@@ -781,6 +781,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
 static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
+  inputs[0] = tensors[0].unsqueeze(dim);
   for (size_t i = 1; i < tensors.size(); ++i) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
       "stack expects each tensor to be equal size, but got ", entry_shape,
