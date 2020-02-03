@@ -58,9 +58,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             as arguments, the ordering as specified by ``model.state_dict().values()``
         verbose (bool, default False): if specified, we will print out a debug
             description of the trace being exported.
-        training (bool, default False): export the model in training mode.  At
-            the moment, ONNX is oriented towards exporting models for inference
-            only, so you will generally not need to set this to True.
+        training (bool, default False): export the model in a training friendly mode.
+            By default, we will export in inference mode and training=False.
         input_names(list of strings, default empty list): names to assign to the
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
