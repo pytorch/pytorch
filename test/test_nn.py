@@ -5741,13 +5741,23 @@ class TestNN(NNTestCase):
         hidden_size = 6
         num_layers = 2
 
-        # creates an RNN (LSTM) and deletes an attribute
         m = nn.LSTM(input_size, hidden_size, num_layers)
+        inp = torch.randn(3, 2, 10)
+        out_expected = m(inp)
+        # deletes an attribute of original LSTM
+        weight_orig = m.weight_hh_l0
         del m.weight_hh_l0
-
+        self.assertFalse(hasattr(m, "weight_hh_l0"))
         # verifies that moving to CUDA with only some attributes defined
         # does not throw an error
         m.cuda()
+        # recompute the weight and make sure that module can be used
+        setattr(m, "weight_hh_l0", weight_orig.cuda())
+        inp = inp.cuda()
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):

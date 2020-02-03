@@ -85,7 +85,7 @@ class RNNBase(Module):
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
 
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names if hasattr(self, weight)]
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -106,12 +106,12 @@ class RNNBase(Module):
         if len(self._flat_weights) != len(self._flat_weights_names):
             return
 
+        for w in self._flat_weights:
+            if not torch.is_tensor(w):
+                return
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes
-        first_fw = self._flat_weights[0].data
-        if not torch.is_tensor(first_fw):
-            return
-        dtype = first_fw.dtype
+        dtype = self._flat_weights[0].dtype
         for fw in self._flat_weights:
             if (not torch.is_tensor(fw.data) or not (fw.data.dtype == dtype) or
                     not fw.data.is_cuda or
@@ -143,8 +143,7 @@ class RNNBase(Module):
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
         # likely rely on this behavior to properly .to() modules like LSTM.
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names if hasattr(self, weight)]
-
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         # Flattens params (on CUDA)
         self.flatten_parameters()
 
@@ -270,7 +269,7 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
                     self._flat_weights_names.extend(weights[:2])
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names if hasattr(self, weight)]
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
 
     @property
     def all_weights(self):
