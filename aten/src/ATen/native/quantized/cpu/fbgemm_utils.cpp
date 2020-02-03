@@ -211,7 +211,6 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                 at::Tensor weight;
                 c10::optional<at::Tensor> bias;
                 std::tie(weight, bias) = params->unpack();
-                std::cout << "here\n";
                 return std::make_tuple(
                     std::move(weight),
                     std::move(bias),
@@ -229,7 +228,7 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                 backend = std::move(std::get<2>(state));
                 bit_width = std::move(std::get<3>(state));
                 if (backend == "FBGEMM") {
-                  if (bit_width == "FP32") {
+                  if (bit_width == "INT8") {
                     return PackedLinearWeight::prepack(
                         std::move(weight), std::move(bias));
                   } else if (bit_width == "FP16") {
@@ -244,8 +243,8 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                   }
                 } else if (backend == "QNNPACK") {
                   TORCH_CHECK(
-                      bit_width == "FP32",
-                      "QNNPACK only supports FP32 bit width currently. Got ",
+                      bit_width == "INT8",
+                      "QNNPACK only supports INT8 bit width currently. Got ",
                       bit_width);
                   return PackedLinearWeightsQnnp::prepack(
                       std::move(weight), std::move(bias));

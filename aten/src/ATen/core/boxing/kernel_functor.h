@@ -186,11 +186,6 @@ namespace detail {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
   };
 
-  template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<c10::IValue, std::decay_t<T>>::value>> {
-  };
-
-
 
   template<class T, bool AllowDeprecatedTypes>
   T ivalue_to_arg(IValue&& v) {

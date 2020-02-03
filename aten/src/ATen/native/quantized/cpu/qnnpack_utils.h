@@ -62,7 +62,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   }
 
   std::string bit_width() override {
-    return "FP32";
+    return "INT8";
   }
 
   static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
