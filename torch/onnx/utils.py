@@ -45,11 +45,11 @@ def set_training(model, mode, onnx_opset_version):
                           "If you wish to export a training amenable ONNX model, specify train=True "
                           "in torch.onnx.export().")
 
+    from torch.onnx.symbolic_helper import _set_training_mode
+    _set_training_mode(mode)
     # ONNX opset 12 has better support for training amenable models, with updated
     # versions of the dropout and batch_norm operators
     if mode is True:
-        from torch.onnx.symbolic_helper import _set_training_mode
-        _set_training_mode(mode)
         if onnx_opset_version < 12:
             warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
                           "Note that onnx opset version 12 was updated for better support of training amenable mode.".format(onnx_opset_version))

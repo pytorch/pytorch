@@ -9,6 +9,7 @@ from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
 import onnx
 import onnxruntime  # noqa
+import numpy as np
 
 import io
 import copy
@@ -333,7 +334,8 @@ class TestUtilityFuns(TestCase):
                           opset_version=self.opset_version, training=False)
         assert model.training == old_state
 
-    @skipIfUnsupportedOpsetVersion("TODO: Enable test when BatchNorm is implemented in ORT for opset 12.")
+    # TODO: Enable test when BatchNorm is implemented in ORT for opset 12.
+    @skipIfUnsupportedOpsetVersion([12])
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -368,9 +370,10 @@ class TestUtilityFuns(TestCase):
 
         ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
         ort_outs = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(out, ort_out) for out, ort_out in zip(pytorch_out, ort_outs)]
+        [np.testing.assert_allclose(out, ort_out, atol=10e-3, rtol=10e-3) for out, ort_out in zip(pytorch_out, ort_outs)]
 
-    @skipIfUnsupportedOpsetVersion("TODO: Enable test when Dropout is implemented in ORT for opset 12.")
+    # TODO: Enable test when Dropout is implemented in ORT for opset 12.
+    @skipIfUnsupportedOpsetVersion([12])
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

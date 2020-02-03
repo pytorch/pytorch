@@ -1012,7 +1012,7 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
                epsilon_f=eps,
                momentum_f=1 - momentum,
                outputs=1 if not training else 5)
-    if not training:
+    if not sym_help._training_mode or not training:
         return out
     else:
         res, new_running_mean, new_running_var, saved_mean, saved_var = out
@@ -1244,7 +1244,8 @@ def exp(g, self):
 
 @parse_args('v', 'f', 'i')
 def dropout(g, input, p, train):
-    if not train:  # in eval mode, dropout is non-op
+    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    if not sym_help._training_mode or not train:
         return input
     warnings.warn("Dropout is a training op and should not be exported in inference mode. "
                   "Make sure to call eval() on the model, and to export it with param training=False.")
