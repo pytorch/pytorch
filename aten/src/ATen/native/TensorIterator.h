@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/TypeCast.h>
 #include <ATen/core/Range.h>
-#include <ATen/detail/ScalarTypeConversions.h>
 #include <bitset>
 #include <c10/util/Optional.h>
 #include <ATen/MemoryOverlap.h>
@@ -252,7 +252,7 @@ struct CAFFE2_API TensorIterator {
   template <typename T>
   T scalar_value(int arg) {
     auto& op = operands_[arg];
-    return at::detail::load<T>(op.data, op.tensor.scalar_type());
+    return c10::fetch_and_cast<T>(op.tensor.scalar_type(), op.data);
   }
 
   void for_each(loop_t loop);
@@ -298,10 +298,6 @@ struct CAFFE2_API TensorIterator {
   /// as opposed to something that will be accumulated further. Only relevant for
   /// CUDA reductions.
   bool is_final_output() const { return final_output_; }
-
-  bool needs_dynamic_casting() const {
-    return force_dynamic_casting_ || ((common_dtype_strategy_ != CommonDTypeStrategy::NONE) && have_differing_types_);
-  }
 
   bool has_contiguous_first_dim() const {
     int num_tensors = ntensors();
@@ -352,10 +348,6 @@ struct CAFFE2_API TensorIterator {
     resize_outputs_ = false;
   }
 
-  void dynamic_cast_if(bool condition) {
-    force_dynamic_casting_ = force_dynamic_casting_ || condition;
-  }
-
   void build();
 
 protected:
@@ -391,8 +383,6 @@ protected:
   bool promote_gpu_output_dtypes_ = false;
   bool final_output_ = true;
   bool check_mem_overlap_ = false;
-  bool have_differing_types_ = false;
-  bool force_dynamic_casting_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
 };
