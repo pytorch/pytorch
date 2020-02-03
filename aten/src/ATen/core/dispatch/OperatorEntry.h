@@ -33,7 +33,7 @@ public:
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(TensorTypeId dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerKernel(DispatchKey dispatch_key, KernelFunction kernel);
   RegistrationHandleRAII registerCatchallKernel(KernelFunction kernel);
 
   const OperatorOptions& options() {
@@ -45,7 +45,7 @@ public:
   }
 
 private:
-  void deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel);
+  void deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);
 
   FunctionSchema schema_;
@@ -85,7 +85,7 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>> kernels_;
+  ska::flat_hash_map<DispatchKey, std::list<KernelFunction>> kernels_;
   std::list<KernelFunction> catchAllKernels_;
 
   // Some metadata about the operator
@@ -95,7 +95,7 @@ private:
 
   // This function re-establishes the invariant that dispatchTable
   // contains the front element from the kernels list for a given dispatch key.
-  void updateDispatchTable_(TensorTypeId dispatch_key);
+  void updateDispatchTable_(DispatchKey dispatch_key);
   void updateCatchallDispatchTable_();
 };
 

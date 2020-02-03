@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <new>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)
@@ -58,7 +59,7 @@ THTensor *THTensor_(new)(void)
 {
   return c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::TensorTypeId::CPUTensorId
+    at::DispatchKey::CPUTensorId
   ).release();
 }
 
@@ -75,7 +76,7 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
   }
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
     c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
-    at::TensorTypeId::CPUTensorId
+    at::DispatchKey::CPUTensorId
   ).release();
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
@@ -320,8 +321,8 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   THTensor_(set)(self, src);
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
 
-  std::vector<int64_t> newSize(self->dim()-1);
-  std::vector<int64_t> newStride(self->dim()-1);
+  at::DimVector newSize(static_cast<size_t>(self->dim()-1));
+  at::DimVector newStride(static_cast<size_t>(self->dim()-1));
   for (d = 0; d < dimension; d++)
   {
     newSize[d] = self->size(d);
@@ -372,8 +373,8 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
 
   if(src->size(dimension) == 1)
   {
-    std::vector<int64_t> newSize(self->dim() - 1);
-    std::vector<int64_t> newStride(self->dim() - 1);
+    at::DimVector newSize(static_cast<size_t>(self->dim() - 1));
+    at::DimVector newStride(static_cast<size_t>(self->dim() - 1));
     for (d = 0; d < dimension; d++)
     {
       newSize[d] = self->size(d);
@@ -400,8 +401,8 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-  std::vector<int64_t> newSize(/* size */ self->dim()+1);
-  std::vector<int64_t> newStride(/* size */ self->dim()+1);
+  at::DimVector newSize(static_cast<size_t>(/* size */ self->dim()+1));
+  at::DimVector newStride(static_cast<size_t>(/* size */ self->dim()+1));
 
   for(d = self->dim(); d > dimension; d--)
   {
@@ -623,6 +624,16 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   bool allSkipped= true;
   int64_t nDims = 0;
   THTensor *notSkippedTensor;  // non-owning reference
+
+  // Inputs cannot alias the output tensor
+  for (int i = 0; i < numInputs; i++) {
+    auto lap = at::get_overlap_status(result, inputs[i]);
+    THArgCheck(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor %d.", i);
+  }
+
   auto should_skip = [](THTensor *t) { return t->is_empty() && t->dim() == 1; };
   for (int i = 0; i < numInputs; i++) {
     if (should_skip(inputs[i])) {
@@ -654,7 +665,7 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 
   // Compute the size of the result
-  std::vector<int64_t> size(nDims);
+  at::DimVector size(static_cast<size_t>(nDims));
   for (int dim = 0; dim < nDims; dim++) {
     int64_t result_dim_size = notSkippedTensor->size(dim);
     if (dim == dimension) {

@@ -218,5 +218,12 @@ struct OperatorSet {
   std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
 };
 
+// Ensure the thing that registers c10 ops is defined.
+// Otherwise, our registry will not have c10 ops. You can run into this
+// scenario if you're querying registered ops during static init.
+//
+// This fn is defined in register_c10_ops.cpp
+TORCH_API void ensure_c10_registerer_defined();
+
 } // namespace jit
 } // namespace torch

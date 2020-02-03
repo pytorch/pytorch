@@ -1,6 +1,8 @@
 package org.pytorch;
 
 import com.facebook.jni.annotations.DoNotStrip;
+import com.facebook.jni.HybridData;
+
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -32,7 +34,6 @@ public abstract class Tensor {
   private static final String ERROR_MSG_DATA_BUFFER_NOT_NULL = "Data buffer must be not null";
   private static final String ERROR_MSG_DATA_ARRAY_NOT_NULL = "Data array must be not null";
   private static final String ERROR_MSG_SHAPE_NOT_NULL = "Shape must be not null";
-  private static final String ERROR_MSG_SHAPE_NOT_EMPTY = "Shape must be not empty";
   private static final String ERROR_MSG_SHAPE_NON_NEGATIVE = "Shape elements must be non negative";
   private static final String ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER =
       "Data buffer must have native byte order (java.nio.ByteOrder#nativeOrder)";
@@ -326,6 +327,8 @@ public abstract class Tensor {
         ERROR_MSG_DATA_BUFFER_MUST_HAVE_NATIVE_BYTE_ORDER);
     return new Tensor_float64(data, shape);
   }
+
+  @DoNotStrip private HybridData mHybridData;
 
   private Tensor(long[] shape) {
     checkShape(shape);
@@ -622,7 +625,6 @@ public abstract class Tensor {
 
   private static void checkShape(long[] shape) {
     checkArgument(shape != null, ERROR_MSG_SHAPE_NOT_NULL);
-    checkArgument(shape.length > 0, ERROR_MSG_SHAPE_NOT_EMPTY);
     for (int i = 0; i < shape.length; i++) {
       checkArgument(shape[i] >= 0, ERROR_MSG_SHAPE_NON_NEGATIVE);
     }
@@ -641,20 +643,24 @@ public abstract class Tensor {
 
   // Called from native
   @DoNotStrip
-  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype) {
+  private static Tensor nativeNewTensor(ByteBuffer data, long[] shape, int dtype, HybridData hybridData) {
+    Tensor tensor = null;
     if (DType.FLOAT32.jniCode == dtype) {
-      return new Tensor_float32(data.asFloatBuffer(), shape);
+      tensor = new Tensor_float32(data.asFloatBuffer(), shape);
     } else if (DType.INT32.jniCode == dtype) {
-      return new Tensor_int32(data.asIntBuffer(), shape);
+      tensor = new Tensor_int32(data.asIntBuffer(), shape);
     } else if (DType.INT64.jniCode == dtype) {
-      return new Tensor_int64(data.asLongBuffer(), shape);
+      tensor = new Tensor_int64(data.asLongBuffer(), shape);
     } else if (DType.FLOAT64.jniCode == dtype) {
-      return new Tensor_float64(data.asDoubleBuffer(), shape);
+      tensor = new Tensor_float64(data.asDoubleBuffer(), shape);
     } else if (DType.UINT8.jniCode == dtype) {
-      return new Tensor_uint8(data, shape);
+      tensor = new Tensor_uint8(data, shape);
     } else if (DType.INT8.jniCode == dtype) {
-      return new Tensor_int8(data, shape);
+      tensor = new Tensor_int8(data, shape);
+    } else {
+      new IllegalArgumentException("Unknown Tensor dtype");
     }
-    throw new IllegalArgumentException("Unknown Tensor dtype");
+    tensor.mHybridData = hybridData;
+    return tensor;
   }
 }

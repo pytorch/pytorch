@@ -86,6 +86,16 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isinf(const Tensor &self) {
+  // Integral tensor types are always not inf
+  if (isIntegralType(self.scalar_type())) {
+    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
+    return self.abs() == std::numeric_limits<scalar_t>::infinity();
+  });
+}
+
 Tensor isfinite(const Tensor& self) {
   // Integral tensor types are finite
   if (!self.is_floating_point()) {
@@ -149,8 +159,10 @@ std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
 
 std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
                                        const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-           "mode only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "mode only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "mode only supports strided layout, got: ", self.layout());
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
     AT_ASSERT(values.dim() == 0);
@@ -197,8 +209,10 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-           "max only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "max only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "max only supports strided layout, got: ", self.layout());
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     AT_ASSERT(max.dim() == 0);
@@ -253,8 +267,10 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
-  TORCH_CHECK(self.options().backend() == Backend::CPU || self.options().backend() == Backend::CUDA,
-           "min only supports CPU AND CUDA backend, got: ", toString(self.options().backend()));
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "min only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "min only supports strided layout, got: ", self.layout());
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     AT_ASSERT(min.dim() == 0);

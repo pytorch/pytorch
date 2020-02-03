@@ -51,7 +51,7 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     // everything is ok, this is a primitive type
   };
 
@@ -90,20 +90,20 @@ namespace detail {
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<float, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: float. Please use double instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: const char*. Please use std::string instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported input type: vector<bool>. Please use List<bool> instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
   };
 
@@ -115,7 +115,7 @@ namespace detail {
   };
 
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     // everything is ok, this is a primitive type
   };
 
@@ -156,20 +156,20 @@ namespace detail {
   // there if they didn't exist, but we can show a better error message
   // in some common error scenarios.
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<float, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: float. Please use double instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<const char*, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const char*, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: const char*. Please use std::string instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported output type: vector<bool>. Please use List<bool> instead.");
   };
   template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, guts::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
+  struct assert_is_valid_output_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_integral<T>::value && !guts::typelist::contains<supported_primitive_arg_types, T>::value>> {
     static_assert(guts::false_t<T>::value, "You tried to register a kernel with an unsupported integral output type. Please use int64_t instead.");
   };
 
@@ -187,13 +187,13 @@ namespace detail {
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
-  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, guts::index_sequence<ivalue_arg_indices...>) {
+  typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg<guts::remove_cv_t<guts::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
+    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
@@ -201,7 +201,7 @@ namespace detail {
   template<class Functor, bool AllowDeprecatedTypes>
   typename guts::infer_function_traits_t<Functor>::return_type call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
-    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, guts::make_index_sequence<num_ivalue_args>());
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
   template<class OutputType, bool AllowDeprecatedTypes>
@@ -213,12 +213,12 @@ namespace detail {
   template<class... OutputTypes, bool AllowDeprecatedTypes>
   struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
     static void call(std::tuple<OutputTypes...>&& output, Stack* stack) {
-      call_(std::move(output), stack, guts::make_index_sequence<sizeof...(OutputTypes)>());
+      call_(std::move(output), stack, std::make_index_sequence<sizeof...(OutputTypes)>());
     }
 
   private:
     template<size_t... indices>
-    static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, guts::index_sequence<indices...>) {
+    static void call_(std::tuple<OutputTypes...>&& output, Stack* stack, std::index_sequence<indices...>) {
       torch::jit::push(*stack, return_to_ivalue<OutputTypes, AllowDeprecatedTypes>(std::move(std::get<indices>(output)))...);
     }
   };
@@ -227,7 +227,7 @@ namespace detail {
 
   // SFINAE version for kernels that return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<!std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
@@ -241,7 +241,7 @@ namespace detail {
 
   // SFINAE version for kernels that don't return an output
   template<class KernelFunctor, bool AllowDeprecatedTypes>
-  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, guts::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
+  struct make_boxed_from_unboxed_functor<KernelFunctor, AllowDeprecatedTypes, std::enable_if_t<std::is_same<void, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value>> final {
     static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
 
     static void call(OperatorKernel* functor, const OperatorHandle&, Stack* stack) {
@@ -284,7 +284,7 @@ namespace detail {
 
   template<class FuncType>
   std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
-    return guts::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+    return std::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
   }
 
   template<class KernelFunctor>

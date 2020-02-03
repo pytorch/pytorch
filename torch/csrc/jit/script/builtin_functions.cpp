@@ -93,8 +93,8 @@ struct BuiltinFunctionRegistry {
         str_pair("triple", "3"),
         str_pair("quadruple", "4"),
     };
-    for (auto scalar : {"float", "int"}) {
-      for (auto pair : name_len) {
+    for (const auto scalar : {"float", "int"}) {
+      for (const auto& pair : name_len) {
         TemplateEnv env;
         env.s("Scalar", scalar);
         env.s("name", pair.first);

@@ -28,17 +28,26 @@ void testClassTypeAddRemoveAttr() {
   ASSERT_TRUE(cls->hasAttribute("attr3"));
 }
 
-void testClassTypeAddConstant() {
+void testClassTypeAddRemoveConstant() {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
   cls->addConstant("const1", IValue(1));
   cls->addConstant("const2", IValue(2));
-  ASSERT_EQ(cls->numConstants(), 2);
+  cls->addConstant("const3", IValue(2));
+  ASSERT_EQ(cls->numConstants(), 3);
   ASSERT_TRUE(cls->hasConstant("const1"));
   ASSERT_TRUE(cls->hasConstant("const2"));
-  ASSERT_FALSE(cls->hasConstant("const3"));
-  ASSERT_EQ(cls->getConstant("const1").value().toInt(), 1);
-  ASSERT_EQ(cls->getConstant("const2").value().toInt(), 2);
+  ASSERT_TRUE(cls->hasConstant("const3"));
+  ASSERT_FALSE(cls->hasConstant("const4"));
+
+  ASSERT_EQ(cls->getConstant("const1").toInt(), 1);
+  ASSERT_EQ(cls->getConstant("const2").toInt(), 2);
+  ASSERT_EQ(cls->getConstant("const2").toInt(), 3);
+
+  cls->unsafeRemoveConstant("const2");
+  ASSERT_TRUE(cls->hasConstant("const1"));
+  ASSERT_FALSE(cls->hasConstant("const2"));
+  ASSERT_TRUE(cls->hasConstant("const3"));
 }
 
 } // namespace jit

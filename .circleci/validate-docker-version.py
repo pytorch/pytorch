@@ -18,11 +18,12 @@ def load_tags_for_projects(workflow_config):
     return {
         v["ecr_gc_job"]["project"]: v["ecr_gc_job"]["tags_to_keep"]
         for v in workflow_config["workflows"]["ecr_gc"]["jobs"]
+        if isinstance(v, dict) and "ecr_gc_job" in v
     }
 
 
 def check_version(job, tags, expected_version):
-    valid_versions = [int(v) for v in tags[job].split(",")]
+    valid_versions = [v for v in tags[job].split(",")]
     if expected_version not in valid_versions:
         raise RuntimeError(
             "We configured {} to use Docker version {}; but this "

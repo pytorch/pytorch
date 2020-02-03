@@ -9,9 +9,9 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 # TODO: Update these variables when there
 # is a new ir_version and producer_version
 # and use these values in the exporter
-ir_version = 4
+ir_version = _C._onnx.IR_VERSION
 producer_name = "pytorch"
-producer_version = "1.3"
+producer_version = _C._onnx.PRODUCER_VERSION
 
 
 class ExportTypes:
@@ -31,7 +31,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None):
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           enable_onnx_checker=True):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -84,12 +85,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             optimization is applied to the model during export. Constant-folding
             optimization will replace some of the ops that have all constant
             inputs, with pre-computed constant nodes.
-        example_outputs (tuple of Tensors, default None): example_outputs must be provided
-            when exporting a ScriptModule or TorchScript Function.
+        example_outputs (tuple of Tensors, default None): Model's example outputs being exported.
+            example_outputs must be provided when exporting a ScriptModule or TorchScript Function.
         strip_doc_string (bool, default True): if True, strips the field
             "doc_string" from the exported model, which information about the stack
             trace.
-        example_outputs: example outputs of the model that is being exported.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
             a dictionary to specify dynamic axes of input/output, such that:
             - KEY:  input and/or output names
@@ -145,6 +145,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             - VALUE: opset version
             If the custom opset is not provided in this dictionary, opset version is set
             to 1 by default.
+        enable_onnx_checker (bool, default True): If True the onnx model checker will be run
+            as part of the export, to ensure the exported model is a valid ONNX model.
     """
 
     from torch.onnx import utils
@@ -153,7 +155,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
                         operator_export_type, opset_version, _retain_param_name,
                         do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets)
+                        custom_opsets, enable_onnx_checker)
 
 
 def export_to_pretty_string(*args, **kwargs):

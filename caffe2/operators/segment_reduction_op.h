@@ -2047,7 +2047,7 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       SIndex,
       Context,
       ReducerGradient>;
-  // Will return 3 input version. This is aliging new CPU/GPU nets.
+  // Will return 3 input version. This is aligning new CPU/GPU nets.
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,

@@ -361,7 +361,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
 
   std::unique_ptr<Reporter> reporter;
   if (step.has_report_net() || compiledStep->reportSubsteps.size() > 0) {
-    reporter = caffe2::make_unique<Reporter>();
+    reporter = std::make_unique<Reporter>();
     auto* reportNet = compiledStep->reportNet;
     if (reportNet) {
       VLOG(1) << "Starting reporter net";

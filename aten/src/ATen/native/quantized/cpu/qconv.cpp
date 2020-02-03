@@ -515,7 +515,8 @@ class QConvInt8 final : public c10::OperatorKernel {
         cpp_custom_type_hack::cast<PackedConvWeightsQnnp>(packed_weight);
     auto* pack_w = pack_data.w.get();
     const auto& kernel = pack_data.kernel;
-    const auto& kernel_zp = pack_data.w_zp;
+    // Adjust weight zero point, similar to weight data.
+    const auto kernel_zp = pack_data.w_zp + 128;
     const auto& kernel_scale = pack_data.w_scale;
 
     const uint32_t kernel_h = kernel[0];
@@ -588,7 +589,7 @@ class QConvInt8 final : public c10::OperatorKernel {
       // Update the input scale to not pack again.
       pack_data.input_scale = input_scale;
       pack_data.w.reset();
-      pack_data.w = guts::make_unique<qnnpack::PrePackConvWeights>(
+      pack_data.w = std::make_unique<qnnpack::PrePackConvWeights>(
           conv_p,
           reinterpret_cast<uint8_t*>(qnnp_w_data),
           reinterpret_cast<int32_t*>(bias.data_ptr<c10::qint32>()));
@@ -640,16 +641,16 @@ static auto registry =
     c10::RegisterOperators()
         .op("quantized::conv2d",
             c10::RegisterOperators::options().kernel<QConvInt8<2, false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv2d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<2, true>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d",
             c10::RegisterOperators::options().kernel<QConvInt8<3, false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::conv3d_relu",
             c10::RegisterOperators::options().kernel<QConvInt8<3, true>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 
 } // namespace
 } // namespace native

@@ -71,6 +71,7 @@ namespace c10 {
   _(aten, Int)                       \
   _(aten, Float)                     \
   _(aten, str)                       \
+  _(aten, Delete)                    \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, shape)                     \
@@ -104,6 +105,7 @@ namespace c10 {
   _(aten, __range_length)            \
   _(aten, __derive_index)            \
   _(aten, __round_to_zero_floordiv)  \
+  _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
   _(prim, forkClosure)               \
@@ -205,11 +207,13 @@ namespace c10 {
   _(onnx, ConstantOfShape)           \
   _(onnx, Cast)                      \
   _(onnx, Mod)                       \
+  _(onnx, Sqrt)                      \
   _(onnx, SplitToSequence)           \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
   _(onnx, ConcatFromSequence)        \
+  _(onnx, Identity)                  \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

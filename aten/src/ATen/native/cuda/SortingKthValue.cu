@@ -10,15 +10,6 @@
 #include <THC/THCScanUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh> // AddOp
 
-#include <thrust/device_ptr.h>
-#include <thrust/sort.h>
-
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/extrema.h>
-#include <thrust/inner_product.h>
-#include <thrust/sequence.h>
-#include <THC/THCThrustAllocator.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
 #include <ATen/NamedTensorUtils.h>
@@ -186,7 +177,7 @@ void kthvalue_cuda_template(
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-// this does not reduce to median with dim beause we don't want to copy twice
+// this does not reduce to median with dim because we don't want to copy twice
 template <typename scalar_t>
 Tensor median_cuda_template(const Tensor& self) {
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
