@@ -477,6 +477,16 @@ def enable_gil_profiling(flag):
     """
     _get_current_rpc_agent().enable_gil_profiling(flag)
 
+@_require_initialized
+def set_network_profiling_enabled(flag):
+    r"""
+    Set whether network profiling is enabled. This incurs a slight
+    overhead cost associated with storing logs.
+
+    Arguments:
+        flag (bool): True to set metrics profiling, False to disable.
+    """
+    _get_current_rpc_agent().set_network_profiling_enabled(flag)
 
 @_require_initialized
 def rpc_sync(to, func, args=None, kwargs=None):
