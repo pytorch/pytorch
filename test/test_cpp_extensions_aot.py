@@ -2,7 +2,6 @@ import os
 import shutil
 import sys
 import unittest
-import warnings
 
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_utils import IS_WINDOWS
