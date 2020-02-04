@@ -5752,7 +5752,7 @@ class TestNN(NNTestCase):
         # does not throw an error
         m.cuda()
         # recompute the weight and make sure that module can be used
-        setattr(m, "weight_hh_l0", weight_orig.cuda())
+        m.weight_hh_l0 = weight_orig.cuda()
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
