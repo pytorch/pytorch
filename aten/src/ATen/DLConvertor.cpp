@@ -159,8 +159,9 @@ void deleter(DLManagedTensor* arg) {
 
 // This function returns a shared_ptr to memory managed DLpack tensor
 // constructed out of ATen tensor
-DLManagedTensor* toDLPack(const Tensor& src) {
-  ATenDLMTensor* atDLMTensor(new ATenDLMTensor);
+std::unique_ptr<atDLMTensor> toDLPack(const Tensor& src) {
+  auto atDLMTensor = std::unique_ptr<atDLMTensor>(new ATenDLMTensor);
+  //ATenDLMTensor* atDLMTensor(new ATenDLMTensor);
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
@@ -177,7 +178,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.strides =
       const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
-  return &(atDLMTensor->tensor);
+  return atDLMTensor->tensor;
 }
 
 Tensor fromDLPack(const DLManagedTensor* src) {

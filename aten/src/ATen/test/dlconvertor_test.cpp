@@ -12,7 +12,7 @@ TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  auto dlMTensor = toDLPack(a);
 
   Tensor b = fromDLPack(dlMTensor);
 
@@ -23,7 +23,7 @@ TEST(TestDlconvertor, TestDlconvertorNoStrides) {
   manual_seed(123);
 
   Tensor a = rand({3, 4});
-  DLManagedTensor* dlMTensor = toDLPack(a);
+  auto dlMTensor = toDLPack(a);
   dlMTensor->dl_tensor.strides = nullptr;
 
   Tensor b = fromDLPack(dlMTensor);
