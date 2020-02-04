@@ -230,7 +230,10 @@ def _batches_apply(func, ndim, tensors):
         result = []
         results = None
         for items in zip(*[tensor.chunk(tensor.shape[0]) for tensor in tensors]):
-            r = _batches_apply(func, ndim, tuple(item[0] for item in items))
+            lst = []
+            for item in items:
+                lst.append(item[0])
+            r = _batches_apply(func, ndim, lst)
             if isinstance(r, tuple):
                 if results is None:
                     results = [[] for r_ in r]
@@ -274,26 +277,38 @@ def svqb(M, U, tau=1e-6, drop=False):
                    is (m, n1), where `n1 = n` if `drop` is `False,
                    otherwise `n1 <= n`.
     """
+    # type: (Tensor, Tensor, Optional[float], Optional[bool]) -> Tensor
+    if tau is None:
+        tau = 1e-6
+    if drop is None:
+        drop = False
     if torch.numel(U) == 0:
         return U
     UMU = _utils.qform(M, U)
     d = UMU.diagonal(0, -2, -1)
-
     # detect and drop zero columns from U
     nz = torch.where(abs(d) != 0.0)
+    assert len(nz) == 1, nz
     if len(nz[0]) < len(d):
-        return svqb(M, U[(Ellipsis,) + nz], tau=tau, drop=drop)
+        U = U[:, nz[0]]
+        if torch.numel(U) == 0:
+            return U
+        UMU = _utils.qform(M, U)
+        d = UMU.diagonal(0, -2, -1)
+        nz = torch.where(abs(d) != 0.0)
+        assert len(nz[0]) == len(d)
 
     D = torch.diag_embed(d ** -0.5)
     DUMUD = _utils.qform(UMU, D)
     E, Z = _utils.symeig(DUMUD, eigenvectors=True)
     t = tau * abs(E).max()
     if drop:
-        keep = (Ellipsis,) + torch.where(E > t)
-        E = E[keep]
-        Z = Z[keep]
+        keep = torch.where(E > t)
+        assert len(keep) == 1, keep
+        E = E[keep[0]]
+        Z = Z[:, keep[0]]
     else:
-        E[torch.where(E < t)] = t
+        E[(torch.where(E < t))[0]] = t
     return torch.chain_matmul(U, D, Z, torch.diag_embed(E ** -0.5))
 
 

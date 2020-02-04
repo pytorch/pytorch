@@ -63,14 +63,10 @@ def transjugate(A):
 def norm(A):
     """Return Frobenius norm of a real matrix.
     """
-    if isinstance(A, torch.Tensor):
-        try:
-            return A.norm(dim=(-2, -1), p='fro')
-        except RuntimeError:
-            # e.g. conj is not available in CUDA
-            return matmul(transpose(A), A).trace() ** 0.5
-    else:
-        raise TypeError("expected Tensor but got %s" % (type(A).__name__))
+    if A.is_cuda:
+        # e.g. conj is not available in CUDA
+        return matmul(transpose(A), A).trace() ** 0.5
+    return A.norm(2, [-2, -1])
 
 
 def bform(X, A, Y):
@@ -88,18 +84,23 @@ def qform(A, S):
 def basis(A):
     """Return orthogonal basis of A columns.
     """
-    try:
-        Q = torch.orgqr(*torch.geqrf(A))
-    except (RuntimeError, AttributeError):
+    if A.is_cuda:
         # torch.orgqr is not available in CUDA
         Q, _ = torch.qr(A, some=True)
+    else:
+        Q = torch.orgqr(*torch.geqrf(A))
     return Q
 
 
 def symeig(A, largest=False, eigenvectors=True):
     """Return eigenpairs of A with specified ordering.
     """
-    E, Z = torch.symeig(A, eigenvectors=eigenvectors)
+    # type: (Tensor, Optional[bool], Optional[bool]) -> Tuple[Tensor, Tensor]
+    if largest is None:
+        largest = False
+    if eigenvectors is None:
+        eigenvectors = True
+    E, Z = torch.symeig(A, eigenvectors, True)
     # assuming that E is ordered
     if largest:
         E = torch.flip(E, dims=(-1,))
