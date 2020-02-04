@@ -4154,6 +4154,27 @@ class TestScript(JitTestCase):
         with self.assertRaises(RuntimeError):
             m.foo = 6
 
+    def test_script_packedsequence(self):
+        # TODO: Fix jitter issue
+        with torch.jit._disable_emit_hooks():
+            class ExperimentalLSTM(torch.nn.Module):
+                def __init__(self, input_dim, hidden_dim):
+                    super().__init__()
+
+                def forward(self, input):
+                    # type: (Tensor)
+                    packed = torch.nn.utils.rnn.pack_padded_sequence(
+                        input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
+                    )
+                    output, lengths = torch.nn.utils.rnn.pad_packed_sequence(
+                        sequence=packed, total_length=2
+                    )
+                    # lengths is flipped, so is output
+                    return output[0]
+
+            lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
+            lstm = lstm.eval()
+            self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_class_attribute(self):
         class M(torch.jit.ScriptModule):
