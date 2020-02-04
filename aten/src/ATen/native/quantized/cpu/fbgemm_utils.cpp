@@ -200,6 +200,9 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 } // namespace native
 } // namespace at
 
+#endif // USE_FBGEMM
+
+
 torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>, std::string, std::string>;
   static int custom_class_handler = torch::jit::registerCustomClassHandler();
@@ -227,6 +230,8 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                 bias = std::move(std::get<1>(state));
                 backend = std::move(std::get<2>(state));
                 bit_width = std::move(std::get<3>(state));
+
+#ifdef USE_FBGEMM
                 if (backend == "FBGEMM") {
                   if (bit_width == "INT8") {
                     return PackedLinearWeight::prepack(
@@ -241,7 +246,10 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                         bit_width,
                         " in serialized LinearPackedParams object!");
                   }
-                } else if (backend == "QNNPACK") {
+                }
+#endif  // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+                if (backend == "QNNPACK") {
                   TORCH_CHECK(
                       bit_width == "INT8",
                       "QNNPACK only supports INT8 bit width currently. Got ",
@@ -255,6 +263,8 @@ torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
                       "unknown backend type ",
                       backend);
                 }
+#endif  // USE_PYTORCH_QNNPACK
+                TORCH_CHECK(false, "Unknown backend ", backend);
               });
   return register_linear_params;
 }
@@ -264,5 +274,3 @@ namespace {
 static auto linear_params = register_linear_params();
 
 } // namespace
-
-#endif // USE_FBGEMM
