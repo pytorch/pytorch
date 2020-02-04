@@ -1211,11 +1211,10 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
         # https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
         # subprocess.run sometimes relies on stdout NOT being detached (I don't know
         # why), but in my experiments subprocess.check_output doesn't have this issue.
-        subprocess.run(
+        subprocess.check_output(
             ['ninja', '-v'],
             stderr=subprocess.STDOUT,
-            cwd=build_directory,
-            check=True)
+            cwd=build_directory)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
