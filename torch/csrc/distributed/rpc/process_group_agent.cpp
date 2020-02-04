@@ -547,8 +547,9 @@ void ProcessGroupAgent::listenLoop() {
     // Error occured in listenLoop(). Stop receiving thread and store exception
     // to indicate that the RPC agent is in an unhealthy state and we should
     // shutdown.
+    LOG(WARNING) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
+                 << e.what();
     listenLoopException = std::current_exception();
-    LOG(INFO) << "Calling shutdown, what is going on....";
   } catch (...) {
     listenLoopException = std::make_exception_ptr(std::runtime_error(
         "Unknown exception occured in ProcessGroupAgent::listenLoop."));
