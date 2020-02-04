@@ -345,7 +345,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   uint32_t attr_version;
 
   /// Flag that control what happens when a Tensor's history is rebased
-  enum class OnRebase: uint8_t { ALLOW, WARN, ERROR };
+  enum class TORCH_API OnRebase: uint8_t { ALLOW, WARN, ERROR };
   OnRebase allow_rebase_history;
 
   bool requires_grad() const override {
