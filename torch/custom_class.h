@@ -70,7 +70,6 @@ class class_ {
     classCU()->register_type(classTypePtr);
   }
 
-
   template <typename... Types>
   class_& def(detail::types<void, Types...>) { // Used in combination with
                                                // torch::jit::init<...>()
