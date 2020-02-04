@@ -56,7 +56,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   auto actual_error = (self - other).abs();
   // The original formula `atol + rtol * other.abs()` works incorrectly when
-  // `other` has integral dtype and `other == min_value` and `abs(min_value)` is negative`.
+  // `other` has integral dtype and `other == min_value` and `abs(min_value)` is negative:
   // std::abs(std::numeric_limits<int64_t>::lowest()) == std::numeric_limits<int64_t>::lowest() < 0
   auto max_error = atol + (rtol * other).abs();
 
