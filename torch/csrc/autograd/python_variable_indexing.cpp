@@ -80,10 +80,10 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   }
   at::AutoNonVariableTypeMode guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackLong(value)), options);
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options);
   }
   if (PyFloat_Check(value)) {
-    return at::scalar_tensor(Scalar(THPUtils_unpackDouble(value)), options);
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackDouble(value)), options);
   }
   throw TypeError(
     "can't assign a %s to a %s",
@@ -91,18 +91,11 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
     torch::utils::options_to_string(options).c_str());
 }
 
-static inline void unpackSliceAndExtractTensors(
+static inline void extractTensorsFromSlice(
   PyObject* obj,
-  Py_ssize_t& start,
-  Py_ssize_t& stop,
-  Py_ssize_t& step,
   Tensor& start_tensor,
   Tensor& stop_tensor,
   Tensor& step_tensor) {
-  if (!THPUtils_unpackSlice(obj, &start, &stop, &step)) {
-    throw python_error();
-  }
-
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
     start_tensor = THPVariable_Unpack(sliceobj->start);
@@ -116,74 +109,98 @@ static inline void unpackSliceAndExtractTensors(
 }
 
 static inline void recordSliceTrace(const Tensor& start_tensor, const Tensor& stop_tensor, const Tensor& step_tensor) {
-  if (torch::jit::tracer::isTracing() && start_tensor.defined()) {
+  if (start_tensor.defined()) {
     torch::jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, start_tensor, torch::jit::IntType::get());
   }
-  if (torch::jit::tracer::isTracing() && stop_tensor.defined()) {
+  if (stop_tensor.defined()) {
     torch::jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, stop_tensor, torch::jit::IntType::get());
   }
-  if (torch::jit::tracer::isTracing() && step_tensor.defined()) {
+  if (step_tensor.defined()) {
     torch::jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, step_tensor, torch::jit::IntType::get());
   }
 }
 
 static inline void recordSelectTrace(const Tensor& index_tensor) {
-  if (torch::jit::tracer::isTracing() && index_tensor.defined()) {
+  if (index_tensor.defined()) {
     torch::jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, index_tensor, torch::jit::IntType::get());
   }
 }
 
-static inline Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices) {
-  int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-  int64_t dim = 0;
-  int64_t specified_dims = count_specified_dimensions(index);
-
-  if (specified_dims > self.dim()) {
-    throw IndexError("too many indices for tensor of dimension %d", (int)self.dim());
+static inline PyObject* convertToPythonInt(PyObject* obj) {
+  auto idx = THPObjectPtr(PyNumber_Index(obj));
+  if (!idx) {
+    PyErr_Clear();
+    invalid_index(obj);
   }
+  return idx;
+}
 
-  Variable result = self;
-  for (int64_t i = 0; i < size; i++) {
-    PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    if (THPUtils_checkLong(obj)) {
-      if (THPVariable_Check(obj)) {
-        recordSelectTrace(THPVariable_Unpack(obj));
-      }
-      result = at::indexing::handleInteger(result, dim, THPUtils_unpackLong(obj), i);
-    } else if (PySlice_Check(obj)) {
-      Py_ssize_t start, stop, step;
+static inline at::indexing::TensorIndex traceAndConvertPythonIndexToTensorIndex(const Variable& self, PyObject* obj, bool is_tracing) {
+  if (THPUtils_checkLong(obj)) {
+    if (is_tracing && THPVariable_Check(obj)) {
+      recordSelectTrace(THPVariable_Unpack(obj));
+    }
+    return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
+  } else if (PySlice_Check(obj)) {
+    Py_ssize_t start, stop, step;
+    if (!THPUtils_unpackSlice(obj, &start, &stop, &step)) {
+      throw python_error();
+    }
+    if (is_tracing) {
       Tensor start_tensor, stop_tensor, step_tensor;
-      unpackSliceAndExtractTensors(obj, start, stop, step, start_tensor, stop_tensor, step_tensor);
+      extractTensorsFromSlice(obj, start_tensor, stop_tensor, step_tensor);
       recordSliceTrace(start_tensor, stop_tensor, step_tensor);
-      result = at::indexing::handleSlice(result, dim, start, stop, step, torch::jit::tracer::isTracing());
-    } else if (obj == Py_Ellipsis) {
-      at::indexing::handleEllipsis(self, dim, specified_dims);
-    } else if (obj == Py_None) {
-      result = at::indexing::handleNone(result, dim);
-    } else if (PyBool_Check(obj)) {
-      result = at::indexing::handleBoolean(result, obj == Py_True, outIndices, dim);
-    } else if (THPVariable_Check(obj)) {
+    }
+    return at::indexing::TensorIndex({start, stop, step});
+  } else if (obj == Py_Ellipsis) {
+    return at::indexing::TensorIndex(at::indexing::Ellipsis);
+  } else if (obj == Py_None) {
+    return at::indexing::TensorIndex(at::indexing::None);
+  } else if (PyBool_Check(obj)) {
+    return at::indexing::TensorIndex(obj == Py_True);
+  } else if (THPVariable_Check(obj)) {
+    if (is_tracing) {
       Tensor tensor = THPVariable_Unpack(obj);
       auto scalar_type = tensor.scalar_type();
       if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/false) && scalar_type != at::kByte) {
         recordSelectTrace(tensor);
       }
-      result = at::indexing::handleTensor(result, tensor, outIndices, dim, i);
-    } else if (PySequence_Check(obj)) {
-      // TODO: Naughty naughty get out of jail free
-      // (Fixing this means I have to fix the call chain though :/)
-      at::indexing::recordTensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj), outIndices, dim);
-    } else {
-      auto idx = THPObjectPtr(PyNumber_Index(obj));
-      if (!idx) {
-        PyErr_Clear();
-        invalid_index(obj);
-      }
-      if (THPVariable_Check(obj)) {
-        recordSelectTrace(THPVariable_Unpack(obj));
-      }
-      result = at::indexing::handleInteger(result, dim, THPUtils_unpackLong(obj), i);
     }
+    return at::indexing::TensorIndex(THPVariable_Unpack(obj));
+  } else if (PySequence_Check(obj)) {
+    // TODO: Naughty naughty get out of jail free
+    // (Fixing this means I have to fix the call chain though :/)
+    return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+  } else {
+    auto idx = convertToPythonInt(obj);
+    if (is_tracing && THPVariable_Check(idx)) {
+      recordSelectTrace(THPVariable_Unpack(idx));
+    }
+    return at::indexing::TensorIndex(THPUtils_unpackLong(idx));
+  }
+}
+
+static inline Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices, bool is_tracing) {
+  int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  int64_t dim = 0;
+  int64_t specified_dims = count_specified_dimensions(index);
+
+  if (specified_dims > self.dim()) {
+    throw IndexError("too many indices for tensor of dimension %d", (int)(self.dim()));
+  }
+
+  Variable result = self;
+  for (int64_t i = 0; i < size; i++) {
+    PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+    result = at::indexing::handleDimInMultiDimIndexing(
+      /*prev_dim_result=*/result,
+      /*original_tensor=*/self,
+      /*index=*/traceAndConvertPythonIndexToTensorIndex(self, obj, is_tracing),
+      /*dim_ptr=*/&dim,
+      /*specified_dims_ptr=*/&specified_dims,
+      /*real_dim=*/i,
+      /*outIndices=*/outIndices,
+      /*is_tracing=*/is_tracing);
   }
   return result;
 }
@@ -243,40 +260,34 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
+  bool is_tracing = torch::jit::tracer::isTracing();
 
-  // handle simple types: integers, slices, ellipsis
-  if (index == Py_None) {
-    return wrap(at::indexing::handleNoneSingleDim(self_));
-  } else if (index == Py_Ellipsis) {
-    return wrap(at::indexing::handleEllipsisSingleDim(self_));
-  } else if (THPUtils_checkLong(index)) {
-    if (THPVariable_Check(index)) {
-      recordSelectTrace(THPVariable_Unpack(index));
-    }
-    return wrap(at::indexing::handleIntegerSingleDim(self_, THPUtils_unpackLong(index)));
-  } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, step;
-    Tensor start_tensor, stop_tensor, step_tensor;
-    unpackSliceAndExtractTensors(index, start, stop, step, start_tensor, stop_tensor, step_tensor);
-    recordSliceTrace(start_tensor, stop_tensor, step_tensor);
-    return wrap(at::indexing::handleSliceSingleDim(self_, start, stop, step, /*is_get=*/true, /*is_tracing=*/torch::jit::tracer::isTracing()));
+  // handle simple types: integers, slices, ellipsis, none
+  if (THPUtils_checkLong(index) \
+    || PySlice_Check(index) \
+    || index == Py_Ellipsis \
+    || index == Py_None) {
+    return THPVariable_Wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
+      self_,
+      traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing),
+      /*is_tracing=*/is_tracing));
   }
 
   // wrap index in a tuple if it's not already one
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices);
+  Variable sliced = applySlicing(self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing);
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return wrap(sliced);
+    return THPVariable_Wrap(sliced);
   }
 
   // indexing by tensors ("advanced" indexing)
-  return wrap(([&]() {
+  return THPVariable_Wrap(([&]() {
     pybind11::gil_scoped_release no_gil;
     return at::indexing::dispatch_index(sliced, variableIndices);
   })());
@@ -299,31 +310,20 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   } else {
     value = valueToTensor(self_.options(), py_value);
   }
+  bool is_tracing = torch::jit::tracer::isTracing();
 
-  // handle simple types: integers, slices, ellipsis, bool
-  if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    // do nothing for false (technically we should check the size, but we don't have
-    // real 0-sized shapes.
-    return 0;
-  } else if (index == Py_Ellipsis) {
-    at::indexing::copy_to(self_, value);
-    return 0;
-  } else if (index == Py_None || index == Py_True) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-    at::indexing::copy_to(at::indexing::handleNoneSingleDim(self_), value);
-    return 0;
-  } else if (THPUtils_checkLong(index)) {
-    if (THPVariable_Check(index)) {
-      recordSelectTrace(THPVariable_Unpack(index));
-    }
-    at::indexing::copy_to(at::indexing::handleIntegerSingleDim(self_, THPUtils_unpackLong(index)), value);
-    return 0;
-  } else if (PySlice_Check(index)) {
-    Py_ssize_t start, stop, step;
-    Tensor start_tensor, stop_tensor, step_tensor;
-    unpackSliceAndExtractTensors(index, start, stop, step, start_tensor, stop_tensor, step_tensor);
-    recordSliceTrace(start_tensor, stop_tensor, step_tensor);
-    at::indexing::copy_to(at::indexing::handleSliceSingleDim(
-      self_, start, stop, step, /*is_get=*/false, /*is_tracing=*/torch::jit::tracer::isTracing()), value);
+  // handle simple types: integers, slices, ellipsis, none, bool
+  if (THPUtils_checkLong(index) \
+    || PySlice_Check(index) \
+    || index == Py_Ellipsis \
+    || index == Py_None \
+    || index == Py_True \
+    || index == Py_False) {
+    at::indexing::handleSimpleTypesInSingleDimIndexingSet(
+      self_,
+      traceAndConvertPythonIndexToTensorIndex(self_, index, is_tracing),
+      value,
+      /*is_tracing=*/is_tracing);
     return 0;
   }
 
@@ -331,15 +331,16 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices);
+  Variable sliced = applySlicing(self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing);
   if (variableIndices.empty()) {
     at::indexing::copy_to(sliced, value);
     return 0;
   }
 
-  IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(value.sizes());
+  IntArrayRef valueSizes = value.sizes();
+  IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
   torch::autograd::Variable valuesSliced;
-  if (!value.sizes().equals(slicedValueSizes)) {
+  if (!valueSizes.equals(slicedValueSizes)) {
     valuesSliced = value.view(slicedValueSizes);
   } else {
     valuesSliced = value;
