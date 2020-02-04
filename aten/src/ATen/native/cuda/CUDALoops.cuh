@@ -229,7 +229,6 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
-  static_assert(detail::has_same_arg_types<func_t>::value, "all arguments of `f` must have the same type");
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using arg_t = detail::arg_type::type<func_t>;
