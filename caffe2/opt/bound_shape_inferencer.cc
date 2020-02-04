@@ -23,7 +23,9 @@ std::vector<TensorBoundShape::DimType> setDimTypeWithFirst(
     uint32_t n) {
   std::vector<TensorBoundShape::DimType> dimTypes(
       n, TensorBoundShape_DimType_CONSTANT);
-  dimTypes[0] = firstDimType;
+  if (dimTypes.size() > 0) {
+    dimTypes[0] = firstDimType;
+  }
   return dimTypes;
 }
 
