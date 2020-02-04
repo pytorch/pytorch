@@ -43,7 +43,8 @@ RegisterOperators reg_rpc_ops(
            if (rref->isOwner()) {
               res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)->getValue();
            } else {
-              res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)->toHere();
+              auto rawValues = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)->toHere();
+              res = std::move(rawValues).front();
            }
            push(stack, std::move(res));
            return 0;
