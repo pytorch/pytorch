@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
 
-#if defined(PYTORCH_MOBILE_OBSERVER)
+#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #endif
@@ -47,7 +47,7 @@ bool InterpreterState::run(Stack& stack) {
 //    }
     switch (inst.op) {
       case OP: {
-#if defined(PYTORCH_MOBILE_OBSERVER)
+#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
         if (auto debug_info = at::getThreadLocalDebugInfo()) {
           if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
             debug_info.get())) {
