@@ -1728,6 +1728,20 @@ class DistAutogradTest(RpcAgentTestFixture):
             dist_autograd.backward([loss], retain_graph=True)
             dist_autograd.backward([loss])
 
+    @dist_init
+    def test_multiple_backward(self):
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            loss = rpc.rpc_sync(
+                'worker{}'.format(self._next_rank()),
+                torch.add,
+                args=(t1, t2, self._next_rank())).sum()
+
+            # Run backward in a loop multiple times.
+            for i in range(1000):
+                dist_autograd.backward([loss], retain_graph=True)
+
 @unittest.skipIf(
     not torch._six.PY3,
     "Pytorch distributed autograd package " "does not support python2",
