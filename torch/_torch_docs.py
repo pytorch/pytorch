@@ -3140,7 +3140,7 @@ to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    mask  (ByteTensor): the tensor containing the binary mask to index with
+    mask  (BoolTensor): the tensor containing the binary mask to index with
     {out}
 
 Example::
