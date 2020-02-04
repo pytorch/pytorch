@@ -353,23 +353,23 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
 #ifdef __AVX2__
 #include <ATen/native/cpu/avx_mathfun.h>
 
-void normal_fill_16_AVX2(float *data,
-                         const Vec256<float> two_pi,
-                         const Vec256<float> one,
-                         const Vec256<float> minus_two,
-                         const Vec256<float> mean,
-                         const Vec256<float> std) {
-  using Vec = Vec256<float>;
-  Vec data_v = Vec::loadu(data);
-  const v8sf u1 = __m256(one - data_v);
-  const Vec radius = (minus_two * Vec(log256_ps(u1))).sqrt();
-  const Vec theta = two_pi * Vec::loadu(data + 8);
-  v8sf sintheta, costheta;
-  sincos256_ps(__m256(theta), &sintheta, &costheta);
-  const Vec n1 = radius * Vec(costheta);
-  const Vec n2 = radius * Vec(sintheta);
-  vec256::fmadd(n1, std, mean).store(data);
-  vec256::fmadd(n2, std, mean).store(data + 8);
+static void normal_fill_16_AVX2(float *data,
+                         const __m256* two_pi,
+                         const __m256* one,
+                         const __m256* minus_two,
+                         const __m256* mean,
+                         const __m256* std_v) {
+  const __m256 u1 = _mm256_sub_ps(*one, _mm256_loadu_ps(data));
+  const __m256 u2 = _mm256_loadu_ps(data + 8);
+  // sincos256_ps and log256_ps are from avx_mathfun.h
+  const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(*minus_two, log256_ps(u1)));
+  const __m256 theta = _mm256_mul_ps(*two_pi, u2);
+  __m256 sintheta, costheta;
+  sincos256_ps(theta, &sintheta, &costheta);
+  const __m256 n1 = _mm256_mul_ps(radius, costheta);
+  const __m256 n2 = _mm256_mul_ps(radius, sintheta);
+  _mm256_storeu_ps(data, _mm256_fmadd_ps(n1, *std_v, *mean));
+  _mm256_storeu_ps(data + 8, _mm256_fmadd_ps(n2, *std_v, *mean));
 }
 
 void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator* gen) {
@@ -381,16 +381,14 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator
     at::uniform_real_distribution<float> uniform(0, 1);
     data[i] = uniform(generator);
   }
-
-  using Vec = Vec256<float>;
-  const Vec two_pi = Vec(2.0f * M_PI);
-  const Vec one = Vec(1.0f);
-  const Vec minus_two = Vec(-2.0f);
-  const Vec mean_v = Vec(mean);
-  const Vec std_v = Vec(std);
+   const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
+  const __m256 one = _mm256_set1_ps(1.0f);
+  const __m256 minus_two = _mm256_set1_ps(-2.0f);
+  const __m256 mean_v = _mm256_set1_ps(mean);
+  const __m256 std_v = _mm256_set1_ps(std);
 
   for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16_AVX2(data + i, two_pi, one, minus_two, mean_v, std_v);
+    normal_fill_16_AVX2(data + i, &two_pi, &one, &minus_two, &mean_v, &std_v);
   }
 
   if (size % 16 != 0) {
@@ -400,7 +398,7 @@ void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator
       at::uniform_real_distribution<float> uniform(0, 1);
       data[i] = uniform(generator);
     }
-    normal_fill_16_AVX2(data, two_pi, one, minus_two, mean_v, std_v);
+    normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &std_v);
   }
 }
 #endif
