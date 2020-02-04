@@ -29,6 +29,16 @@ struct BackendTransformOptions {
   BoundShapeSpec bound_shape_spec;
 };
 
+// Wrap TensorShape into TensorProto
+TensorProto wrapShapeInfoIntoTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info);
+
+// Wrap Quantized TensorShape into QTensorProto
+QTensorProto wrapShapeInfoIntoQTensorProto(
+    const std::string& name,
+    const ShapeInfo& shape_info);
+
 // This class contains some common functions for backend lowering and graph
 // cutting
 class BackendTransformerBase {
@@ -72,16 +82,6 @@ class BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const ShapeInfoMap& input_shape_hints);
-
-  // Wrap TensorShape into TensorProto
-  TensorProto wrapShapeInfoIntoTensorProto(
-      const std::string& name,
-      const ShapeInfo& shape_info) const;
-
-  // Wrap Quantized TensorShape into QTensorProto
-  QTensorProto wrapShapeInfoIntoQTensorProto(
-      const std::string& name,
-      const ShapeInfo& shape_info) const;
 
   // Do bound shape inference and collect shape infos
   ShapeInfoMap inferShapes(
