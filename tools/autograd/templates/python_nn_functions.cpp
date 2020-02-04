@@ -55,7 +55,7 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
 
 // generated forward declarations start here
 
-${py_signatures}
+${py_forwards}
 
 static PyMethodDef nn_functions[] = {
   {"_parse_to", (PyCFunction)(void(*)(void))THPVariable__parse_to, METH_VARARGS | METH_KEYWORDS, nullptr},

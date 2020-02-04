@@ -82,10 +82,10 @@ SKIP_PYTHON_BINDINGS_SIGNATURES = [
     'div(Tensor, Scalar)', 'div_(Tensor, Scalar)',
 ]
 
-NATIVE_NAMESPACE_MAPPING = [
-    "torch", "THPVariableFunctions",
-    "torch.nn", "THPNNVariableFunctions"
-]
+NATIVE_NAMESPACE_MAPPING = {
+    "torch": "THPVariableFunctionsModule",
+    "torch.nn": "THPNNVariableFunctionsModule"
+}
 
 def should_generate_python_binding(declaration):
     name = declaration['name']
@@ -126,7 +126,7 @@ def gen_py_variable_methods(out, declarations, template_path):
 
     py_variable_methods = get_py_variable_methods(declarations)
 
-    env = create_python_bindings(py_variable_methods, is_python_method=True, module=None, native_namespace=None)
+    env = create_python_bindings(py_variable_methods, is_python_method=True, module=None)
 
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
 
@@ -189,7 +189,7 @@ def group_declarations_by_op_name(declarations):
     return groups
 
 
-def create_python_bindings(python_functions, is_python_method, module, native_namespace):
+def create_python_bindings(python_functions, is_python_method, module):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
@@ -848,8 +848,8 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 """)
 
 TORCH_FUNCTION_CHECK = CodeTemplate("""\
-if(r.has_torch_function()) {
-  return handle_torch_function(r, args, kwargs, ${namespace}, ${modulename});
+if(_r.has_torch_function()) {
+  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
 }
 """)
 
@@ -907,7 +907,7 @@ def method_impl(name, declarations, is_python_method, module):
     if module:
         check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
             namespace=NATIVE_NAMESPACE_MAPPING[module],
-            module=module
+            modulename='"' + module + '"',
         )
     else:
         check_has_torch_function = ''
@@ -942,7 +942,7 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args);
 
 
 def forward_decls(name, declarations, is_python_method, module):
-    if module or is_python_method:
+    if is_python_method:
         return []
 
     if is_noarg_binding(declarations):
