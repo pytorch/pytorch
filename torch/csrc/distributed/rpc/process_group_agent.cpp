@@ -565,10 +565,6 @@ void ProcessGroupAgent::listenLoop() {
       return;
     }
 
-    // if (!rpcRunning_.load() || !work->wait() /* aborted */) {
-    //   return;
-    // }
-
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
     auto srcRank = preamble_items[0];
@@ -580,7 +576,8 @@ void ProcessGroupAgent::listenLoop() {
     try {
       pg_->recv(tensors, srcRank, pg_->getRank())->wait();
     } catch (const gloo::IoException& e) {
-      LOG(WARNING) << "No op against the process group, terminating RPC agent.";
+      LOG(WARNING)
+          << "No operation against the process group, terminating RPC agent.";
     }
 
     enqueueRecv(
@@ -594,7 +591,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
-    // if there are no futures or the first future's RPC t is set to 0
+    // if there are no futures or the first future's RPC timeout is set to 0
     // (meaning no timeout), then sleep for a set "infinity" time.
     if (futureTimeouts_.empty()) {
       minEndTime = kInfiniteTimeoutTimePoint;
