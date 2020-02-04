@@ -1462,7 +1462,8 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
-dtype2prec = {torch.float: 1e-5,
+# Using @precisionOverride is the recommended way instead of this.
+dtype2prec_DONTUSE = {torch.float: 1e-5,
               torch.double: 1e-5,
               torch.half: 1e-2,
               torch.bfloat16: 1e-1}
