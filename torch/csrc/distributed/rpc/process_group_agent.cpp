@@ -267,6 +267,10 @@ void ProcessGroupAgent::shutdown() {
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  // Throw if we previously encountered an exception in ::listenLoop.
+  if (listenLoopException) {
+    std::rethrow_exception(listenLoopException);
+  }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
@@ -537,7 +541,18 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::listenLoop() {
-  listenLoopInternal();
+  try {
+    listenLoopInternal();
+  } catch (const std::exception& e) {
+    // Error occured in listenLoop(). Stop receiving thread and store exception
+    // to indicate that the RPC agent is in an unhealthy state and we should
+    // shutdown.
+    listenLoopException = std::current_exception();
+    LOG(INFO) << "Calling shutdown, what is going on....";
+  } catch (...) {
+    listenLoopException = std::make_exception_ptr(std::runtime_error(
+        "Unknown exception occured in ProcessGroupAgent::listenLoop."));
+  }
 }
 
 void ProcessGroupAgent::listenLoopInternal() {
@@ -550,22 +565,7 @@ void ProcessGroupAgent::listenLoopInternal() {
       recvWork_ = work;
     }
 
-    if (!rpcRunning_.load()) {
-      return;
-    }
-    bool aborted;
-    try {
-      aborted = !work->wait();
-    } catch (const gloo::IoException& e) {
-      // Gloo has thrown since no operations had been executed against the
-      // process group for a given duration (given by the timeout in
-      // ProcessGroup), so we abort listening. At this point, the process group
-      // is in a bad state and we should abort RPC.
-      LOG(WARNING)
-          << "No operation against the process group, terminating RPC agent.";
-      return;
-    }
-    if (aborted) {
+    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
       return;
     }
 
@@ -577,12 +577,7 @@ void ProcessGroupAgent::listenLoopInternal() {
     int64_t id = preamble_items[3];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
-    try {
-      pg_->recv(tensors, srcRank, pg_->getRank())->wait();
-    } catch (const gloo::IoException& e) {
-      LOG(WARNING)
-          << "No operation against the process group, terminating RPC agent.";
-    }
+    pg_->recv(tensors, srcRank, pg_->getRank())->wait();
 
     enqueueRecv(
         RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
