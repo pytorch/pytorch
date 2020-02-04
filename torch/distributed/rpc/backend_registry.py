@@ -79,7 +79,6 @@ def _process_group_construct_rpc_backend_options_handler(
     rpc_timeout,
     init_method,
     num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS,
-    process_group_timeout=rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT,
     **kwargs
 ):
     from . import ProcessGroupRpcBackendOptions
@@ -88,7 +87,6 @@ def _process_group_construct_rpc_backend_options_handler(
     rpc_backend_options.rpc_timeout = rpc_timeout
     rpc_backend_options.init_method = init_method
     rpc_backend_options.num_send_recv_threads = num_send_recv_threads
-    rpc_backend_options.process_group_timeout = process_group_timeout
     return rpc_backend_options
 
 
@@ -103,8 +101,13 @@ def _process_group_init_backend_handler(
             "Default process group must not be initialized before init_rpc."
         )
 
-    process_group_timeout = rpc_backend_options.process_group_timeout
+    process_group_timeout = (
+        rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
+        if not dist.rpc.internal.TEST_PG_TIMEOUT
+        else dist.rpc.internal.TEST_PG_TIMEOUT
+    )
 
+    print("RANK {} Setting PG timeout of {}, test_pg_timeout is {}".format(rank, process_group_timeout, dist.rpc.internal.TEST_PG_TIMEOUT))
     dist.init_process_group(
         backend="gloo",
         store=store,

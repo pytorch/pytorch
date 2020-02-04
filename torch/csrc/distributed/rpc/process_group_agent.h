@@ -15,7 +15,6 @@ namespace rpc {
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
-  std::chrono::seconds processGroupTimeout;
 };
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by
@@ -139,8 +138,12 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // receiving messages
+  // Loop for receiving messages. Calls listenLoopInternal and handles errors
+  // such as timeouts on the process group.
+  void listenLoopInternal();
+  // Main function for receiving messages
   void listenLoop();
+  std::exception_ptr listenLoopException;
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures

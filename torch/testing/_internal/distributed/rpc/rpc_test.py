@@ -15,7 +15,12 @@ import torch.testing._internal.dist_utils
 from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
+from torch.distributed.rpc.internal import (
+    PythonUDF,
+    RPCExecMode,
+    _internal_rpc_pickler,
+    set_process_group_timeout_for_testing,
+)
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -1717,12 +1722,11 @@ class RpcTest(RpcAgentTestFixture):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
 
-        backend_opts = self.rpc_backend_options
         # Set a small process group timeout on node 1.
-        rank_1_pg_timeout = timedelta(seconds=1)
-        pg_sleep_interval = rank_1_pg_timeout.seconds * 3
+        rank_1_pg_timeout = 1
+        pg_sleep_interval = rank_1_pg_timeout * 3
         if self.rank == 1:
-            backend_opts.process_group_timeout = rank_1_pg_timeout
+            set_process_group_timeout_for_testing(timeout_seconds=rank_1_pg_timeout)
         rpc.init_rpc(
             name="worker%d" % self.rank,
             backend=rpc.backend_registry.BackendType[
@@ -1730,7 +1734,7 @@ class RpcTest(RpcAgentTestFixture):
             ],
             rank=self.rank,
             world_size=self.world_size,
-            rpc_backend_options=backend_opts,
+            rpc_backend_options=self.rpc_backend_options,
         )
 
         if self.rank != 0 and self.rank != 1:
@@ -1757,3 +1761,4 @@ class RpcTest(RpcAgentTestFixture):
                     "Encountered exception in ProcessGroupAgent::enqueueSend",
                 ):
                     rpc.rpc_async("worker1", torch.add, args=(1, 1)).wait()
+            rpc.shutdown(graceful=False)
