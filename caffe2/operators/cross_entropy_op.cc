@@ -149,6 +149,85 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
 }
 
 template <>
+bool PerSampleUnjoinedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::
+    RunOnDevice() {
+  auto& logits = Input(0);
+  auto& targets = Input(1);
+  auto& unjoined_lr_loss = Input(2);
+  CAFFE_ENFORCE_EQ(logits.sizes(), targets.sizes(), unjoined_lr_loss.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+
+  std::vector<int64_t> dims;
+  if (logits.dim() != 0) {
+    dims =
+        std::vector<int64_t>(logits.sizes().begin(), logits.sizes().end() - 1);
+  }
+  auto* out = Output(0, dims, at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
+
+  auto* logits_ptr = logits.data<float>();
+  auto* targets_ptr = targets.data<float>();
+  auto* unjoined_lr_loss_ptr = unjoined_lr_loss.data<float>();
+
+  auto in_idx = 0;
+  for (int i = 0; i < outer_size; ++i) {
+    float value = 0;
+    for (int j = 0; j < inner_size; ++j) {
+      if (unjoined_lr_loss_ptr[in_idx] > 0.5) {
+        value += unjoined_sigmoid_xent_forward(
+            logits_ptr[in_idx], targets_ptr[in_idx]);
+      } else {
+        value += sigmoid_xent_forward(logits_ptr[in_idx], targets_ptr[in_idx]);
+      }
+      ++in_idx;
+    }
+    out_ptr[i] = -value / inner_size;
+  }
+  return true;
+}
+
+template <>
+bool PerSampleUnjoinedSigmoidCrossEntropyWithLogitsGradientOp<
+    float,
+    CPUContext>::RunOnDevice() {
+  auto& g = Input(0);
+  auto& logits = Input(1);
+  auto& targets = Input(2);
+  auto& unjoined_loss_flag = Input(3);
+  CAFFE_ENFORCE(logits.sizes() == targets.sizes());
+  const auto inner_size = logits.dim() > 0 ? logits.sizes().back() : 1;
+  const auto outer_size = logits.numel() / inner_size;
+  CAFFE_ENFORCE(g.numel() == outer_size);
+  CAFFE_ENFORCE(unjoined_loss_flag.sizes() == logits.sizes());
+
+  auto* out = Output(0, logits.sizes(), at::dtype<float>());
+  auto* out_ptr = out->template mutable_data<float>();
+
+  auto* logits_ptr = logits.data<float>();
+  auto* targets_ptr = targets.data<float>();
+  auto* g_ptr = g.data<float>();
+  auto* unjoined_loss_flag_ptr = unjoined_loss_flag.data<float>();
+
+  auto in_idx = 0;
+  for (int i = 0; i < outer_size; ++i) {
+    auto g_factor = -g_ptr[i] / inner_size;
+    for (int j = 0; j < inner_size; ++j) {
+      if (unjoined_loss_flag_ptr[in_idx] > 0.5) {
+        out_ptr[in_idx] = g_factor *
+            unjoined_sigmoid_xent_backward(
+                              logits_ptr[in_idx], targets_ptr[in_idx]);
+      } else {
+        out_ptr[in_idx] = g_factor *
+            sigmoid_xent_backward(logits_ptr[in_idx], targets_ptr[in_idx]);
+      }
+      ++in_idx;
+    }
+  }
+  return true;
+}
+
+template <>
 bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
@@ -246,7 +325,7 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     dXdata[i * D + labelData[i]] =
-        - dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
+        -dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
   }
   return true;
 }
@@ -360,10 +439,12 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-REGISTER_CPU_OPERATOR(LabelCrossEntropy,
-                      LabelCrossEntropyOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(LabelCrossEntropyGradient,
-                      LabelCrossEntropyGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    LabelCrossEntropy,
+    LabelCrossEntropyOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    LabelCrossEntropyGradient,
+    LabelCrossEntropyGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(LabelCrossEntropy)
     .NumInputs(2)
@@ -436,37 +517,36 @@ Y:
 
 
 )DOC")
-  .Input(
-      0,
-      "X",
-      "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
-  .Input(
-      1,
-      "label",
-      "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
-  .Output(
-      0,
-      "Y",
-      "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
-OPERATOR_SCHEMA(LabelCrossEntropyGradient)
-  .NumInputs(3)
-  .NumOutputs(1);
+    .Input(
+        0,
+        "X",
+        "Input tensor which is almost always the result of a softmax operation. $X$ is a 2D array of size $NxD$, where $N$ is the batch size and $D$ is the number of classes.")
+    .Input(
+        1,
+        "label",
+        "Blob containing the labels used to compare the input. $label$ is a length $N$ list of integers, where each element is the integer label for the $n$th element of the batch.")
+    .Output(
+        0,
+        "Y",
+        "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
+OPERATOR_SCHEMA(LabelCrossEntropyGradient).NumInputs(3).NumOutputs(1);
 
 class GetLabelCrossEntropyGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "LabelCrossEntropyGradient", "",
+        "LabelCrossEntropyGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(LabelCrossEntropy, GetLabelCrossEntropyGradient);
 
-REGISTER_CPU_OPERATOR(MakeTwoClass,
-                      MakeTwoClassOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(MakeTwoClassGradient,
-                      MakeTwoClassGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MakeTwoClass, MakeTwoClassOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    MakeTwoClassGradient,
+    MakeTwoClassGradientOp<float, CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     SigmoidCrossEntropyWithLogits,
@@ -474,6 +554,15 @@ REGISTER_CPU_OPERATOR(
 REGISTER_CPU_OPERATOR(
     SigmoidCrossEntropyWithLogitsGradient,
     SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>);
+
+REGISTER_CPU_OPERATOR(
+    PerSampleUnjoinedSigmoidCrossEntropyWithLogits,
+    PerSampleUnjoinedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    PerSampleUnjoinedSigmoidCrossEntropyWithLogitsGradient,
+    PerSampleUnjoinedSigmoidCrossEntropyWithLogitsGradientOp<
+        float,
+        CPUContext>);
 
 REGISTER_CPU_OPERATOR(
     WeightedSigmoidCrossEntropyWithLogits,
@@ -485,13 +574,13 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(MakeTwoClass)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out[0].add_dims(in[0].dims(0));
-          out[0].add_dims(2);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims(0));
+      out[0].add_dims(2);
+      return out;
+    })
     .SetDoc(R"DOC(
 Given a vector of probabilities, this operator transforms this into a 2-column
  matrix with complimentary probabilities for binary classification. In explicit
@@ -504,9 +593,7 @@ Given a vector of probabilities, this operator transforms this into a 2-column
         "2-column matrix with complimentary probabilities of X for "
         "binary classification");
 
-OPERATOR_SCHEMA(MakeTwoClassGradient)
-  .NumInputs(1)
-  .NumOutputs(1);
+OPERATOR_SCHEMA(MakeTwoClassGradient).NumInputs(1).NumOutputs(1);
 
 OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogits)
     .Arg("log_D_trick", R"DOC(
@@ -532,6 +619,28 @@ Returns a tensor of shape (batch_size,) of losses for each example.
 
 OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogitsGradient)
     .NumInputs(3)
+    .NumOutputs(1);
+
+OPERATOR_SCHEMA(PerSampleUnjoinedSigmoidCrossEntropyWithLogits)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInputDim(0, 0)
+    .SetDoc(R"DOC(
+Given two matrices logits and targets, of same shape,
+(batch_size, num_classes), computes the sigmoid cross entropy between the two.
+If unjoined_lr_loss = 1, subrtacts loss for previous label.
+Returns a tensor of shape (batch_size,) of losses for each example.
+)DOC")
+    .Input(0, "logits", "matrix of logits for each example and class.")
+    .Input(1, "targets", "matrix of targets, same shape as logits.")
+    .Input(
+        2,
+        "unjoined_lr_loss",
+        "Flag indicating if unjoined loss should be used for this sample.")
+    .Output(0, "xentropy", "Vector with the total xentropy for each example.");
+
+OPERATOR_SCHEMA(PerSampleUnjoinedSigmoidCrossEntropyWithLogitsGradient)
+    .NumInputs(4)
     .NumOutputs(1);
 
 OPERATOR_SCHEMA(WeightedSigmoidCrossEntropyWithLogits)
@@ -596,10 +705,10 @@ REGISTER_GRADIENT(
     WeightedSigmoidCrossEntropyWithLogits,
     GetWeightedSigmoidCrossEntropyWithLogitsGradient);
 
-REGISTER_CPU_OPERATOR(CrossEntropy,
-                      CrossEntropyOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(CrossEntropyGradient,
-                      CrossEntropyGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(CrossEntropy, CrossEntropyOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    CrossEntropyGradient,
+    CrossEntropyGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(CrossEntropy)
     .NumInputs(2)
@@ -683,19 +792,18 @@ Y:
         0,
         "Y",
         "Output blob from the cross entropy computation. $Y$ is 1D length $N$ tensor.");
-OPERATOR_SCHEMA(CrossEntropyGradient)
-  .NumInputs(3)
-  .NumOutputs(1);
+OPERATOR_SCHEMA(CrossEntropyGradient).NumInputs(3).NumOutputs(1);
 
 class GetCrossEntropyGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "CrossEntropyGradient", "",
+        "CrossEntropyGradient",
+        "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(CrossEntropy, GetCrossEntropyGradient);
 
-}  // namespace caffe2
+} // namespace caffe2
