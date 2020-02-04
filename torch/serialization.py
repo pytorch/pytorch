@@ -331,7 +331,7 @@ def _check_dill_version(pickle_module):
                 pickle_module.__version__
             ))
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
@@ -539,7 +539,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
             :attr:`errors=...`.
 
     .. warning::
-        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.  
+        :func:`torch.load()` uses ``pickle`` module implicitly, which is known to be insecure.
         It is possible to construct malicious pickle data which will execute arbitrary code
         during unpickling. Never load data that could have come from an untrusted
         source, or that could have been tampered with. **Only load data you trust**.
