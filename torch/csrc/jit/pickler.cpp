@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -126,6 +127,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     err << ". Please define serialization methods via torch::jit::pickle_ for "
            "this class.";
     AT_ERROR(err.str());
+  } else if (ivalue.isRRef()) {
+    pushRRef(ivalue);
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -143,6 +146,24 @@ void Pickler::pushDevice(const IValue& ivalue) {
   } else {
     pushBinGet(it->second);
   }
+}
+
+void Pickler::pushRRef(const IValue& ivalue) {
+  auto rrefInterface = ivalue.toRRef();
+  auto rref = c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
+  pushGlobal("torch", "rref");
+  auto& ctx = distributed::rpc::RRefContext::getInstance();
+  auto rrefForkData = ctx.prepareChildFork(rref);
+  push<PickleOpCode>(PickleOpCode::MARK);
+  pushInt(rrefForkData.ownerId_);
+  pushInt(rrefForkData.rrefId_.createdOn_);
+  pushInt(rrefForkData.rrefId_.localId_);
+  pushInt(rrefForkData.forkId_.createdOn_);
+  pushInt(rrefForkData.forkId_.localId_);
+  pushInt(rrefForkData.parent_);
+  pushString(rrefForkData.typeStr_);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushIValue(const IValue& ivalue) {

@@ -152,6 +152,7 @@ class Pickler {
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);
+  void pushRRef(const IValue& ivalue);
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);

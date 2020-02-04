@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include "unpickler.h"
@@ -503,6 +504,33 @@ void Unpickler::readGlobal(
       });
       stack_.emplace_back(int64_t(globals_.size() - 1));
       return;
+  } else if (module_name == "torch" && class_name == "rref") {
+      globals_.emplace_back([this] {
+        auto args = stack_.back().toTuple()->elements();
+        stack_.pop_back();
+        auto ownerId = static_cast<int16_t>(args.at(0).toInt());
+        // const reference will extend the lifetime of the temporary variable
+        const auto& rrefId = distributed::rpc::RRefId(
+            static_cast<int16_t>(args.at(1).toInt()),
+            static_cast<int64_t>(args.at(2).toInt()));
+        const auto& forkId = distributed::rpc::RRefId(
+            static_cast<int16_t>(args.at(3).toInt()),
+            static_cast<int64_t>(args.at(4).toInt()));
+        auto parent = static_cast<int16_t>(args.at(5).toInt());
+        const auto& typeStr = static_cast<std::string>(args.at(6).toStringRef());
+        auto rrefForkData = distributed::rpc::RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
+        auto& ctx = distributed::rpc::RRefContext::getInstance();
+        c10::intrusive_ptr<distributed::rpc::RRef> rref;
+        // TODO get correct type
+        TypePtr rrefType = PyObjectType::get();
+    //        PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
+        rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
+        ctx.notifyOwnerAndParentOfFork(
+            rrefForkData.forkId_, rrefForkData.parent_, rref);
+        stack_.emplace_back(std::move(c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref)));
+      });
+      stack_.emplace_back(int64_t(globals_.size() - 1));
+      return;
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -575,7 +603,7 @@ void Unpickler::rebuildTensor(bool quantized) {
           std::vector<double> scales = convertList<double>(qparams.at(1));
           std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
           int64_t axis = qparams.at(3).toInt();
-          result = _empty_per_channel_affine_quantized(
+          result = at::_empty_per_channel_affine_quantized(
               {0},
               at::tensor(scales),
               at::tensor(zero_points),

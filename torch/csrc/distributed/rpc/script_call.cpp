@@ -44,7 +44,7 @@ std::vector<at::IValue>& ScriptCall::stackRef() {
 
 void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
   for (auto& value : stack_) {
-    ivalues.push_back(value);
+    ivalues.push_back(std::move(value));
   }
 
   if (hasOp()) {
@@ -104,8 +104,8 @@ Message ScriptCall::toMessage() && {
   toIValues(ivalues);
 
   std::vector<torch::Tensor> tensor_table;
-  auto payload =
-      jit::pickle(c10::ivalue::Tuple::create(ivalues), &tensor_table);
+  auto payload = jit::pickle(
+      c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
   return Message(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
