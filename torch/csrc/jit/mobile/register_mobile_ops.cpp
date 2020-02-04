@@ -116,6 +116,17 @@ void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
+void upsample_nearest2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = at::upsample_nearest2d(
+    (std::move(peek(*stack, 0, 4))).toTensor(),
+    (std::move(peek(*stack, 1, 4))).toIntVector(),
+    (std::move(peek(*stack, 2, 4))).toOptional<double>(),
+    (std::move(peek(*stack, 3, 4))).toOptional<double>()
+  );
+  drop(*stack, 4);
+  pack(*stack, std::move(result_));
+}
+
 void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   drop(*stack, 1);
   pop(*stack);
@@ -347,6 +358,9 @@ static auto registry = torch::RegisterOperators().op(
   [](const Tensor & self, const Tensor & other) {
      return at::mul(self, other);
   })
+).op(
+  "_aten::upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor",
+  torch::RegisterOperators::options().kernel<&upsample_nearest2d_kernel>(c10::DispatchKey::CPUTensorId)
 ).op(
   "_aten::tanh(Tensor self) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
