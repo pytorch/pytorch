@@ -153,6 +153,7 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
+  std::cout << expr << std::endl;
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
