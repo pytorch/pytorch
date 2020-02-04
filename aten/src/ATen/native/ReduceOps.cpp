@@ -196,6 +196,7 @@ Tensor& cumlogsumexp_out(Tensor& result, const Tensor& self, int64_t dim) {
     at::_cumsum(result, dim);
     result.log_().add_(cummax_values);
   }
+  namedinference::propagate_names(result, self);
   return result;
 }
 

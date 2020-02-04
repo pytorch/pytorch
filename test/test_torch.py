@@ -5395,6 +5395,7 @@ def add_neg_dim_tests():
         ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
         ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
+        ('cumlogsumexp', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -5628,6 +5629,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
         # cumsum, cumprod, cummax, cummin
+        self.assertEqual((), torch.cumlogsumexp(zero_d, 0).shape)
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
@@ -10021,6 +10023,7 @@ class TestTorchDeviceType(TestCase):
         actual = a.cumlogsumexp(1)
         max = np.maximum.accumulate(a.numpy(), axis=1)
         expected = max + np.log(np.cumsum(np.exp(a - max), axis=1))
+        self.assertEqual(a.dtype, actual.dtype)
         self.assertEqual(expected.shape, actual.shape)
         self.assertTrue(np.allclose(expected, actual.numpy()))
         # check that out is actually inplace
@@ -10766,6 +10769,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 0)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 2)[0].shape)
+        self.assertEqual(shape, torch.cumlogsumexp(x, 0)[0].shape)
+        self.assertEqual(shape, torch.cumlogsumexp(x, 2)[0].shape)
 
         # flip
         self.assertEqual(x, x.flip(0))
@@ -14288,6 +14293,8 @@ tensor_op_tests = [
     ('contiguous', '', _medium_2d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, False),
     ('cross', '', _new_t((_M, 3, _M)), lambda t, d: [_new_t((_M, 3, _M))(t, d)],
         1e-2, 1e-5, 1e-5, _types, False),
+    ('cumsumlogexp', '', _small_3d, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
+    ('cumsumlogexp', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cummax', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cummax', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-2, 1e-5, 1e-5, _types, False),
     ('cummin', '', _small_3d_unique, lambda t, d: [1], 1e-2, 1e-5, 1e-5, _types, False),
