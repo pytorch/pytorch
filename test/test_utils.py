@@ -562,6 +562,11 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    def test_hub_dir(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            self.assertEqual(torch.hub._get_torch_home(), dirname)
+
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
