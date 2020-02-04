@@ -1206,15 +1206,23 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
     try:
         sys.stdout.flush()
         sys.stderr.flush()
-        # Don't call subprocess.run. Use subprocess.check_output instead.
-        # If the stdout encoding is not utf-8, distutils can detach stdout.
-        # https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
-        # subprocess.run sometimes relies on stdout NOT being detached (I don't know
-        # why), but in my experiments subprocess.check_output doesn't have this issue.
-        subprocess.check_output(
-            ['ninja', '-v'],
-            stderr=subprocess.STDOUT,
-            cwd=build_directory)
+        if sys.version_info >= (3, 5):
+            # WARNING: do not use stdout=None.
+            # If the stdout encoding is not utf-8, distutils can detach stdout.
+            # https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
+            # subprocess.run with stdout=None relies on stdout not being detached:
+            # https://github.com/python/cpython/blob/c352e6c7446c894b13643f538db312092b351789/Lib/subprocess.py#L1214
+            subprocess.run(
+                ['ninja', '-v'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd=build_directory,
+                check=True)
+        else:
+            subprocess.check_output(
+                ['ninja', '-v'],
+                stderr=subprocess.STDOUT,
+                cwd=build_directory)
     except subprocess.CalledProcessError:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
