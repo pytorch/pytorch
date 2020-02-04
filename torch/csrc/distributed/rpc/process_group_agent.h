@@ -15,6 +15,7 @@ namespace rpc {
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
+  std::chrono::seconds processGroupTimeout;
 };
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by

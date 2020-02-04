@@ -1711,3 +1711,46 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(hasattr(this_module, "foo_add"))
             with self.assertRaisesRegex(Exception, "AttributeError"):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_listenloop_error(self):
+        # test that if a callee node has gone down, we raise an appropriate
+        # exception instead of just crashing.
+
+        backend_opts = self.rpc_backend_options
+        # Set a small process group timeout on node 1.
+        rank_1_pg_timeout = timedelta(seconds=1)
+        pg_sleep_interval = rank_1_pg_timeout.seconds * 3
+        if self.rank == 1:
+            backend_opts.process_group_timeout = rank_1_pg_timeout
+        rpc.init_rpc(
+            name="worker%d" % self.rank,
+            backend=rpc.backend_registry.BackendType[
+                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+            ],
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=backend_opts,
+        )
+
+        if self.rank != 0 and self.rank != 1:
+            rpc.shutdown(graceful=False)
+        else:
+            # Let rank 1 time out. Note that all existing workers should wait
+            # for 1 to timeout since any actions against the process group will
+            # reset the timer.
+            if self.rank == 1:
+                time.sleep(pg_sleep_interval)
+                # 1 should not be able to send RPCs.
+                with self.assertRaisesRegex(
+                    RuntimeError, "Application timeout caused pair closure"
+                ):
+                    rpc.rpc_async("worker0", torch.add, args=(1,1)).wait()
+            else:
+                wait_until_node_failure(rank=1, sleep_duration=pg_sleep_interval, backoff=1.5)
+                # Node 1 should not be accessible.
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Encountered exception in ProcessGroupAgent::enqueueSend",
+                ):
+                    rpc.rpc_async("worker1", torch.add, args=(1,1)).wait()

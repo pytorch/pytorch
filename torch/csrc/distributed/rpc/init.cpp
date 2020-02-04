@@ -213,6 +213,9 @@ If the future completes with an error, an exception is thrown.
       module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
       .def(py::init<>())
       .def_readwrite(
+          "process_group_timeout",
+          &ProcessGroupRpcBackendOptions::processGroupTimeout)
+      .def_readwrite(
           "num_send_recv_threads",
           &ProcessGroupRpcBackendOptions::numSendRecvThreads);
 

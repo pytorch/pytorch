@@ -2,6 +2,9 @@
 
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
+#ifdef USE_C10D_GLOO
+#include <c10d/ProcessGroupGloo.hpp>
+#endif
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -242,7 +245,8 @@ void ProcessGroupAgent::start() {
 }
 
 void ProcessGroupAgent::shutdown() {
-  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
+            << ".";
   std::unique_lock<std::mutex> lock{futureMutex_};
   if (!rpcRunning_.exchange(false)) {
     return;
@@ -542,9 +546,28 @@ void ProcessGroupAgent::listenLoop() {
       recvWork_ = work;
     }
 
-    if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+    if (!rpcRunning_.load()) {
       return;
     }
+    bool aborted;
+    try {
+      aborted = !work->wait();
+    } catch (const gloo::IoException& e) {
+      // Gloo has thrown since no operations had been executed against the
+      // process group for a given duration (given by the timeout in
+      // ProcessGroup), so we abort listening. At this point, the process group
+      // is in a bad state and we should abort RPC.
+      LOG(WARNING)
+          << "No operation against the process group, terminating RPC agent.";
+      return;
+    }
+    if (aborted) {
+      return;
+    }
+
+    // if (!rpcRunning_.load() || !work->wait() /* aborted */) {
+    //   return;
+    // }
 
     int64_t* preamble_items = preamble.front().storage().data<int64_t>();
 
@@ -554,7 +577,11 @@ void ProcessGroupAgent::listenLoop() {
     int64_t id = preamble_items[3];
 
     std::vector<torch::Tensor> tensors = {torch::empty({size}, {torch::kChar})};
-    pg_->recv(tensors, srcRank, pg_->getRank())->wait();
+    try {
+      pg_->recv(tensors, srcRank, pg_->getRank())->wait();
+    } catch (const gloo::IoException& e) {
+      LOG(WARNING) << "No op against the process group, terminating RPC agent.";
+    }
 
     enqueueRecv(
         RecvWork(allWorkerInfo_[srcRank], type, id, std::move(tensors[0])));
@@ -567,7 +594,7 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
     steady_clock_time_point minEndTime;
     // Estimate amount of time the first future will time out in, and sleep
     // for that long.
-    // if there are no futures or the first future's RPC timeout is set to 0
+    // if there are no futures or the first future's RPC t is set to 0
     // (meaning no timeout), then sleep for a set "infinity" time.
     if (futureTimeouts_.empty()) {
       minEndTime = kInfiniteTimeoutTimePoint;
