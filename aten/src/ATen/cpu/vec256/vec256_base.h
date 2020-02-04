@@ -165,6 +165,16 @@ public:
   T& operator[](int idx) {
     return values[idx];
   }
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 0-bit and non-zeros are translated to 1-bit
+    int mask = 0;
+    for (int i = 0; i < size(); ++ i) {
+      if (values[i]) {
+        mask |= (1 << i);
+      }
+    }
+    return mask;
+  }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
     for (int64_t i = 0; i != size(); i++) {
