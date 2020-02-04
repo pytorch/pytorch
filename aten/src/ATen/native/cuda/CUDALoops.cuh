@@ -193,6 +193,35 @@ inline int can_vectorize_up_to(array_t pointers) {
   return result;
 }
 
+template<typename func_t, int remaining=function_traits<func_t>::arity-1>
+struct has_same_arg_types {
+  using traits = function_traits<func_t>;
+  static constexpr bool value = std::is_same<
+      typename traits::template arg<remaining>::type,
+      typename traits::template arg<remaining-1>::type
+    >::value && has_same_arg_types<func_t, remaining-1>::value;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, 0> {
+  static constexpr bool value = true;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, -1> {
+  static constexpr bool value = true;
+};
+
+// simple compile time test for has_same_arg_types:
+using func1_t = int (*)(float, float);
+using func2_t = int (*)(bool, float, float);
+using func3_t = int (*)(float);
+using func4_t = int (*)();
+static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
+static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
+static_assert(has_same_arg_types<func3_t>::value, "func1_t has the same argument types");
+static_assert(has_same_arg_types<func4_t>::value, "func1_t has the same argument types");
+
 }  // namespace detail
 
 template<typename func_t, typename array_t, typename policy_t>
@@ -200,6 +229,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+  static_assert(detail::has_same_arg_types<func_t>::value, "all arguments of `f` must have the same type");
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using arg_t = detail::arg_type::type<func_t>;
@@ -335,7 +365,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
-    } else if (iter.has_contiguous_first_dim()) {
+    } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
       modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
