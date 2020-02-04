@@ -298,7 +298,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     an equivalent graph (corresponding to the view operations) without using
 ///     the user-provided grad_fn. If the provided grad_fn does more
 ///     than the backward of the view, then the DifferentiableViewMeta must be
-///     created with allow_rebase_history=OnRebase::ERROR to prevent the engine
+///     created with allow_rebase_history=OnRebase::ERROR_REBASE to prevent the engine
 ///     from ignoring the provided grad_fn.
 ///
 /// Interaction with GradMode:
@@ -313,8 +313,8 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     torch.autograd.grad(base.sum(), var)  <- what should it return?
 ///
 /// Given that there is no consensus on what this particular code should return,
-/// we explicitely forbid it by setting allow_rebase_history=OnRebase::ERROR for
-/// all differentiable views created in no_grad mode.
+/// we explicitely forbid it by setting allow_rebase_history=OnRebase::ERROR_REBASE
+/// for all differentiable views created in no_grad mode.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -345,7 +345,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   uint32_t attr_version;
 
   /// Flag that control what happens when a Tensor's history is rebased
-  enum class TORCH_API OnRebase: uint8_t { ALLOW, WARN, ERROR };
+  enum class OnRebase: uint8_t { ALLOW_REBASE, WARN_REBASE, ERROR_REBASE };
   OnRebase allow_rebase_history;
 
   bool requires_grad() const override {
@@ -353,7 +353,7 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-                         OnRebase allow_rebase_history=OnRebase::ALLOW);
+                         OnRebase allow_rebase_history=OnRebase::ALLOW_REBASE);
   ~DifferentiableViewMeta();
 };
 
@@ -389,7 +389,8 @@ inline Variable make_variable_differentiable_view(
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(base),
-      allow_rebase_history? DifferentiableViewMeta::OnRebase::ALLOW: DifferentiableViewMeta::OnRebase::ERROR));
+      allow_rebase_history? DifferentiableViewMeta::OnRebase::ALLOW_REBASE:
+                            DifferentiableViewMeta::OnRebase::ERROR_REBASE));
     return Variable(data_impl_copy);
     }
   return Variable();

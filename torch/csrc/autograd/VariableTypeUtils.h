@@ -47,7 +47,7 @@ inline void check_inplace(const Tensor& tensor) {
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
       // Unsafe because we don't want to trigger the creation of the view's custom grad_fn
       auto grad_fn = impl::grad_fn_unsafe(var);
-      if (diff_view_meta->allow_rebase_history != DifferentiableViewMeta::OnRebase::ALLOW) {
+      if (diff_view_meta->allow_rebase_history != DifferentiableViewMeta::OnRebase::ALLOW_REBASE) {
         std::string msg;
         if (grad_fn) {
           msg = c10::str("The ", diff_view_meta->output_nr_, "th output of ", grad_fn->name(),
@@ -60,10 +60,10 @@ inline void check_inplace(const Tensor& tensor) {
               " do NOT want the change to be tracked by the autograd. Or both outside the no_grad block if you"
               " want the change to tracked.");
         }
-        if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::WARN) {
+        if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::WARN_REBASE) {
           TORCH_WARN(msg);
         } else {
-          TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR);
+          TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR_REBASE);
           TORCH_CHECK(false, msg);
         }
       }

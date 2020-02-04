@@ -92,8 +92,8 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     if (!is_input && var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR) {
-        diff_view_meta->allow_rebase_history = DifferentiableViewMeta::OnRebase::WARN;
+      if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR_REBASE) {
+        diff_view_meta->allow_rebase_history = DifferentiableViewMeta::OnRebase::WARN_REBASE;
       }
     }
 
