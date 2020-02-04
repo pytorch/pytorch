@@ -393,7 +393,7 @@ void GeluBackwardCUDAKernelImpl(TensorIterator& it) {
                     T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
                 kBeta;
             return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
-	  });
+          });
         });
       });
 }
