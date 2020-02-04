@@ -11365,6 +11365,35 @@ class TestTorchDeviceType(TestCase):
         test_tensor_pow_tensor(floats, torch.float32, np.float32)
         test_tensor_pow_tensor(floats, torch.float64, np.float64)
 
+    @dtypes(torch.float)
+    def test_add_with_tail(self, device, dtype):
+        # test tensor where there is a tail which is not a multiple
+        # of GPU warp size
+        for tail_size in [1, 63, 67, 130]:
+            size = 4096 + tail_size
+            a = torch.randn(size, device=device, dtype=dtype)
+            b = torch.randn(size, device=device, dtype=dtype)
+            c = a + b
+            for x, y, z in zip(a.tolist(), b.tolist(), c.tolist()):
+                self.assertEqual(x + y, z)
+
+    def test_logical_xor_with_nontrivial_alignment(self, device):
+        # test tensor that is not aligned to multiple of 16 bytes
+        size = 128
+        a = (torch.randn(size, device=device) > 0)
+        b = (torch.randn(size, device=device) > 0)
+        c = (torch.randn(size, device=device) > 0)
+        non_trivial_alignment = [1, 2, 4, 8, 15]
+        for i in non_trivial_alignment:
+            for j in non_trivial_alignment:
+                for k in non_trivial_alignment:
+                    a_ = a[i: 100 + i]
+                    b_ = b[j: 100 + j]
+                    c_ = c[k: 100 + k]
+                    torch.logical_xor(a_, b_, out=c_)
+                    for x, y, z in zip(a_.tolist(), b_.tolist(), c_.tolist()):
+                        self.assertEqual(x ^ y, z)
+
     def test_var_mean_some_dims(self, device):
         sizes = (4, 6, 7, 5, 3)
         dims = len(sizes)
