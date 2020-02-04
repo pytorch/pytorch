@@ -69,7 +69,7 @@ static void upsample_nearest1d_backward_out_cpu_template(
   grad_input.resize_({nbatch, channels, input_width});
   grad_input.zero_();
 
-  upsample_nearest1d_backward_kernel(kCPU, grad_input, grad_output, scales_1);
+  upsample_nearest1d_backward_kernel(kCPU, grad_input, grad_output, scales);
 }
 } // namespace
 

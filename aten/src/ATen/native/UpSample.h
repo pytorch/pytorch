@@ -45,9 +45,10 @@
 namespace at {
 namespace native {
 
-using upsampling_1d = void(*)(Tensor& output, const Tensor& input, double scales_1);
-using upsampling_2d = void(*)(Tensor& output, const Tensor& input, double scales_1, double scales_2);
-using upsampling_3d = void(*)(Tensor& output, const Tensor& input, double scales_1, double scales_2, double scales_3);
+using scale_t = c10::optional<double>;
+using upsampling_1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
+using upsampling_2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);
+using upsampling_3d = void(*)(Tensor& output, const Tensor& input, scale_t scales_d, scale_t scales_h, scale_t scales_w);
 DECLARE_DISPATCH(upsampling_1d, upsample_nearest1d_kernel);
 DECLARE_DISPATCH(upsampling_2d, upsample_nearest2d_kernel);
 DECLARE_DISPATCH(upsampling_3d, upsample_nearest3d_kernel);

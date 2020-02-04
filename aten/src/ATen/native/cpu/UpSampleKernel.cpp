@@ -37,15 +37,15 @@ static inline int64_t nearest_idx(
     int64_t output_index,
     int64_t input_size,
     int64_t output_size,
-    double scales_1) {
+    c10::optional<double> scales) {
   if (output_size == input_size) {
-    // simply copy
+    // scale_factor = 1, simply copy
     return output_index;
-  } else if (output_size == 2 * input_size && scales_1 < 0.) {
-    // scale_factor = 2
+  } else if (output_size == 2 * input_size) {
+    // scale_factor = 2, shift input index
     return output_index >> 1;
   } else {
-    float scale = compute_scales_value<float>(scales_1, input_size, output_size);
+    float scale = compute_scales_value<float>(scales, input_size, output_size);
     return nearest_neighbor_compute_source_index(scale, output_index, input_size);
   }
 }
@@ -140,14 +140,8 @@ void cpu_upsample_nearest_backward(
     Tensor& grad_input_,
     const Tensor& grad_output_,
     const scale_type& scales) {
-
   TORCH_CHECK(grad_input_.dtype() == grad_output_.dtype(), "expected dtype ", grad_output_.dtype(),
               " for `grad_input` but got dtype ", grad_input_.dtype());
-
-  scale_type scales_{scales.begin(), scales.end()};
-  while (scales_.size() < 3) {
-    scales_.push_back(-1);
-  }
 
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
@@ -170,14 +164,39 @@ void cpu_upsample_nearest_backward(
   int64_t output_slice_size = output_depth * output_height * output_width;
   int64_t input_slice_size = input_depth * input_height * input_width;
 
-  auto loop = [&](int64_t begin, int64_t end) {
+  auto loop1d = [&](int64_t begin, int64_t end) {
+    for (int64_t c = begin; c < end; c++){
+      for (int64_t ow = 0; ow < output_width; ow++) {
+        int64_t iw = nearest_idx(ow, input_width, output_width, scales[0]);
+        int64_t output_offset = c * output_slice_size + ow;
+        int64_t input_offset = c * input_slice_size + iw;
+        grad_input_data[input_offset] += grad_output_data[output_offset];
+      }
+    }
+  };
+
+  auto loop2d = [&](int64_t begin, int64_t end) {
+    for (int64_t c = begin; c < end; c++) {
+      for (int64_t oh = 0; oh < output_height; oh++) {
+        int64_t ih = nearest_idx(oh, input_height, output_height, scales[0]);
+        for (int64_t ow = 0; ow < output_width; ow++) {
+          int64_t iw = nearest_idx(ow, input_width, output_width, scales[1]);
+          int64_t output_offset = c * output_slice_size + oh * output_width + ow;
+          int64_t input_offset = c * input_slice_size + ih * input_width + iw;
+          grad_input_data[input_offset] += grad_output_data[output_offset];
+        }
+      }
+    }
+  };
+
+  auto loop3d = [&](int64_t begin, int64_t end) {
     for (int64_t c = begin; c < end; c++) {
       for (int64_t od = 0; od < output_depth; od++) {
-        int64_t id = nearest_idx(od, input_depth, output_depth, scales_[0]);
+        int64_t id = nearest_idx(od, input_depth, output_depth, scales[0]);
         for (int64_t oh = 0; oh < output_height; oh++) {
-          int64_t ih = nearest_idx(oh, input_height, output_height, scales_[1]);
+          int64_t ih = nearest_idx(oh, input_height, output_height, scales[1]);
           for (int64_t ow = 0; ow < output_width; ow++) {
-            int64_t iw = nearest_idx(ow, input_width, output_width, scales_[2]);
+            int64_t iw = nearest_idx(ow, input_width, output_width, scales[2]);
             int64_t output_offset = c * output_slice_size +
                 od *  output_height * output_width + oh * output_width + ow;
             int64_t input_offset = c * input_slice_size +
@@ -189,71 +208,80 @@ void cpu_upsample_nearest_backward(
     }
   };
 
-  at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop);
+  if (ndim == 3) {
+    // upsample nearest 1d
+    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop1d);
+  } else if (ndim == 4) {
+    // upsample nearest 2d
+    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size , loop2d);
+  } else {
+    // upsample nearest 3d
+    at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
+  }
 
   if (!grad_input_.is_contiguous()) {
     grad_input_.copy_(grad_input);
   }
 }
 
-using scale_t = std::vector<double>;
+using scale_t = std::vector<c10::optional<double>>;
 void upsample_nearest1d_kernel_impl(
     Tensor& output,
     const Tensor& input,
-    double scales_1) {
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest1d", [&] {
-    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1});
+    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_w});
   });
 }
 
 void upsample_nearest2d_kernel_impl(
     Tensor& output,
     const Tensor& input,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest2d", [&] {
-    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1, scales_2});
+    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_h, scales_w});
   });
 }
 
 void upsample_nearest3d_kernel_impl(
     Tensor& output,
     const Tensor& input,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_nearest3d", [&] {
-    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_1, scales_2, scales_3});
+    cpu_upsample_nearest<scalar_t, scale_t>(output, input, {scales_d, scales_h, scales_w});
   });
 }
 
 void upsample_nearest1d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
-    double scales_1) {
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1});
+    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_w});
   });
 }
 
 void upsample_nearest2d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
-    double scales_1,
-    double scales_2) {
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest2d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1, scales_2});
+    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_h, scales_w});
   });
 }
 
 void upsample_nearest3d_backward_kernel_impl(
     Tensor& grad_input,
     const Tensor& grad_output,
-    double scales_1,
-    double scales_2,
-    double scales_3) {
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
-    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_1, scales_2, scales_3});
+    cpu_upsample_nearest_backward<scalar_t, scale_t>(grad_input, grad_output, {scales_d, scales_h, scales_w});
   });
 }
 
