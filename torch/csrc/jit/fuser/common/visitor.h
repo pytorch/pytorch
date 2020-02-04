@@ -15,6 +15,17 @@ struct Add;
 struct Val;
 struct Expr;
 
+/*
+ * Visitors are mechanisms to traverse the graph without modifying anything in it. This provides
+ * safety to make sure nothing is actually modified in your pass. These passes could be analysis
+ * done to make sure things are correct, or to collect information that will be used later.
+ * This could be a dependency analysis, to create an ordering of all Exprs that respects
+ * dataflow, or to simply print the IR.
+ * 
+ * TODO: Create a BaseHandler that instantiates all node types and simply traverses the graph.
+ * This could then be derived by other passes where only some nodes need to be specialized.
+ */ 
+
 //TODO: Make BaseHandler that other vistiors can inherit from.
 struct TORCH_API SimpleHandler {
   int handle(const Statement* const statement);
