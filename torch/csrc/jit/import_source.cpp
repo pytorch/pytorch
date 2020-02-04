@@ -1,6 +1,7 @@
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/script/parser.h>
 #include <torch/csrc/jit/script/resolver.h>
