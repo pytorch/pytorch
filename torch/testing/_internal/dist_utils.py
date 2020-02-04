@@ -99,7 +99,6 @@ def wait_until_node_failure(rank, sleep_duration=0.5, backoff=1):
     '''
     while True:
         try:
-            print("Sleeping for {}".format(sleep_duration))
             time.sleep(sleep_duration)
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
         except Exception as e:

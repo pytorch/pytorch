@@ -1714,7 +1714,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_listenloop_error(self):
-         # test that if a callee node has gone down, we raise an appropriate
+        # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
 
         backend_opts = self.rpc_backend_options
