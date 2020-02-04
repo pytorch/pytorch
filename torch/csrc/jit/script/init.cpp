@@ -596,7 +596,7 @@ struct slot_dict_impl {
   slot_dict_impl(script::ModulePtr module) : module_(std::move(module)) {}
   bool contains(const std::string& name) const {
     if (auto slot = module_->type()->findAttributeSlot(name)) {
-      if (Policy::valid(module_->type(), *slot)) {
+      if (Policy::valid(module_->type(), *slot, module_->getSlot(*slot))) {
         return true;
       }
     }
@@ -606,7 +606,7 @@ struct slot_dict_impl {
   std::vector<std::pair<std::string, py::object>> items() const {
     std::vector<std::pair<std::string, py::object>> result;
     for (size_t i = 0, N = module_->type()->numAttributes(); i < N; ++i) {
-      if (Policy::valid(module_->type(), i)) {
+      if (Policy::valid(module_->type(), i, module_->getSlot(i))) {
         result.emplace_back(
             module_->type()->getAttributeName(i),
             toPyObject(module_->getSlot(i)));
