@@ -6,7 +6,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 from torch.utils.cpp_extension import CUDA_HOME
 
 CXX_FLAGS = ['/sdl', '/permissive-'] if sys.platform == 'win32' else ['-g']
-USE_NINJA = os.environ['USE_NINJA'] == "1"
+USE_NINJA = os.getenv('USE_NINJA') == '1'
 
 ext_modules = [
     CppExtension(

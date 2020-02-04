@@ -394,8 +394,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
 
 
 def exclude_tests(exclude_list, selected_tests, exclude_message=None):
-    tests_copy = selected_tests[:]
     for exclude_test in exclude_list:
+        tests_copy = selected_tests[:]
         for test in tests_copy:
             if test.startswith(exclude_test):
                 if exclude_message is not None:
