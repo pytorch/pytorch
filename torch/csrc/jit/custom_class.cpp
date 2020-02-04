@@ -29,12 +29,12 @@ TypePtr realCustomClassHandler(const std::string& name) {
 
 } // namespace
 
-int registerCustomClassHandler() {
+int register_custom_class_handler() {
   setGetCustomClassFn(realCustomClassHandler);
   return 0;
 };
 
-static int register_handler = registerCustomClassHandler();
+static int ensure_custom_class_handler_registered = register_custom_class_handler();
 
 } // namespace jit
 } // namespace torch
