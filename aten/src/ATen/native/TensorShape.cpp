@@ -15,6 +15,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Copy.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at {
 namespace native {
@@ -69,14 +70,23 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
 }
 
 Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
-  bool allSkipped = true;
-  Tensor notSkippedTensor;
-
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
   // FIXME: warn if this is the case
+  bool allSkipped = true;
+  Tensor notSkippedTensor;
+
+  // Inputs cannot alias the output tensor
+  for (int64_t i = 0; i < tensors.size(); i++) {
+    auto lap = at::get_overlap_status(result, tensors[i]);
+    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor ", i);
+  }
+
   auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
   for (auto const &tensor : tensors) {
     if (should_skip(tensor)) {
@@ -94,7 +104,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
   TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
 
-  // when the input tensors are of the same size and strids,
+  // when the input tensors are of the same size and strides,
   // reuse the same iterator for all input tensors
   bool reuse_iterator = true;
 
@@ -119,7 +129,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   result.resize_(result_size);
 
   int64_t offset = 0;
-  if (reuse_iterator) {
+  if (reuse_iterator && result.is_contiguous()) {
     auto source_slice = notSkippedTensor;
     auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
