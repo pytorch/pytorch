@@ -268,8 +268,8 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
   // Throw if we previously encountered an exception in ::listenLoop.
-  if (listenLoopException) {
-    std::rethrow_exception(listenLoopException);
+  if (listenLoopExceptionSet_) {
+    std::rethrow_exception(listenLoopException_);
   }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
@@ -549,10 +549,13 @@ void ProcessGroupAgent::listenLoop() {
     // shutdown.
     LOG(WARNING) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
                  << e.what();
-    listenLoopException = std::current_exception();
+    listenLoopException_ = std::current_exception();
+    // Set to signal to other threads
+    listenLoopExceptionSet_.store(true);
   } catch (...) {
-    listenLoopException = std::make_exception_ptr(std::runtime_error(
+    listenLoopException_ = std::make_exception_ptr(std::runtime_error(
         "Unknown exception occured in ProcessGroupAgent::listenLoop."));
+    listenLoopExceptionSet_.store(true);
   }
 }
 
