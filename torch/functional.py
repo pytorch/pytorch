@@ -57,7 +57,7 @@ def broadcast_tensors(*tensors):
 
 
 def split(tensor, split_size_or_sections, dim=0):
-    r"""Splits the tensor into chunks.
+    r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
     be split into equally sized chunks (if possible). Last chunk will be smaller if

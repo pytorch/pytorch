@@ -1986,7 +1986,7 @@ add_docstr_all('permute',
                r"""
 permute(*dims) -> Tensor
 
-Permute the dimensions of this tensor.
+Returns a view of the original tensor with its dimensions permuted.
 
 Args:
     *dims (int...): The desired ordering of dimensions
@@ -2472,7 +2472,7 @@ add_docstr_all('select',
 select(dim, index) -> Tensor
 
 Slices the :attr:`self` tensor along the selected dimension at the given index.
-This function returns a tensor with the given dimension removed.
+This function returns a view of the original tensor with the given dimension removed.
 
 Args:
     dim (int): the dimension to slice
@@ -3110,7 +3110,7 @@ add_docstr_all('unfold',
                r"""
 unfold(dimension, size, step) -> Tensor
 
-Returns a tensor which contains all slices of size :attr:`size` from
+Returns a view of the original tensor which contains all slices of size :attr:`size` from
 :attr:`self` tensor in the dimension :attr:`dimension`.
 
 Step between two slices is given by :attr:`step`.
