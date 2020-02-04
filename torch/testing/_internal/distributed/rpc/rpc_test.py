@@ -1714,7 +1714,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_listenloop_error(self):
-        # test that if a callee node has gone down, we raise an appropriate
+         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
 
         backend_opts = self.rpc_backend_options
@@ -1740,17 +1740,20 @@ class RpcTest(RpcAgentTestFixture):
             # for 1 to timeout since any actions against the process group will
             # reset the timer.
             if self.rank == 1:
+                # Hack: Can't call wait_until_node_failure() on self rank.
                 time.sleep(pg_sleep_interval)
                 # 1 should not be able to send RPCs.
                 with self.assertRaisesRegex(
                     RuntimeError, "Application timeout caused pair closure"
                 ):
-                    rpc.rpc_async("worker0", torch.add, args=(1,1)).wait()
+                    rpc.rpc_async("worker0", torch.add, args=(1, 1)).wait()
             else:
-                wait_until_node_failure(rank=1, sleep_duration=pg_sleep_interval, backoff=1.5)
+                wait_until_node_failure(
+                    rank=1, sleep_duration=pg_sleep_interval, backoff=1.5
+                )
                 # Node 1 should not be accessible.
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "Encountered exception in ProcessGroupAgent::enqueueSend",
                 ):
-                    rpc.rpc_async("worker1", torch.add, args=(1,1)).wait()
+                    rpc.rpc_async("worker1", torch.add, args=(1, 1)).wait()
