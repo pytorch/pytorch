@@ -796,6 +796,12 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
 
+@parse_args('v')
+def bitwise_not(g, inp):
+    if inp.type().scalarType() != 'Bool':
+        return _unimplemented("bitwise_not", "non-bool tensor")
+    return g.op("Not", inp)
+
 
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
