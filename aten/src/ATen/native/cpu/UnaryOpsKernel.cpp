@@ -350,6 +350,61 @@ static void log_normal_kernel(TensorIterator& iter, double mean, double std, Gen
   });
 }
 
+#ifdef __AVX2__
+#include <ATen/native/cpu/avx_mathfun.h>
+
+void normal_fill_16_AVX2(float *data,
+                         const Vec256<float> two_pi,
+                         const Vec256<float> one,
+                         const Vec256<float> minus_two,
+                         const Vec256<float> mean,
+                         const Vec256<float> std) {
+  using Vec = Vec256<float>;
+  Vec data_v = Vec::loadu(data);
+  const v8sf u1 = __m256(one - data_v);
+  const Vec radius = (minus_two * Vec(log256_ps(u1))).sqrt();
+  const Vec theta = two_pi * Vec::loadu(data + 8);
+  v8sf sintheta, costheta;
+  sincos256_ps(__m256(theta), &sintheta, &costheta);
+  const Vec n1 = radius * Vec(costheta);
+  const Vec n2 = radius * Vec(sintheta);
+  vec256::fmadd(n1, std, mean).store(data);
+  vec256::fmadd(n2, std, mean).store(data + 8);
+}
+
+void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator* gen) {
+  float *data = self.data_ptr<float>();
+  auto size = self.numel();
+  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+  std::lock_guard<std::mutex> lock(generator->mutex_);
+  for (int64_t i = 0; i < size; ++i) {
+    at::uniform_real_distribution<float> uniform(0, 1);
+    data[i] = uniform(generator);
+  }
+
+  using Vec = Vec256<float>;
+  const Vec two_pi = Vec(2.0f * M_PI);
+  const Vec one = Vec(1.0f);
+  const Vec minus_two = Vec(-2.0f);
+  const Vec mean_v = Vec(mean);
+  const Vec std_v = Vec(std);
+
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    normal_fill_16_AVX2(data + i, two_pi, one, minus_two, mean_v, std_v);
+  }
+
+  if (size % 16 != 0) {
+    // Recompute the last 16 values.
+    data = data + size - 16;
+    for (int64_t i = 0; i < 16; ++i) {
+      at::uniform_real_distribution<float> uniform(0, 1);
+      data[i] = uniform(generator);
+    }
+    normal_fill_16_AVX2(data, two_pi, one, minus_two, mean_v, std_v);
+  }
+}
+#endif
+
 template <typename scalar_t>
 static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t std) {
   for (int j = 0; j < 8; ++j) {
@@ -389,19 +444,27 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
 
 void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
   auto size = self.numel();
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
-    if (size >= 16 && self.is_contiguous()) {
-      normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
-    } else {
-      auto iter = TensorIterator::nullary_op(self);
-      CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-      std::lock_guard<std::mutex> lock(generator->mutex_);
-      cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-        at::normal_distribution<double> normal(mean, std);
-        return (scalar_t)normal(generator);
-      });
-    }
-  });
+  if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
+#ifdef __AVX2__
+    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), gen);
+#else
+    normal_fill(self, static_cast<float>(mean), static_cast<float>(std), gen);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
+      if (size >= 16 && self.is_contiguous()) {
+        normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
+      } else {
+        auto iter = TensorIterator::nullary_op(self);
+        CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+        std::lock_guard<std::mutex> lock(generator->mutex_);
+        cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
+          at::normal_distribution<double> normal(mean, std);
+          return (scalar_t)normal(generator);
+        });
+      }
+    });
+  }
 }
 
 static void rsqrt_kernel(TensorIterator& iter) {

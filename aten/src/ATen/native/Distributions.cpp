@@ -213,79 +213,10 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
   geometric_stub(iter.device_type(), iter, p, gen);
   return self;
 }
-#ifdef __AVX2__
-#include <ATen/cpu/vec256/vec256.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/native/cpu/avx_mathfun.h>
-
-void normal_fill_16_AVX2(float *data,
-                         const Vec256<float> two_pi,
-                         const Vec256<float> one,
-                         const Vec256<float> minus_two,
-                         const Vec256<float> mean,
-                         const Vec256<float> std) {
-  using Vec = Vec256<float>;
-  Vec data_v = Vec::loadu(data);
-  const v8sf u1 = __m256(one - data_v);
-  const Vec radius = (minus_two * Vec(log256_ps(u1))).sqrt();
-  const Vec theta = two_pi * Vec::loadu(data + 8);
-  v8sf sintheta, costheta;
-  sincos256_ps(__m256(theta), &sintheta, &costheta);
-  const Vec n1 = radius * Vec(costheta);
-  const Vec n2 = radius * Vec(sintheta);
-  vec256::fmadd(n1, std, mean).store(data);
-  vec256::fmadd(n2, std, mean).store(data + 8);
-}
-
-void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator* gen) {
-  float *data = self.data_ptr<float>();
-  auto size = self.numel();
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  std::lock_guard<std::mutex> lock(generator->mutex_);
-  for (int64_t i = 0; i < size; ++i) {
-    at::uniform_real_distribution<float> uniform(0, 1);
-    data[i] = uniform(generator);
-  }
-
-  using Vec = Vec256<float>;
-  const Vec two_pi = Vec(2.0f * M_PI);
-  const Vec one = Vec(1.0f);
-  const Vec minus_two = Vec(-2.0f);
-  const Vec mean_v = Vec(mean);
-  const Vec std_v = Vec(std);
-
-  for (int64_t i = 0; i < size - 15; i += 16) {
-    normal_fill_16_AVX2(data + i, two_pi, one, minus_two, mean_v, std_v);
-  }
-
-  if (size % 16 != 0) {
-    // Recompute the last 16 values.
-    data = data + size - 16;
-    for (int64_t i = 0; i < 16; ++i) {
-      at::uniform_real_distribution<scalar_t> uniform(0, 1);
-      data[i] = uniform(generator);
-    }
-    normal_fill_16_AVX2(data, two_pi, one, minus_two, mean_v, std_v);
-  }
-}
-#else
-void normal_fill_AVX2(Tensor& self, const float mean, const float std, Generator* gen) {
-  TORCH_CHECK(false, "normal_fill_AVX2: not compiled with AVX2 support");
-}
-#endif
 
 Tensor& normal_cpu_(Tensor& self, double mean, double std, Generator* gen) {
   TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
-  bool normal_avx2 = false;
-#ifdef __AVX2__
-  if (self.scalar_type() == ScalarType::Float && size = self.numel() > 16 && self.is_contiguous())
-      normal_avx2 = true;
-#endif
-  if (normal_avx2) {
-    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), gen);
-  } else {
-    normal_stub(kCPU, self, mean, std, gen);
-  }
+  normal_stub(kCPU, self, mean, std, gen);
   return self;
 }
 
@@ -309,19 +240,19 @@ Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Ge
 }
 
 Tensor normal_cpu(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(std, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }
 
 Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }
