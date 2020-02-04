@@ -112,7 +112,7 @@ std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
 }
 
-Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
+Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
   auto iter = at::TensorIterator();
