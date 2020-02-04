@@ -135,20 +135,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_clone
-  cname: newClone
-  return: THTensor*
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_index_select
   cuda_bool: True
   cname: indexSelect
@@ -162,8 +148,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
 ]]
 [[
@@ -175,8 +160,7 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
     - THTensor* source
 ]]
@@ -219,8 +203,7 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
     - THTensor* source
 ]]
@@ -234,8 +217,7 @@
   options:
     - arguments:
       - THTensor* self
-      - arg: long dim
-        wrap_dim: self
+      - long dim
       - THIndexTensor* index
       - real value
 ]]
@@ -249,15 +231,13 @@
     - cname: scatter
       arguments:
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - THIndexTensor* index
         - THTensor* src
     - cname: scatterFill
       arguments:
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - THIndexTensor* index
         - real value
 ]]
@@ -271,8 +251,7 @@
   variants: function
   arguments:
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
     - THTensor* src
 ]]
@@ -290,8 +269,7 @@
       output: True
       resize: index
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
 ]]
 [[
@@ -341,8 +319,7 @@
         - arg: THIndexTensor* min_indices
           output: True
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - bool keepdim
 ]]
 [[
@@ -379,8 +356,7 @@
         - arg: THIndexTensor* max_indices
           output: True
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - bool keepdim
 ]]
 [[
@@ -394,8 +370,7 @@
     - arg: THIndexTensor* indices
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool keepdim
 ]]
 [[
@@ -410,8 +385,7 @@
     - arg: THIndexTensor* indices
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool descending
 ]]
 [[
@@ -429,8 +403,7 @@
       output: True
     - THTensor* self
     - long k
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool largest
     - bool sorted
 ]]
@@ -592,8 +565,7 @@
       output: True
     - THTensor* self
     - real p
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - real maxnorm
 ]]
 [[
@@ -610,8 +582,7 @@
     - THTensor* self
     - THTensor* self
     - real p
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - real maxnorm
 ]]
 [[
@@ -662,8 +633,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
 ]]
 [[
   name: _th_cumprod
@@ -676,8 +646,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
 ]]
 [[
   name: _th_trace
