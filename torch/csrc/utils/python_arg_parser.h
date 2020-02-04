@@ -104,6 +104,7 @@ struct PythonArgParser {
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void check_deprecated(const FunctionSignature & signature);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
