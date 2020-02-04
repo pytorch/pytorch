@@ -1,9 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -32,7 +33,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << ")";
     }
     if (value->undefined() && *value->undefined()) {
-      out << "[Undefined]";
+      out << "[Undefined] ";
+    }
+
+    if (torch::jit::is_enabled(
+            __FILE__, torch::jit::JitLoggingLevels::GRAPH_DEBUG)) {
+      out
+          << (value->requiresGrad().has_value()
+                  ? (*value->requiresGrad() ? "[R]" : "[!R]")
+                  : "[R?]");
     }
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();

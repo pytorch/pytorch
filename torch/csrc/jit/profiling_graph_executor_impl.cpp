@@ -79,7 +79,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
-        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
+        getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1,
+        /*strict_requires_grad_check=*/true);
     for (Node* dnode : diff_nodes) {
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);

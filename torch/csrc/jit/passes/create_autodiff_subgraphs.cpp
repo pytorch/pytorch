@@ -5,6 +5,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -129,16 +130,21 @@ class SubgraphSlicer {
 
     bool requires_grad = !strict_check_;
     if (strict_check_) {
-      bool output_needs_grad = std::any_of(
+      requires_grad = std::any_of(
           node->outputs().begin(), node->outputs().end(), [](Value* o) {
-            if (auto tt = o->type()->cast<TensorType>()) {
+            auto tt = o->type()->cast<TensorType>();
+            if (!tt) {
+              if (auto lt = o->type()->cast<ListType>()) {
+                tt = lt->getElementType()->cast<TensorType>();
+              }
+            }
+
+            if (tt) {
               return !tt->requiresGrad().has_value() ||
                   tt->requiresGrad().value();
             }
             return false;
           });
-
-      requires_grad &= output_needs_grad;
     }
 
     return requires_grad && isDifferentiable(node);
