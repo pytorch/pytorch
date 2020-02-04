@@ -588,4 +588,18 @@ struct MulOp {
   }
 };
 
+template <typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::max(lhs, rhs);
+  }
+};
+
+template <typename T>
+struct MinOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::min(lhs, rhs);
+  }
+};
+
 #endif // THC_TENSORMATH_REDUCE_CUH

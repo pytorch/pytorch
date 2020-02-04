@@ -9,12 +9,22 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
+
+#include <ATen/ATen.h>
+#include <ATen/Tensor.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+
 #include <limits>
 #include <tuple>
 #include <THC/THCNumerics.cuh>
+#include <THC/THCThrustAllocator.cuh>
 #include <thrust/tuple.h>
 #include <thrust/pair.h>
 
+#include <THC/THCTensorMathReduce.cuh>
 
 namespace at { namespace native {
 
@@ -222,60 +232,253 @@ void argmin_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+
+//TODO: check if I should use unit64_t in place of int
+
+/* Perform an inclusive scan along an outer dimension of a tensor.
+ *
+ * - num_orows is the size of the flattened outer dimensions;
+ * - num_irows is the size of the flattened inner dimensions;
+ * - row_size is the size of the dimension along which to compute the variance;
+ *
+ * The dimensions to the outside and inside of the specified dimension are considered as flattened.
+ * Thread blocks with the same blockIdx.y process an "outer row" (i.e. an element of the flattened
+ * outer dimensions, which contains several "inner rows").
+ * Each thread processes a single inner row at a time.
+ */
+// template<typename scalar_t, class BinaryOp>
+// __global__ void tensor_kernel_scanOuterDim(scalar_t *self_, scalar_t *values_, int64_t *indices_,
+//                                             int num_orows, int num_irows, int row_size,
+//                                             scalar_t init, BinaryOp binary_op)
+// {
+//   for (int orow = blockIdx.x; orow < num_orows; orow += gridDim.x) {
+//     for (int irow = blockIdx.y * blockDim.x + threadIdx.x; irow < num_irows; irow += gridDim.y * blockDim.x) {
+//       scalar_t *self = self_ + orow * row_size * num_irows + irow;
+//       scalar_t *values = values_ + orow * row_size * num_irows + irow;
+//       int64_t *indices = indices_ + orow * row_size * num_irows + irow;
+//       scalar_t acc = init;
+//       int64_t idx = 0;
+//
+//       for (int col = 0; col < row_size; ++col) {
+//         acc = binary_op(acc, *self);
+//         if(acc == *self) {
+//           idx = col;
+//         }
+//         *self = acc;
+//         *indices = idx;
+//         self += num_irows;
+//         values += num_irows;
+//         indices += num_irows;
+//       }
+//     }
+//   }
+// }
+//
+// /* Perform an inclusive scan along the innermost dimension of a tensor.
+//  *
+//  * - num_rows is the size of the flattened outer dimensions;
+//  * - row_size is the size of the innermost dimension;
+//  *
+//  * The outer dimensions of the tensor are considered as a single dimension, i.e. the tensor is
+//  * considered as having 'num_rows' rows of size 'row_size'.
+//  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
+//  * per thread block is quicker than processing a single row, especially for short rows).
+//  */
+// template<typename scalar_t, int num_threads_x, int num_threads_y, class BinaryFunction>
+// __global__ void tensor_kernel_scanInnermostDim(const scalar_t *self_, scalar_t *values_, int64_t *indices_,
+//                                                 int num_rows, int row_size,
+//                                                 scalar_t init, BinaryFunction binary_op)
+// {
+//   __shared__ scalar_t vbuf[num_threads_y][2 * num_threads_x];
+//   __shared__ int64_t ibuf[num_threads_y][2 * num_threads_x];
+//   scalar_t* row_buf = vbuf[threadIdx.y];
+//   scalar_t* row_idx_buf = ibuf[threadIdx.y];
+//
+//   for (int block_row = blockIdx.x * blockDim.y;
+//        block_row < num_rows;
+//        block_row += blockDim.y * gridDim.x) {
+//     int row = block_row + threadIdx.y;
+//     scalar_t *row_self = self_ + row * row_size;
+//     scalar_t *row_values = values_ + row * row_size;
+//     int64_t *row_indices = indices_ + row * row_size;
+//     scalar_t block_total = init;
+//     int64_t block_total_idx;
+//     // Perform scan on one block at a time, keeping track of the total value of
+//     // all blocks processed so far.
+//     for (int block_col = 0; block_col < row_size; block_col += 2 * num_threads_x) {
+//       // Load data into shared memory (two values per thread).
+//       int col1 = block_col + threadIdx.x;
+//       int col2 = block_col + num_threads_x + threadIdx.x;
+//       if (row < num_rows) {
+//         if (col1 < row_size) {
+//           row_buf[threadIdx.x] = row_self[col1];
+//           //TODO: add init for indices
+//         } else {
+//           row_buf[threadIdx.x] = init;
+//           //TODO: add init for indices
+//         }
+//
+//         if (col2 < row_size) {
+//           row_buf[num_threads_x + threadIdx.x] = row_src[col2];
+//         } else {
+//           row_buf[num_threads_x + threadIdx.x] = init;
+//           //TODO: add init for indices
+//         }
+//
+//         // Add the total value of all previous blocks to the first value of this block.
+//         if (threadIdx.x == 0) {
+//           row_buf[0] = binary_op(row_buf[0], block_total);
+//           //TODO: update indices
+//         }
+//       }
+//       __syncthreads();
+//
+//       // Parallel reduction (up-sweep).
+//       for (int s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
+//         if (row < num_rows && threadIdx.x < s) {
+//           int offset = (2 * threadIdx.x + 1) * d - 1;
+//           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
+//         }
+//         __syncthreads();
+//       }
+//
+//       // Down-sweep.
+//       for (int s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
+//         if (row < num_rows && threadIdx.x < s - 1) {
+//           int offset = 2 * (threadIdx.x + 1) * d - 1;
+//           row_buf[offset + d] = binary_op(row_buf[offset], row_buf[offset + d]);
+//         }
+//         __syncthreads();
+//       }
+//
+//       // Write back to output.
+//       if (row < num_rows) {
+//         if (col1 < row_size) row_values[col1] = row_buf[threadIdx.x];
+//         if (col2 < row_size) row_values[col2] = row_buf[num_threads_x + threadIdx.x];
+//         //TODO:update indices
+//       }
+//       block_total = row_buf[2 * num_threads_x - 1];
+//       __syncthreads();
+//     }
+//   }
+// }
+//
 template<typename scalar_t, typename BinaryFunction>
-void scanThrustWithIndices(Tensor& values, Tensor& indices, const Tensor& self, BinaryFunction binary_op) {
-
+void scanThrustWithIndices(const scalar_t *self, scalar_t *values, int64_t *indices, int dim, BinaryFunction binary_op) {
+  // auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  // const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  // auto policy = thrust::cuda::par(allocator).on(stream);
+  //
+  // typedef thrust::device_ptr<scalar_t> device_ptr;
+  // // auto self_data = device_ptr(self.data_ptr<scalar_t>());
+  // // auto values_data = device_ptr(values.data_ptr<scalar_t>());
+  // // auto indices_data = device_ptr(indices.data_ptr<scalar_t>());
+  // auto self_stride = self->stride(dim);
+  // auto values_stride = values->stride(dim);
+  // auto indices_stride = indices->stride(dim);
+  // int nelements = self.numel();
+//   thrust::inclusive_scan(
+// #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
+//       policy,
+// #endif
+//       self_data, self_data + nelements, values_data, indices_data, binary_op);
+  //auto cummax = self[0];
+  int idx = 0;
+  // for(int i = 0; i < self->size(dim); i++) {
+  //   if(self[i*self_stride] >= cummax) {
+  //     cummax = self[i*self_stride];
+  //     idx = i;
+  //   }
+  //   values[i*values_stride] = cummax;
+  //   indices[i*indices_stride] = idx;
+  // }
 }
 
-template <typename scalar_t, typename BinaryFunction>
-void scanDimWithIndices(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim, BinaryFunction binary_op) {
-  int ndim = self.dim();
-  TORCH_CHECK(dim >= 0 && dim < ndim, "dimension ", dim, " out of range");
-   Tensor self_ = self.contiguous();
-   Tensor values_ = values.contiguous();
-   Tensor indices_ = indices.contiguous();
-   auto values__data = values.data_ptr<scalar_t>();
-   auto self__data = self.data_ptr<scalar_t>();
-   auto indices__data = indices.data_ptr<int64_t>();
-   if (!self.is_empty()) {
-     if(scalar_t == at::Half) {
-       if (ndim == 1) {
-         // thrust does not take an "init"
-         // scanThrustWithIndices(values, indices, self, binary_op);
-       }
-     }
-     if (dim == ndim - 1) {
-       // THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
-     } else {
-       // THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
-     }
-   }
-   // // cuda blocks & threads:
-   // int blocksH = std::max<int64_t>((int)(16L / sizeD), 1);
-   // dim3 blocks(sizeB * sizeD, blocksH);
-   // dim3 threads(32, 8);
-   //
-   // // run averagepool kernel
-   // adaptiveaveragepool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-   //   input_data, output_data,
-   //   isizeH, isizeW, osizeH, osizeW,
-   //   istrideD, istrideH, istrideW);
+template<typename scalar_t, class BinaryFunction>
+__host__ void scanOuterDimWithIndices(const scalar_t *self, scalar_t *values, int64_t *indices,
+                                       int dim, BinaryFunction binary_op)
+{
+  // int ndim = std::max(1, self->dim());
+  // // Treat all outer dimensions (i.e. dim_ < dim) as one.
+  // int num_orows = 1;
+  // for (int dim_ = 0; dim_ < dim; dim_++) {
+  //   num_orows *= self->size(dim_);
+  // }
+  // int row_size = self->size(dim);
+  // // Treat all inner dimensions (i.e. dim > dimension) as one.
+  // int num_irows = 1;
+  // for (int dim_ = dim + 1; dim_ < ndim; dim_++) {
+  //   num_irows *= self->size(dim_);
+  // }
+  //
+  // dim3 threads(std::min(512, num_irows));
+  // int maxGridDim = 1024;
+  // dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, cuda::ATenCeilDiv(num_irows, int(threads.x))));
+
+  // tensor_kernel_scanOuterDim<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  //   self, values, indices, num_orows, num_irows, row_size, init, binary_op);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
-std::tuple<Tensor&, Tensor&> cummax_helper_out_cuda(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
-  checkAllSameGPU("cummax", {self, values, indices});
-  AT_DISPATCH_ALL_TYPES(self.dtype(), "cummax_cuda", [&]() {
-    scanDimWithIndices<scalar_t, MaxOp<scalar_t>>(values, indices, self, dim, MaxOp<scalar_t>());
+template <typename scalar_t, class BinaryFunction>
+__host__ void scanInnermostDimWithIndices(const scalar_t *self, scalar_t *values, int64_t *indices, BinaryFunction binary_op) {
+  // int ndim = self->dim();
+  // // Treat all outer dimensions as a single dimension.
+  // int row_size = self->size(ndim - 1);
+  // int num_rows = self->numel() / row_size;
+  //
+  // dim3 threads(16, 32);
+  // dim3 grid(std::min(1024, cuda::ATenCeilDiv(num_rows, int(threads.y))));
+  // //
+  // // tensor_kernel_scanInnermostDim<scalar_t, 16, 32><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+  // //   THCTensor_(data)(state, tgt), THCTensor_(data)(state, src), num_rows, row_size, init, binary_op);
+  // //
+  // AT_CUDA_CHECK(cudaGetLastError());
+}
+
+// template <class BinaryFunction>
+// template<typename scalar_t, typename BinaryFunction>
+// void scanDimWithIndices(const Tensor& self, Tensor& values, Tensor& indices, //int64_t dim) {
+//      int64_t dim, BinaryFunction binary_op) {
+//
+//   int ndim = self.dim();
+//   Tensor self_ = self.contiguous();
+//   Tensor values_ = values.contiguous();
+//   Tensor indices_ = indices.contiguous();
+//   auto values_data = values_.data_ptr<scalar_t>();
+//   auto self_data = self_.data_ptr<scalar_t>();
+//   auto indices_data = indices_.data_ptr<int64_t>();
+//    if (self.numel() != 0) {
+//      if (ndim == 1) {
+//        //scanThrustWithIndices<scalar_t, BinaryFunction>(self_data, values_data, indices_data, dim, binary_op);
+//      }
+//      else if (dim == ndim - 1) {
+//        scanInnermostDimWithIndices<scalar_t, BinaryFunction>(self_data, values_data, indices_data, binary_op);
+//      } else {
+//        //scanOuterDimWithIndices<scalar_t, BinaryFunction>(self_data, values_data, indices_data, dim, binary_op);
+//      }
+//    }
+// }
+
+void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  TensorArg output_arg{ values, "output", 1 };
+  TensorArg indices_arg{ indices, "indices", 2 };
+  TensorArg input_arg{ self, "input", 3 };
+  checkAllSameGPU("cummax", {output_arg, indices_arg, input_arg});
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummax_cuda", [&]() {
+    //scanDimWithIndices<scalar_t, MaxOp<scalar_t>>(self, values, indices, dim, MaxOp<scalar_t>());
+    //scanDimWithIndices<scalar_t>(self, values, indices, dim);
   });
-  return std::forward_as_tuple(values, indices);
 }
 
-std::tuple<Tensor&, Tensor&> cummin_helper_out_cpu(Tensor& values, Tensor& indices, const Tensor& self, int64_t dim) {
-  checkAllSameGPU("cummin", {self, values, indices});
-  AT_DISPATCH_ALL_TYPES(self.dtype(), "cummin_cuda", [&]() {
-    scanDimWithIndices<scalar_t, MinOp<scalar_t>>(values, indices, self, dim, MinOp<scalar_t>());
+void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
+  TensorArg output_arg{ values, "output", 1 };
+  TensorArg indices_arg{ indices, "indices", 2 };
+  TensorArg input_arg{ self, "input", 3 };
+  checkAllSameGPU("cummin", {output_arg, indices_arg, input_arg});
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cummin_cuda", [&]() {
+    //scanDimWithIndices<scalar_t, MaxOp<scalar_t>>(self, values, indices, dim, MaxOp<scalar_t>());
   });
-  return std::forward_as_tuple(values, indices);
 }
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_cuda);
