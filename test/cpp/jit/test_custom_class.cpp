@@ -99,36 +99,48 @@ static auto testStack =
         // .def("foo", [](int64_t a) -> int64_t{ return 3;});
 // clang-format on
 
-static auto testPickle =
-    torch::jit::class_<PickleTester>("_TorchScriptTesting_PickleTester")
-        .def(torch::jit::init<std::vector<int64_t>>())
-        .def_pickle(
-            [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
-              return std::vector<int64_t>{1, 3, 3, 7};
-            },
-            [](std::vector<int64_t> state) { // __setstate__
-              return c10::make_intrusive<PickleTester>(std::move(state));
-            })
-        .def(
-            "top",
-            [](const c10::intrusive_ptr<PickleTester>& self) {
-              return self->vals.back();
-            })
-        .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
-          auto val = self->vals.back();
-          self->vals.pop_back();
-          return val;
-        });
+torch::jit::class_<PickleTester>& register_pickle_tester() {
+  static auto testPickle =
+      torch::jit::class_<PickleTester>("_TorchScriptTesting_PickleTester")
+          .def(torch::jit::init<std::vector<int64_t>>())
+          .def_pickle(
+              [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
+                return std::vector<int64_t>{1, 3, 3, 7};
+              },
+              [](std::vector<int64_t> state) { // __setstate__
+                return c10::make_intrusive<PickleTester>(std::move(state));
+              })
+          .def(
+              "top",
+              [](const c10::intrusive_ptr<PickleTester>& self) {
+                return self->vals.back();
+              })
+          .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
+            auto val = self->vals.back();
+            self->vals.pop_back();
+            return val;
+          });
+  return testPickle;
+}
+
+static auto& testPickle = register_pickle_tester();
 
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return at::zeros({instance->vals.back(), 4});
 }
 
-static auto instance_registry = torch::RegisterOperators().op(
-    torch::RegisterOperators::options()
-        .schema(
-            "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
-        .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+torch::RegisterOperators &register_take_instance() {
+  register_pickle_tester();
+  register_custom_class_handler();
+  static auto instance_registry = torch::RegisterOperators().op(
+      torch::RegisterOperators::options()
+          .schema(
+              "_TorchScriptTesting::take_an_instance(__torch__.torch.classes._TorchScriptTesting_PickleTester x) -> Tensor Y")
+          .catchAllKernel<decltype(take_an_instance), &take_an_instance>());
+  return instance_registry;
+}
+
+static auto& instance_registry = register_take_instance();
 
 } // namespace
 

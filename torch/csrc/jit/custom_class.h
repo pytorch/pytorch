@@ -18,5 +18,7 @@ using GetCustomClassFnType = at::TypePtr (*)(const std::string&);
 // can resolve custom classes as type expressions.
 TORCH_API void setGetCustomClassFn(GetCustomClassFnType fn);
 
+TORCH_API int register_custom_class_handler();
+
 } // namespace jit
 } // namespace torch
