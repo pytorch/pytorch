@@ -20,10 +20,56 @@ namespace jit {
 namespace fuser {
 
 // TODO: add comment explaining structure
-// TODO: automatic casting (check type for binary ops, cast inputs to common type)
 // TODO: Add casting function
-// TODO: Add more binary ops (div, mul, mod, sub, LT)
+// TODO: Add more binary ops, maybe reduce to single class (div, mul, mod, sub, LT)
+// TODO: Add unary ops, maybe reduce to single class (casting)
 // TODO: Add more types (int32, int64)
+
+/* 
+ * This file defines the basic IR structure.
+ * IR is any information that the code generation stack may need for analysis. By analysis
+ * we're refering to anything done in response to a user facing call of this stack. Analysis
+ * is the first step in any IR modifying calls. This could be careful tracking of user calls,
+ * and any transformation including optimizing transformations, user declared transformations,
+ * and lowering the IR.
+ * For now the IR has 4 major classes:
+
+ * Statement:
+ * Statement should be inhereited at some point by every IR node. It may be better to call Statement
+ * a node. We use Statements to pass around nodes of unknown compile type. Therefore it is also
+ * important for the design to have easy to use dispatch of a Statment. Basically beinng able to
+ * succienctly traverse down the inhereitance stack of a Statment at runtime.
+ *
+ * Val:
+ * Val can generally be thought of as any data. This could be a float that is either a constant
+ * (constants in this context could be compile time or run time known from the perspective of a 
+ * pytorch end user). 
+ * Some examples:
+ *     a constant size like convolution filter width
+ *     a runtime constant like batch normalizations momentum
+ *     a "symbolic" tensor like one passed down from the JIT
+ *     a memory buffer for device code
+ *
+ * IRInputOutput:
+ * A function on Vals. Has inputs and outputs that are all Vals. Anything that connects
+ * values and therefore would be used during dependency analysis.
+ * Examples:
+ *     binary operations on combinations of tensors, scalar values, or combinations of such
+ *     a thread all reduce
+ *     for loops
+ * 
+ * Expr:
+ * Expr should be simple IRInputOutput nodes. We may want to even specialize them to be limited
+ * to maximum 2 inputs and a single output. For now we're using it for things like binary and
+ * unary operations.
+ *
+ * For now this IR is static single assignment. Values can only be defined once. If they are re-defined
+ * the original definition should be deleted from the program, as opposed to an ordered redefinition of
+ * the value in the program. Since for now the IR will be provided to us as a graph and we will translate
+ * it, this should be easier of a framework to work in. We in theory could support a non SSA interface
+ * and translate to SSA, but that's outside the scope of this work for now.
+ */
+
 
 using StmtNameType = unsigned int;
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned int>::max();
@@ -32,6 +78,12 @@ struct Fusion;
 struct Expr;
 struct Add;
 
+
+/*
+ * Statement is the highest level node representation. Everything that is considered "IR" will
+ * be derived from this class eventually. Both Values and Expr's are a Statement. If there will
+ * ever be any more fundamental types, they will also derive from Statement.
+ */
 struct TORCH_API Statement {
   virtual ~Statement() = 0;
 
@@ -91,6 +143,49 @@ public:
 protected:
   const ValType type_;
 };
+
+/*
+ * IRInputOutput is any type of node that has values as inputes and outputs. Anything that we may want
+ * to do dependency analysis on should derive IRInputOutput.
+ * TODO: Uncertain if we want to specialize this to enforce nodes that strictly only support 1 output.
+ */
+struct TORCH_API IRInputOutput {
+  virtual ~IRInputOutput() = 0;
+
+  const std::deque<const Val*>& inputs() const noexcept { return inputs_; }
+  const std::deque<const Val*>& outputs() const noexcept { return outputs_; }
+
+  const Val* getInput(const std::deque<const Val*>::size_type idx) const {
+    return inputs_[idx];
+  }
+  const Val* getOutput(const std::deque<const Val*>::size_type idx) const {
+    return outputs_[idx];
+  }
+
+  void addInput(const Val* input) {
+    
+    inputs_.push_back(input);
+  }
+  void addOutput(const Val* output) {
+    outputs_.push_back(output);
+  }
+
+  void addInputAt(const std::deque<const Val*>::size_type pos, const Val* input) {
+    inputs_.insert(inputs_.begin() + pos, input);
+  }
+  void addOutputAt(const std::deque<const Val*>::size_type pos, const Val* output) {
+    outputs_.insert(outputs_.begin() + pos, output);
+  }
+
+  std::deque<const Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
+  std::deque<const Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
+
+protected:
+  std::deque<const Val*> inputs_;
+  std::deque<const Val*> outputs_;
+
+};
+
 
 struct TORCH_API Tensor : public Val {
   ~Tensor() = default;
@@ -153,54 +248,15 @@ private:
   c10::optional<int> maybe_value_;
 };
 
-
-// TODO: comment
-struct TORCH_API IRInputOutput {
-  virtual ~IRInputOutput() = 0;
-
-  const std::deque<const Val*>& inputs() const noexcept { return inputs_; }
-  const std::deque<const Val*>& outputs() const noexcept { return outputs_; }
-
-  const Val* getInput(const std::deque<const Val*>::size_type idx) const {
-    return inputs_[idx];
-  }
-  const Val* getOutput(const std::deque<const Val*>::size_type idx) const {
-    return outputs_[idx];
-  }
-
-  void addInput(const Val* input) {
-    
-    inputs_.push_back(input);
-  }
-  void addOutput(const Val* output) {
-    outputs_.push_back(output);
-  }
-
-  void addInputAt(const std::deque<const Val*>::size_type pos, const Val* input) {
-    inputs_.insert(inputs_.begin() + pos, input);
-  }
-  void addOutputAt(const std::deque<const Val*>::size_type pos, const Val* output) {
-    outputs_.insert(outputs_.begin() + pos, output);
-  }
-
-  std::deque<const Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
-  std::deque<const Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
-
-protected:
-  std::deque<const Val*> inputs_;
-  std::deque<const Val*> outputs_;
-
-};
-
-
 // TODO: improve input/output model to track dataflow
 // TODO: add regions (e.g. loop exprs have bodies)
 /*
 * A Expr represents a "computation." These are functions that may take inputs
 * and produce outputs.
 *
-* Exprs are unique and mutable. Conceptually, Exprs could always be manipulated
-* using unique pointers.
+* Exprs are unique and immutable. Conceptually, Exprs could always be manipulated
+* using unique pointers, and we could add this later. However, for now Exprs can be
+* replaced in a fusion, but they cannot be modified in place.
 */
 struct TORCH_API Expr : public Statement, IRInputOutput {
 public:

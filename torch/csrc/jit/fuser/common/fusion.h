@@ -102,20 +102,6 @@ struct TORCH_API Fusion : public IRInputOutput{
     return infusion;
   }
 
-  StmtNameType registerStatement(const Statement* stmt) {
-    if(inFusion(stmt))
-      return stmt->name();
-
-    if (stmt->isVal()) {
-      return registerVal(static_cast<const Val*>(stmt));
-    }else if(stmt->isExpr()){
-      return registerExpr(static_cast<const Expr*>(stmt));
-    }
-
-    throw std::runtime_error("Could not register statement.");
-    return UNINITIALIZED_STMTNAMETYPE;
-  }
-
   //TODO: Lets topologically sort these.
   std::vector<const Expr*> exprs() const {
     std::vector<const Expr*> exprs;
@@ -124,6 +110,11 @@ struct TORCH_API Fusion : public IRInputOutput{
     return exprs;
   }
 
+
+  /*
+   * Simple Registration methods. These methods do 2 things:
+   * Register the Statment/Val/Expr 
+   */
   // TODO: Simplify this function, we register values as soon as they're created
   StmtNameType registerVal(const Val* val) {
     if (val->fusion()) {
@@ -151,6 +142,20 @@ struct TORCH_API Fusion : public IRInputOutput{
     }
 
     return expr->name();
+  }
+
+  StmtNameType registerStatement(const Statement* stmt) {
+    if(inFusion(stmt))
+      return stmt->name();
+
+    if (stmt->isVal()) {
+      return registerVal(static_cast<const Val*>(stmt));
+    }else if(stmt->isExpr()){
+      return registerExpr(static_cast<const Expr*>(stmt));
+    }
+
+    throw std::runtime_error("Could not register statement.");
+    return UNINITIALIZED_STMTNAMETYPE;
   }
 
 private:
