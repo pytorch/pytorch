@@ -262,6 +262,8 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
           if (error) {
             // Skip any further processing on errors.
             callbackFuture->setError(error->what());
+            // Reset the graph task once we're done with all processing.
+            autogradContext->resetGraphTask();
             return;
           }
 
@@ -269,7 +271,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
           auto rpcFuture =
               autogradContext->clearAndWaitForOutstandingRpcsAsync();
           rpcFuture->addCallback(
-              [callbackFuture](
+              [callbackFuture, autogradContext](
                   const rpc::Message& /* unused */,
                   const c10::optional<torch::utils::FutureError>& error) {
                 // Finally mark the 'uber' future as completed.
@@ -278,6 +280,8 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
                 } else {
                   callbackFuture->setError(error->what());
                 }
+                // Reset the graph task once we're done with all processing.
+                autogradContext->resetGraphTask();
               });
         });
 
@@ -321,7 +325,7 @@ void DistEngine::execute(const variable_list& roots, bool retainGraph) {
     initializedContextIds_.insert(autogradContext->contextId());
   }
 
-  ClearContextIdGuard guard(autogradContext);
+  BackwardPassCleanupGuard guard(autogradContext);
 
   // This needs to be blocking and as a result we wait for the future to
   // complete.
@@ -335,9 +339,6 @@ void DistEngine::execute(const variable_list& roots, bool retainGraph) {
 void DistEngine::clearInitializedContextId(const ContextPtr& autogradContext) {
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
   initializedContextIds_.erase(autogradContext->contextId());
-
-  // Reset the graph task as well for the appropriate autograd context.
-  autogradContext->resetGraphTask();
 }
 
 size_t DistEngine::numBackwardPasses() const {

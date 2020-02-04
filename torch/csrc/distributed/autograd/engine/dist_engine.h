@@ -13,7 +13,7 @@ namespace distributed {
 namespace autograd {
 
 // Forward declaration.
-class ClearContextIdGuard;
+class BackwardPassCleanupGuard;
 
 // This is a singleton class responsible for running distributed backward
 // passes. This engine relies heavily on the vanilla autograd engine and tries
@@ -105,18 +105,21 @@ class TORCH_API DistEngine {
   // Reference to local autograd engine.
   torch::autograd::Engine& engine_;
 
-  friend class ClearContextIdGuard;
+  friend class BackwardPassCleanupGuard;
 };
 
-// Guard to clear the provided contextId from the 'initializedContextIds_' map
-// once the distributed backward pass is done on a node.
-class ClearContextIdGuard {
+// Guard to clean up resources once the backward pass is done.
+class BackwardPassCleanupGuard {
  public:
-  explicit ClearContextIdGuard(const ContextPtr& autogradContext)
+  explicit BackwardPassCleanupGuard(const ContextPtr& autogradContext)
       : autogradContext_(autogradContext) {}
 
-  ~ClearContextIdGuard() {
+  ~BackwardPassCleanupGuard() {
+    // Clear the initialized context id.
     DistEngine::getInstance().clearInitializedContextId(autogradContext_);
+
+    // Reset the graph task once we're done with all processing.
+    autogradContext_->resetGraphTask();
   }
 
  private:

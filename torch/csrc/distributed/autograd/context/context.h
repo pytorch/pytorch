@@ -68,6 +68,7 @@ class TORCH_API DistAutogradContext {
   std::unordered_set<rpc::worker_id_t> getKnownWorkerIds() const;
 
  private:
+  friend class BackwardPassCleanupGuard;
   friend class DistEngine;
   friend class RecvRpcBackward;
 
