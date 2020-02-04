@@ -21,20 +21,25 @@
 
 namespace at {
 namespace {
-Tensor empty_complex(IntArrayRef size, const TensorOptions & options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_complex(IntArrayRef size,
+                     c10::optional<ScalarType> dtype,
+                     c10::optional<Layout> layout,
+                     c10::optional<Device> device,
+                     c10::optional<bool> pin_memory,
+                     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!optional_memory_format.has_value(), "memory format is not supported")
-  AT_ASSERT(options.device().is_cpu());
+  AT_ASSERT(device.has_value() && device.value().is_cpu());
 
   for (auto x: size) {
     TORCH_CHECK(x >= 0, "Trying to create tensor using size with negative dimension: ", size);
   }
   auto* allocator = at::getCPUAllocator();
   int64_t nelements = at::prod_intlist(size);
-  auto dtype = options.dtype();
+  auto currDtype = dtype.has_value() ? scalarTypeToTypeMeta(dtype.value()) : at::get_default_dtype();
   auto storage_impl = c10::make_intrusive<StorageImpl>(
-      dtype,
+      currDtype,
       nelements,
-      allocator->allocate(nelements * dtype.itemsize()),
+      allocator->allocate(nelements * currDtype.itemsize()),
       allocator,
       /*resizable=*/true);
 

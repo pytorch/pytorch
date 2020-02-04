@@ -1,3 +1,6 @@
+# This script generates BackendSelectRegister.cpp which is being used for dispatching purposes.
+# We process only those factory functions that have 'backend_select' flag in its native_functions.yaml definition.
+
 from code_template import CodeTemplate
 import tensor_options_utils as TOUtils
 
@@ -22,7 +25,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
 
     for decl in declarations:
         for option in decl["options"]:
-            if '_like' in option['name'] or 'new_' in option['name'] or 'to' in option['name']:
+            if not option.get('backend_select', False):
                 continue
 
             name = option['name']
