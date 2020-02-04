@@ -1611,7 +1611,7 @@ void FoldConvBatchNorm2dHelper::transform() {
     auto w_b = item.second;
     conv.setattr("weight", std::get<0>(w_b));
     // registering bias as an attribute field
-    conv.register_parameter("bias", std::get<1>(w_b), true);
+    conv.register_attribute("bias", OptionalType::ofTensor(), std::get<1>(w_b), true);
   }
 
   // Perform planned rewritings
@@ -1636,7 +1636,7 @@ void FoldConvBatchNorm2dHelper::restoreNoneBias(script::Module& module) {
       TORCH_INTERNAL_ASSERT(m.num_slots() + 1 == m.type()->numAttributes(),
                             "Unexpected number of slots when restoring None bias for "
                             "conv module instances");
-      m.register_attribute("bias", NoneType::get(), IValue());
+      m.register_attribute("bias", OptionalType::ofTensor(), IValue(), true);
     }
   }
 }
