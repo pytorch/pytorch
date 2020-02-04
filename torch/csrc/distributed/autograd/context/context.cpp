@@ -121,20 +121,36 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
         : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
     std::shared_ptr<rpc::FutureMessage> future;
     std::atomic<int32_t> remaining;
+    std::atomic<bool> alreadySentError{false};
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
   if (outStandingRpcs.empty()) {
     state->future->markCompleted(rpc::Message());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback(
-          [state](
-              const rpc::Message& /* unused */,
-              const c10::optional<utils::FutureError>& /* unused */) {
-            if (--state->remaining == 0) {
-              state->future->markCompleted(rpc::Message());
-            }
-          });
+      rpc->addCallback([state](
+                           const rpc::Message& /* unused */,
+                           const c10::optional<utils::FutureError>& err) {
+        if (err) {
+          // If there's an error, we want to setError() on the future, unless
+          // another error has already been sent - use a CAS to guard.
+          //
+          // Don't decrement num remaining here! (We don't need to, since memory
+          // handling is separate). If we simply don't decrement on errors,
+          // reaching 0 means that there were no errors - and hence, we can just
+          // markCompleted() without any other checking there.
+          bool expectedAlreadySent = false;
+          if (state->alreadySentError.compare_exchange_strong(
+                  expectedAlreadySent, true)) {
+            state->future->setError(err->what());
+          }
+          return;
+        }
+
+        if (--state->remaining == 0) {
+          state->future->markCompleted(rpc::Message());
+        }
+      });
     }
   }
   return state->future;
