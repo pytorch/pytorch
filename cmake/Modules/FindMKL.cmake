@@ -29,10 +29,24 @@ SET(MKL_CDFT_LIBRARIES)
 INCLUDE(CheckTypeSize)
 INCLUDE(CheckFunctionExists)
 
+# Set default value of INTEL_COMPILER_DIR and INTEL_MKL_DIR
+IF (WIN32)
+  IF(DEFINED ENV{MKLProductDir})
+    SET(DEFAULT_INTEL_COMPILER_DIR $ENV{MKLProductDir})
+  ELSE()
+    SET(DEFAULT_INTEL_COMPILER_DIR
+     "C:/Program Files (x86)/IntelSWTools/compilers_and_libraries/windows")
+  ENDIF()
+  SET(DEFAULT_INTEL_MKL_DIR "${INTEL_COMPILER_DIR}/mkl")
+ELSE (WIN32)
+  SET(DEFAULT_INTEL_COMPILER_DIR "/opt/intel")
+  SET(DEFAULT_INTEL_MKL_DIR "/opt/intel/mkl")
+ENDIF (WIN32)
+
 # Intel Compiler Suite
-SET(INTEL_COMPILER_DIR "/opt/intel" CACHE STRING
+SET(INTEL_COMPILER_DIR "${DEFAULT_INTEL_COMPILER_DIR}" CACHE STRING
   "Root directory of the Intel Compiler Suite (contains ipp, mkl, etc.)")
-SET(INTEL_MKL_DIR "/opt/intel/mkl" CACHE STRING
+SET(INTEL_MKL_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
   "Root directory of the Intel MKL (standalone)")
 SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
 
@@ -90,13 +104,6 @@ SET(mklseq)
 SET(saved_CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH})
 SET(saved_CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH})
 IF(WIN32)
-  # Set default MKLRoot for Windows
-  IF($ENV{MKLProductDir})
-    SET(INTEL_COMPILER_DIR $ENV{MKLProductDir})
-  ELSE()
-    SET(INTEL_COMPILER_DIR
-     "C:/Program Files (x86)/IntelSWTools/compilers_and_libraries/windows")
-  ENDIF()
   # Change mklvers and iccvers when we are using MSVC instead of ICC
   IF(MSVC AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     SET(mklvers "${mklvers}_win")
