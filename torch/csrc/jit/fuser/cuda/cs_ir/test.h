@@ -8,7 +8,9 @@
 
 namespace Fuser {
 
-#define STRINGIFY(x) x
+//#define STRINGIFY(x) x
+//#define STRINGIFY(x, ...) x STRINGIFY(...)
+#define STRINGIFY(...) __VA_ARGS__
 #include "data_struct.h"
 #undef STRINGIFY
 
@@ -22,7 +24,8 @@ std::string getTypeName() {
   return undecorated_name;
 }
 
-#define STRINGIFY(x) #x
+//#define STRINGIFY(x) #x
+#define STRINGIFY(...) #__VA_ARGS__
 static auto typeinfo = 
 #include"data_struct.h"
 ;
