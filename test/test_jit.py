@@ -4155,7 +4155,6 @@ class TestScript(JitTestCase):
             m.foo = 6
 
     def test_script_packedsequence(self):
-        # TODO: Fix jitter issue
         class ExperimentalLSTM(torch.nn.Module):
             def __init__(self, input_dim, hidden_dim):
                 super().__init__()
@@ -4174,6 +4173,13 @@ class TestScript(JitTestCase):
         lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
 
         with torch.jit._disable_emit_hooks():
+            # TODO: Fix jitter issue, an node is inserted as an uninitialzed
+            # PackedSequence and never used
+            #     unsorted_indices: Optional[Tensor]=None) -> __torch__.torch.nn.utils.rnn.PackedSequence:
+            #     _10 = __torch__.torch.nn.utils.rnn.invert_permutation
+            # +   _11 = uninitialized(__torch__.torch.nn.utils.rnn.PackedSequence)
+            #     if torch.__is__(unsorted_indices, None):
+            #     unsorted_indices1 = _10(sorted_indices, )
             self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_class_attribute(self):
