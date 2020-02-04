@@ -8,8 +8,6 @@
 
 #include <Python.h>
 
-#include "python_torch_functions_dispatch.h"
-
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/Dtype.h"
@@ -23,6 +21,7 @@
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 
 #include <ATen/ATen.h>
 
@@ -39,6 +38,10 @@ using at::Backend;
 using at::OptionalDeviceGuard;
 using at::DeviceGuard;
 using at::TensorOptions;
+using at::IntArrayRef;
+using at::Generator;
+using at::TensorList;
+using at::Dimname;
 
 using namespace torch::autograd::utils;
 
@@ -368,7 +371,7 @@ static PyObject * THPVariable_numel(PyObject* self_, PyObject* args, PyObject* k
 
 // generated forward declarations start here
 
-${py_signatures}
+${py_forwards}
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
