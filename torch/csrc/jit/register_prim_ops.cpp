@@ -601,6 +601,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::type(Device self) -> str",
+         [](Stack& stack) {
+           auto d = pop(stack);
+           push(stack, d.toDevice().str());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          // TODO return generator object when torchscript supports RNG
          // first-class
          "aten::manual_seed(int seed) -> ()",

@@ -89,6 +89,19 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     }
   }
 
+  if (value_->type()->isSubtypeOf(DeviceObjType::get())) {
+    // if (value_->type()->kind() == TypeKind::DeviceObjType) {
+    // property lookups on Device
+    static const std::unordered_set<std::string> fields = {
+        "type",
+    };
+    if (fields.count(field)) {
+      auto r =
+          m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
+      return std::make_shared<SimpleValue>(r);
+    }
+  }
+
   // accessing fields of named tuples
   if (auto tuple_type = value_->type()->cast<TupleType>()) {
     if (tuple_type->schema()) {
