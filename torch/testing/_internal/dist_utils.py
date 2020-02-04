@@ -5,6 +5,7 @@ from functools import partial, wraps
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed.rpc import _rref_context_get_debug_info
 
 
 if not dist.is_available():
@@ -97,6 +98,35 @@ def wait_until_node_failure(rank):
             time.sleep(0.5)
         except Exception:
             break
+
+# Shutdown sequence is not well defined, so we may see any of the following errors
+# When running tests that simulate errors via a shutdown on the remote end.
+def get_shutdown_error_regex():
+    error_regexes = [
+        "Request aborted during client shutdown",
+        "worker.: Error in reponse from worker.: server shutting down",
+        "worker.: Error in response from worker.: Failed to write to remote endpoint",
+        "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
+    ]
+    error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
+    return error_regex
+
+def wait_until_pending_users_flushed():
+    '''
+    The RRef protocol holds forkIds of rrefs in a map until those forks are
+    confirmed by the owner. The message confirming the fork may arrive after
+    our tests check whether this map is empty, which leads to failures and
+    flaky tests. to_here also does not guarantee that we have finished
+    processind the owner's confirmation message for the RRef. This function
+    loops until the map is empty, which means the messages have been received
+    as processed. Call this function before asserting the map returned by
+    _get_debug_info is empty.
+    '''
+    num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+    while num_pending_users != 0:
+        time.sleep(0.1)
+        num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
+    return
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.
