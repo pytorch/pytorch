@@ -164,3 +164,7 @@ def collapse_formals_list(formals):
                                  "type": "const TensorOptions &", })
 
     return collapsed
+
+
+def check_hack(name):
+    return name in ['randint_like', 'rand_like', 'randn_like', 'zeros_like', 'ones_like', 'full_like', 'empty_like', '_cudnn_init_dropout_state', '_sparse_coo_tensor_with_dims_and_tensors']

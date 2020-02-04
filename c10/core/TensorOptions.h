@@ -340,6 +340,64 @@ struct C10_API TensorOptions {
     return DispatchKeySet(computeDispatchKey()).add(DispatchKey::BackendSelect);
   }
 
+  inline static DispatchKey computeDispatchKey(ScalarType dtype, Layout layout, Device device) {
+    switch (layout) {
+      case Layout::Strided:
+        switch (device.type()) {
+          case DeviceType::CPU: {
+            if (isComplexType(dtype)) {
+              return DispatchKey::ComplexCPUTensorId;
+            }
+            if (isQIntType(dtype)) {
+              return DispatchKey::QuantizedCPUTensorId;
+            }
+            return DispatchKey::CPUTensorId;
+            }
+          case DeviceType::CUDA:
+            if (isComplexType(dtype)) {
+              return DispatchKey::ComplexCUDATensorId;
+            }
+            return DispatchKey::CUDATensorId;
+          case DeviceType::MKLDNN:
+            return DispatchKey::MKLDNNTensorId;
+          case DeviceType::OPENGL:
+            return DispatchKey::OpenGLTensorId;
+          case DeviceType::OPENCL:
+            return DispatchKey::OpenCLTensorId;
+          case DeviceType::IDEEP:
+            return DispatchKey::IDEEPTensorId;
+          case DeviceType::HIP:
+            return DispatchKey::HIPTensorId;
+          case DeviceType::MSNPU:
+            return DispatchKey::MSNPUTensorId;
+          case DeviceType::XLA:
+            return DispatchKey::XLATensorId;
+          default:
+            AT_ERROR("Unsupported device type for dense layout: ", device.type());
+        }
+      case Layout::Sparse:
+        switch (device.type()) {
+          case DeviceType::CPU:
+            return DispatchKey::SparseCPUTensorId;
+          case DeviceType::CUDA:
+            return DispatchKey::SparseCUDATensorId;
+          case DeviceType::HIP:
+            return DispatchKey::SparseHIPTensorId;
+          default:
+            AT_ERROR("Unsupported device type for sparse layout: ", device.type());
+        }
+      case Layout::Mkldnn:
+        switch (device.type()) {
+          case DeviceType::CPU:
+            return DispatchKey::MkldnnCPUTensorId;
+          default:
+            AT_ERROR("Unsupported device type for mkldnn layout: ", device.type());
+        }
+      default:
+        AT_ERROR("Unsupported layout: ", layout);
+    }
+  }
+
   inline DispatchKey computeDispatchKey() const {
     switch (layout()) {
       case Layout::Strided:

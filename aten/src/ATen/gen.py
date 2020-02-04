@@ -468,8 +468,7 @@ def generate_outputs():
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
-    gen_backend_select_register.register_backend_select_methods(declarations, top_env)
-    file_manager.write('BackendSelectRegister.cpp', BACKEND_SELECT_REGISTER_CPP, top_env)
+    gen_backend_select_register.register_backend_select_methods(declarations, BACKEND_SELECT_REGISTER_CPP, file_manager)
 
     add_op_registrations(
         top_env['function_registrations'], per_op_registrations, op_registrations)

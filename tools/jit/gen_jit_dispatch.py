@@ -542,7 +542,7 @@ def is_kwarg_only(a):
 
 NEEDS_HACKED_TWIN_NAMES = [
     "aten::_index_put_impl_",
-    "aten::index.Tensor", 
+    "aten::index.Tensor",
     "aten::index_put",
     "aten::index_put_",
 ]
@@ -551,8 +551,6 @@ def needs_hacked_twin(decl):
     schema_string = decl['schema_string']
     return any([schema_string.startswith(name) for name in NEEDS_HACKED_TWIN_NAMES])
 
-<<<<<<< HEAD
-
 def hacked_twin(decl):
     decl_copy = copy.deepcopy(decl)
     decl_copy['schema_string'] = decl['schema_string'].replace('Tensor?[]', 'Tensor[]')
@@ -560,62 +558,6 @@ def hacked_twin(decl):
         if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
             arg['is_nullable'] = False
     return decl_copy
-=======
-def signature(decl, should_match_schema=True):
-    def format_arg(arg):
-        name = arg['name']
-        typ = jit_type_of(arg)
-        decl = '{} {}'.format(typ, name)
-        if 'default' in arg:
-            # clean up initializer lists {{true, true}} -> [true, true]
-            default = arg['default']
-            # NOTE: str(float) in python2 truncates, which makes JIT signatures not match native_functions
-            # signatures.  repr(float) doesn't seem to truncate in these cases.
-            default = str(default) if not isinstance(default, float) else repr(default)
-            default = default \
-                .replace('{{', '[') \
-                .replace('}}', ']') \
-                .replace('true', 'True') \
-                .replace('false', 'False') \
-                .replace('at::Reduction::Mean', 'Mean') \
-                .replace('MemoryFormat::Contiguous', 'contiguous_format') \
-                .replace('QScheme::PER_TENSOR_AFFINE', 'per_tensor_affine') \
-                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
-                .replace('{', '[') \
-                .replace('}', ']') \
-                .replace('}', ']') \
-                .replace('at::kLong', 'long')
-
-            default = default_map.get(default, default)
-            decl = '{}={}'.format(decl, default)
-        return decl
-
-    args = []
-    kwarg_only = False
-
-    ordered_arguments = sorted(zip(argument_order(decl), decl['arguments']))
-    for _, a in ordered_arguments:
-        if not kwarg_only and is_kwarg_only(a):
-            args.append('*')
-            kwarg_only = True
-        args.append(format_arg(a))
-
-    arg_list = ', '.join(args)
-    if len(decl['returns']) == 1:
-        ret_list = jit_type_of(decl['returns'][0])
-        # Adding output name if it exists
-        if decl['returns'][0].get('field_name'):
-            ret_list += ' ' + decl['returns'][0]['field_name']
-    else:
-        def type_maybe_field(r):
-            return '{} {}'.format(jit_type_of(r), r['field_name']) if 'field_name' in r else jit_type_of(r)
-        ret_list = '({})'.format(', '.join(type_maybe_field(r) for r in decl['returns']))
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    overload_name = '.' + decl['overload_name'] if not decl['overload_name'] == '' else ''
-    constructed_string = 'aten::{}{}({}) -> {}'.format(name, overload_name, arg_list, ret_list)
-    return match_signature(decl, constructed_string, should_match_schema)
->>>>>>> b3db154e35... Updated codegen to remove TensorOptions from generated code
-
 
 def signature_without_args(decl):
     name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
