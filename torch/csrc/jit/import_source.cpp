@@ -109,6 +109,9 @@ struct SourceImporterImpl : public Resolver,
   }
 
   TypePtr findNamedType(const QualifiedName& name) {
+    if (auto custom_class = getCustomClass(name.qualifiedName())) {
+      return custom_class;
+    }
     parseSourceIfNeeded(name.prefix());
     auto it = to_be_defined_.find(name);
     if (it != to_be_defined_.end() && it->second->kind() == TK_CLASS_DEF) {
