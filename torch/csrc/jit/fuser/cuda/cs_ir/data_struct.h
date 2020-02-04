@@ -1,8 +1,8 @@
 STRINGIFY(
-template<typename T>
+template<typename T, typename INDEX_T, int DIM>
 struct IO_struct {
-  long int shapes[8];
-  long int strides[8];
+  INDEX_T shapes[DIM];
+  INDEX_T strides[DIM];
   T* data;
 };
 )
