@@ -22,6 +22,22 @@ namespace fuser {
 // TODO: DCE pass
 // TODO: comment
 
+/* This file is critical to the lifetime model of the IR system. FusionGuard is a convenient way to set
+ * what base container instance holds your IR. Statements that are defined are registered through the FusionGuard
+ * with a particular Fusion. You need to create your instances of Fusion and are responsible for holding on to them
+ * however, FusionGuard allows you to set this so that constructors of Expr and Vals are automatically registered.
+ * If there are other container or derived classes of Statement it is important to make sure it gets registered
+ * with Fusion so it is properly cleaned up.
+ *
+ * Fusion is generally thought of as a translated fusion group from the JIT. It is likely a single kernel, although,
+ * we don't have to stick to this in the future and could in theory generate multiple kernels with the logic
+ * to execute them.
+ *
+ * Fusion also allows users to set input/output values that will allow us to figure out how to hook up runtime data
+ * to and from the JIT as well as provide us mechanisms for dependency analysis and DCE including safety checks.
+ *
+ */
+
 struct Fusion;
 
 struct TORCH_API FusionGuard{
@@ -44,6 +60,22 @@ public:
   }
 
 };
+
+/*
+ * Fusion is mutable but unique. Nodes cannot be copied in any way from one Fusion to another.
+ * If anything like that is desired, it would require duplicating all values and exprs.
+ * Fusion is considered to contain SSA, though this could also change in the future if there is
+ * a good reason to do so.
+ *
+ * Fusion should provide sorting mechanisms on the Expr's it holds. This could be done in a few
+ * ways and we should support as many of them as is convenient. For example we may want to be able
+ * to extract out only the expr's that are associated with a particular output, or set of outputs.
+ * Fusion should also provide sorted and unsorted iterables of its exprs. This could be either in
+ * depth first or breadth first traversal of the dependency chain. Having these sorted lists could
+ * make it easy to convert some passes to iteration based instead of recursive, or even allow us to 
+ * more easily generate a pass that is partially recursive and partially iterative.
+ *
+ */
 
 struct TORCH_API Fusion : public IRInputOutput{
   Fusion() {}
