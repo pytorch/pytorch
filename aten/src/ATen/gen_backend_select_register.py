@@ -15,7 +15,7 @@ Tensor ${function_name}(${method_formals}) {
 }
 """)
 
-def register_backend_select_methods(declarations, top_env):
+def register_backend_select_methods(declarations, template_path, file_manager):
     backend_select_method_definitions = []
     backend_select_function_registrations = []
 
@@ -42,6 +42,7 @@ def register_backend_select_methods(declarations, top_env):
                 backend_select_function_registrations.append(func_reg)
                 backend_select_method_definitions.append(method_def)
 
-
-    top_env['backend_select_method_definitions'] = backend_select_method_definitions
-    top_env['backend_select_function_registrations'] = backend_select_function_registrations
+    env = {}
+    env['backend_select_method_definitions'] = backend_select_method_definitions
+    env['backend_select_function_registrations'] = backend_select_function_registrations
+    file_manager.write('BackendSelectRegister.cpp', template_path, env)
