@@ -55,7 +55,9 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
 
   auto actual_error = (self - other).abs();
-  auto max_error = atol + rtol * other.abs();
+  // The original formula `atol + rtol * other.abs()` works incorrectly when
+  // other has integral dtype and other = min_value and abs(min_value) is negative`.
+  auto max_error = atol + (rtol * other).abs();
 
   // `max_error` could be a float or double depending on the type of the input
   // tensors.
