@@ -54,7 +54,6 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
 
-  auto actual_error = (self - other).abs();
   // The original formula `atol + rtol * other.abs()` works incorrectly when
   // `other` has integral dtype and `other == min_value` and `abs(min_value)` is negative:
   // std::abs(std::numeric_limits<int64_t>::lowest()) == std::numeric_limits<int64_t>::lowest() < 0
@@ -66,9 +65,7 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // float tensor.
   // It is also possible for parameters to be 'wrapped_number's, in which case
   // max_error could be promoted to double when actual error is still a float.
-  if (actual_error.scalar_type() != max_error.scalar_type()) {
-    actual_error = actual_error.to(max_error.scalar_type());
-  }
+  auto actual_error = (self - other.to(max_error.scalar_type())).abs();
 
   auto close = actual_error <= max_error;
 
