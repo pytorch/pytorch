@@ -210,11 +210,22 @@ pytorch_ios_params: &pytorch_ios_params
     IOS_PLATFORM: << parameters.ios_platform >>
     SELECTED_OP_LIST: << parameters.op_list >>
 
-
-
-
-
-
+pytorch_windows_params: &pytorch_windows_params
+  parameters:
+    test_name:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
+    SCCACHE_BUCKET: "ossci-compiler-cache"
+    CUDA_VERSION: "10"
+    PYTHON_VERSION: "3.6"
+    VC_VERSION: "14.11"
+    VC_YEAR: "2017"
+    VC_PRODUCT: "BuildTools"
+    USE_CUDA: "1"
+    TORCH_CUDA_ARCH_LIST: "7.5"
+    JOB_BASE_NAME: <<parameters.test_name>>
 caffe2_params: &caffe2_params
   parameters:
     build_environment:
@@ -442,13 +453,8 @@ jobs:
         path: test-reports
 
   pytorch_windows_build:
+    <<: *pytorch_windows_params
     executor: windows-cpu-with-nvidia-cuda
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      USE_CUDA: "1"
-      TORCH_CUDA_ARCH_LIST: "7.5"
     steps:
       - checkout
       - run:
@@ -479,16 +485,12 @@ jobs:
             set -x
             .jenkins/pytorch/win-build.sh
   pytorch_windows_test:
-    executor: windows-with-nvidia-gpu
+    <<: *pytorch_windows_params
     parameters:
       test_name:
         type: string
         default: ""
-    environment:
-      BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
-      SCCACHE_BUCKET: "ossci-compiler-cache"
-      CUDA_VERSION: "10"
-      JOB_BASE_NAME: <<parameters.test_name>>
+    executor: windows-with-nvidia-gpu
     steps:
       - checkout
       - run:

@@ -2,11 +2,11 @@
 
 namespace c10 {
 
-void DispatchKeyExtractor::setIsOperatorOverridden(DispatchKey k, bool is_overridden) {
-  if (is_overridden) {
-    perOperatorOverriddenKernels_ = perOperatorOverriddenKernels_.add(k);
+void DispatchKeyExtractor::setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel) {
+  if (has_kernel) {
+    operatorHasKernelForBackend_ = operatorHasKernelForBackend_.add(k);
   } else {
-    perOperatorOverriddenKernels_ = perOperatorOverriddenKernels_.remove(k);
+    operatorHasKernelForBackend_ = operatorHasKernelForBackend_.remove(k);
   }
 }
 
