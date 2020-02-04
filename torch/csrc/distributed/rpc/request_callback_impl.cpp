@@ -80,6 +80,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+      auto rrefId = scriptRemoteCall.retRRefId();
+      auto forkId = scriptRemoteCall.retForkId();
       auto& ctx = RRefContext::getInstance();
 
       TypePtr returnType;
@@ -95,8 +97,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
                          .type();
       }
 
-      auto ownerRRef =
-          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), returnType);
+      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
 
       // TODO: make this asynchronous
       // scriptRemoteCall is only alive within this block, use reference to
@@ -119,11 +120,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
-      ctx.addForkOfOwner(
-          scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId());
-      return wrap(
-          RemoteRet(scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId())
-              .toMessage());
+      if (rrefId != forkId) {
+        ctx.addForkOfOwner(rrefId, forkId);
+      }
+      return wrap(RemoteRet(rrefId, forkId).toMessage());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);

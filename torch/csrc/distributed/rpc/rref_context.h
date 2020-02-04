@@ -17,6 +17,11 @@ namespace callback {
 void TORCH_API confirmPendingUser(
     const rpc::Message& message,
     const c10::optional<utils::FutureError>& futErr);
+
+// It's the callback after finishing creating owner rref
+void TORCH_API finishCreatingOwnerRRef(
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
