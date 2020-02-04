@@ -279,7 +279,6 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
-_(aten, cumlogsumexp) \
 _(aten, cummax) \
 _(aten, cummin) \
 _(aten, cumprod) \
@@ -417,6 +416,7 @@ _(aten, log_sigmoid_forward) \
 _(aten, log_softmax) \
 _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
+_(aten, logcumsumexp) \
 _(aten, logdet) \
 _(aten, logspace) \
 _(aten, logsumexp) \

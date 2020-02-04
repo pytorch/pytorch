@@ -224,7 +224,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
-   .. automethod:: cumlogsumexp
+   .. automethod:: logcumsumexp
    .. automethod:: cummax
    .. automethod:: cummin
    .. automethod:: cumprod

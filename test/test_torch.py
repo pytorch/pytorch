@@ -5395,7 +5395,7 @@ def add_neg_dim_tests():
         ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
         ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
         ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
-        ('cumlogsumexp', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
+        ('logcumsumexp', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cumsum', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
         ('cummax', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),
@@ -5629,7 +5629,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.clamp(one_d, max=1).shape)
 
         # cumsum, cumprod, cummax, cummin
-        self.assertEqual((), torch.cumlogsumexp(zero_d, 0).shape)
+        self.assertEqual((), torch.logcumsumexp(zero_d, 0).shape)
         self.assertEqual((), torch.cumsum(zero_d, 0).shape)
         self.assertEqual((), torch.cumprod(zero_d, 0).shape)
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
@@ -10016,11 +10016,11 @@ class TestTorchDeviceType(TestCase):
                                                        [0, 0, 0]]))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
-    def test_cumlogsumexp(self):
+    def test_logcumsumexp(self):
         a = torch.randn(5, 4)
         a[0, 0] = inf
         a[1, :] = -inf
-        actual = a.cumlogsumexp(1)
+        actual = a.logcumsumexp(1)
         max = np.maximum.accumulate(a.numpy(), axis=1)
         expected = max + np.log(np.cumsum(np.exp(a - max), axis=1))
         self.assertEqual(a.dtype, actual.dtype)
@@ -10029,7 +10029,7 @@ class TestTorchDeviceType(TestCase):
         # check that out is actually inplace
         b = torch.zeros(5, 2)
         c = b[:, 0]
-        torch.cumlogsumexp(a, 1, out=c)
+        torch.logcumsumexp(a, 1, out=c)
         self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
 
     def test_std_mean(self, device):
@@ -10769,8 +10769,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(shape, torch.cummax(x, 2)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 0)[0].shape)
         self.assertEqual(shape, torch.cummin(x, 2)[0].shape)
-        self.assertEqual(shape, torch.cumlogsumexp(x, 0)[0].shape)
-        self.assertEqual(shape, torch.cumlogsumexp(x, 2)[0].shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 0)[0].shape)
+        self.assertEqual(shape, torch.logcumsumexp(x, 2)[0].shape)
 
         # flip
         self.assertEqual(x, x.flip(0))

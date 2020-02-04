@@ -831,11 +831,11 @@ Args:
         Otherwise, the argument has no effect. Default: ``False``.
 """)
 
-add_docstr_all('cumlogsumexp',
+add_docstr_all('logcumsumexp',
                r"""
-cumlogsumexp(dim) -> Tensor
+logcumsumexp(dim) -> Tensor
 
-See :func:`torch.cumlogsumexp`
+See :func:`torch.logcumsumexp`
 """)
 
 add_docstr_all('cummax',

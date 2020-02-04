@@ -988,11 +988,11 @@ class TestNamedTensor(TestCase):
         test_ops(torch.cummax)
         test_ops(torch.cummin)
 
-    def test_cumlogsumexp(self):
+    def test_logcumsumexp(self):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'D')
             tensor = torch.rand(2, 3, names=names)
-            result = torch.cumlogsumexp(tensor, 0)
+            result = torch.logcumsumexp(tensor, 0)
             self.assertEqual(result.names, names)
 
     def test_bitwise_not(self):

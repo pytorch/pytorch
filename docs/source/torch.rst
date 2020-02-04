@@ -311,7 +311,7 @@ Other Operations
 .. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
-.. autofunction:: cumlogsumexp
+.. autofunction:: logcumsumexp
 .. autofunction:: cummax
 .. autofunction:: cummin
 .. autofunction:: cumprod
