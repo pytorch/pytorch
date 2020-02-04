@@ -311,6 +311,235 @@ void mergeFp32InputsAndConvertToFp16(
   }
 }
 
+NetDef buildLoopTestNet(
+    const NetDef& net,
+    const std::unordered_set<std::string>& initialization_list,
+    std::unordered_map<std::string, ShapeInfo>* shape_hints,
+    size_t batch_size) {
+  NetDef net_dummy;
+
+  // Add non-weigh inputs only
+  for (const auto& i : net.external_input()) {
+    if (!initialization_list.count(i)) {
+      net_dummy.add_external_input(i);
+    }
+  }
+  for (const auto& o : net.external_output()) {
+    net_dummy.add_external_output(o);
+  }
+
+  // Now categorize the inputs into the following groups. We don't support
+  // handling of 3d inputs yet, but it can be done easily by converting n-d
+  // inputs into 2-d with Reshape or ReduceSum
+  std::unordered_set<std::string> batched_2d_inputs;
+  std::unordered_set<std::string> other_2d_inputs;
+  std::unordered_set<std::string> all_1d_inputs;
+  auto addCast = [&net_dummy](
+                     const std::string& i,
+                     std::string& in,
+                     caffe2::TensorProto::DataType dtype) mutable {
+    int multiplier = 1;
+    if (dtype != caffe2::TensorProto::FLOAT) {
+      in += "_fp32";
+      net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+          "Clip",
+          "",
+          {i},
+          {in},
+          {MakeArgument<float>("min", 0.0), MakeArgument<float>("max", 1.0)}));
+      if (dtype == caffe2::TensorProto::INT8 ||
+          dtype == caffe2::TensorProto::UINT8) {
+        multiplier = sizeof(float) / sizeof(int8_t);
+      } else if (
+          dtype == caffe2::TensorProto::INT16 ||
+          dtype == caffe2::TensorProto::UINT16 ||
+          dtype == caffe2::TensorProto::FLOAT16) {
+        multiplier = sizeof(float) / sizeof(int16_t);
+      } else if (dtype == caffe2::TensorProto::INT64) {
+        // Special case, it should really be 0.5
+        multiplier = 0;
+      }
+    }
+    return multiplier;
+  };
+  auto adjustDim = [](int d, int m, TensorShape& shape) {
+    if (m > 1) {
+      CAFFE_ENFORCE_EQ(shape.dims(d) % m, 0);
+      shape.set_dims(d, shape.dims(d) / m);
+    } else if (m == 0) {
+      shape.set_dims(d, shape.dims(d) * 2);
+    }
+    shape.set_data_type(caffe2::TensorProto::FLOAT);
+  };
+  size_t dim2 = 0;
+  for (const auto& i : net_dummy.external_input()) {
+    auto it = shape_hints->find(i);
+    CAFFE_ENFORCE(
+        it != shape_hints->end(), "Cannot find shape info for input ", i);
+    auto& shape = it->second.shape;
+    std::string in = i;
+    // Trick here: since backend like glow doesn't support non-float
+    // arithmatics, we need to be creative and bitcast non-float data type into
+    // float while maintaining the same bit lengths. We do this by changing the
+    // shape dim. So that we will always load the same amount of bits onto the
+    // backend. To avoid numeric complication, we add a Clip.
+    if (shape.dims_size() == 2) {
+      auto m = addCast(i, in, shape.data_type());
+      adjustDim(1, m, shape);
+      if (shape.dims(0) == batch_size) {
+        batched_2d_inputs.emplace(in);
+        dim2 += shape.dims(1);
+      } else {
+        other_2d_inputs.emplace(in);
+      }
+    } else if (shape.dims_size() == 1) {
+      auto m = addCast(i, in, shape.data_type());
+      adjustDim(0, m, shape);
+      all_1d_inputs.emplace(in);
+    } else {
+      const std::string fin = i + "_flatten";
+      net_dummy.add_op()->CopyFrom(
+          CreateOperatorDef("Flatten", "", {i}, {fin}, {}));
+      in = fin;
+      auto m = addCast(fin, in, shape.data_type());
+      auto last = shape.dims_size() - 1;
+      adjustDim(last, m, shape);
+      size_t ndim = 1;
+      for (unsigned k = 1; k < shape.dims_size(); ++k) {
+        ndim *= shape.dims(k);
+      }
+      if (shape.dims(0) == batch_size) {
+        batched_2d_inputs.emplace(in);
+        dim2 += ndim;
+      } else {
+        other_2d_inputs.emplace(in);
+      }
+    }
+  }
+
+  // Add adjusted shape hints
+  auto* shape_arg = net_dummy.add_arg();
+  auto* qshape_arg = net_dummy.add_arg();
+  shape_arg->set_name("input_shape_info");
+  qshape_arg->set_name("input_qshape_info");
+  for (const auto& i : net_dummy.external_input()) {
+    auto info = shape_hints->at(i);
+    if (!info.is_quantized) {
+      shape_arg->mutable_tensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoTensorProto(i, info));
+    } else {
+      qshape_arg->mutable_qtensors()->Add()->CopyFrom(
+          wrapShapeInfoIntoQTensorProto(i, info));
+    }
+  }
+
+  // Collect all the input together into a 2d tensor of {batch_size, X}
+  std::vector<std::string> concat2d_batched(
+      batched_2d_inputs.begin(), batched_2d_inputs.end());
+  const std::string concat_out = "batch_2d_concat";
+  net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+      "Concat",
+      "",
+      concat2d_batched,
+      {concat_out, "batch_2d_concat_split_info"},
+      {MakeArgument<int>("axis", 1)}));
+  std::vector<std::string> scalars;
+  for (const auto& i : other_2d_inputs) {
+    std::string o = i + "_reduced";
+    net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+        "ReduceSum",
+        "",
+        {i},
+        {o},
+        {MakeArgument<std::vector<int>>("axes", {0, 1}),
+         MakeArgument<int>("keepdims", 0)}));
+    scalars.emplace_back(std::move(o));
+  }
+  for (const auto& i : all_1d_inputs) {
+    std::string o = i + "_reduced";
+    net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+        "ReduceSum",
+        "",
+        {i},
+        {o},
+        {MakeArgument<std::vector<int>>("axes", {0}),
+         MakeArgument<int>("keepdims", 0)}));
+    scalars.emplace_back(std::move(o));
+  }
+  const std::string summed = "summed";
+  net_dummy.add_op()->CopyFrom(
+      CreateOperatorDef("Sum", "", scalars, {summed}, {}));
+  const std::string out = "result_out";
+  net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+      "Add",
+      "",
+      {concat_out, summed},
+      {out},
+      {MakeArgument<int>("broadcast", 1)}));
+
+  for (const auto& o : net_dummy.external_output()) {
+    const auto it = shape_hints->find(o);
+    CAFFE_ENFORCE(
+        it != shape_hints->end(), "Cannot find shape info for output ", o);
+    const auto& shape = it->second.shape;
+    // TODO: all doable but I'm lazy
+    if (shape.data_type() != caffe2::TensorProto::FLOAT) {
+      CAFFE_THROW("We need a Cast op to match the output data type");
+    }
+    if (shape.dims_size() == 2) {
+      if (shape.dims(0) == batch_size) {
+        if (shape.dims(1) > dim2) {
+          CAFFE_THROW(
+              "We need Tile op to match the output dim ",
+              shape.dims(1),
+              " vs ",
+              dim2);
+        } else if (shape.dims(1) == dim2) {
+          net_dummy.add_op()->CopyFrom(
+              CreateOperatorDef("Copy", "", {out}, {o}, {}));
+        } else {
+          net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+              "Slice",
+              "",
+              {out},
+              {o},
+              {MakeArgument<std::vector<int>>("starts", {0, 0}),
+               MakeArgument<std::vector<int>>(
+                   "ends", {-1, static_cast<int>(shape.dims(1))})}));
+        }
+      }
+    } else if (shape.dims_size() == 1) {
+      if (shape.dims(0) == batch_size) {
+        const std::string oi = o + "_pre";
+        net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+            "Slice",
+            "",
+            {out},
+            {oi},
+            {MakeArgument<std::vector<int>>("starts", {0, 0}),
+             MakeArgument<std::vector<int>>("ends", {-1, 1})}));
+        net_dummy.add_op()->CopyFrom(CreateOperatorDef(
+            "Reshape",
+            "",
+            {oi},
+            {o},
+            {MakeArgument<std::vector<int>>(
+                "shape", {static_cast<int>(batch_size)})}));
+      } else {
+        CAFFE_THROW(
+            "We need Slice and Tile op to match the output dim ",
+            shape.dims(0),
+            " vs ",
+            batch_size);
+      }
+    } else {
+      CAFFE_THROW("Only support 1D/2D outputs for now");
+    }
+  }
+
+  return net_dummy;
+}
+
 } // namespace
 
 OnnxifiTransformer::OnnxifiTransformer(const OnnxifiTransformerOptions& opts)
@@ -506,6 +735,18 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     output_shape_hints.emplace(o, shape);
   }
 
+  // Rewrite the net into a dummy in loop test mode
+  ShapeInfoMap new_shape_hints;
+  if (opts_.loop_test) {
+    new_shape_hints = shape_hints;
+    onnxifi_net = buildLoopTestNet(
+        onnxifi_net,
+        initialization_list,
+        &new_shape_hints,
+        opts_.bound_shape_spec.max_batch_size);
+    initialization_list.clear();
+  }
+
   // Build ONNXIFI Op
   std::vector<std::string> onnxifi_net_inputs(
       onnxifi_net.external_input().begin(), onnxifi_net.external_input().end());
@@ -520,7 +761,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
       initialization_list,
       onnxifi_net_inputs,
       onnxifi_net_outputs,
-      shape_hints);
+      opts_.loop_test ? new_shape_hints : shape_hints);
   NetDef net_opt = composeResultNet(onnxifi_op);
 
   // Debugging stuff
