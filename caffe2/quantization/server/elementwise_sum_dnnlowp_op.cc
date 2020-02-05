@@ -103,7 +103,7 @@ bool SumDNNLowPOp<T, ReluFused>::RunOnDevice() {
             out_qparams_.zero_point);
       } // omp parallel
     } else {
-      RequantizationParams in_requantization_params[InputSize()];
+      vector<RequantizationParams> in_requantization_params(InputSize());
       vector<T*> input_data(InputSize());
       for (int i = 0; i < InputSize(); ++i) {
         float real_multiplier =
