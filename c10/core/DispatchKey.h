@@ -16,10 +16,10 @@ enum class DispatchKey : uint8_t {
   //
   //    using DispatchKey = optional<RealDispatchKey>
   //
-  // and UndefinedTensorId == nullopt.  We didn't actually represent
+  // and Undefined == nullopt.  We didn't actually represent
   // it this way because optional<RealDispatchKey> would take two
   // words, when DispatchKey fits in eight bits.
-  UndefinedTensorId = 0,
+  Undefined = 0,
 
   // This pool of IDs is not really ordered, but it is merged into
   // the hierarchy for convenience and performance
@@ -47,10 +47,15 @@ enum class DispatchKey : uint8_t {
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
 
-  // WARNING! If you add more "wrapper" style tensor ids (tensor
-  // ids which don't get kernels directly defined in native_functions.yaml;
-  // examples are tracing or profiling) here, you need to also adjust
-  // legacyExtractDispatchKey in c10/core/DispatchKeySet.h to mask them out.
+  // Custom pseudorandom number generator dispatch key.
+  // To enable PyTorch users to have custom PRNGs, we added support for
+  // dispatching on at::Generator* parameters.
+  // This key must be used in two places:
+  //  1) as a second parameter of at::Generator constructor call in
+  //     the user-defined PRNG class.
+  //  2) as a dispatch key while registering custom kernels
+  //     (templatized kernels specialized for user-defined PRNG class)
+  CustomRNGKeyId,
 
   VariableTensorId,
 
