@@ -576,7 +576,7 @@ at::Tensor _convolution(
     weight_sizes = c10::IntArrayRef(weight_sizes_mkl);
   }
   int64_t dim = k - 2;
-  
+
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
@@ -593,7 +593,7 @@ at::Tensor _convolution(
 
   check_shape_forward(input, weight_sizes, bias, params, input_is_mkldnn);
 
-  if (input.size(0) == 0) {    
+  if (input.size(0) == 0) {
     // don't send empty inputs through backends
     // but need to compute correct output size first and set up history for params
     std::vector<int64_t> o;
@@ -655,23 +655,32 @@ at::Tensor _convolution(
     TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same");
-
-    if (params.transposed) {
-      output = at::cudnn_convolution_transpose(
-          input.contiguous(cudnn_memory_format), weight,
-          params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
-      if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
+    try {
+      if (params.transposed) {
+        output = at::cudnn_convolution_transpose(
+            input.contiguous(cudnn_memory_format), weight,
+            params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+        if (bias.defined()) {
+          output = output + reshape_bias(input.dim(), bias);
+        }
+      } else {
+        output = at::cudnn_convolution(
+            input.contiguous(cudnn_memory_format), weight,
+            params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
+        if (bias.defined()) {
+          output = output + reshape_bias(input.dim(), bias);
+        }
       }
-    } else {
-      output = at::cudnn_convolution(
-          input.contiguous(cudnn_memory_format), weight,
-          params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
-      if (bias.defined()) {
-        output = output + reshape_bias(input.dim(), bias);
-      }
+      goto end;
+    } catch (std::runtime_error) {
+      // Sometimes cuDNN choose an algorithm that uses too much memory.
+      // Sometimes cuDNN just fail with CUDNN_STATUS_NOT_SUPPORTED.
+      // Unfortunately we don't know for which input on which hardware this failure happens.
+      // So let's just globally allow it to fail and when fail, continue the control flow and move
+      // forward to other implementations.
     }
-  } else if (params.use_miopen(input, bias.defined())) {
+  }
+  if (params.use_miopen(input, bias.defined())) {
     TORCH_CHECK(input.options().type_equal(weight.options()),
              "Input type (", input.toString(), ") and weight type (", weight.toString(),
              ") should be the same");
@@ -729,6 +738,7 @@ at::Tensor _convolution(
     output = at::convolution_overrideable(input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding, params.groups);
   }
 
+end:
   if (k == 3) {
     output = view3d(output);
   }
