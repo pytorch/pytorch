@@ -394,12 +394,16 @@
   use_c10_dispatcher: full
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU: argmax
+    CUDA: argmax
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU: argmin
+    CUDA: argmin
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
