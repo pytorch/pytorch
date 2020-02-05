@@ -1208,13 +1208,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
         sys.stderr.flush()
         if sys.version_info >= (3, 5):
             # WARNING: do not use stdout=None.
-            # If the stdout encoding is not utf-8, distutils can detach stdout.
+            # 1) If the stdout encoding is not utf-8, distutils can detach __stdout__.
             # https://github.com/pypa/setuptools/blob/7e97def47723303fafabe48b22168bbc11bb4821/setuptools/dist.py#L1110
-            # subprocess.run with stdout=None relies on stdout not being detached:
+            # 2) subprocess.run with stdout=None relies on __stdout__ not being detached:
             # https://github.com/python/cpython/blob/c352e6c7446c894b13643f538db312092b351789/Lib/subprocess.py#L1214
+            # As the workaround, we use sys.stdout instead of None.
             subprocess.run(
                 ['ninja', '-v'],
-                stdout=subprocess.PIPE,
+                stdout=sys.stdout if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 check=True)
