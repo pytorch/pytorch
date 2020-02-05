@@ -49,7 +49,7 @@ enum class DispatchKey : uint8_t {
   HIPTensorId,    // TODO: I think this is not actually used, due to Note [Masquerading as CUDA]
   MSNPUTensorId,  // tested at test/cpp_extensions/msnpu_extension.cpp
                   // NB: we suspect that MSNPU is defunct
-  XLATensorId     // lives out of tree at https://github.com/pytorch/xla
+  XLATensorId,    // lives out of tree at https://github.com/pytorch/xla
 
   // These are Caffe2 device types which we grandfathered into
   // DispatchKey.
