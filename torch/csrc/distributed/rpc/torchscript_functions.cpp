@@ -120,8 +120,8 @@ std::shared_ptr<RRef> remoteTorchscript(
       TORCH_INTERNAL_ASSERT(
           rr->rrefId() == rr->forkId(),
           "Expecting an OwnerRRef as RemoteRet but got a fork.");
-      auto& ctx = RRefContext::getInstance();
-      ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+      auto& refCtx = RRefContext::getInstance();
+      refCtx.delForkOfOwner(rr->rrefId(), rr->rrefId());
     });
     return ownerRRefPtr;
   }
