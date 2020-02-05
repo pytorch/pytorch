@@ -11677,7 +11677,7 @@ a")
             f = io.BytesIO()
             with self.assertRaisesRegex(RuntimeError, "Couldn't export Python"):
                 torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
-                                example_outputs=outputs)
+                                   example_outputs=outputs)
 
     def test_onnx_export_script_inline_trace(self):
         with enable_profiling_mode():
@@ -12010,7 +12010,7 @@ a")
             outputs = foo(torch.zeros(1, 2, 3))
             f = io.BytesIO()
             torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
-                                            example_outputs=outputs)
+                                               example_outputs=outputs)
 
     def test_shape_analysis_loop(self):
         def foo(a, b, x):
