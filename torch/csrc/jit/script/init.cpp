@@ -737,11 +737,63 @@ void initJitScriptBindings(PyObject* module) {
             return bool(self.find_method(name));
           })
       .def(
-          "_method_names", [](Object& self) {
+          "_method_names",
+          [](Object& self) {
             return fmap(self.get_methods(), [](const Method& method) {
               return method.name();
             });
-          });
+          })
+      .def(py::pickle(
+          [](const Object& self)
+              -> std::tuple<py::object, std::string> { // __getstate__
+            if (auto getstate_method = self.find_method("__getstate__")) {
+              auto object_state = toPyObject((*getstate_method)(Stack{}));
+              TORCH_INTERNAL_ASSERT(self.type()->name());
+              return std::make_tuple(
+                  object_state, self.type()->name()->qualifiedName());
+            }
+            std::stringstream err;
+            err << "Tried to serialize object ";
+            if (auto qualname = self.type()->name()) {
+              err << qualname->qualifiedName() << " ";
+            }
+            err << "which does not have a __getstate__ method defined!";
+            throw std::runtime_error(err.str());
+          },
+          [](std::tuple<py::object, std::string> state_tup) -> Object {
+            py::object state;
+            std::string qualname;
+            std::tie(state, qualname) = state_tup;
+            auto class_type = classCU()->get_class(qualname);
+            TORCH_CHECK(
+                class_type,
+                "Tried to deserialize class ",
+                qualname,
+                " which is not known to the runtime. "
+                "If this is a custom C++ class, make "
+                "sure the appropriate code is linked.");
+
+            auto self = script::Object(c10::ivalue::Object::create(
+                c10::StrongTypePtr(classCU(), class_type), 1));
+            if (auto setstate_method = self.find_method("__setstate__")) {
+              auto setstate_schema = setstate_method->function().getSchema();
+              TORCH_INTERNAL_ASSERT(
+                  setstate_schema.arguments().size() == 2,
+                  "__setstate__ method for class ",
+                  class_type->python_str(),
+                  " must have exactly 2 arguments!");
+              auto state_type = setstate_schema.arguments().at(1).type();
+              (*setstate_method)(Stack{toIValue(state, state_type)});
+              return self;
+            }
+            std::stringstream err;
+            err << "Tried to deserialize object ";
+            if (auto qualname = class_type->name()) {
+              err << qualname->qualifiedName() << " ";
+            }
+            err << "which does not have a __setstate__ method defined!";
+            throw std::runtime_error(err.str());
+          }));
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
