@@ -50,46 +50,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   return futPtr;
 }
 
-c10::intrusive_ptr<UserRRef> remoteTorchscript(
-    const std::string& dstWorkerName,
-    const c10::QualifiedName& qualifiedName,
-    const c10::FunctionSchema& functionSchema,
-    std::vector<c10::IValue>& stack) {
-  auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
-  auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
-  auto& ctx = RRefContext::getInstance();
-
-  // Get function return type to construct UserRRef.
-  auto returns = functionSchema.returns();
-  // Script call only allows single IValue returned.
-  TORCH_INTERNAL_ASSERT(
-      returns.size() == 1,
-      "Return value of an annotated torchScript function should be a single "
-      "IValue.",
-      returns.size());
-  auto returnType = returns.at(0).type();
-  auto userRRefPtr = ctx.createUserRRef(dstWorkerInfo.id_, returnType);
-
-  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
-      qualifiedName,
-      std::move(stack),
-      userRRefPtr->rrefId(),
-      userRRefPtr->forkId());
-
-  auto fm = torch::distributed::autograd::sendMessageWithAutograd(
-      *rpcAgentPtr,
-      dstWorkerInfo,
-      std::move(*scriptRemoteCall).toMessage(),
-      true /*forceGradRecording*/,
-      nullptr);
-
-  ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-  fm->addCallback(callback::confirmPendingUser);
-
-  return userRRefPtr;
-}
-
-c10::intrusive_ptr<OwnerRRef> remoteTorchscriptToOwner(
+c10::intrusive_ptr<RRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
@@ -108,25 +69,47 @@ c10::intrusive_ptr<OwnerRRef> remoteTorchscriptToOwner(
       returns.size());
   auto returnType = returns.at(0).type();
 
-  auto ownerRRef = ctx.createOwnerRRef(returnType);
-  // prevent this owner RRef be deleted due to other forks
-  ctx.addSelfAsFork(ownerRRef);
+  if (ctx.getWorkerId() != dstWorkerInfo.id_) {
+    auto userRRefPtr = ctx.createUserRRef(dstWorkerInfo.id_, returnType);
 
-  auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
-      qualifiedName,
-      std::move(stack),
-      ownerRRef->rrefId(),
-      ownerRRef->rrefId());
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        qualifiedName,
+        std::move(stack),
+        userRRefPtr->rrefId(),
+        userRRefPtr->forkId());
 
-  auto fm = torch::distributed::autograd::sendMessageWithAutograd(
-      *rpcAgentPtr,
-      dstWorkerInfo,
-      std::move(*scriptRemoteCall).toMessage(),
-      true /*forceGradRecording*/,
-      nullptr);
+    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+        *rpcAgentPtr,
+        dstWorkerInfo,
+        std::move(*scriptRemoteCall).toMessage(),
+        true /*forceGradRecording*/,
+        nullptr);
 
-  fm->addCallback(callback::finishCreatingOwnerRRef);
-  return ownerRRef;
+    ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
+    fm->addCallback(callback::confirmPendingUser);
+
+    return userRRefPtr;
+  } else {
+    auto ownerRRefPtr = ctx.createOwnerRRef(returnType);
+    // prevent this owner RRef be deleted due to other forks
+    ctx.addSelfAsFork(ownerRRefPtr);
+
+    auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
+        qualifiedName,
+        std::move(stack),
+        ownerRRefPtr->rrefId(),
+        ownerRRefPtr->rrefId());
+
+    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+        *rpcAgentPtr,
+        dstWorkerInfo,
+        std::move(*scriptRemoteCall).toMessage(),
+        true /*forceGradRecording*/,
+        nullptr);
+
+    fm->addCallback(callback::finishCreatingOwnerRRef);
+    return ownerRRefPtr;
+  }
 }
 
 } // namespace rpc

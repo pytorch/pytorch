@@ -123,10 +123,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       if (rrefId != forkId) {
         ctx.addForkOfOwner(rrefId, forkId);
       }
-
-      return wrap(
-          RemoteRet(scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId())
-              .toMessage());
+      return wrap(RemoteRet(rrefId, forkId).toMessage());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);

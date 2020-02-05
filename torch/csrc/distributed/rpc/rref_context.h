@@ -18,7 +18,8 @@ void TORCH_API confirmPendingUser(
     const rpc::Message& message,
     const c10::optional<utils::FutureError>& futErr);
 
-void finishCreatingOwnerRRef(
+// It's the callback after finishing creating owner rref
+void TORCH_API finishCreatingOwnerRRef(
     const Message& message,
     const c10::optional<utils::FutureError>& futErr);
 } // namespace callback

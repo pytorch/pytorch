@@ -44,7 +44,7 @@ std::vector<at::IValue>& ScriptCall::stackRef() {
 
 void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
   for (auto& value : stack_) {
-    ivalues.push_back(std::move(value));
+    ivalues.push_back(value);
   }
 
   if (hasOp()) {
