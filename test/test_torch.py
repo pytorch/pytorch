@@ -14669,6 +14669,7 @@ class TestDevicePrecision(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
+
 # Below are fixtures and functions that generate tensor op comparison tests
 # These tests run a single op on both a CPU and device tensor and compare the
 # the results. In-place variants of the ops can also be run.
