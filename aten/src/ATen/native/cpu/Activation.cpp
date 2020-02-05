@@ -217,7 +217,7 @@ void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_sca
           if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
             return a * poscoef_vec;
           } else {
-            return Vec::blendv(a * poscoef_vec, ((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, cmp);
+            return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
           }
         });
   });
@@ -243,7 +243,7 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
           if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
             return a * poscoef_vec;
           } else {
-            return Vec::blendv(a * poscoef_vec, a * negiptcoef_vec * (b + negcoef_vec), cmp);
+            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
           }
         }
     );
