@@ -21,11 +21,11 @@ TEST(ReduceOpsTest, MaxValuesAndMinValues) {
       );
       ASSERT_FLOAT_EQ(
         a.neg().max_values(c10::IntArrayRef{0, 1}).item<double>(),
-        a.max().item<double>()
+        a.neg().max().item<double>()
       );
       ASSERT_FLOAT_EQ(
         a.neg().min_values(c10::IntArrayRef{0, 1}).item<double>(),
-        a.min().item<double>()
+        a.neg().min().item<double>()
       );
     }
   }
