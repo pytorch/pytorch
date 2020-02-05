@@ -50,19 +50,21 @@ bool RemoveExceptionBranches(Block* block) {
         }
       }
       if (foundException && valid_path) {
-        std::vector<Node*> tmp;
+        std::vector<Node*> nodes_in_valid_path;
         for (auto* valid_node : valid_path->nodes()) {
-          tmp.push_back(valid_node);
+          nodes_in_valid_path.push_back(valid_node);
         }
         Node* cur = node;
-        for (auto* valid_node : tmp) {
+        for (auto* valid_node : nodes_in_valid_path) {
           valid_node->moveAfter(cur);
           cur = valid_node;
+        }
+        for(auto i = 0; i < valid_path->return_node()->inputs().size(); ++i) {
+          node->outputs()[i]->replaceAllUsesWith(valid_path->return_node()->inputs()[i]);
         }
         while(!node->blocks().empty()) {
           node->eraseBlock(0);
         }
-        node->replaceAllUsesWith(cur);
         to_destroy.push_back(node);
       }
     }
