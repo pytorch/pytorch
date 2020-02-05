@@ -227,7 +227,6 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -267,7 +266,6 @@ class TestONNXRuntime(unittest.TestCase):
         images = [image]
         return images
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -275,7 +273,6 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
