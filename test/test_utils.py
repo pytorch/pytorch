@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.cuda
+from torch._six import PY2
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
@@ -562,6 +563,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    @unittest.skipIf(PY2, "Requires python 3")
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
