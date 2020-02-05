@@ -1,46 +1,20 @@
-#include "batch_sparse_to_dense_op.h"
-
-#include "caffe2/core/context.h"
+#include "caffe2/operators/batch_sparse_to_dense_op.h"
 
 namespace caffe2 {
 
-template <typename T, class Context>
-bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
-  auto& lengths = Input(LENGTHS);
-  auto& indices = Input(INDICES);
-  auto& values = Input(VALUES);
-
-  CAFFE_ENFORCE_EQ(indices.numel(), values.numel());
-  CAFFE_ENFORCE_EQ(lengths.dim(), 1);
-  CAFFE_ENFORCE_EQ(indices.dim(), 1);
-
-  const int64_t* lengths_data = lengths.template data<int64_t>();
-  const int64_t* indices_data = indices.template data<int64_t>();
-  const T* values_data = values.template data<T>();
-  int64_t batch_size = lengths.numel();
+template <>
+void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
+    const int64_t batch_size,
+    const int64_t indice_lengths,
+    const int64_t* lengths_data,
+    const int64_t* indices_data,
+    const float* values_data,
+    float* output_data,
+    CPUContext* /*context*/) {
   int64_t lengths_sum = 0;
-  math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.numel());
-
-  vector<int64_t> output_shape = {batch_size};
-  if (InputSize() == 4) {
-    auto& shaper = Input(3);
-    CAFFE_ENFORCE_EQ(shaper.dim(), 2);
-    if (dense_last_dim_ == -1) {
-      dense_last_dim_ = shaper.size(1);
-    } else {
-      CAFFE_ENFORCE(
-          dense_last_dim_ == shaper.size(1),
-          "The last dim argument is not aligned with the shape input last dim");
-    }
-  } else {
-    CAFFE_ENFORCE(dense_last_dim_ >= 1, "The last dim of dense must be >= 1");
-  }
-  output_shape.push_back(dense_last_dim_);
-  auto* output = Output(0, output_shape, at::dtype<T>());
-  T* output_data = output->template mutable_data<T>();
-  math::Set(
-      output->numel(), static_cast<T>(default_value_), output_data, &context_);
+  math::Sum<int64_t, CPUContext>(
+      batch_size, lengths_data, &lengths_sum, &context_);
+  CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
   int64_t k = 0;
   for (int64_t i = 0; i < batch_size; ++i) {
@@ -56,49 +30,36 @@ bool BatchSparseToDenseOp<T, Context>::RunOnDevice() {
       k += 1;
     }
   }
-
-  return true;
 }
 
-template <typename T, class Context>
-bool BatchDenseToSparseOp<T, Context>::RunOnDevice() {
-  auto& lengths = Input(LENGTHS);
-  auto& indices = Input(INDICES);
-  auto& dense = Input(DENSE);
-
-  CAFFE_ENFORCE_EQ(lengths.dim(), 1);
-  CAFFE_ENFORCE_EQ(indices.dim(), 1);
-  CAFFE_ENFORCE_EQ(dense.dim(), 2);
-  const int64_t* lengths_data = lengths.template data<int64_t>();
-  const int64_t* indices_data = indices.template data<int64_t>();
-  const T* dense_data = dense.template data<T>();
-
-  int64_t batch_size = lengths.numel();
+template <>
+void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
+    const int64_t batch_size,
+    const int64_t indice_lengths,
+    const int64_t* lengths_data,
+    const int64_t* indices_data,
+    const float* dense_data,
+    float* output_data,
+    CPUContext* /*context*/) {
   int64_t lengths_sum = 0;
-  math::Sum<int64_t, Context>(batch_size, lengths_data, &lengths_sum, &context_);
-  CAFFE_ENFORCE_EQ(lengths_sum, indices.numel());
-
-  CAFFE_ENFORCE_EQ(batch_size, dense.size(0));
-  dense_last_dim_ = dense.size(1);
-  vector<int64_t> output_shape = indices.sizes().vec();
-  auto* output = Output(0, output_shape, at::dtype<T>());
-  T* output_data = output->template mutable_data<T>();
+  math::Sum<int64_t, CPUContext>(
+      batch_size, lengths_data, &lengths_sum, &context_);
+  CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
   int64_t k = 0;
   for (int64_t i = 0; i < batch_size; ++i) {
     for (int64_t j = 0; j < lengths_data[i]; ++j) {
       CAFFE_ENFORCE(
-          indices_data[k] < dense.size(1),
+          indices_data[k] < dense_last_dim_,
           "An indice (",
           indices_data[k],
           ") is larger then last dim of dense (",
-          dense.size(1),
+          dense_last_dim_,
           ").");
-      output_data[k] = dense_data[i * dense.size(1) + indices_data[k]];
+      output_data[k] = dense_data[i * dense_last_dim_ + indices_data[k]];
       k += 1;
     }
   }
-  return true;
 }
 
 REGISTER_CPU_OPERATOR(

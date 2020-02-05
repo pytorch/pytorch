@@ -26,7 +26,7 @@ struct Dist {
   //     map :      This tells how to modify (a - b) to form the component that
   //                gets summed.
   //     red :      This tells how to sum the result of map up. This is
-  //                separate because the inf norm actuall uses max instead of
+  //                separate because the inf norm actually uses max instead of
   //                sum.
   //     finish :   This tells what to do with the aggregated value to compute
   //                the norm. Generally this is the result of val ^ (1 / p).

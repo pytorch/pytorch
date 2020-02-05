@@ -75,7 +75,7 @@ class Tags(object):
 
     # In certain cases we want to have different schema for training and
     # prediction, as an example in prediction we might need to have only
-    # subset of ids present in the orignal schema. This tag is one of the ways
+    # subset of ids present in the original schema. This tag is one of the ways
     # to mark operators that will be removed from prediction and should
     # override schema for predictors.
     PREDICTION_SCHEMA = 'prediction_schema'

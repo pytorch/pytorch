@@ -43,7 +43,7 @@ TORCH_API c10::optional<Value*> tryInsertConstant(
 // Helper for retrieving constants
 ////////////////////////////////////////////////////////////////////////////////
 
-// attempt to convert a (possibly constant) Value* into an intepreter value
+// attempt to convert a (possibly constant) Value* into an interpreter value
 // (IValue). returns c10::nullopt if the Value* was not constant
 TORCH_API c10::optional<IValue> toIValue(const Value* v);
 

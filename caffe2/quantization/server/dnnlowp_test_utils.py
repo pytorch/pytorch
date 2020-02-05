@@ -384,7 +384,7 @@ def run_conv_or_fc(
     # do caching so exercises different code paths from the subsequent
     # runs
 
-    # self.ws.run re-creates operator everytime so this test covers
+    # self.ws.run re-creates operator every time so this test covers
     # cases when we have multiple nets sharing the same workspace
     test_case.ws.create_blob("X").feed(X, device_option=gc)
     test_case.ws.create_blob("W").feed(W, device_option=gc)

@@ -256,7 +256,11 @@ bool SoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
   float* avg_loss_data = avg_loss->template mutable_data<float>();
   if (weight_sum != 0.0) {
-    avg_loss_data[0] = loss_sum * scale_ / weight_sum;
+    if (average_by_batch_size_) {
+      avg_loss_data[0] = loss_sum * scale_ / N;
+    } else {
+      avg_loss_data[0] = loss_sum * scale_ / weight_sum;
+    }
   } else {
     avg_loss_data[0] = 0.0;
   }
@@ -278,6 +282,7 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   N = X.size_to_dim(canonical_axis); // batch size
   D = X.size_from_dim(canonical_axis);
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
+  float avg_denominator;
 
   if (label_prob_mode_) {
     CAFFE_ENFORCE_GE(T.dim(), 2);
@@ -349,9 +354,14 @@ bool SoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
 
   // Scale by d_avg_loss / N
   if (total_weight > 0) {
+    if (average_by_batch_size_) {
+      avg_denominator = N;
+    } else {
+      avg_denominator = total_weight;
+    }
     math::Scale<float, float, CPUContext>(
         dX->numel(),
-        scale_ / total_weight * d_avg_loss.data<float>()[0],
+        scale_ / avg_denominator * d_avg_loss.data<float>()[0],
         dX->data<float>(),
         dX_data,
         &context_);

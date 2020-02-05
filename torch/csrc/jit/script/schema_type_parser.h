@@ -10,10 +10,9 @@ namespace jit {
 namespace script {
 
 using TypePtr = c10::TypePtr;
-using TypeAndAlias = std::pair<TypePtr, c10::optional<c10::AliasInfo>>;
 
 struct CAFFE2_API SchemaTypeParser {
-  TypeAndAlias parseBaseType();
+  TypePtr parseBaseType();
   c10::optional<c10::AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
   c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);

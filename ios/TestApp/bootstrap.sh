@@ -17,6 +17,17 @@ help () {
 }
 bootstrap() {
     echo "starting"
+    echo "detecting devices..."
+    if ! [ -x "$(command -v ios-deploy)" ]; then
+        echo 'Error: ios-deploy is not installed.'
+        exit 1
+    fi 
+    ios-deploy -c -t 1
+    if [ "$?" -ne "0" ]; then
+        echo 'Error: No device connected. Please connect your device via USB then re-run the script'
+        exit 1
+    fi
+    echo "Done."
     PROJ_ROOT=$(pwd)
     BENCHMARK_DIR="${PROJ_ROOT}/benchmark"
     XCODE_PROJ_PATH="./TestApp.xcodeproj"
@@ -59,12 +70,8 @@ bootstrap() {
                             -configuration Debug \
                             PROVISIONING_PROFILE_SPECIFIER=${PROFILE}
     #install TestApp
-    if ! [ -x "$(command -v ios-deploy)" ]; then
-        echo 'Error: ios-deploy is not installed.'
-        exit 1
-    fi 
-    echo "installing, make sure your phone is unlocked"
-    ios-deploy --bundle "${XCODE_BUILD}/Debug-iphoneos/${XCODE_TARGET}.app"
+    echo "installing..."
+    ios-deploy -r --bundle "${XCODE_BUILD}/Debug-iphoneos/${XCODE_TARGET}.app"
     echo "Done."
 }
 while [[ $# -gt 1 ]]
