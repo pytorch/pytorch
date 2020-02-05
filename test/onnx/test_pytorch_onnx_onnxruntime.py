@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
