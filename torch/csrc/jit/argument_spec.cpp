@@ -26,7 +26,7 @@ void ArgumentSpecCreator::scan(
   };
   // the simple vm that scans instructions_ has a limited stack depth,
   // this prevents going deeper than that.
-  if (depth >= DEPTH_LIMIT) {
+  if (depth >= ARG_SPEC_DEPTH_LIMIT) {
     instructions_.emplace_back(SKIP);
   }
   if (typ->isSubtypeOf(TensorType::get())) {
@@ -130,7 +130,7 @@ void ArgumentSpecCreator::dump() const {
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     const {
   ArgumentSpec spec(num_tensors_, num_optionals_);
-  const IValue* stack[DEPTH_LIMIT]; // The stack of IValue lists
+  const IValue* stack[ARG_SPEC_DEPTH_LIMIT]; // The stack of IValue lists
   // The stack gets initialized with the input list
   stack[0] = last(input, num_inputs_).begin();
   size_t stack_top = 0; // offset to the top of the stack
