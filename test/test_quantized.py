@@ -167,7 +167,7 @@ class TestQuantizedOps(TestCase):
                                        dtype=torch_type)
         qY_hat = op(qX, negative_slope=alpha)
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
-            message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+                         message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
