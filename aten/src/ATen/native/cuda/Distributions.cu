@@ -729,14 +729,21 @@ Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, G
 
   if (expandable) {
     auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(empty_output || output.sizes().equals(shape), "output size is not the same as broadcasted size of mean and std");
+    TORCH_CHECK(
+        empty_output || output.sizes().equals(shape), 
+        "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
     if (empty_output) {
       at::native::resize_(output, shape);
     }
   }
   else {
-    TORCH_CHECK(mean.numel() == std.numel(), "std and mean are not broadcastable and have different number of elements");
-    TORCH_CHECK(empty_output || output.sizes().equals(mean.sizes()), "std and mean are not broadcastable, output size is not the same as mean size");
+    TORCH_CHECK(
+        mean.numel() == std.numel(), 
+        "inconsistent tensor, std and mean are not broadcastable and have different number of elements, "
+        "expected mean ", mean.sizes(), " and std ", std.sizes(), " to have same number of elements)");
+    TORCH_CHECK(
+        empty_output || output.sizes().equals(mean.sizes()), 
+        "inconsistent tensor, std and mean are not broadcastable, output size (", output.sizes(), ") is not the same as mean size (", mean.sizes(), ")");
     TORCH_WARN_ONCE(
         "std and mean have the same number of elements, but are not broadcastable. This was previously a "
         "supported mode of operation, but is now deprecated and the support will be removed in a later release. "
