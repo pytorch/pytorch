@@ -76,6 +76,9 @@ class Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  #ifdef USE_DISTRIBUTED
+    void rebuildRRef();
+  #endif
   PickleOpCode readInstruction();
   PickleOpCode readOpCode() {
     return static_cast<PickleOpCode>(read<uint8_t>());

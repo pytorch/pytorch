@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#endif
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -128,7 +130,11 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-    pushRRef(ivalue);
+    #ifdef USE_DISTRIBUTED
+      pushRRef(ivalue);
+    #else
+      TORCH_INTERNAL_ASSERT(false, "RRef pickling is only supported with the distributed package");
+    #endif
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -149,9 +155,11 @@ void Pickler::pushDevice(const IValue& ivalue) {
 }
 
 void Pickler::pushRRef(const IValue& ivalue) {
+  // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
-  auto rref = c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
-  pushGlobal("torch", "rref");
+  auto rref =
+      c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
+  pushGlobal("torch.distributed.rpc", "rref");
   auto& ctx = distributed::rpc::RRefContext::getInstance();
   auto rrefForkData = ctx.prepareChildFork(rref);
   push<PickleOpCode>(PickleOpCode::MARK);

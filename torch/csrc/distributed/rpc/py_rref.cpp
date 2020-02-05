@@ -12,17 +12,6 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
-constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
-constexpr int PARENT_IDX = 5; // index of parent in the tuple
-constexpr int TYPE_IDX = 6; // index of parent in the tuple
-
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -39,19 +28,22 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   // add GIL as it is accessing a py::object
   pybind11::gil_scoped_acquire ag;
   TORCH_INTERNAL_ASSERT(
-      pyTuple.size() == RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain 6 numbers.");
-  worker_id_t ownerId = pyTuple[OWNER_IDX].cast<worker_id_t>();
+      pyTuple.size() == RRefForkData::RFD_TUPLE_SIZE,
+      "Pickled RRefForkData must contain ",
+      RRefForkData::RFD_TUPLE_SIZE,
+      " numbers.");
+  worker_id_t ownerId = pyTuple[RRefForkData::OWNER_IDX].cast<worker_id_t>();
   // const reference will extend the lifetime of the temporary variable
   const RRefId& rrefId = RRefId(
-      pyTuple[RREFID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[RREFID_ID_IDX].cast<local_id_t>());
+      pyTuple[RRefForkData::RREFID_ON_IDX].cast<worker_id_t>(),
+      pyTuple[RRefForkData::RREFID_ID_IDX].cast<local_id_t>());
   const RRefId& forkId = RRefId(
-      pyTuple[FORKID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[FORKID_ID_IDX].cast<local_id_t>());
+      pyTuple[RRefForkData::FORKID_ON_IDX].cast<worker_id_t>(),
+      pyTuple[RRefForkData::FORKID_ID_IDX].cast<local_id_t>());
 
-  worker_id_t parent = pyTuple[PARENT_IDX].cast<worker_id_t>();
-  const std::string& typeStr = pyTuple[TYPE_IDX].cast<std::string>();
+  worker_id_t parent = pyTuple[RRefForkData::PARENT_IDX].cast<worker_id_t>();
+  const std::string& typeStr =
+      pyTuple[RRefForkData::TYPE_IDX].cast<std::string>();
 
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }

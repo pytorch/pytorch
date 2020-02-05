@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#endif
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include "unpickler.h"
@@ -504,33 +506,12 @@ void Unpickler::readGlobal(
       });
       stack_.emplace_back(int64_t(globals_.size() - 1));
       return;
-  } else if (module_name == "torch" && class_name == "rref") {
-      globals_.emplace_back([this] {
-        auto args = stack_.back().toTuple()->elements();
-        stack_.pop_back();
-        auto ownerId = static_cast<int16_t>(args.at(0).toInt());
-        // const reference will extend the lifetime of the temporary variable
-        const auto& rrefId = distributed::rpc::RRefId(
-            static_cast<int16_t>(args.at(1).toInt()),
-            static_cast<int64_t>(args.at(2).toInt()));
-        const auto& forkId = distributed::rpc::RRefId(
-            static_cast<int16_t>(args.at(3).toInt()),
-            static_cast<int64_t>(args.at(4).toInt()));
-        auto parent = static_cast<int16_t>(args.at(5).toInt());
-        const auto& typeStr = static_cast<std::string>(args.at(6).toStringRef());
-        auto rrefForkData = distributed::rpc::RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
-        auto& ctx = distributed::rpc::RRefContext::getInstance();
-        c10::intrusive_ptr<distributed::rpc::RRef> rref;
-        // TODO get correct type
-        TypePtr rrefType = PyObjectType::get();
-    //        PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
-        rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
-        ctx.notifyOwnerAndParentOfFork(
-            rrefForkData.forkId_, rrefForkData.parent_, rref);
-        stack_.emplace_back(std::move(c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref)));
-      });
-      stack_.emplace_back(int64_t(globals_.size() - 1));
-      return;
+  } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
+      #ifdef USE_DISTRIBUTED
+        return rebuildRRef();
+      #else
+        TORCH_INTERNAL_ASSERT(false, "RRef unpickling is only supported with the distributed package");
+      #endif
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -629,6 +610,50 @@ void Unpickler::rebuildTensor(bool quantized) {
     result = autograd::make_variable(result, requires_grad);
     stack_.push_back(std::move(result));
   });
+}
+
+void Unpickler::rebuildRRef() {
+  globals_.emplace_back([this] {
+    // It is the same as how rref is unpickled in python,
+    // see PyRRef::unpickle
+    auto args = stack_.back().toTuple()->elements();
+    stack_.pop_back();
+    TORCH_INTERNAL_ASSERT(
+        args.size() == distributed::rpc::RRefForkData::RFD_TUPLE_SIZE,
+        "Pickled RRefForkData must contain ",
+        distributed::rpc::RRefForkData::RFD_TUPLE_SIZE,
+        " numbers.");
+    auto ownerId = static_cast<int16_t>(
+        args.at(distributed::rpc::RRefForkData::OWNER_IDX).toInt());
+    // const reference will extend the lifetime of the temporary variable
+    const auto& rrefId = distributed::rpc::RRefId(
+        static_cast<int16_t>(
+            args.at(distributed::rpc::RRefForkData::RREFID_ON_IDX).toInt()),
+        static_cast<int64_t>(
+            args.at(distributed::rpc::RRefForkData::RREFID_ID_IDX).toInt()));
+    const auto& forkId = distributed::rpc::RRefId(
+        static_cast<int16_t>(
+            args.at(distributed::rpc::RRefForkData::FORKID_ON_IDX).toInt()),
+        static_cast<int64_t>(
+            args.at(distributed::rpc::RRefForkData::FORKID_ID_IDX).toInt()));
+    auto parent = static_cast<int16_t>(
+        args.at(distributed::rpc::RRefForkData::PARENT_IDX).toInt());
+    const auto& typeStr = static_cast<std::string>(
+        args.at(distributed::rpc::RRefForkData::TYPE_IDX).toStringRef());
+    auto rrefForkData = distributed::rpc::RRefForkData(
+        ownerId, rrefId, forkId, parent, typeStr);
+    auto& ctx = distributed::rpc::RRefContext::getInstance();
+    c10::intrusive_ptr<distributed::rpc::RRef> rref;
+    // TODO get correct type by passing classResolver
+    TypePtr rrefType = PyObjectType::get();
+    rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
+    ctx.notifyOwnerAndParentOfFork(
+        rrefForkData.forkId_, rrefForkData.parent_, rref);
+    stack_.emplace_back(std::move(
+        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref)));
+  });
+  stack_.emplace_back(int64_t(globals_.size() - 1));
+  return;
 }
 
 void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
