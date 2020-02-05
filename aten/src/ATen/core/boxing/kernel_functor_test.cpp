@@ -560,7 +560,7 @@ TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTupleInput_with
   auto op = c10::Dispatcher::singleton().findSchema({"_test::dict_input", ""});
   ASSERT_TRUE(op.has_value());
 
-  std::tuple<string, int64_t, float> tup = {"foobar", 123, 420.1337};
+  std::tuple<string, int64_t, float> tup{"foobar", 123, 420.1337};
   auto outputs = callOp(*op, tup);
   EXPECT_EQ(1, outputs.size());
   EXPECT_EQ("foobar", outputs[0].toString()->string());
