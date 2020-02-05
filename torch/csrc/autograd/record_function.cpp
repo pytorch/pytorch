@@ -210,7 +210,7 @@ void RecordFunction::setThreadId() {
 RecordFunction::~RecordFunction() {
   try {
     end();
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
   }
 }
