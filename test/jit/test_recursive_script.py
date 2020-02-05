@@ -465,7 +465,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_attributes(self):
         @torch.jit.script
-        class Inner(object):
+        class Inner2(object):
             def __init__(self):
                 self.b = "a string"
 
@@ -473,16 +473,16 @@ class TestRecursiveScript(JitTestCase):
         class Foo(object):
             def __init__(self):
                 self.a = 4
-                self.inner = Inner()
+                self.inner = Inner2()
 
         @torch.jit.script
         class SFoo(object):
             def __init__(self):
                 self.a = 4
-                self.inner = Inner()
+                self.inner = Inner2()
 
             def __setstate__(self, obj):
-                # type: (Tuple[int, Inner]) -> None
+                # type: (Tuple[int, Inner2]) -> None
                 a, inner = obj
                 self.a = a
                 self.inner = inner
@@ -650,3 +650,19 @@ class TestRecursiveScript(JitTestCase):
                 return self.encoder(input)
 
         self.checkModule(ContainsLoaded(), (torch.rand(2, 3), ))
+
+    def test_optional_module(self):
+        class Dummy(nn.Module):
+            def __init__(self):
+                super(Dummy, self).__init__()
+                self.foo = nn.Linear(2, 2)
+
+            def forward(self, x):
+                if self.foo is not None:
+                    return self.foo(x)
+                return x
+
+        mod = Dummy()
+        self.checkModule(mod, (torch.rand(2, 2),))
+        mod.foo = None
+        self.checkModule(mod, (torch.rand(2, 2),))

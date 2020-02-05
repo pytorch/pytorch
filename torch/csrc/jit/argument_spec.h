@@ -157,6 +157,10 @@ struct ArgumentSpec {
   std::vector<bool> optional_presence;
 };
 
+namespace {
+static constexpr size_t ARG_SPEC_DEPTH_LIMIT = 128;
+}
+
 // ArgumentSpecCreator takes an initial graph and comes up with a set
 // of simple instructions to compute the ArgumentSpec given a set of
 // input tensors.
@@ -187,7 +191,6 @@ struct TORCH_API ArgumentSpecCreator {
   using WrittenSlots = std::unordered_set<std::string>;
 
  private:
-  static constexpr size_t DEPTH_LIMIT = 128;
   void scan(
       const TypePtr& typ,
       size_t depth,
