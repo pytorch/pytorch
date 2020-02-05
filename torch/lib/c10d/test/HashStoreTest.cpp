@@ -11,7 +11,7 @@
 void testHelper(std::string prefix = "") {
   // Basic set/get
   {
-    c10d::HashStore hashStore;
+    auto hashStore = std::make_shared<c10d::HashStore>();
     c10d::PrefixStore store(prefix, hashStore);
     c10d::test::set(store, "key0", "value0");
     c10d::test::set(store, "key1", "value1");
@@ -23,7 +23,7 @@ void testHelper(std::string prefix = "") {
 
   // get() waits up to timeout_.
   {
-    c10d::HashStore hashStore;
+    auto hashStore = std::make_shared<c10d::HashStore>();
     c10d::PrefixStore store(prefix, hashStore);
     std::thread th([&]() { c10d::test::set(store, "key0", "value0"); });
     c10d::test::check(store, "key0", "value0");
@@ -35,7 +35,7 @@ void testHelper(std::string prefix = "") {
   const auto numThreads = 4;
   const auto numIterations = 100;
   c10d::test::Semaphore sem1, sem2;
-  c10d::HashStore hashStore;
+  auto hashStore = std::make_shared<c10d::HashStore>();
   c10d::PrefixStore store(prefix, hashStore);
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::thread([&] {
