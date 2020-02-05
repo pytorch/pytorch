@@ -161,22 +161,27 @@ def _test_cpp_extensions_aot(executable, test_module, test_directory, options, u
             print(CPP_EXTENSIONS_ERROR)
             return 1
 
-    OLD_USE_NINJA = os.environ.get('USE_NINJA', '')
-    try:
-        os.environ['USE_NINJA'] = str(1 if use_ninja else 0)
-        cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
-        cmd = [sys.executable, 'setup.py', 'install', '--root', './install']
-        return_code = shell(cmd, cwd=cpp_extensions_test_dir)
+    # Wipe the build folder, if it exists already
+    cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, 'build')
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    shell_env = os.environ.copy()
+    shell_env['USE_NINJA'] = str(1 if use_ninja else 0)
+    cmd = [sys.executable, 'setup.py', 'install', '--root', './install']
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
+    if return_code != 0:
+        return return_code
+    if sys.platform != 'win32':
+        return_code = shell(cmd,
+                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'),
+                            env=shell_env)
         if return_code != 0:
             return return_code
-        if sys.platform != 'win32':
-            return_code = shell(cmd,
-                                cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
-            if return_code != 0:
-                return return_code
-    finally:
-        os.environ['USE_NINJA'] = OLD_USE_NINJA
 
+    # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
