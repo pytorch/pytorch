@@ -318,11 +318,11 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
   ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_THROWS_WITH(
       value.get<float>(),
-      "Attempted to cast Value to float, "
+      "Attempted to cast AnyValue to float, "
       "but its actual type is int");
   ASSERT_THROWS_WITH(
       value.get<long>(),
-      "Attempted to cast Value to long, "
+      "Attempted to cast AnyValue to long, "
       "but its actual type is int");
 }
 
