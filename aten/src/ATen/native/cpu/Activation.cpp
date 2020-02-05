@@ -212,7 +212,7 @@ void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_sca
         [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
           return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
         },
-        [negcoef_vec, negiptcoef_vec, poscoef_vec, one_vec, zero_vec](Vec a) -> Vec {
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
           auto cmp = (a > zero_vec);
           if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
             return a * poscoef_vec;
@@ -238,7 +238,7 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
         [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
           return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
         },
-        [negcoef_vec, negiptcoef_vec, poscoef_vec, zero_vec](Vec a, Vec b) -> Vec {
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
           auto cmp = (b > zero_vec);
           if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
             return a * poscoef_vec;
