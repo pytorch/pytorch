@@ -135,20 +135,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_clone
-  cname: newClone
-  return: THTensor*
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_index_select
   cuda_bool: True
   cname: indexSelect
@@ -310,14 +296,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmin
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_min
@@ -347,14 +325,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmax
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_max
