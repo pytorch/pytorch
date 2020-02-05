@@ -521,7 +521,7 @@ if(USE_FBGEMM)
       "A compiler with AVX512 support is required for FBGEMM. "
       "Not compiling with FBGEMM. "
       "Turn this warning off by USE_FBGEMM=OFF.")
-    set(USE_FBGEMM OFF)
+    set(USE_FBGEMM ON)
   endif()
   if(MSVC)
     message(WARNING
