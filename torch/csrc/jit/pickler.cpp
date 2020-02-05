@@ -154,6 +154,7 @@ void Pickler::pushDevice(const IValue& ivalue) {
   }
 }
 
+#ifdef USE_DISTRIBUTED
 void Pickler::pushRRef(const IValue& ivalue) {
   // It is the same as how rref is pickled in python, see PyRRef::pickle
   auto rrefInterface = ivalue.toRRef();
@@ -173,6 +174,7 @@ void Pickler::pushRRef(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
+#endif
 
 void Pickler::pushIValue(const IValue& ivalue) {
   bool shouldMemoizeByPointer =

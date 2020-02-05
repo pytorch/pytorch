@@ -90,6 +90,11 @@ def my_rref_add(rref_t1, t2):
 def my_script_add(t1, t2):
     return torch.add(t1, t2)
 
+@torch.jit.script
+def my_script_ref_add(ref_t1, t2):
+    # type: (RRef[Tensor], Tensor) -> Tensor
+    t1 = ref_t1.to_here()
+    return torch.add(t1, t2)
 
 def my_nested_rref_add(dst, rref_t1, t2):
     return rpc.rpc_sync(dst, my_rref_add, args=(rref_t1, t2))
@@ -1261,12 +1266,43 @@ class DistAutogradTest(RpcAgentTestFixture):
             ExecMode.REMOTE,
         ]:
             with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                loss = ret.sum()
+                forward_ret = self._exec_func(exec_mode, my_script_add, t1, t2)
+                loss = forward_ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
                 local_grads = ret if ret else local_grads
+
+    @dist_init
+    def test_backward_script_call_with_ref_arg(self):
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = True
+        # TODO, need to create tensor with require_grad here, so that
+        # we can verify grad of this tensor, however it seems that torchscript
+        # function does not allow call torch.ones(sizes, ..) with require_grad
+        # arg
+        @torch.jit.script
+        def create_ref_tensor(t) :
+            # type: (Tensor) -> Tensor
+            return t
+
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        t1 = torch.ones((3, 3), requires_grad=True)
+        t2 = torch.ones((3, 3), requires_grad=True)
+        local_ret = torch.add(t1, t2)
+        local_ret.sum().backward()
+
+        ref_t1 = rpc.remote(
+            "worker{}".format(dst_rank),
+            create_ref_tensor,
+            args=(t1, ))
+        with dist_autograd.context() as context_id:
+            ret = rpc.rpc_sync(
+                "worker{}".format(dst_rank), my_script_ref_add, args=(ref_t1, t2)
+            )
+            dist_autograd.backward([ret.sum()])
+
 
     @dist_init
     def test_backward_remote_script_module(self):

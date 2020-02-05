@@ -612,6 +612,7 @@ void Unpickler::rebuildTensor(bool quantized) {
   });
 }
 
+#ifdef USE_DISTRIBUTED
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
     // It is the same as how rref is unpickled in python,
@@ -655,6 +656,7 @@ void Unpickler::rebuildRRef() {
   stack_.emplace_back(int64_t(globals_.size() - 1));
   return;
 }
+#endif
 
 void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
   // First, read any partial from buffer (may be 0).
