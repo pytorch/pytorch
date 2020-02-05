@@ -210,7 +210,7 @@ void RecordFunction::setThreadId() {
 RecordFunction::~RecordFunction() {
   try {
     end();
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     LOG(INFO) << "Exception in RecordFunction::end(): " << e.what();
   }
 }
@@ -236,6 +236,25 @@ void RecordFunction::end() {
     thread_local_func_ = parent_;
     initialized_ = false;
   }
+}
+
+void RecordFunction::runEndCallbacks() {
+  if (initialized_) {
+    for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
+      if (!manager().is_callback_sampled[idx] || run_sampled_) {
+        manager().end_callbacks[idx](*this);
+      }
+    }
+    initialized_ = false;
+  }
+}
+
+void RecordFunction::resetThreadLocalFunc() {
+  TORCH_INTERNAL_ASSERT(
+      initialized_, "Current RecordFunction is not initialized.")
+  TORCH_INTERNAL_ASSERT(
+      thread_local_func_ == this, name_, ": must be top of stack.");
+  thread_local_func_ = parent_;
 }
 
 RecordFunction* RecordFunction::current() {

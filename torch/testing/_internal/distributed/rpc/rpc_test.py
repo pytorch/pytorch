@@ -646,23 +646,25 @@ class RpcTest(RpcAgentTestFixture):
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
-                if rpc_exec_mode == RPCExecMode.SYNC:
-                    rpc.rpc_sync("worker{}".format(dst), func, args=args)
-                elif rpc_exec_mode == RPCExecMode.ASYNC:
-                    fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
-                    fut.wait()
-                else:
-                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
-                    rref = rpc.remote("worker{}".format(dst), func, args=args)
-                    rref.to_here()
-                    # We need to wait for the instance to be created on
-                    # the owner, and get back a positive confirmation.
-                    # Calling to_here does not ensure that we have finished
-                    # processing the Owner's confirmation of this RRef. To do
-                    # this, we wait until the current RRef context doesn't have
-                    # any pending users, which indicates that the confirmation
-                    # was processed on this worker.
-                    wait_until_pending_users_flushed()
+                # Nested scopes in the autograd profiler previously had issues with RPC, so use a nested scope here to ensure the issue is resolved.
+                with torch.autograd.profiler.record_function("foo"):
+                    if rpc_exec_mode == RPCExecMode.SYNC:
+                        rpc.rpc_sync("worker{}".format(dst), func, args=args)
+                    elif rpc_exec_mode == RPCExecMode.ASYNC:
+                        fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
+                        fut.wait()
+                    else:
+                        self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                        rref = rpc.remote("worker{}".format(dst), func, args=args)
+                        rref.to_here()
+                        # We need to wait for the instance to be created on
+                        # the owner, and get back a positive confirmation.
+                        # Calling to_here does not ensure that we have finished
+                        # processing the Owner's confirmation of this RRef. To do
+                        # this, we wait until the current RRef context doesn't have
+                        # any pending users, which indicates that the confirmation
+                        # was processed on this worker.
+                        wait_until_pending_users_flushed()
 
             events = prof.function_events
             rpc_event = [

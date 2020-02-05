@@ -128,6 +128,9 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     // save the local threadId so that end() callbacks can be correctly invoked
     // from a different thread.
     rf->setThreadId();
+    // This must be set synchronously in the same thread to avoid issues with
+    // nested scopes.
+    rf->resetThreadLocalFunc();
     // Add a callback to
     // the future that captures the RecordFunction to persist it for the
     // lifetime of the future. When the future is completed, this will run the
@@ -137,7 +140,9 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
         [rf](
             const Message& /* unused */,
             const c10::optional<utils::FutureError>& /* unused */) {
-          rf->end();
+          // Only run end callbacks here, don't call end(), since that will
+          // reset thread local pointers in RecordFunction incorrectly.
+          rf->runEndCallbacks();
         });
   }
   return fut;

@@ -107,6 +107,15 @@ struct TORCH_API RecordFunction {
 
   void end();
 
+  // runEndCallbacks invokes all pushed end callbacks with this RecordFunction.
+  void runEndCallbacks();
+
+  // resetThreadLocal func resets the thread_local pointer to the current
+  // RecordFunction to be the parent RecordFunction. This is used to manage
+  // nested scopes such as those that are created by the
+  // profiler.record_function context manager.
+  void resetThreadLocalFunc();
+
   // Saves the thread_id that this RecordFunction was created with. This is
   // needed so that we can access Events created by the original thread in a
   // different thread, since they are thread-local. This should be used to call
