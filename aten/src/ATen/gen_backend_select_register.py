@@ -21,20 +21,28 @@ Tensor ${function_name}(${method_formals}) {
 }
 """)
 
+def needs_backend_select(declaration_option):
+    # We register an op under the BackendSelect dispatch key
+    # if a TensorOptions argument has been gathered from its declared args
+    # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
+    # See TypeDefault.cpp
+    if '_like' in declaration_option['name'] or 'new_' in declaration_option['name']:
+        return False
+
+    return any("dynamic_type" in a and a["dynamic_type"] == "TensorOptions" for a in declaration_option["arguments"])
+
 def register_backend_select_methods(declarations, template_path, file_manager):
     backend_select_method_definitions = []
     backend_select_function_registrations = []
 
     for decl in declarations:
         for option in decl["options"]:
-            if '_like' in option['name'] or 'new_' in option['name']:
-                continue
+            if needs_backend_select(option):
 
-            name = option['name']
-            if 'overload_name' in option and option['overload_name'] != '':
-                name = "{0}_{1}".format(name, option['overload_name'])
+                name = option['name']
+                if option.get('overload_name', '') != '':
+                    name = "{0}_{1}".format(name, option['overload_name'])
 
-            if any("dynamic_type" in a and a["dynamic_type"] == "TensorOptions" for a in option["arguments"]):
                 func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
                                                             function_name=name)
 
