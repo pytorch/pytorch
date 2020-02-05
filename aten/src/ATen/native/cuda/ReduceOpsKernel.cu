@@ -39,9 +39,9 @@ void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool tak
   gpu_reduce_kernel<at::Half, at::Half, 2>(iter, WelfordOps<at::Half, float, int32_t, float, thrust::tuple<at::Half, at::Half>> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
 }
 
-template <typename scalar_t, typename acc_t=scalar_t>
+template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void prod_kernel_impl(TensorIterator& iter) {
-  gpu_reduce_kernel<scalar_t, scalar_t>(iter, func_wrapper<scalar_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+  gpu_reduce_kernel<scalar_t, out_t>(iter, func_wrapper<out_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
     return a * b;
   }), 1);
 }
@@ -99,6 +99,9 @@ static void sum_kernel_cuda(TensorIterator& iter) {
 static void prod_kernel_cuda(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
     return prod_kernel_impl<at::Half, float>(iter);
+  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
+    // type promotion that does cast and reduction in a single kernel
+    return prod_kernel_impl<at::Half, float, float>(iter);
   }
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "prod_cuda", [&]() {
     prod_kernel_impl<scalar_t>(iter);

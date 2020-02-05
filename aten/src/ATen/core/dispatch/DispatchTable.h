@@ -33,7 +33,7 @@ public:
 
   enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
   C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
-    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::UndefinedTensorId);
+    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
     SetKernelResult result;;
     if (slot.isValid()) {
@@ -96,6 +96,7 @@ class DispatchTable final {
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
       TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
     }
@@ -108,6 +109,7 @@ class DispatchTable final {
    */
   void removeKernelIfExists(DispatchKey dispatchKey) {
     kernels_.removeKernelIfExists(dispatchKey);
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
   }
 
   /**

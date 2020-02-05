@@ -739,7 +739,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value* tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     // Note that we check the contents of the grad_map instead of
-    // tmp->requires_grad(), becuase it's actually a more faithful source.
+    // tmp->requires_grad(), because it's actually a more faithful source.
     // tmp->requires_grad() is really an overapproximation (i.e. it can have
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real
@@ -792,24 +792,6 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
-
-  // if we actually profile we can rely on profiling information
-  // so we don't have to mark every gradient as possibly undefined
-  if (!getProfilingMode() && getExecutorMode()) {
-    for (size_t i = 0; i < grad_desc.df_input_vjps.size(); i++) {
-      auto tt = grad_desc.df->block()->inputs().at(i);
-      if (auto ttt = tt->type()->cast<TensorType>()) {
-        tt->setType(ttt->withPossiblyUndefined());
-      } else if (auto lt = tt->type()->cast<ListType>()) {
-        auto undef_type =
-            lt->getElementType()->expect<TensorType>()->withPossiblyUndefined();
-        tt->setType(ListType::create(undef_type));
-      } else {
-        // unexpected type
-        TORCH_INTERNAL_ASSERT(false);
-      }
-    }
-  }
 
   GRAPH_DUMP(" forward graph: ", &graph);
   GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));

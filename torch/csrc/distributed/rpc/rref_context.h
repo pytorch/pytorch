@@ -12,11 +12,24 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+namespace callback {
+// It's the callback for RemoteCall.
+void TORCH_API confirmPendingUser(
+    const rpc::Message& message,
+    const c10::optional<utils::FutureError>& futErr);
+} // namespace callback
+
 // Manages RRef lifetime and keeps track of RRef forks.
-class RRefContext {
+class TORCH_API RRefContext {
  public:
   static RRefContext& getInstance();
-  static void destroyInstance(bool ignoreRRefLeak = true);
+  // NB: This method must be called before destructing RRefContext singleton.
+  // Similar to delForkOfOwner, this method returns a vector of OwnerRRefs that
+  // hold py::object. The call-site is also responsible for resetting those
+  // shared_ptr objects with a GIL. See comments at delForkOfOwner() for more
+  // details.
+  static std::vector<std::shared_ptr<RRef>> destroyInstance(
+      bool ignoreRRefLeak = true);
 
   static void handleException(const c10::optional<utils::FutureError>& futErr);
 
@@ -47,26 +60,27 @@ class RRefContext {
   }
 
   // create a ``UserRRef`` owned by the worker ``ownerId``
-  template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(worker_id_t ownerId);
+  std::shared_ptr<UserRRef> createUserRRef(
+      worker_id_t ownerId,
+      const TypePtr& type);
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
-  // method.
-  template <typename T>
-  std::shared_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd);
+  // method, we pass type here to validate or help the rref creation.
+  std::shared_ptr<RRef> getOrCreateRRef(
+      const RRefForkData& rfd,
+      const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOrCreateOwnerRRef(const RRefId& rrefId);
+  std::shared_ptr<OwnerRRef> getOrCreateOwnerRRef(
+      const RRefId& rrefId,
+      const TypePtr& type);
 
-  // Create an empty owner rref of type T.
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> createOwnerRRef();
+  // Create an empty owner rref of type.
+  std::shared_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
-  template <typename T>
-  std::shared_ptr<OwnerRRef<T>> getOwnerRRef(const RRefId& rrefId);
+  std::shared_ptr<OwnerRRef> getOwnerRRef(const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -78,15 +92,23 @@ class RRefContext {
   // and this could happen before the self remote call finishes. To prevent
   // that, this API adds the RRefId as a ForkId, which will then delete the
   // ForkId when the self remote is done.
-  template <typename T>
-  void addSelfAsFork(std::shared_ptr<OwnerRRef<T>>& rref);
+  void addSelfAsFork(std::shared_ptr<OwnerRRef>& rref);
 
   // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
   // IValue or py::object. For the later, this method will acquire GIL.
-  void delForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
+  // NB: If this fork deletion triggered deleting OwnerRRef, this method will
+  // return a shared_ptr to the OwnerRRef, which is likely to be the last
+  // shared_ptr instance for it. Therefore, deleting this shared_ptr<OwnerRRef>
+  // will also trigger deleting the object it points to. If OwnerRRef holds a
+  // py::object, deleting it require GIL. The call site should guarded it with
+  // a GIL and reset the shared_ptr. The GIL-guarded deletion is intentionally
+  // left out of this function to avoid creating dependency on pybind.
+  std::shared_ptr<RRef> delForkOfOwner(
+      const RRefId& rrefId,
+      const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
   RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
@@ -124,11 +146,11 @@ class RRefContext {
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
-  template <typename T>
-  std::shared_ptr<UserRRef<T>> createUserRRef(
+  std::shared_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
-      const ForkId& forkId);
+      const ForkId& forkId,
+      const TypePtr& type);
 
   void finishForkRequest(const ForkId& forkId, worker_id_t parent);
 
@@ -164,7 +186,7 @@ class RRefContext {
 
   // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
-  // following two conditions is ture:
+  // following two conditions is true:
   //
   // (1) A UserRRef has not been accepted by owner yet.
   //

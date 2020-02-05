@@ -28,8 +28,9 @@ DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
 DistEngine& DistEngine::getInstance() {
-  static DistEngine engine;
-  return engine;
+  // Leaky singleton to avoid module destructor race.
+  static DistEngine* engine = new DistEngine();
+  return *engine;
 }
 
 void DistEngine::validateRootsAndRetrieveEdges(
@@ -307,7 +308,7 @@ void DistEngine::execute(const variable_list& roots) {
   // functions.
   {
     std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
-    // Context should not have been intialized already.
+    // Context should not have been initialized already.
     TORCH_INTERNAL_ASSERT(
         initializedContextIds_.find(autogradContext->contextId()) ==
         initializedContextIds_.end());

@@ -317,7 +317,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -325,7 +325,8 @@ def embedding_bag(g,
                   scale_grad_by_freq,
                   mode,
                   sparse,
-                  per_sample_weights):
+                  per_sample_weights,
+                  include_last_offset):
     if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
@@ -337,7 +338,8 @@ def embedding_bag(g,
                 outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
-                sparse_i=sparse)
+                sparse_i=sparse,
+                include_last_offset_i=include_last_offset)
 
 
 def size(g, self, dim):
@@ -793,6 +795,12 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
+
+@parse_args('v')
+def bitwise_not(g, inp):
+    if inp.type().scalarType() != 'Bool':
+        return _unimplemented("bitwise_not", "non-bool tensor")
+    return g.op("Not", inp)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1982,7 +1990,9 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and (index.type().scalarType() == "Byte" or index.type().scalarType() == "Bool"):
+            if sym_help._export_onnx_opset_version < 9:
+                raise RuntimeError("Exporting masked indices are only supported after ONNX opset 9.")
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -2200,3 +2210,6 @@ def dim(g, self):
     # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
     shape = g.op('Shape', self)
     return g.op('Size', shape)
+
+def __getitem_(g, self, i):
+    return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
