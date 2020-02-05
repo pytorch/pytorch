@@ -128,7 +128,8 @@ std::string getNcclAbortedCommStoreKey(const std::string ncclIdStr) {
 
 } // namespace
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 100;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
+constexpr int64_t kWaitForAbortCommStoreKey = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
 
@@ -340,6 +341,15 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
             // waiting for the operation to complete.
             for (const auto& ncclComm : ncclComms) {
               ncclComm->ncclCommAbort();
+              // Note that we don't remove the aborted communicators from the
+              // cache. The reason is that if we do remove the communicator
+              // from the cache, it is possible that a new collective operation
+              // calls `ncclCommInitRank` to create a new communicator whereas
+              // other ranks might have failed/timed out and didn't enter
+              // `ncclCommInitRank`. As a result, when there is a failure on
+              // a communicator the application receives an exception and its
+              // their responsibility to destroy the process group and recreate
+              // it to recover from errors.
               abortedCommIds.emplace(
                   buildNcclUniqueIdStr(ncclComm->getNcclId()));
             }
@@ -373,7 +383,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
           try {
             store_->wait(
                 {storeKey},
-                std::chrono::milliseconds(kWatchdogThreadSleepMillis));
+                std::chrono::milliseconds(kWaitForAbortCommStoreKey));
             LOG(INFO) << "Found key in store: " << storeKey
                       << ", aborting appropriate communicators";
 

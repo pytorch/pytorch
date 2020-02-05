@@ -3217,8 +3217,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             time.sleep(2 * self.op_timeout_sec)
 
             # Now verify communicators on this rank have been aborted by the watchdog thread.
-            with self.assertRaisesRegex(RuntimeError, "NCCL communicator was aborted"):
-                process_group.allreduce(torch.rand(10).cuda(self.rank))
+            self._wait_for_comm_abort(process_group)
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
