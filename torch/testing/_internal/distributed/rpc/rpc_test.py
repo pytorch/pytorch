@@ -646,7 +646,9 @@ class RpcTest(RpcAgentTestFixture):
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
-                # Nested scopes in the autograd profiler previously had issues with RPC, so use a nested scope here to ensure the issue is resolved.
+                # Nested scopes in the autograd profiler previously had issues
+                # with RPC, so use a nested scope here to ensure the issue is
+                # resolved.
                 with torch.autograd.profiler.record_function("foo"):
                     if rpc_exec_mode == RPCExecMode.SYNC:
                         rpc.rpc_sync("worker{}".format(dst), func, args=args)
