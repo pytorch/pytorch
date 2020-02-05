@@ -123,7 +123,6 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  auto fut = agent.send(dst, std::move(msg));
   if (rf != nullptr) {
     // save the local threadId so that end() callbacks can be correctly invoked
     // from a different thread.
@@ -131,11 +130,13 @@ std::shared_ptr<FutureMessage> sendMessageWithAutograd(
     // This must be set synchronously in the same thread to avoid issues with
     // nested scopes.
     rf->resetThreadLocalFunc();
-    // Add a callback to
-    // the future that captures the RecordFunction to persist it for the
-    // lifetime of the future. When the future is completed, this will run the
-    // end() callbacks associated with the RecordFunction, so that async RPCs
-    // can be profiled correctly.
+  }
+  auto fut = agent.send(dst, std::move(msg));
+  if (rf != nullptr) {
+    // Add a callback to the future that captures the RecordFunction to persist
+    // it for the lifetime of the future. When the future is completed, this
+    // will run the end() callbacks associated with the RecordFunction, so that
+    // async RPCs can be profiled correctly.
     fut->addCallback(
         [rf](
             const Message& /* unused */,
