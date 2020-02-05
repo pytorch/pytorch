@@ -37,25 +37,21 @@ const Statement* BaseMutator::mutate(const Add* const add){
 }
 
 void BaseMutator::mutate(Fusion* fusion){
-  //TODO: Mutate inputs and outputs
-//   if(fusion.inputs().size()>0)
-//        fusion.inputs();
-//   if(fusion.outputs().size()>0)
-//     fusion.outputs();
   std::vector<const Expr*> new_exprs;
   std::vector<const Expr*> orig_exprs = fusion->exprs();
-  std::cout<<"Mutating fusion with "<<orig_exprs.size()<<" exprs"<<std::endl;
+
   for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
-      std::cout<<i<<std::endl;
       const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);
       assert(new_stmt->isExpr());
       new_exprs.push_back(static_cast<const Expr*>(new_stmt));  
   }
+
   for(std::vector<const Expr*>::size_type i = 0; i < fusion->exprs().size(); i++){
     if(orig_exprs[i] != new_exprs[i]){
-        fusion->remove_expr(orig_exprs[i]);
+        fusion->removeExpr(orig_exprs[i]);
     }
-  }  
+  }
+
 }
 
 }}} // torch::jit::fuser

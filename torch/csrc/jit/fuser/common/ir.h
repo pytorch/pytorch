@@ -139,9 +139,12 @@ public:
     static_assert(((int)ValType::Float) == 1); //Depend on ordering to know if Val is a scalar.
     return type() >= ValType::Float;
   }
-  
+
+  const Expr* getOrigin(){return origin_;}
+
 protected:
   const ValType type_;
+  Expr *volatile origin_ = nullptr;
 };
 
 /*
@@ -153,7 +156,7 @@ struct TORCH_API IRInputOutput {
   virtual ~IRInputOutput() = 0;
 
   const std::deque<const Val*>& inputs() const noexcept { return inputs_; }
-  const std::deque<const Val*>& outputs() const noexcept { return outputs_; }
+  const std::deque<const Val*>& outputs() const noexcept{ return outputs_; }
 
   const Val* getInput(const std::deque<const Val*>::size_type idx) const {
     return inputs_[idx];
@@ -170,11 +173,36 @@ struct TORCH_API IRInputOutput {
     outputs_.push_back(output);
   }
 
+  bool hasInput(const Val* input) const {
+    for(auto val : inputs_)
+      if(val == input)
+        return true;
+    return false;
+  }
+
+  bool hasOutput(const Val* output) const {
+    for(auto val : outputs_)
+      if(val == output)
+        return true;
+    return false;
+  }
+
   void addInputAt(const std::deque<const Val*>::size_type pos, const Val* input) {
     inputs_.insert(inputs_.begin() + pos, input);
   }
-  void addOutputAt(const std::deque<const Val*>::size_type pos, const Val* output) {
+  void addOutputAt(const std::deque<const Val*>::size_type pos, Val* output) {
     outputs_.insert(outputs_.begin() + pos, output);
+  }
+
+  void removeOutput(const Val* val){
+    auto it = outputs_.begin();
+    for(; it != outputs_.end(); ++it){
+      if((*it) == val)
+        break;
+    }
+    assert(it!=outputs_.end());
+    outputs_.erase(it);    
+      
   }
 
   std::deque<const Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
@@ -264,19 +292,18 @@ public:
   Expr() = delete;
   Expr(const ExprType _type);
 
+  Expr(const Expr& other) = delete;
+  Expr& operator=(const Expr& other) = delete;
+
+  Expr(Expr&& other) = delete;
+  Expr& operator=(Expr&& other) = delete;
+
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
   ExprType type() const noexcept { return type_; }
 
-  // std::vector<Region*>& regions() noexcept { return regions_; }
-  // const std::vector<Region*>& regions() const noexcept { return regions_; }
-
-  // void addRegion(Region* region);
 
 private:
   ExprType type_;
-  // std::vector<Region*> regions_;
-
-  // void register_callback(Statement* stmt) override;
 };
 
 // TODO: comment
@@ -290,9 +317,9 @@ struct TORCH_API Add : public Expr {
   , out_{_out}
   , lhs_{_lhs}
   , rhs_{_rhs} {
-    // addOutput(_out);
-    // addInput(_lhs);
-    // addInput(_rhs);
+    addOutput(_out);
+    addInput(_lhs);
+    addInput(_rhs);
   }
 
   Add(const Add& other) = delete;

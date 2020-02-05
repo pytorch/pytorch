@@ -9,6 +9,7 @@
 #include <vector>
 #include <stack>
 #include <iostream>
+#include <set>
 
 namespace torch {
 namespace jit {
@@ -98,14 +99,29 @@ struct TORCH_API Fusion : public IRInputOutput{
     }
   };
 
-  //Probably this should be implicit in register Expr
-  //i.e. if an expr is registered with an output
-  //we should check if it's an output of any other expr.
-  //If it is, we should delete that expr.
-  void remove_expr(const Expr* expr){
+  /*
+   * Break dependency chains associated with Expr, remove references to expr
+   * delete expr.
+   */
+  void removeExpr(const Expr* expr){
     if(!inFusion(expr))
       throw std::runtime_error("Cannot remove expr as it is not registered with this fusion.");
+
+    for(auto out : expr->outputs())
+      if(origin_.find(out) != origin_.end())
+        if(origin_.find(out)->second == expr)
+          origin_.erase(out);
+
+    for(auto inp : expr->inputs()){
+      if(uses_.find(inp) != uses_.end()){
+        if(uses_.find(inp)->second.find(expr) != uses_.find(inp)->second.end()){
+          uses_.find(inp)->second.erase(expr);
+        }
+      }
+    }
+
     expr_map_.erase(expr);
+
     delete expr;
   }
 
@@ -135,7 +151,7 @@ struct TORCH_API Fusion : public IRInputOutput{
   }
 
   //TODO: Lets topologically sort these.
-  std::vector<const Expr*> exprs() const {
+  std::vector<const Expr*> exprs(bool from_outputs_only=false, bool breadth_first=false) const {
     std::vector<const Expr*> exprs;
     for(const auto it : expr_map_)
       exprs.push_back(it.first);
@@ -157,6 +173,11 @@ struct TORCH_API Fusion : public IRInputOutput{
     return val->name();
   }
 
+  /*
+   * When we register an expression, we want to update the dependency tracking
+   * of Vals. We add expr to our general expr_map_, we add use tracking for inputs
+   * and origin tracking for outputs.
+   */ 
   StmtNameType registerExpr(const Expr* expr){
     if (expr->fusion()) {
       TORCH_CHECK(inFusion(expr));
@@ -167,10 +188,19 @@ struct TORCH_API Fusion : public IRInputOutput{
 
     for (const Val* input : expr->inputs()) {
       registerVal(input);
+      if(uses_.find(input) != uses_.end()){
+        uses_[input] = {expr};
+      }else{
+        uses_.find(input)->second.emplace(expr);
+      }
     }
 
     for (const Val* output : expr->outputs()) {
       registerVal(output);
+      if(origin_.find(output) != origin_.end()){
+        origin_.erase(origin_.find(output));
+      }
+      origin_[output] = expr;
     }
 
     return expr->name();
@@ -190,6 +220,10 @@ struct TORCH_API Fusion : public IRInputOutput{
     return UNINITIALIZED_STMTNAMETYPE;
   }
 
+  bool used(const Val* val){
+    return (uses_.find(val) != uses_.end()) && ( uses_.find(val)->second.size() > 0);
+  }
+
 private:
   std::unordered_map<const Val*, StmtNameType> val_map_;
   std::unordered_map<const Expr*, StmtNameType> expr_map_;
@@ -199,8 +233,13 @@ private:
 
   StmtNameType getValName() { return val_name_counter_++; }
   StmtNameType getExprName() { return expr_name_counter_++; }
+
+  //Dependency tracking for Vals. Where did it come from? Where is it used?
+  std::unordered_map<const Val*, const Expr*> origin_;
+  std::unordered_map<const Val*, std::set<const Expr*> > uses_;
 };
 
+  ///Convenience methods to be able to print fusions and vals.
   TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& fusion);
   TORCH_API std::ostream& operator<<(std::ostream& os, const std::deque<const Val*>& vals);
 
