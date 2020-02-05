@@ -33,8 +33,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
+      - THTensor* self
       - THByteTensor* mask
       - real value
 ]]
@@ -49,8 +48,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
+      - THTensor* self
       - THBoolTensor* mask
       - real value
 ]]
@@ -64,8 +62,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
     - THTensor* source
 ]]
@@ -79,8 +76,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
     - THTensor* source
 ]]
@@ -296,14 +292,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmin
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_min
@@ -333,14 +321,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmax
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_max
