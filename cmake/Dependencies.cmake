@@ -472,7 +472,7 @@ if(BUILD_TEST)
   # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
   # don't bleed into it. This is because libraries installed into the root conda
   # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
-  # gtest installed in conda, the third_party/googletest/**.cc source files
+#gtest installed in conda, the third_party / googletest/**.cc source files
   # would try to include headers from /opt/conda/include/gtest/**.h instead of
   # its own. Once we have proper target-based include directories,
   # this shouldn't be necessary anymore.
@@ -524,10 +524,7 @@ if(USE_FBGEMM)
     set(USE_FBGEMM OFF)
   endif()
   if(MSVC)
-    message(WARNING
-      "FBGEMM is currently not supported on windows with MSVC. "
-      "Not compiling with FBGEMM. "
-      "Turn this warning off by USE_FBGEMM=OFF.")
+    message(STATUS "FBGEMM has added the support on Windows with MSVC. ")
     set(USE_FBGEMM ON)
   endif()
   if(USE_FBGEMM AND NOT TARGET fbgemm)
