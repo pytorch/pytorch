@@ -2962,7 +2962,6 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
-
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 

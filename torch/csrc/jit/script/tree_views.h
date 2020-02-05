@@ -903,8 +903,7 @@ struct SliceExpr : public Expr {
   }
   Expr stepOr(int64_t alternative) const {
     const auto stepOption = step();
-    auto ret = stepOption.present() ? stepOption.get() : createInt(alternative);
-    return ret;
+    return stepOption.present() ? stepOption.get() : createInt(alternative);
   }
   static SliceExpr create(
       const SourceRange& range,
