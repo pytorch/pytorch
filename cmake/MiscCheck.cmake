@@ -173,6 +173,7 @@ else()
   # linux_conda_3.7_cu100_build
   set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
 endif()
+set(CMAKE_REQUIRED_QUIET OFF)
 CHECK_CXX_SOURCE_COMPILES(
     "#if defined(_MSC_VER)
      #include <intrin.h>
@@ -198,6 +199,8 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
   # Also see CMakeLists.txt under caffe2/perfkernels.
   set(CAFFE2_PERF_WITH_AVX512 1)
+else()
+  message(FATAL_ERROR "AVX512 not enabled")
 endif()
 cmake_pop_check_state()
 
