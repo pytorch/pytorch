@@ -160,10 +160,6 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
                          self.calib_data)
         checkQuantized(model)
 
-        loaded = torch.jit.load('/home/jamesreed/nested_quantized.zip')
-        loaded.dump(False, False, False)
-
-
     def test_nested2(self):
         model = AnnotatedSubNestedModel()
         model = prepare(model)
