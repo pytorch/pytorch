@@ -59,7 +59,7 @@ bool RemoveExceptionBranches(Block* block) {
           valid_node->moveAfter(cur);
           cur = valid_node;
         }
-        for (size_t i = 0; i <  node->blocks().size(); ++i) {
+        while(!node->blocks().empty()) {
           node->eraseBlock(0);
         }
         node->replaceAllUsesWith(cur);
