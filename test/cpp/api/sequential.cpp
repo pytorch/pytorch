@@ -440,7 +440,7 @@ TEST_F(SequentialTest, PrettyPrintSequential) {
 TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   {
     Sequential sequential(Identity(), ConvTranspose1d(ConvTranspose1dOptions(3, 2, 3).stride(1).bias(false)));
-    std::dynamic_pointer_cast<ConvTranspose1dImpl>(sequential[0])->weight.set_data(torch::arange(18.).reshape({3, 2, 3}));
+    std::dynamic_pointer_cast<ConvTranspose1dImpl>(sequential[1])->weight.set_data(torch::arange(18.).reshape({3, 2, 3}));
     auto x = torch::arange(30.).reshape({2, 3, 5});
     auto y = sequential->forward(x);
     auto expected = torch::tensor({{{ 150.,  333.,  552.,  615.,  678.,  501.,  276.},
@@ -451,7 +451,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   }
   {
     Sequential sequential(Identity(), ConvTranspose2d(ConvTranspose2dOptions(3, 2, 3).stride(1).bias(false)));
-    std::dynamic_pointer_cast<ConvTranspose2dImpl>(sequential[0])->weight.set_data(torch::arange(54.).reshape({3, 2, 3, 3}));
+    std::dynamic_pointer_cast<ConvTranspose2dImpl>(sequential[1])->weight.set_data(torch::arange(54.).reshape({3, 2, 3, 3}));
     auto x = torch::arange(75.).reshape({1, 3, 5, 5});
     auto y = sequential->forward(x);
     auto expected = torch::tensor({{{{ 2250.,  4629.,  7140.,  7311.,  7482.,  5133.,  2640.},
@@ -472,7 +472,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   }
   {
     Sequential sequential(Identity(), ConvTranspose3d(ConvTranspose3dOptions(2, 2, 2).stride(1).bias(false)));
-    std::dynamic_pointer_cast<ConvTranspose3dImpl>(sequential[0])->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
+    std::dynamic_pointer_cast<ConvTranspose3dImpl>(sequential[1])->weight.set_data(torch::arange(32.).reshape({2, 2, 2, 2, 2}));
     auto x = torch::arange(16.).reshape({1, 2, 2, 2, 2});
     auto y = sequential->forward(x);
     auto expected = torch::tensor({{{{{ 128.,  280.,  154.},
