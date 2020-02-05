@@ -649,18 +649,18 @@ void GraphEncoder::EncodeTensor(
             tensorName[i] = '_';
         }
       }
-      if (tensorName == std::string("features.2.conv.0.0.weight")) {
-        printf("I am here.\n");
-        for (auto d : tensor.sizes()) {
-          printf("%ld, ", d);
-        }
-        printf("TensorSize is %ld.\n",tensorSize);
-        auto qe = t.numel();
-        printf("t.numel() is %ld.\n",qe);
-        auto qe1 = t.element_size();
-        printf("t.element_size() is %ld.\n",qe1);
+      // if (tensorName == std::string("features.2.conv.0.0.weight")) {
+      //   printf("I am here.\n");
+      //   for (auto d : tensor.sizes()) {
+      //     printf("%ld, ", d);
+      //   }
+      //   printf("TensorSize is %ld.\n",tensorSize);
+      //   auto qe = t.numel();
+      //   printf("t.numel() is %ld.\n",qe);
+      //   auto qe1 = t.element_size();
+      //   printf("t.element_size() is %ld.\n",qe1);
         
-      }
+      // }
       std::string fullFilePath = folder + "/" + tensorName;
       FILE* fp = fopen(fullFilePath.c_str(), "wb");
       if (fp == NULL) {

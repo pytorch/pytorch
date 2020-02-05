@@ -76,5 +76,17 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
         return wrapper
     return skip_dec
 
+# skips tests that do not follow ONNX IR v3 (old-style) export.
+# Only tests that follow ONNX IR v3 export, i.e. where 
+# keep_initializers_as_inputs is set to True in torch.onnx.export API call.
+def skipIfNotOnnxIRv3():
+    def skip_dec(func):
+        def wrapper(self):
+            if hasattr(self, 'keep_initializers_as_inputs') and self.keep_initializers_as_inputs is False:
+                raise unittest.SkipTest("Skip test that does not use ONNX IR v3 export.")
+            return func(self)
+        return wrapper
+    return skip_dec
+
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))

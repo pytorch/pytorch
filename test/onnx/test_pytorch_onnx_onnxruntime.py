@@ -15,7 +15,8 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack, enableScriptTest
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
+from test_pytorch_common import enableScriptTest, skipIfNotOnnxIRv3
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -162,7 +163,8 @@ class TestONNXRuntime(unittest.TestCase):
                 ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
 
-    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedMinOpsetVersion(9) # Because large model format was released with Opset 9.
+    @skipIfNotOnnxIRv3()
     def test_large_model_export_embed(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):
@@ -182,7 +184,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([2], dtype=torch.long)
         self.run_large_model_test(model, x)
 
-    @skipIfUnsupportedMinOpsetVersion(9)
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because large model format was released with Opset 9.
+    @skipIfNotOnnxIRv3()
     def test_large_model_export_mobilenet_v2(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
