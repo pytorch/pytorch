@@ -296,14 +296,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmin
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_min
@@ -333,14 +325,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmax
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_max
