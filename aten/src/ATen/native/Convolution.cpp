@@ -672,7 +672,7 @@ at::Tensor _convolution(
         }
       }
       goto end;
-    } catch (std::runtime_error) {
+    } catch (const c10::Error &) {
       // Sometimes cuDNN choose an algorithm that uses too much memory.
       // Sometimes cuDNN just fail with CUDNN_STATUS_NOT_SUPPORTED.
       // Unfortunately we don't know for which input on which hardware this failure happens.
