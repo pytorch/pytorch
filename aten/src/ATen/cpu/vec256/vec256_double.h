@@ -86,6 +86,7 @@ public:
   const double& operator[](int idx) const  = delete;
   double& operator[](int idx) = delete;
   int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
     __m256d cmp = _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_EQ_OQ);
     return _mm256_movemask_pd(cmp);
   }
