@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -107,7 +108,21 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         nullptr);
 
-    fm->addCallback(callback::finishCreatingOwnerRRef);
+    // The callback is the same as finishCreatingOwnerRRef() in
+    // python_functions.py, the difference is that ownerRRefPtr created here
+    // always holds an IValue, no need to explicitly hold GIL and clear
+    // deletedRRef. Not calling finishCreatingOwnerRRef() because it is not
+    // necessary to introduce python dependency in this file.
+    fm->addCallback([](const Message& message,
+                       const c10::optional<utils::FutureError>& futErr) {
+      RRefContext::handleException(futErr);
+      auto rr = RemoteRet::fromMessage(message);
+      TORCH_INTERNAL_ASSERT(
+          rr->rrefId() == rr->forkId(),
+          "Expecting an OwnerRRef as RemoteRet but got a fork.");
+      auto& ctx = RRefContext::getInstance();
+      ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+    });
     return ownerRRefPtr;
   }
 }
