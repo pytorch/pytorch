@@ -516,7 +516,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
     auto key = torch::ones({batch_size, src_len, embed_dim});
     auto value = key;
 
-    Sequential sequential(Identity(), MultiheadAttention(embed_dim, num_heads));
+    Sequential sequential(MultiheadAttention(embed_dim, num_heads));
     auto output = sequential->forward<std::tuple<torch::Tensor, torch::Tensor>>(query.transpose(0, 1), key.transpose(0, 1), value.transpose(0, 1));
 
     auto attn_output = std::get<0>(output);
@@ -546,7 +546,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   {
     auto indices = torch::tensor({{{1, 3, 4}}}, torch::kLong);
     auto x = torch::tensor({{{2, 4, 5}}}, torch::dtype(torch::kFloat));
-    Sequential sequential(Identity(), MaxUnpool1d(3));
+    Sequential sequential(MaxUnpool1d(3));
     auto y = sequential->forward(x, indices);
     auto expected = torch::tensor({{{0, 2, 0, 4, 5, 0, 0, 0, 0}}}, torch::kFloat);
     ASSERT_TRUE(torch::allclose(y, expected));
@@ -566,7 +566,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
      {{{31, 33, 34},
        {41, 43, 44},
        {46, 48, 49}}}}, torch::dtype(torch::kFloat));
-    Sequential sequential(Identity(), MaxUnpool2d(MaxUnpool2dOptions(3).stride(2).padding(1)));
+    Sequential sequential(MaxUnpool2d(MaxUnpool2dOptions(3).stride(2).padding(1)));
     auto y = sequential->forward(x, indices);
     auto expected = torch::tensor(
     {{{{ 0,  0,  0,  0,  0},
@@ -584,7 +584,7 @@ TEST_F(SequentialTest, ModuleForwardMethodOptionalArg) {
   {
     auto indices = torch::tensor({{{{{26}}}}}, torch::kLong);
     auto x = torch::tensor({{{{{26}}}}}, torch::dtype(torch::kFloat).requires_grad(true));
-    Sequential sequential(Identity(), MaxUnpool3d(3));
+    Sequential sequential(MaxUnpool3d(3));
     auto y = sequential->forward(x, indices);
     auto expected = torch::tensor(
     {{{{{ 0,  0,  0},
