@@ -1,6 +1,4 @@
 import os
-import shutil
-import sys
 import unittest
 
 import torch.testing._internal.common_utils as common
