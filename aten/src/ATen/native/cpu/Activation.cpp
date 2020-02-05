@@ -202,11 +202,11 @@ void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_sca
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    const auto negcoef_vec = Vec(negcoef);
-    const auto negiptcoef_vec = Vec(negiptcoef);
-    const auto poscoef_vec = Vec(poscoef);
-    const auto one_vec = Vec(static_cast<scalar_t>(1));
-    const auto zero_vec = Vec(static_cast<scalar_t>(0));
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec one_vec(static_cast<scalar_t>(1));
+    const Vec zero_vec(static_cast<scalar_t>(0));
     cpu_kernel_vec(
         it,
         [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
@@ -229,10 +229,10 @@ void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar 
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    const auto negcoef_vec = Vec(negcoef);
-    const auto negiptcoef_vec = Vec(negiptcoef);
-    const auto poscoef_vec = Vec(poscoef);
-    const auto zero_vec = Vec(static_cast<scalar_t>(0));
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec zero_vec(static_cast<scalar_t>(0));
     cpu_kernel_vec(
         it,
         [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
