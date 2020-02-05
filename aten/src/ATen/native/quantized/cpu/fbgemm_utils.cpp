@@ -14,6 +14,8 @@
 
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+
 namespace at {
 namespace native {
 namespace fbgemm_utils {
@@ -205,7 +207,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>, std::string, std::string>;
-  static int custom_class_handler = torch::jit::registerCustomClassHandler();
+  static int custom_class_handler = torch::jit::register_custom_class_handler();
   static auto register_linear_params =
       torch::jit::class_<LinearPackedParamsBase>("LinearPackedParamsBase")
           .def_pickle(

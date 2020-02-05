@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/custom_class.h>
+#include <ATen/core/ivalue.h>
 
 struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor apply(
@@ -20,5 +20,3 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual std::string backend() = 0;
   virtual std::string bit_width() = 0;
 };
-
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();

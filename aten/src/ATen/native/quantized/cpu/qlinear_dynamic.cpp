@@ -7,8 +7,12 @@
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
+#include <torch/custom_class.h>
+
 #include <algorithm>
 #include <string>
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
