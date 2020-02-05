@@ -220,7 +220,7 @@ pytorch_windows_params: &pytorch_windows_params
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: "10"
     PYTHON_VERSION: "3.6"
-    VC_VERSION: "14.11"
+    VC_VERSION: "14.12"
     VC_YEAR: "2017"
     VC_PRODUCT: "BuildTools"
     USE_CUDA: "1"
