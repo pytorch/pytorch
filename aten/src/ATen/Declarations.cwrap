@@ -566,23 +566,6 @@
     - real maxnorm
 ]]
 [[
-  name: _th_dist
-  types:
-    - floating_point
-  backends:
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: dist
-      return: accreal
-      arguments:
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-        - real p
-]]
-[[
   name: _th_histc
   cname: histc
   types:

@@ -4937,7 +4937,7 @@
   variants: method, function
   dispatch:
     CPU: dist
-    CUDA: legacy::cuda::_th_dist
+    CUDA: dist_cuda
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
