@@ -23,7 +23,7 @@ namespace nn {
 /// a type erased object, whose concrete value can be retrieved at runtime by
 /// checking if the `typeid()` of a requested type matches the `typeid()` of
 /// the object stored.
-class AnyValue {
+class TORCH_API AnyValue {
  public:
   /// Move construction and assignment is allowed, and follows the default
   /// behavior of move for `std::unique_ptr`.

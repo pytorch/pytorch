@@ -93,13 +93,72 @@ TEST_F(AnyModuleTest, WrongNumberOfArguments) {
   AnyModule any(M{});
   ASSERT_THROWS_WITH(
       any.forward(),
-      "M's forward() method expects 2 arguments, but received 0");
+      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 0. "
+      "If AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method has default arguments, "
+      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(5),
-      "M's forward() method expects 2 arguments, but received 1");
+      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 1. "
+      "If AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method has default arguments, "
+      "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(1, 2, 3),
-      "M's forward() method expects 2 arguments, but received 3");
+      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 3.");
+}
+
+struct M_default_arg_with_macro : torch::nn::Module {
+  double forward(int a, int b = 2, double c = 3.0) {
+    return a + b + c;
+  }
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, torch::nn::AnyValue(2)}, {2, torch::nn::AnyValue(3.0)})
+};
+
+struct M_default_arg_without_macro : torch::nn::Module {
+  double forward(int a, int b = 2, double c = 3.0) {
+    return a + b + c;
+  }
+};
+
+TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMethod) {
+  {
+    AnyModule any(M_default_arg_with_macro{});
+
+    ASSERT_EQ(any.forward<double>(1), 6.0);
+    ASSERT_EQ(any.forward<double>(1, 3), 7.0);
+    ASSERT_EQ(any.forward<double>(1, 3, 5.0), 9.0);
+
+    ASSERT_THROWS_WITH(
+        any.forward(),
+        "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 0.");
+    ASSERT_THROWS_WITH(
+        any.forward(1, 2, 3.0, 4),
+        "M_default_arg_with_macro's forward() method expects at least 1 argument(s) and at most 3 argument(s), but received 4.");
+  }
+  {
+    AnyModule any(M_default_arg_without_macro{});
+
+    ASSERT_EQ(any.forward<double>(1, 3, 5.0), 9.0);
+
+    ASSERT_THROWS_WITH(
+        any.forward(),
+        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 0. "
+        "If M_default_arg_without_macro's forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward<double>(1),
+        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 1. "
+        "If M_default_arg_without_macro's forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward<double>(1, 3),
+        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 2. "
+        "If M_default_arg_without_macro's forward() method has default arguments, "
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
+    ASSERT_THROWS_WITH(
+        any.forward(1, 2, 3.0, 4),
+        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 4.");
+  }
 }
 
 struct M : torch::nn::Module {
