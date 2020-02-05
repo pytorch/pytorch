@@ -22,10 +22,15 @@ from torch.testing._internal.dist_utils import (
     get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
+    wait_until_pending_users_flushed,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+
+
+def foo_add():
+    return torch.add(torch.ones(1), torch.ones(1))
 
 
 def requires_process_group_agent(message=""):
@@ -64,6 +69,9 @@ def _stub_init_rpc_backend_handler(store, name, rank, world_size, rpc_backend_op
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
+def wait_for_value_future():
+    return VALUE_FUTURE.result()
 
 
 def set_and_check_done(value):
@@ -659,14 +667,7 @@ class RpcTest(RpcAgentTestFixture):
                     # this, we wait until the current RRef context doesn't have
                     # any pending users, which indicates that the confirmation
                     # was processed on this worker.
-                    num_pending_users = int(
-                        _rref_context_get_debug_info()["num_pending_users"]
-                    )
-                    while num_pending_users != 0:
-                        time.sleep(0.1)
-                        num_pending_users = int(
-                            _rref_context_get_debug_info()["num_pending_users"]
-                        )
+                    wait_until_pending_users_flushed()
 
             events = prof.function_events
             rpc_event = [
@@ -839,10 +840,14 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
+        local_ret = one_arg(torch.ones(2, 2))
         ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
+        self.assertEqual(ret, local_ret)
         rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(rref.to_here(), local_ret)
+        # create rref to itself
+        local_rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(local_rref.to_here(), local_ret)
 
     @dist_init
     def test_torchscript_function_exception(self):
@@ -1379,6 +1384,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 2
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1404,6 +1410,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 3
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
@@ -1691,6 +1698,30 @@ class RpcTest(RpcAgentTestFixture):
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
 
+    @dist_init
+    def test_function_not_on_callee(self):
+        # test that if a function does not exist on a callee, we don't crash,
+        # instead we get an AttributeError indicating that the func does not exist.
+        this_module = sys.modules[__name__]
+        caller_worker = "worker0"
+        callee_worker = "worker1"
+
+        if self.rank == 1:
+            # Use delattr to remove the binding of a func on this nodes
+            delattr(this_module, "foo_add")
+            # notify remote end that we have removed it.
+            rpc.rpc_sync(caller_worker, set_value, args=(self.rank,))
+
+        if self.rank == 0:
+            # func exists on caller, but not callee.
+            # TODO: Need to enhance RemoteException to return the correct
+            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
+            # wait for remote end to remove the binding of foo_add func.
+            wait_for_value_future()
+            # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
+            self.assertTrue(hasattr(this_module, "foo_add"))
+            with self.assertRaisesRegex(Exception, "AttributeError"):
+                rpc.rpc_sync(callee_worker, foo_add, args=())
 
 @unittest.skipIf(
     sys.version_info < (3, 0),
@@ -1710,14 +1741,6 @@ class RpcJitTest(RpcAgentTestFixture):
             return t + 1
 
         local_ret = rref_to_here(rref_var)
-        print(local_ret)
-        '''
-        rpc_ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
-            rref_to_here,
-            args=(rref_var,))
-        self.assertEqual(local_ret, rpc_ret)
-        '''
 
     @dist_init
     def test_remote_script_module(self):
@@ -1745,11 +1768,3 @@ class RpcJitTest(RpcAgentTestFixture):
             return module.forward()
 
         local_ret = run_ref_script_module(ref_script_module)
-        print(local_ret)
-        '''
-        ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
-            run_ref_script_module,
-            args=(ref_script_module,))
-        self.assertEqual(ret, local_ret)
-        '''

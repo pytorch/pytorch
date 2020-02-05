@@ -9,6 +9,29 @@
 namespace torch {
 namespace jit {
 
+void testLiteInterpreterUpsampleNearest2d() {
+  script::Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  res = bc.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+}
+
 void testLiteInterpreterAdd() {
   script::Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
