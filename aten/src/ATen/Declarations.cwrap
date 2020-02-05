@@ -33,8 +33,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
+      - THTensor* self
       - THByteTensor* mask
       - real value
 ]]
@@ -49,8 +48,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
+      - THTensor* self
       - THBoolTensor* mask
       - real value
 ]]
@@ -64,8 +62,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
     - THTensor* source
 ]]
@@ -79,8 +76,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
     - THTensor* source
 ]]
