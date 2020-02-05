@@ -164,7 +164,7 @@ if (MSVC)
   # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
   # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
   # But, we chose not to do that not to rely on hidden options.
-  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
+  set(CMAKE_REQUIRED_FLAGS "/arch:AVX2" "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
 else()
   # We only consider the case where all of avx512f, avx512dq, and avx512vl are
   # supported.
@@ -173,7 +173,6 @@ else()
   # linux_conda_3.7_cu100_build
   set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512vl")
 endif()
-set(CMAKE_REQUIRED_QUIET OFF)
 CHECK_CXX_SOURCE_COMPILES(
     "#if defined(_MSC_VER)
      #include <intrin.h>
@@ -199,8 +198,6 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
   message(STATUS "Current compiler supports avx512f extension. Will build fbgemm.")
   # Also see CMakeLists.txt under caffe2/perfkernels.
   set(CAFFE2_PERF_WITH_AVX512 1)
-else()
-  message(FATAL_ERROR "AVX512 not enabled")
 endif()
 cmake_pop_check_state()
 
