@@ -6,7 +6,7 @@
 #include <cmath>
 #include <limits>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 using namespace std;
 
