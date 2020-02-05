@@ -29,15 +29,15 @@ void testGPU_FusionDispatch(){
   
   SimpleHandler* handler = new SimpleHandler{};
   const auto result = f->dispatch(handler);
-  std::cout << "Dispatch Float result: " << result << std::endl;
+  std::cout << "Dispatch 2.f by Float reference: " << result << std::endl;
 
   Val* v = static_cast<Val*>(f);
   const auto v_result = v->dispatch(handler);
-  std::cout << "Dispatch Val result: " << v_result << std::endl;
+  std::cout << "Dispatch 2.f by Val reference: " << v_result << std::endl;
 
   Statement* s = static_cast<Statement*>(f);
   const auto s_result = s->dispatch(handler);
-  std::cout << "Dispatch Statement result: " << s_result << std::endl;
+  std::cout << "Dispatch 2.f by Statement reference: " << s_result << std::endl;
 
 }
 
@@ -51,7 +51,7 @@ void testGPU_FusionSimpleArith(){
   Float* f3 = new Float();
   
   Add* an_add = new Add(f3, f1, f2);
-  std::cout<<"Explicit add construction: "<<fusion<<std::endl;
+  std::cout<<"Explicit add construction of 1.f + 2.f: "<<fusion<<std::endl;
 
 }
 
@@ -63,7 +63,7 @@ void testGPU_FusionContainer(){
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
   auto f3 = add(f1, f2);
-  std::cout<<"Implicit add construction: "<<fusion1<<std::endl;
+  std::cout<<"Implicit add construction of 1.f + 2.f : "<<fusion1<<std::endl;
 
   Fusion fusion2;
   {
@@ -96,9 +96,10 @@ void testGPU_FusionMutator(){
   Float* f4 = new Float{1.f};
   Int* i1 = new Int{3};
   Val* f5 = add(f4, i1);
+  std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
   BaseMutator mutator;
   mutator.mutate(&fusion);
-  std::cout<<"Zeroed? "<<fusion<<std::endl;
+  std::cout<<"Replaced: "<<fusion<<std::endl;
 
 }
 

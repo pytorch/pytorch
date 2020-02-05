@@ -32,7 +32,7 @@ std::ostream& IRPrinter::printValPreamble(std::ostream& out, const Val* const v)
 }
 
 int IRPrinter::handle(const Statement* const statement){
-  out_ << "Unknown statement";
+  statement->dispatch(this);
   return 0;
 }
 
