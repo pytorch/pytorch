@@ -1330,6 +1330,9 @@ void initJitScriptBindings(PyObject* module) {
         },
         py::arg("proto_string")
       );
+  m.def("_jit_is_script_object", [](const py::object& obj) {
+    return py::isinstance<script::Object>(obj);
+  });
 }
 } // namespace script
 } // namespace jit
