@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/utils/variadic.h>
+#include <torch/custom_class.h>
 
 #include <memory>
 #include <sstream>
@@ -148,6 +149,25 @@ Value* TracingState::getValue(const IValue& var) {
       }
       return it->second;
     }
+
+    // Find torchbind classes
+    if (isCustomClass(var)) {
+      auto obj = script::Object(var.toObject());
+      auto qualname = obj.type()->name();
+      auto custom_class_type = getCustomClass(qualname->qualifiedName());
+      if (custom_class_type) {
+        auto capsule = var.toObject()->getAttr("capsule");
+        for (size_t i = 0; i < env_stack.size(); ++i) {
+          auto& value_map = env_stack.at(env_stack.size() - 1 - i);
+          auto it = value_map.find(capsule);
+          if (it == value_map.end()) {
+            continue;
+          }
+          return it->second;
+        }
+      }
+    }
+
     std::ostringstream oss;
     if (var.isFuture()) {
       oss << "Tried to trace Future or Object that the tracer was not aware of.";
@@ -309,7 +329,11 @@ static void gatherParametersAndBuffers(
     if (s.value.type()->isSubtypeOf(TensorType::get())) {
       addInput(
           state, s.value, s.value.type(), trace_get_attr);
-    } else if (self_ty->getAttribute(s.name)->is_module()) {
+    }
+    if (isCustomClass(s.value)) {
+      tracer::setValueTrace(s.value, trace_get_attr);
+    }
+    if (self_ty->getAttribute(s.name)->is_module()) {
       gatherParametersAndBuffers(
           state, trace_get_attr, script::Module(s.value.toObject()), qualname);
     }
@@ -408,6 +432,9 @@ void TracingState::setValue(const IValue& v, Value* value) {
     for (size_t i = 0; i < elements.size(); ++i) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
+  } else if (isCustomClass(v)) {
+    auto capsule = v.toObject()->getAttr("capsule");
+    env_stack.back()[capsule] = value;
   } else if (v.isFuture() || v.isObject()) {
     env_stack.back()[v] = value;
   } else {
@@ -629,6 +656,14 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
 
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
   AT_ERROR("Tracing float lists currently not supported!");
+}
+
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
+  Value* v = getValueTrace(obj);
+  n->addInput(v);
 }
 
 void addOutput(Node* node, const at::Tensor& output) {

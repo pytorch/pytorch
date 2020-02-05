@@ -96,6 +96,8 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
               throw std::runtime_error(
                   "unsupported input list type: " + elem_type->str());
             }
+          } else if (iter->isObject()) {
+            tracer::addInputs(node, args[i].name().c_str(), iter->toObject());
           } else {
             throw std::runtime_error("unsupported input type: " + type->str());
           }
