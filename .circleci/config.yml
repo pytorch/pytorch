@@ -3713,9 +3713,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3723,9 +3720,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3733,9 +3727,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3743,9 +3734,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3753,9 +3741,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
@@ -3763,9 +3748,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
@@ -3773,9 +3755,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
@@ -3783,9 +3762,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
       - binary_linux_build:
@@ -3793,9 +3769,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3803,9 +3776,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3813,9 +3783,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3823,9 +3790,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_build:
@@ -3833,9 +3797,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
@@ -3843,9 +3804,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
@@ -3853,9 +3811,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
@@ -3863,9 +3818,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 devtoolset7"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
       - binary_linux_build:
@@ -3873,9 +3825,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3883,9 +3832,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3893,9 +3839,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3903,9 +3846,6 @@ workflows:
           build_environment: "libtorch 2.7m cpu gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3913,9 +3853,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3923,9 +3860,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3933,9 +3867,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3943,9 +3874,6 @@ workflows:
           build_environment: "libtorch 2.7m cu92 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3953,9 +3881,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3963,9 +3888,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3973,9 +3895,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3983,9 +3902,6 @@ workflows:
           build_environment: "libtorch 2.7m cu100 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -3993,9 +3909,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -4003,9 +3916,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -4013,9 +3923,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_build:
@@ -4023,9 +3930,6 @@ workflows:
           build_environment: "libtorch 2.7m cu101 gcc5.4_cxx11-abi"
           requires:
             - setup
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_mac_build:
@@ -4674,9 +4578,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
@@ -4685,9 +4586,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
@@ -4696,9 +4594,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
@@ -4707,9 +4602,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_devtoolset7_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
       - binary_linux_test:
@@ -4718,9 +4610,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_devtoolset7_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -4731,9 +4620,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_devtoolset7_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -4744,9 +4630,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_devtoolset7_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -4757,9 +4640,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_devtoolset7_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda92"
           use_cuda_docker_runtime: "1"
@@ -4770,9 +4650,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_devtoolset7_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -4783,9 +4660,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_devtoolset7_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -4796,9 +4670,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_devtoolset7_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -4809,9 +4680,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_devtoolset7_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda100"
           use_cuda_docker_runtime: "1"
@@ -4822,9 +4690,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_devtoolset7_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -4835,9 +4700,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_devtoolset7_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -4848,9 +4710,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_devtoolset7_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -4861,9 +4720,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_devtoolset7_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/manylinux-cuda101"
           use_cuda_docker_runtime: "1"
@@ -4874,9 +4730,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
@@ -4885,9 +4738,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
@@ -4896,9 +4746,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
@@ -4907,9 +4754,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       - binary_linux_test:
@@ -4918,9 +4762,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4931,9 +4772,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4944,9 +4782,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4957,9 +4792,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu92_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4970,9 +4802,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4983,9 +4812,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -4996,9 +4822,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -5009,9 +4832,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu100_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -5022,9 +4842,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -5035,9 +4852,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "shared-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -5048,9 +4862,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-with-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
@@ -5061,9 +4872,6 @@ workflows:
           requires:
             - setup
             - binary_linux_libtorch_2_7m_cu101_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          filters:
-            branches:
-              only: nightly
           libtorch_variant: "static-without-deps"
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
           use_cuda_docker_runtime: "1"
