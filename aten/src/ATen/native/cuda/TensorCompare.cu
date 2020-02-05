@@ -9,7 +9,6 @@ namespace at { namespace native {
 
 using where_fn = void (*)(TensorIterator &, ScalarType);
 DECLARE_DISPATCH(where_fn, where_kernel);
-DEFINE_DISPATCH(where_kernel);
 
 namespace {
 
