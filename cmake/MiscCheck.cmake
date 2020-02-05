@@ -164,7 +164,7 @@ if (MSVC)
   # We could've used MSVC's hidden option /arch:AVX512 that defines __AVX512F__,
   # __AVX512DQ__, and __AVX512VL__, and /arch:AVX512F that defines __AVX512F__.
   # But, we chose not to do that not to rely on hidden options.
-  set(CMAKE_REQUIRED_FLAGS "/arch:AVX2" "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
+  set(CMAKE_REQUIRED_FLAGS "/D__AVX512F__ /D__AVX512DQ__ /D__AVX512VL__")
 else()
   # We only consider the case where all of avx512f, avx512dq, and avx512vl are
   # supported.
