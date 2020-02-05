@@ -237,6 +237,12 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+@torch.jit.script
+def heavy_rpc_torchscript(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor /= i + 1
+    return 0
 
 def raise_func():
     raise ValueError("Expected error")
@@ -927,8 +933,8 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(fut.wait(), 0)
         tok = time.time()
         print(
-            "Rank {} finished testing {} {} times in {} seconds.".format(
-                self.rank, f.__name__, repeat, tok - tik
+            "Rank {} finished testing {} times in {} seconds.".format(
+                self.rank, repeat, tok - tik
             )
         )
 
@@ -939,6 +945,10 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
+
+    @dist_init
+    def test_stress_heavy_rpc_torchscript(self):
+        self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
 
     @dist_init
     def test_builtin_remote_ret(self):
@@ -1755,10 +1765,10 @@ class RpcJitTest(RpcAgentTestFixture):
             return my_script_module_init(rank)
 
         @torch.jit.script
-        def run_ref_script_module(ref_script_module):
-            # type: (RRef[MyModuleInterface]) -> Tensor
+        def run_ref_script_module(ref_script_module, t):
+            # type: (RRef[MyModuleInterface], Tensor) -> Tensor
             module = ref_script_module.to_here()
-            return module.forward()
+            return module.forward() + t
 
         # TODO, need more investigation
         # there is rref leak when shutting down, suspect it is because
@@ -1776,5 +1786,6 @@ class RpcJitTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             run_ref_script_module,
-            args=(remote_ref,))
-        self.assertEqual(ret, MyScriptModule(self.rank).forward())
+            args=(remote_ref, torch.ones(self.rank)))
+        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
+        self.assertEqual(ret, local_ret)
