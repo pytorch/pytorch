@@ -246,17 +246,17 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
 
 namespace torch {
 namespace nn {
-struct TestValue {
+struct TestAnyValue {
   template <typename T>
-  explicit TestValue(T&& value) : value_(std::forward<T>(value)) {}
-  AnyModule::Value operator()() {
+  explicit TestAnyValue(T&& value) : value_(std::forward<T>(value)) {}
+  AnyValue operator()() {
     return std::move(value_);
   }
-  AnyModule::Value value_;
+  AnyValue value_;
 };
 template <typename T>
-AnyModule::Value make_value(T&& value) {
-  return TestValue(std::forward<T>(value))();
+AnyValue make_value(T&& value) {
+  return TestAnyValue(std::forward<T>(value))();
 }
 } // namespace nn
 } // namespace torch
