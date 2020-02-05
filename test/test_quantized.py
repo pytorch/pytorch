@@ -148,6 +148,27 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
 
+    """Tests the correctness of the quantized::relu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qrelu_leaky(self, X):
+        X, (scale, zero_point, torch_type) = X
+        alpha = 0.1
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+        # torch.nn.functional
+        op = torch.nn.functional.leaky_relu
+        dqY = op(dqX, negative_slope=alpha)
+        qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        qY_hat = op(qX, negative_slope=alpha)
+        self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+            message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))

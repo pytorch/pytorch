@@ -193,6 +193,51 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
+static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
+                                   Scalar negval_) {
+  int64_t i_zp = qx.q_zero_point();
+  float i_scale = qx.q_scale();
+
+  int64_t o_zp = out.q_zero_point();
+  float o_scale = out.q_scale();
+  float o_inv_scale = 1.0 / o_scale;
+
+  float negval = negval_.to<float>();
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "leaky_qrelu", [&] {
+    using Vec = Vec256<float>;  // Naïve implementation uses dequant/quant loop.
+    using qVec = Vec256<scalar_t>;
+    Vec zero_vec = Vec((float)(0.0f));
+    Vec one_vec = Vec((float)(1.0f));
+
+    Vec i_scale_vec = Vec((float)i_scale);
+    Vec i_zp_vec = Vec((float)i_zp);
+    Vec i_scale_zp_neg_premul_vec = i_scale_vec * i_zp_vec.neg();
+
+    Vec negval_vec = Vec(negval);
+
+    auto iter = TensorIterator::unary_op(out, qx);
+
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          auto value_dx = at::dequantize_val(i_scale, i_zp, value_qx);
+          auto value_dy = value_dx > 0 ? value_dx : value_dx * negval;
+          return at::quantize_val<scalar_t>(o_scale, o_zp, value_dy);
+        },
+        [&](qVec qx_vec) -> qVec {
+          auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
+                                              i_scale_zp_neg_premul_vec);
+          for (int idx = 0; idx < dx_vec_vec.size(); ++idx) {
+            const auto dx_vec = dx_vec_vec[idx];
+            const auto r = Vec::blendv(negval_vec, one_vec, dx_vec > zero_vec);
+            dx_vec_vec[idx] = dx_vec * r;
+          }
+          return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
+        });
+  });
+}
+
 void qsigmoid_kernel(const Tensor& qx, Tensor& qy) {
   int64_t zero_point = qx.q_zero_point();
   float scale = qx.q_scale();
@@ -959,6 +1004,7 @@ void qtopk_kernel(Tensor& values,
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
