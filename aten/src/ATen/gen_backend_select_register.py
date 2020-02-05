@@ -4,6 +4,9 @@
 from code_template import CodeTemplate
 import tensor_options_utils as TOUtils
 
+GENERATED_COMMENT = CodeTemplate(
+    "@" + "generated from ${filename}")
+
 FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
@@ -25,7 +28,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
 
     for decl in declarations:
         for option in decl["options"]:
-            if not option.get('backend_select', False):
+            if '_like' in option['name'] or 'new_' in option['name']:
                 continue
 
             name = option['name']
@@ -41,7 +44,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 else:
                     dispatch_key_args = "dtype.value_or(ScalarType::Float), layout.value_or(kStrided), device.value_or(kCPU)"
                 method_def = FUNCTION_DEFINITION.substitute(function_name=name,
-                                                            method_formals=option['method_formals'],
+                                                            method_formals=option['formals_with_defaults'],
                                                             name=option['name'],
                                                             dispatch_key_args=dispatch_key_args,
                                                             overload_name=option['overload_name'],
@@ -54,4 +57,6 @@ def register_backend_select_methods(declarations, template_path, file_manager):
     env = {}
     env['backend_select_method_definitions'] = backend_select_method_definitions
     env['backend_select_function_registrations'] = backend_select_function_registrations
+
+    env['generated_comment'] = GENERATED_COMMENT.substitute(filename=template_path)
     file_manager.write('BackendSelectRegister.cpp', template_path, env)
