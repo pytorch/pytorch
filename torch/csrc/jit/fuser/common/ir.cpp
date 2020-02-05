@@ -32,25 +32,6 @@ Val::Val(
     
 }
 
-/*
-void Val::setOrigin(Expr* new_origin) const{
-    if(new_origin == origin_)
-      return;
-
-    assert(new_origin->isExpr());
-    assert(new_origin->isAnOutput(this));
-
-    Expr* old_origin = origin_;
-    origin_ = new_origin;
-
-    if(old_origin!=nullptr){
-      old_origin->removeOutput(this);
-      if(old_origin->nOutputs() == 1){
-        FusionGuard::getCurFusion()->removeExpr(old_origin);
-      }
-    }
-  }
-*/
 
 Expr::Expr(
     const ExprType _type)
@@ -58,12 +39,22 @@ Expr::Expr(
     Fusion* fusion = FusionGuard::getCurFusion(); 
     if(fusion == nullptr)
       throw std::runtime_error("No fusion group found when creating an Expr.");
-    this->name_ = fusion->registerExpr(this);
     this->fusion_ = fusion;
-    
-    //for(const Val* output : outputs_)
-    //  output->setOrigin(this);
 }
+
+  Add::Add(
+    const Val* _out
+  , const Val* _lhs
+  , const Val* _rhs)
+  : Expr(ExprType::Add)
+  , out_{_out}
+  , lhs_{_lhs}
+  , rhs_{_rhs} {
+    addOutput(_out);
+    addInput(_lhs);
+    addInput(_rhs);
+    this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  }
 
 Statement::~Statement() { }
 

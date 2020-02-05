@@ -38,4 +38,5 @@ std::ostream& operator<<(std::ostream& os, const Fusion& fusion) {
   return os;
 }
 
+
 }}} // torch::jit::fuser

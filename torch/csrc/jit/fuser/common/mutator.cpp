@@ -14,7 +14,6 @@ const Statement* BaseMutator::mutate(const Float* const f){
     if(!f->isSymbolic())
         if(*(f->value()) == 1.0){
             Float* f2 = new Float(0.0);
-            std::cout<<"Replacing!"<<std::endl;
             return f2;
         }
     return f;

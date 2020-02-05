@@ -7,9 +7,10 @@
 
 #include <unordered_map>
 #include <vector>
-#include <stack>
+#include <deque>
 #include <iostream>
 #include <set>
+#include <algorithm>
 
 namespace torch {
 namespace jit {
@@ -17,11 +18,9 @@ namespace fuser {
 
 // TODO: replaceAllUsesOfLeftWithRight(Val, Val) for values
 // TODO: hasUses(Val)
-// TODO: val->uses mapping? expr->location mapping?
 // TODO: plumb through helpers, ex. Val.replaceAllUsesWith(Val)
 //          (registration makes this easy)
 // TODO: DCE pass
-// TODO: comment
 
 /* This file is critical to the lifetime model of the IR system. FusionGuard is a convenient way to set
  * what base container instance holds your IR. Statements that are defined are registered through the FusionGuard
@@ -150,12 +149,72 @@ struct TORCH_API Fusion : public IRInputOutput{
     return infusion;
   }
 
-  //TODO: Lets topologically sort these.
+  const Expr* origin(const Val* val) const{
+    const auto it = origin_.find(val);
+
+    if(it == origin_.end())
+      return nullptr;
+
+    return it->second;
+  }
+
+  /* Return topologically sorted list of exprs. We can start by only traversing back from registered
+   * outputs, or from any terminating Val. Can also select depth first traversal, or breadth first.
+   */
   std::vector<const Expr*> exprs(bool from_outputs_only=false, bool breadth_first=false) const {
-    std::vector<const Expr*> exprs;
-    for(const auto it : expr_map_)
-      exprs.push_back(it.first);
-    return exprs;
+
+    if(breadth_first)
+      throw std::runtime_error("Not implemented yet.");
+
+    std::deque<const Val*> to_visit;
+    std::set<const Val*> visited;
+
+    std::vector<const Expr*> reversed_exprs;
+
+    if(from_outputs_only){
+      for(const Val* output : outputs())
+        to_visit.push_back(output);
+    }else{
+      for(const auto it : val_map_){
+        if(uses_.find(it.first) == uses_.end()) //never used, must be output or unused val
+          to_visit.push_back(it.first);
+      }
+    }
+
+    while(!to_visit.empty()){
+      const Val* val;
+      if(breadth_first){
+        val = to_visit.front();
+        to_visit.pop_front();
+      }else{
+        val = to_visit.back();
+        to_visit.pop_back();
+      }
+      
+
+      if(visited.find(val) != visited.end())
+        continue;
+
+      visited.emplace(val);
+      
+      const Expr* orig = origin(val);
+
+      if(orig == nullptr)
+        continue;
+
+      reversed_exprs.push_back(orig);
+
+      for(const Val* inp : orig->inputs())
+        if(visited.find(val) != visited.end())
+          to_visit.push_back(inp);
+
+      for(const Val* out : orig->outputs())
+        if(out != val)
+          if(visited.find(val) != visited.end())
+            to_visit.push_back(out);
+    }
+    std::reverse(reversed_exprs.begin(), reversed_exprs.end());
+    return reversed_exprs; //now ordered
   }
 
 
@@ -163,7 +222,6 @@ struct TORCH_API Fusion : public IRInputOutput{
    * Simple Registration methods. These methods do 2 things:
    * Register the Statment/Val/Expr 
    */
-  // TODO: Simplify this function, we register values as soon as they're created
   StmtNameType registerVal(const Val* val) {
     if (val->fusion()) {
       TORCH_CHECK(inFusion(val)); //Registered with another fusion
@@ -180,15 +238,16 @@ struct TORCH_API Fusion : public IRInputOutput{
    */ 
   StmtNameType registerExpr(const Expr* expr){
     if (expr->fusion()) {
-      TORCH_CHECK(inFusion(expr));
-      return expr->name();
+      TORCH_CHECK(expr->fusion() == this);
+      if(inFusion(expr))
+        return expr->name();
     }
 
     expr_map_[expr] = expr->name();
 
     for (const Val* input : expr->inputs()) {
       registerVal(input);
-      if(uses_.find(input) != uses_.end()){
+      if(uses_.find(input) == uses_.end()){
         uses_[input] = {expr};
       }else{
         uses_.find(input)->second.emplace(expr);
@@ -197,9 +256,11 @@ struct TORCH_API Fusion : public IRInputOutput{
 
     for (const Val* output : expr->outputs()) {
       registerVal(output);
-      if(origin_.find(output) != origin_.end()){
-        origin_.erase(origin_.find(output));
+      auto it = origin_.find(output);
+      if( it != origin_.end()){
+        origin_.erase(it);
       }
+      
       origin_[output] = expr;
     }
 

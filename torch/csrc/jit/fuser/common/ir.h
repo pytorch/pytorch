@@ -285,6 +285,12 @@ private:
 * Exprs are unique and immutable. Conceptually, Exprs could always be manipulated
 * using unique pointers, and we could add this later. However, for now Exprs can be
 * replaced in a fusion, but they cannot be modified in place.
+*
+* Note: Registering an Expr with a Fusion is actually 2 parts, one part is done in
+* the Expr constructor, so that should be called on anything that inherits Expr.
+* The issue with having registration in Expr's constructor, is that the constructor
+* of an Expr will set ouputs and inputs. This information is important for registration
+* with Fuser, so it can track the dependency chain.
 */
 struct TORCH_API Expr : public Statement, IRInputOutput {
 public:
@@ -312,15 +318,7 @@ struct TORCH_API Add : public Expr {
   Add(
     const Val* _out
   , const Val* _lhs
-  , const Val* _rhs)
-  : Expr(ExprType::Add)
-  , out_{_out}
-  , lhs_{_lhs}
-  , rhs_{_rhs} {
-    addOutput(_out);
-    addInput(_lhs);
-    addInput(_rhs);
-  }
+  , const Val* _rhs);
 
   Add(const Add& other) = delete;
   Add& operator=(const Add& other) = delete;
