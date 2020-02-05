@@ -706,6 +706,11 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   auto strides = self.strides().vec();
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
+
+  // INT64_MAX stands for default value.
+  if (start == INT64_MAX) {
+    start = 0;
+  }
   if (start < 0) {
     start += sizes[dim];
   }

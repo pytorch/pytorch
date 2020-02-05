@@ -2937,17 +2937,14 @@ struct to_ir {
     // aten::slice, we should separate it from this function.
     if (dim) {
       AT_ASSERT(input->type()->isSubtypeOf(TensorType::get()));
-
       args.emplace_back(dim);
     } else {
       AT_ASSERT(!input->type()->isSubtypeOf(TensorType::get()));
     }
 
-    args.emplace_back(loc, "begin", emitExpr(Expr(slice.startOr(0))));
+    args.emplace_back(loc, "start", emitExpr(Expr(slice.startOr(INT64_MAX))));
     const auto has_end = slice.end().present();
-    if (has_end) {
-      args.emplace_back(loc, "end", emitExpr(Expr(slice.end().get())));
-    }
+    args.emplace_back(loc, "end", emitExpr(Expr(slice.endOr(INT64_MAX))));
     if (input->type()->cast<TupleType>()) {
       auto has_step = slice.step().present();
       if (has_step) {
@@ -2965,6 +2962,7 @@ struct to_ir {
 
     auto step = emitExpr(Expr(slice.stepOr(1)));
     NamedValue step_nv = NamedValue(loc, "step", step);
+
     return emitBuiltinCall(loc, *graph, aten::slice, args, {step_nv});
   }
 

@@ -1975,35 +1975,78 @@ int listMulIntRight(Stack& stack) {
   return 0;
 }
 
+// Stolen (with appropriate modifications) from cpython repo
+// Objects/sliceobject.c with comment:
+// this is harder to get right than you might think
+//
+// This adjusts indexes according to python list semantics and returns number
+// of elements in the resulting list.
+static int64_t PySlice_AdjustIndices(
+    int64_t length, int64_t* start, int64_t* stop, int64_t step) {
+  TORCH_CHECK(step != 0, "List slice should have non-zero step")
+
+  if (*start == INT64_MAX) {
+    *start = (step < 0) ? INT64_MAX : 0;
+  }
+  if (*stop == INT64_MAX) {
+    *stop = (step < 0) ? INT64_MIN : INT64_MAX;
+  }
+
+  if (*start < 0) {
+    *start += length;
+    if (*start < 0) {
+      *start = (step < 0) ? -1 : 0;
+    }
+  } else if (*start >= length) {
+    *start = (step < 0) ? length - 1 : length;
+  }
+
+  if (*stop < 0) {
+    *stop += length;
+    if (*stop < 0) {
+      *stop = (step < 0) ? -1 : 0;
+    }
+  } else if (*stop >= length) {
+    *stop = (step < 0) ? length - 1 : length;
+  }
+
+  if (step < 0) {
+    if (*stop < *start) {
+      return (*start - *stop - 1) / (-step) + 1;
+    }
+  } else {
+    if (*start < *stop) {
+      return (*stop - *start - 1) / step + 1;
+    }
+  }
+  return 0;
+}
+
 template <typename T>
 int listSlice(Stack& stack) {
   int64_t step = pop(stack).to<int64_t>();
-  int64_t end = pop(stack).to<int64_t>();
+  int64_t stop = pop(stack).to<int64_t>();
   int64_t start = pop(stack).to<int64_t>();
-  c10::List<T> list = pop(stack).to<c10::List<T>>();
 
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
   const int64_t list_size = list.size();
 
-  // clamp start and end to the bounds of the list
-  const auto normalized_start =
-      std::max((int64_t)0, normalizeIndex(start, list_size));
-  const auto normalized_end =
-      std::min(list_size, normalizeIndex(end, list_size));
-
   c10::List<T> sliced_list = make_result_list<T>(list.elementType());
-  if (normalized_end <= normalized_start) {
-    // early exit if the slice is trivially empty
+  const int64_t num_values =
+       PySlice_AdjustIndices(list_size, &start, &stop, step);
+
+  if (num_values == 0) {
+    // early exit if the slice is empty
     push(stack, std::move(sliced_list));
     return 0;
   }
+  sliced_list.reserve(num_values);
 
-  sliced_list.reserve(normalized_end - normalized_start);
-
-  for (auto i = normalized_start; i < normalized_end;) {
+  int i = start;
+  for (int j = 0; j < num_values; ++j) {
     sliced_list.push_back(list.get(i));
     i += step;
   }
-
   push(stack, std::move(sliced_list));
   return 0;
 }
@@ -2580,9 +2623,11 @@ RegisterOperators reg2({
           "[] b) -> " decl_type "[]",                                               \
           listInplaceAdd<c_type::value_type>,                                       \
           aliasAnalysisFromSchema()),                                               \
+      /* INT64_MAX=9223372036854775807 represents unspeficied value, aka Py_None */ \
       Operator(                                                                     \
           "aten::slice(" decl_type                                                  \
-          "[] l, int start, int end=9223372036854775807, int step=1) -> " decl_type \
+          "[] l, int start=9223372036854775807,                                     \
+                 int end=9223372036854775807, int step=1) -> " decl_type            \
           "[]",                                                                     \
           listSlice<c_type::value_type>,                                            \
           aliasAnalysisFromSchema()),                                               \
