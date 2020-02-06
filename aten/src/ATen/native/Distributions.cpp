@@ -234,6 +234,14 @@ Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator
 }
 
 Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  if (output.numel() == 0) {
+    at::native::resize_(output, shape);
+  }
+
+  TORCH_CHECK(output.sizes().equals(shape),
+    "output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
+
   normal_cpu_(output, 0, 1, gen);
   output.mul_(std).add_(mean);
   return output;
@@ -252,7 +260,7 @@ Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
 }
 
 Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }

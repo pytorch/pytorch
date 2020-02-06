@@ -5330,34 +5330,27 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(torch.normal(2, tensor2345).size(), (2, 3, 4, 5))
 
             # inputs are expandable tensors
-            if device == 'cpu':
-                # CPU version is written in legacy code (TH), it doesn't support broadcasting
-                with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                    torch.normal(tensor2345, tensor2145)
-            else:
-                self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
-                self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
 
-            # inputs are non-expandable tensors, but they have same number of elements
-            self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
-            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
-
-            # inputs are non-expandable tensors and they don't have same number of elements
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+            # inputs are non-expandable tensors
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
                 torch.normal(tensor2345, tensor4)
 
             # output and inputs are size compatible
             self.assertEqual(torch.normal(tensor2345, tensor2345, out=output2345).size(), (2, 3, 4, 5))
 
             # output and inputs are not size compatible
-            # CUDA only since CPU version is written in legacy TH, it doesn't care about the size compatible
-            if device == 'cuda':
-                with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                    # inputs are expandable but have different broadcasted size than output
-                    torch.normal(tensor2345, tensor2145, out=output345)
-                with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                    # inputs are not expandable but reshapeable, output size is not the same as mean
-                    torch.normal(tensor2345, tensor120, out=output345)
+            with self.assertRaisesRegex(RuntimeError, "not the same as broadcasted"):
+                # inputs are expandable but have different broadcasted size than output
+                torch.normal(tensor2345, tensor2145, out=output345)
+            with self.assertRaisesRegex(RuntimeError, "must match the size"):
+                # inputs are not expandable
+                torch.normal(tensor2345, tensor120, out=output345)
 
 
 # Functions to test negative dimension wrapping
