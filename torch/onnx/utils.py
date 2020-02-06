@@ -32,35 +32,38 @@ def is_in_onnx_export():
 
 @contextlib.contextmanager
 def set_training(model, mode, onnx_opset_version):
-    old_mode = model.training
+    if not isinstance(model, torch.jit.ScriptFunction):
+        old_mode = model.training
 
-    if mode is None:
-        mode = False
-        # if the model is in training mode but the user did not specify
-        # to export the model in training mode, export the model in inference
-        # mode (default) and warn them
-        if old_mode is True:
-            warnings.warn("You are exporting the model to ONNX while in training mode with "
-                          "train=None param. The model will default to inference mode export. "
-                          "If you wish to export a training amenable ONNX model, specify train=True "
-                          "in torch.onnx.export().")
+        if mode is None:
+            mode = False
+            # if the model is in training mode but the user did not specify
+            # to export the model in training mode, export the model in inference
+            # mode (default) and warn them
+            if old_mode is True:
+                warnings.warn("You are exporting the model to ONNX while in training mode with "
+                              "train=None param. The model will default to inference mode export. "
+                              "If you wish to export a training amenable ONNX model, specify train=True "
+                              "in torch.onnx.export().")
 
-    from torch.onnx.symbolic_helper import _set_training_mode
-    _set_training_mode(mode)
-    # ONNX opset 12 has better support for training amenable models, with updated
-    # versions of the dropout and batch_norm operators
-    if mode is True:
-        if onnx_opset_version < 12:
-            warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
-                          "Note that onnx opset version 12 was updated for better support of training amenable mode.".format(onnx_opset_version))
+        from torch.onnx.symbolic_helper import _set_training_mode
+        _set_training_mode(mode)
+        # ONNX opset 12 has better support for training amenable models, with updated
+        # versions of the dropout and batch_norm operators
+        if mode is True:
+            if onnx_opset_version < 12:
+                warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
+                              "Note that onnx opset version 12 was updated for better support of training "
+                              "amenable mode.".format(onnx_opset_version))
 
-    if old_mode != mode:
-        model.train(mode)
+        if old_mode != mode:
+            model.train(mode)
     try:
         yield
     finally:
-        if old_mode != mode:
-            model.train(old_mode)
+        if not isinstance(model, torch.jit.ScriptFunction):
+            if old_mode != mode:
+                model.train(old_mode)
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
