@@ -22,6 +22,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     parameters = list(filter(lambda p: p.grad is not None, parameters))
+    assert max_norm >=0, "max_norm must not be negative"
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == inf:
