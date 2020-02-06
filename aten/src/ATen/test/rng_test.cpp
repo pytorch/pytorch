@@ -90,7 +90,9 @@ class RNGTest : public ::testing::Test {
 
 template<c10::ScalarType S, typename T>
 void test_random_from_to() {
-  const auto min_val = std::numeric_limits<T>::lowest();
+  const auto t_min_val = std::numeric_limits<T>::lowest();
+  const auto int64_min_value = std::numeric_limits<int64_t>::lowest();
+  const int64_t min_val = std::is_floating_point<T>::value ? int64_min_value : static_cast<int64_t>(t_min_val);
   const auto max_val = std::numeric_limits<T>::max();
   const auto uint64_max_val = std::numeric_limits<uint64_t>::max();
 
@@ -246,8 +248,10 @@ void test_random() {
       exp = static_cast<uint32_t>(val) % range;
     }
 
-    ASSERT_TRUE(0 <= exp);
-    ASSERT_TRUE(exp < range);
+    if (!std::is_same<T, bool>::value) {
+      ASSERT_TRUE(0 <= exp);
+      ASSERT_TRUE(exp < range);
+    }
     const auto expected = torch::full_like(actual, exp);
     // std::cout << "actual = " << actual << std::endl;
     // std::cout << "expected = " << expected << std::endl;
