@@ -1210,6 +1210,10 @@
   supports_named_tensor: True
   variants: function, method
 
+- func: expm1.dtype(Tensor self, ScalarType dtype) -> Tensor
+  supports_named_tensor: True
+  variants: function, method
+
 - func: expm1_(Tensor(a!) self) -> Tensor(a!)
   supports_named_tensor: True
   variants: function, method
