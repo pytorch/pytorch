@@ -53,13 +53,6 @@ class TORCH_API SGD : public Optimizer {
     TORCH_CHECK(defaults.momentum() >= 0, "Invalid momentum value: ", defaults.momentum());
     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
     TORCH_CHECK(!defaults.nesterov() || (defaults.momentum() > 0 && defaults.dampening() == 0), "Nesterov momentum requires a momentum and zero dampening");
-    for (const auto& group : param_groups_) {
-      for (const auto& p : group.params()) {
-        auto state = std::make_unique<SGDParamState>();
-        state->momentum_buffer(torch::empty({0}, p.options()));
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
-      }
-    }
   }
 
   explicit SGD(std::vector<Tensor> params,

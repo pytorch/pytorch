@@ -132,6 +132,14 @@ size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
 }
 
+size_t OptimizerBase::_size_new_design() const noexcept {
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
+}
+
 OptimizerOptions& OptimizerBase::defaults() noexcept {
   return *defaults_.get();
 }

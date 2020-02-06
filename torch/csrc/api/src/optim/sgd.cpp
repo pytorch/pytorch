@@ -66,17 +66,19 @@ void SGD::step() {
       }
       auto d_p = p.grad().data();
       if (weight_decay != 0) {
-        NoGradGuard guard;
         d_p = d_p.add(p.data(), weight_decay);
       }
       if (momentum != 0) {
-        auto& param_state = static_cast<SGDParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+        //auto& param_state = static_cast<SGDParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
         Tensor buf;
-        if (param_state.momentum_buffer().size(0) == 0) {
+        auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+        if(param_state == state_.end()) {
           buf = torch::clone(d_p).detach();
-          param_state.momentum_buffer(buf);
+          auto state = std::make_unique<SGDParamState>();
+          state->momentum_buffer(buf);
+          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
         } else {
-          buf = param_state.momentum_buffer();
+          buf = static_cast<SGDParamState&>(*param_state->second).momentum_buffer();
           buf.mul_(momentum).add_(d_p, 1 - dampening);
         }
         if (nesterov) {
@@ -85,18 +87,13 @@ void SGD::step() {
           d_p = buf;
         }
       }
-      NoGradGuard guard;
       p.data().add_(d_p, -1 * options.lr());
     }
   }
 }
 
 size_t SGD::size() const noexcept {
-  size_t count = 0;
-  for (const auto& group : param_groups_) {
-    count += group.params().size();
-  }
-  return count;
+  return _size_new_design();
 }
 
 void SGD::save(serialize::OutputArchive& archive) const {
