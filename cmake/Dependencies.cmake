@@ -472,7 +472,7 @@ if(BUILD_TEST)
   # Add googletest subdirectory but make sure our INCLUDE_DIRECTORIES
   # don't bleed into it. This is because libraries installed into the root conda
   # env (e.g. MKL) add a global /opt/conda/include directory, and if there's
-#gtest installed in conda, the third_party / googletest/**.cc source files
+  # gtest installed in conda, the third_party/googletest/**.cc source files
   # would try to include headers from /opt/conda/include/gtest/**.h instead of
   # its own. Once we have proper target-based include directories,
   # this shouldn't be necessary anymore.
@@ -527,9 +527,9 @@ if(USE_FBGEMM)
     set(FBGEMM_BUILD_TESTS OFF CACHE BOOL "")
     set(FBGEMM_BUILD_BENCHMARKS OFF CACHE BOOL "")
     if(MSVC AND BUILD_SHARED_LIBS)
-        set(FBGEMM_LIBRARY_TYPE "shared" CACHE STRING "")
+      set(FBGEMM_LIBRARY_TYPE "shared" CACHE STRING "")
     else()
-        set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
+      set(FBGEMM_LIBRARY_TYPE "static" CACHE STRING "")
     endif()
     add_subdirectory("${FBGEMM_SOURCE_DIR}")
     set_property(TARGET fbgemm_generic PROPERTY POSITION_INDEPENDENT_CODE ON)

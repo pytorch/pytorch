@@ -20,7 +20,7 @@ class L2ErrorMinimization : public NormMinimization {
 
 namespace internal {
 
-float L2MinimizationKernelAVX2(
+CAFFE2_API float L2MinimizationKernelAVX2(
     int precision,
     float* bins,
     int nbins,

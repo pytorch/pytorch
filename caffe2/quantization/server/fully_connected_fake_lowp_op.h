@@ -25,21 +25,21 @@
 namespace caffe2 {
 
 // convert to float16 reducing mantissa, preserving exponent
-void fp32_to_bfp16(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_bfp16(const float* source, size_t size, float* dest);
 
 // convert to float24 reducing mantissa, preserving exponent
-void fp32_to_bfp24(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_bfp24(const float* source, size_t size, float* dest);
 
 // convert to float14 reducing mantissa, preserving exponent
-void fp32_to_bfp14(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_bfp14(const float* source, size_t size, float* dest);
 
-void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_bfp16_scalar(const float* source, size_t size, float* dest);
 
 // convert to IEEE float16
-void fp32_to_fp16(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_fp16(const float* source, size_t size, float* dest);
 
 // fp32 -> int32 -> += 1<< 15 -> fp32 -> truncation
-void fp32_to_bfp16_round(const float* source, size_t size, float* dest);
+CAFFE2_API void fp32_to_bfp16_round(const float* source, size_t size, float* dest);
 
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.
 template <

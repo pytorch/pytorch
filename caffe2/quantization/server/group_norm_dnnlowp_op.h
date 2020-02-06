@@ -175,7 +175,13 @@ namespace internal {
 template <typename T>
 void VectorMomentsAVX2(const int N, const T* src, int64_t* sum, int64_t* sumsq);
 
-void ComputeQuantizedFusedParamsAVX2(
+template CAFFE2_API void VectorMomentsAVX2<uint8_t>(
+    const int N,
+    const uint8_t* src,
+    int64_t* sum,
+    int64_t* sumsq);
+
+CAFFE2_API void ComputeQuantizedFusedParamsAVX2(
     const int N,
     const int G,
     const int K,
@@ -207,6 +213,16 @@ void AffineBatchChannelAndRequantizeNHWCAVX2(
     const int32_t* scale,
     const int32_t* bias,
     T* Y);
+
+template CAFFE2_API void AffineBatchChannelAndRequantizeNHWCAVX2<uint8_t>(
+    const int N,
+    const int C,
+    const int HxW,
+    const fbgemm::RequantizationParams& params,
+    const uint8_t* X,
+    const int32_t* scale,
+    const int32_t* bias,
+    uint8_t* Y);
 
 } // namespace internal
 
