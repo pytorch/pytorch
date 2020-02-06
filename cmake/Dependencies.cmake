@@ -540,10 +540,8 @@ if(USE_FBGEMM)
 
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
-    install(TARGETS fbgemm DESTINATION lib)
-    if(MSVC AND BUILD_SHARED_LIBS)
-      install(FILES $<TARGET_PDB_FILE:fbgemm> DESTINATION lib OPTIONAL)
-    endif()
+    install(EXPORT fbgemmLibraryConfig DESTINATION share/cmake/fbgemm
+      FILENAME fbgemmLibraryConfig.cmake)
   endif()
 endif()
 
