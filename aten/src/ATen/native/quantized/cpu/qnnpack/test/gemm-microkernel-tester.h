@@ -285,6 +285,7 @@ class GemmMicrokernelTester {
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
               kernel_zero_points.data(),
+              requantization_scale.data(),
               multipliers.data(),
               shifts.data(),
               cZeroPoint,
@@ -318,17 +319,18 @@ class GemmMicrokernelTester {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           ASSERT_LE(uint32_t(c[mIndex * cStride() + nIndex]), uint32_t(qmax()));
           ASSERT_GE(uint32_t(c[mIndex * cStride() + nIndex]), uint32_t(qmin()));
-          ASSERT_EQ(
-              uint32_t(c[mIndex * cStride() + nIndex]),
-              uint32_t(cRef[mIndex * n() + nIndex]))
-              << "at " << mIndex << ", " << nIndex
-              << ": reference = " << (uint32_t)cRef[mIndex * n() + nIndex]
-              << " (accumulator = " << acc[mIndex * n() + nIndex]
-              << "), optimized = " << (uint32_t)c[mIndex * cStride() + nIndex]
-              << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
-              << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantization_scale[0]
-              << ", output zero point = " << int32_t(cZeroPoint);
+          auto abs_diff = std::abs(c[mIndex * cStride() + nIndex] - cRef[mIndex * n() + nIndex]);
+          if (abs_diff > 1) {
+            ASSERT_TRUE(false)
+                << "at " << mIndex << ", " << nIndex
+                << ": reference = " << (uint32_t)cRef[mIndex * n() + nIndex]
+                << " (accumulator = " << acc[mIndex * n() + nIndex]
+                << "), optimized = " << (uint32_t)c[mIndex * cStride() + nIndex]
+                << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
+                << ", M x N x K = " << m() << " x " << n() << " x " << k()
+                << ", requantization scale = " << requantization_scale[0]
+                << ", output zero point = " << int32_t(cZeroPoint);
+          }
         }
       }
     }
@@ -562,6 +564,7 @@ class GemmMicrokernelTester {
           pytorch_qnnp_compute_conv_quantization_params(
               aZeroPoint(),
               kernel_zero_points.data(),
+              requantization_scale.data(),
               multipliers.data(),
               shifts.data(),
               cZeroPoint,
@@ -595,17 +598,18 @@ class GemmMicrokernelTester {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
           ASSERT_LE(uint32_t(c[mIndex * cStride() + nIndex]), uint32_t(qmax()));
           ASSERT_GE(uint32_t(c[mIndex * cStride() + nIndex]), uint32_t(qmin()));
-          ASSERT_EQ(
-              uint32_t(c[mIndex * cStride() + nIndex]),
-              uint32_t(cRef[mIndex * n() + nIndex]))
-              << "at " << mIndex << ", " << nIndex
-              << ": reference = " << uint32_t(cRef[mIndex * n() + nIndex])
-              << " (accumulator = " << acc[mIndex * n() + nIndex]
-              << "), optimized = " << uint32_t(c[mIndex * cStride() + nIndex])
-              << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
-              << ", M x N x K = " << m() << " x " << n() << " x " << k()
-              << ", requantization scale = " << requantization_scale[0]
-              << ", output zero point = " << int32_t(cZeroPoint);
+          auto abs_diff = std::abs(c[mIndex * cStride() + nIndex] - cRef[mIndex * n() + nIndex]);
+          if (abs_diff > 1) {
+            ASSERT_TRUE(false)
+                << "at " << mIndex << ", " << nIndex
+                << ": reference = " << uint32_t(cRef[mIndex * n() + nIndex])
+                << " (accumulator = " << acc[mIndex * n() + nIndex]
+                << "), optimized = " << uint32_t(c[mIndex * cStride() + nIndex])
+                << ", Mr x Nr x Kr = " << mr() << " x " << nr() << " x " << kr()
+                << ", M x N x K = " << m() << " x " << n() << " x " << k()
+                << ", requantization scale = " << requantization_scale[0]
+                << ", output zero point = " << int32_t(cZeroPoint);
+          }
         }
       }
     }

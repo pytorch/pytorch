@@ -150,11 +150,7 @@ union pytorch_qnnp_conv_quantization_params {
   struct {
     PYTORCH_QNNP_ALIGN(16) const uint8_t* kernel_zero_points;
     PYTORCH_QNNP_ALIGN(16) int16_t input_zero_point[8];
-    PYTORCH_QNNP_ALIGN(16) uint32_t multiplier[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t rounding[2];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_mask[4];
-    PYTORCH_QNNP_ALIGN(16) int32_t remainder_threshold[4];
-    PYTORCH_QNNP_ALIGN(16) uint64_t shift[2];
+    PYTORCH_QNNP_ALIGN(16) float multiplier[4];
     PYTORCH_QNNP_ALIGN(16) int16_t output_zero_point[8];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_max[16];
     PYTORCH_QNNP_ALIGN(16) uint8_t output_min[16];

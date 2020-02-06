@@ -128,6 +128,7 @@ static inline union pytorch_qnnp_conv_quantization_params
 pytorch_qnnp_compute_conv_quantization_params(
     uint8_t input_zero_point,
     const uint8_t* kernel_zero_point,
+    const float* requantization_scale_ptr,
     const int32_t* multiplier_ptr,
     const int32_t* shift_ptr,
     uint8_t output_zero_point,
@@ -154,28 +155,14 @@ pytorch_qnnp_compute_conv_quantization_params(
   const int32_t shift = shift_ptr[0];
 
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
-  const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
-  const uint32_t remainder_threshold = remainder_mask >> 1;
   params.sse2.kernel_zero_points = kernel_zero_point;
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.input_zero_point[i] = (int16_t)(uint16_t)input_zero_point;
   }
-  params.sse2.multiplier[0] = multiplier;
-  params.sse2.multiplier[1] = multiplier;
-  params.sse2.multiplier[2] = multiplier;
-  params.sse2.multiplier[3] = multiplier;
-  params.sse2.rounding[0] = UINT64_C(0x40000000);
-  params.sse2.rounding[1] = UINT64_C(0x40000000);
-  params.sse2.remainder_mask[0] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[1] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[2] = (int32_t)remainder_mask;
-  params.sse2.remainder_mask[3] = (int32_t)remainder_mask;
-  params.sse2.remainder_threshold[0] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[1] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[2] = (int32_t)remainder_threshold;
-  params.sse2.remainder_threshold[3] = (int32_t)remainder_threshold;
-  params.sse2.shift[0] = (uint64_t)(uint32_t)shift;
-  params.sse2.shift[1] = (uint64_t)(uint32_t)shift;
+  params.sse2.multiplier[0] = requantization_scale_ptr[0];
+  params.sse2.multiplier[1] = requantization_scale_ptr[0];
+  params.sse2.multiplier[2] = requantization_scale_ptr[0];
+  params.sse2.multiplier[3] = requantization_scale_ptr[0];
   for (uint32_t i = 0; i < 8; i++) {
     params.sse2.output_zero_point[i] = (int16_t)(uint16_t)output_zero_point;
   }

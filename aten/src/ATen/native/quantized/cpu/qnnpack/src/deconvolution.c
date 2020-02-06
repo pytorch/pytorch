@@ -202,6 +202,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_deconvolution2d_nhwc_q8(
       pytorch_qnnp_compute_conv_quantization_params(
           input_zero_point,
           kernel_zero_points,
+          requantization_scale,
           multipliers,
           shifts,
           output_zero_point,

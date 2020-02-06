@@ -278,6 +278,7 @@ class DWConvMicrokernelTester {
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
               kernel_zero_points.data(),
+              requantization_scale.data(),
               multipliers.data(),
               shifts.data(),
               outputZeroPoint,
@@ -310,10 +311,11 @@ class DWConvMicrokernelTester {
           ASSERT_NEAR(
               clampedAccumulator, double(output[x * outputStride() + c]), 0.6)
               << "x = " << x << ", channel = " << c;
-          ASSERT_EQ(
-              uint32_t(referenceOutput),
-              uint32_t(output[x * outputStride() + c]))
-              << "x = " << x << ", channel = " << c;
+          auto abs_diff = std::abs(referenceOutput - output[x * outputStride() + c]);
+          if (abs_diff > 1) {
+            ASSERT_TRUE(false)
+                << "x = " << x << ", channel = " << c;
+          }
         }
       }
     }
@@ -463,6 +465,7 @@ class DWConvMicrokernelTester {
           pytorch_qnnp_compute_conv_quantization_params(
               inputZeroPoint(),
               kernel_zero_points.data(),
+              requantization_scale.data(),
               multipliers.data(),
               shifts.data(),
               outputZeroPoint,
@@ -496,10 +499,11 @@ class DWConvMicrokernelTester {
           ASSERT_NEAR(
               clampedAccumulator, double(output[x * outputStride() + c]), 0.6)
               << "x = " << x << ", channel = " << c;
-          ASSERT_EQ(
-              uint32_t(referenceOutput),
-              uint32_t(output[x * outputStride() + c]))
-              << "x = " << x << ", channel = " << c;
+          auto abs_diff = std::abs(referenceOutput - output[x * outputStride() + c]);
+          if (abs_diff > 1) {
+            ASSERT_TRUE(false)
+                << "x = " << x << ", channel = " << c;
+          }
         }
       }
     }

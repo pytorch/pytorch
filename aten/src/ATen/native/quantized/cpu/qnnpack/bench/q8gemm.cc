@@ -117,12 +117,12 @@ class Q8GEMM : public benchmark::Fixture {
 
     size_t num_zero_points_kernel = (nc_ + (nr_ -1)) & -nr_;
     std::vector<uint8_t> kernel_zero_points(num_zero_points_kernel, 127);
-    float requantization_scale = 0.75f;
-    auto multiplier_shift_pair = calc_multiplier_and_shift(requantization_scale);
-    std::vector<int32_t> multipliers(1, multiplier_shift_pair.first);
-    std::vector<int32_t> shifts(1, multiplier_shift_pair.second);
+    std::vector<float> requantization_scale(num_zero_points_kernel, 0.75f);
+    auto multiplier_shift_pair = calc_multiplier_and_shift(requantization_scale[0]);
+    std::vector<int32_t> multipliers(num_zero_points_kernel, multiplier_shift_pair.first);
+    std::vector<int32_t> shifts(num_zero_points_kernel, multiplier_shift_pair.second);
     quantizationParams_ = pytorch_qnnp_compute_conv_quantization_params(
-        127, kernel_zero_points.data(), multipliers.data(),
+        127, kernel_zero_points.data(), requantization_scale.data(), multipliers.data(),
         shifts.data(), 127, 1, 254);
   }
 
