@@ -172,7 +172,8 @@ const auto options = TensorOptions()
 #ifdef USE_STATIC_DISPATCH
     auto result_ = at::${name}(${args_with_tensor_options_disp});
 #else
-    auto result_ = options.has_dtype() ? torch::_${name}(${args_with_tensor_options}) : torch::_${name}(${args_with_tensor_options_nullopt});
+    auto result_ = options.has_dtype() ? torch::_${name}(${args_with_tensor_options}) :
+                                         torch::_${name}(${args_with_tensor_options_nullopt});
 #endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
@@ -241,23 +242,9 @@ def is_jit_op(decl):
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['arguments'])) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['returns'])))
 
-
-def is_tensor_arg(arg):
-    return arg['simple_type'] in {'Tensor', 'TensorList'}
-
-
 def is_sized_intlist_arg(arg):
     """Returns True for arguments declared as IntArrayRef[k], but False for IntArrayRef."""
     return (arg['simple_type'] == 'IntArrayRef') and ('size' in arg)
-
-
-def base_name(decl):
-    name = decl['name']
-    return name[:-1] if decl.get('inplace', False) else name[:-4] if name.endswith('_out') else name
-
-
-def is_view(decl):
-    return base_name(decl) in RETURNS_VIEWS_OF_INPUT
 
 
 def is_out_variant(decl):
@@ -318,8 +305,11 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
 
             args_with_tensor_options_disp = args[:tensor_options_arg_index] + \
                 ['options'] + args[(tensor_options_arg_index + 4):]
+
             args_with_tensor_options = args[:tensor_options_arg_index] + \
-                ['at::typeMetaToScalarType(options.dtype())', 'options.layout(), options.device(), options.pinned_memory(), options.requires_grad()'] + args[(tensor_options_arg_index + 4):]
+                ['at::typeMetaToScalarType(options.dtype())',
+                 'options.layout(), options.device(), options.pinned_memory(), options.requires_grad()'] + \
+                args[(tensor_options_arg_index + 4):]
 
             if is_namespace_function:
                 if (decl['name'] == 'arange'):
@@ -517,9 +507,6 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         write(out, 'register_aten_ops_%d.cpp' % i, REGISTER_ATEN_OPS_CPP, env)
 
 
-default_map = {'{}': 'None', 'nullptr': 'None', 'c10::nullopt': 'None'}
-
-
 def reorder_out_args(decl):
     first_arg = decl['arguments'][0]
     assert(first_arg['output'])
@@ -528,10 +515,6 @@ def reorder_out_args(decl):
     # to denote kwarg_only
     nargs = len(decl['arguments'])
     decl['jit_argument_order'] = [nargs - 1] + list(range(nargs - 1))
-
-
-def is_kwarg_only(a):
-    return a.get('kwarg_only') or a.get('output')
 
 
 #

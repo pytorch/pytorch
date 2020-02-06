@@ -2540,6 +2540,80 @@ TEST_F(FunctionalTest, isinf_CUDA) {
   test_isinf<torch::kFloat16, c10::Half>(device);
 }
 
+template<c10::ScalarType S, typename T>
+void test_allclose(const at::Device& device) {
+  const std::vector<T> values = {
+    std::numeric_limits<T>::lowest(),
+    0, 1, 42,
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max()
+  };
+  for (const auto value : values) {
+    const auto x = torch::full({1}, value, torch::TensorOptions().dtype(S).device(device));
+    const auto y = torch::full({1}, value, torch::TensorOptions().dtype(S).device(device));
+    ASSERT_TRUE(torch::allclose(x, x));
+    ASSERT_TRUE(torch::allclose(x, y));
+    ASSERT_TRUE(torch::allclose(y, x));
+    ASSERT_FALSE(torch::allclose(1.1 * x + 0.1, 1.0 * x));
+    ASSERT_TRUE(torch::allclose(0.99 * x + 0.1, 1.0 * x, 1.1, 0.1));
+  }
+  if (std::numeric_limits<T>::has_infinity) {
+    const auto inf = std::numeric_limits<T>::infinity();
+    const auto x = torch::tensor({-inf, inf},
+      torch::TensorOptions().dtype(S).device(device));
+    const auto y = torch::tensor({-inf, inf},
+      torch::TensorOptions().dtype(S).device(device));
+    ASSERT_TRUE(torch::allclose(x, x));
+    ASSERT_TRUE(torch::allclose(x, y));
+    ASSERT_TRUE(torch::allclose(y, x));
+  }
+  if (std::numeric_limits<T>::has_quiet_NaN) {
+    const auto x = torch::tensor({
+      std::numeric_limits<T>::quiet_NaN()
+    }, torch::TensorOptions().dtype(S).device(device));
+    const auto y = torch::tensor({
+      std::numeric_limits<T>::quiet_NaN()
+    }, torch::TensorOptions().dtype(S).device(device));
+    ASSERT_TRUE(torch::allclose(x, x, 1.0, 0.0, /*equal_nan=*/true));
+    ASSERT_TRUE(torch::allclose(x, y, 1.0, 0.0, /*equal_nan=*/true));
+    ASSERT_TRUE(torch::allclose(y, x, 1.0, 0.0, /*equal_nan=*/true));
+  }
+  if (std::numeric_limits<T>::has_signaling_NaN) {
+    const auto x = torch::tensor({
+      std::numeric_limits<T>::signaling_NaN()
+    }, torch::TensorOptions().dtype(S).device(device));
+    const auto y = torch::tensor({
+      std::numeric_limits<T>::signaling_NaN()
+    }, torch::TensorOptions().dtype(S).device(device));
+    ASSERT_TRUE(torch::allclose(x, x, 1.0, 0.0, /*equal_nan=*/true));
+    ASSERT_TRUE(torch::allclose(x, y, 1.0, 0.0, /*equal_nan=*/true));
+    ASSERT_TRUE(torch::allclose(y, x, 1.0, 0.0, /*equal_nan=*/true));
+  }
+}
+
+TEST_F(FunctionalTest, AllClose) {
+  const at::Device device("cpu");
+  test_allclose<torch::kUInt8, uint8_t>(device);
+  test_allclose<torch::kInt8, int8_t>(device);
+  test_allclose<torch::kInt16, int16_t>(device);
+  test_allclose<torch::kInt32, int32_t>(device);
+  test_allclose<torch::kInt64, int64_t>(device);
+  test_allclose<torch::kFloat32, float>(device);
+  test_allclose<torch::kFloat64, double>(device);
+}
+
+TEST_F(FunctionalTest, AllClose_CUDA) {
+  const at::Device device("cuda");
+  test_allclose<torch::kUInt8, uint8_t>(device);
+  test_allclose<torch::kInt8, int8_t>(device);
+  test_allclose<torch::kInt16, int16_t>(device);
+  test_allclose<torch::kInt32, int32_t>(device);
+  test_allclose<torch::kInt64, int64_t>(device);
+  test_allclose<torch::kFloat32, float>(device);
+  test_allclose<torch::kFloat64, double>(device);
+  test_allclose<torch::kFloat16, c10::Half>(device);
+}
+
 TEST_F(FunctionalTest, BCEWithLogitsLoss) {
   { // test BCE with logits raises if target and input are different size
     {

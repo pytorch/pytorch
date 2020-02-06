@@ -101,7 +101,6 @@ def turn_actuals_into_option_calls(actuals):
     collapsed[index + 2] = 'options.device()'
     collapsed[index + 3] = 'options.pinned_memory()'
     collapsed.insert(index + 4, 'options.requires_grad()')
-    #collapsed[index + 4] = 'options.requires_grad()'
     return collapsed
 
 def process_function(decl, has_tensor_options, disable_autograd):
@@ -118,7 +117,7 @@ def process_function(decl, has_tensor_options, disable_autograd):
         formals.append("{} {}{}".format(type, argument["name"], default))
 
         if argument['name'] == 'pin_memory' and has_tensor_options:
-            #insert grad before MemoryFormat
+            # insert requires_grad before MemoryFormat
             formals.append("c10::optional<bool> requires_grad = c10::nullopt")
 
         actual = argument["name"]

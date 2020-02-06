@@ -614,7 +614,6 @@ def handle_python_binding_args(declaration, output_gap):
         return expr
 
     has_output = len(pa['output_args']) == 1
-    #tensor_options_arg = get_tensor_options(declaration)
 
     if has_tensor_options(declaration):
         # if our op has a tensor options arg, these are its scattered fields.
@@ -636,9 +635,8 @@ def handle_python_binding_args(declaration, output_gap):
             raise RuntimeError(
                 '{}: incomplete tensor options args: {}'.
                 format(declaration['name'], [arg['name'] for arg in python_binding_args]))
-        # generate a gathering initialization of options struct
 
-        #argname = tensor_options_arg['name']
+        # generate a gathering initialization of options struct
         argname = "options"
         inits.append(TENSOR_OPTIONS_DECL.substitute({
             'name': argname,
@@ -655,11 +653,6 @@ def handle_python_binding_args(declaration, output_gap):
         inits.append('auto requires_grad = {0};'.format(parse_binding_arg('requires_grad')))
 
         inits.append('torch::utils::maybe_initialize_cuda({});'.format(argname))
-        # and add to op arg map
-        #argmap['options'] = {
-        #    'value': argname,
-        #    'formal': get_cpp_formal(tensor_options_arg),
-        #}
         argmap['dtype'] = {
             'value': 'dtype',
             'formal': 'c10::optional<ScalarType> dtype',
@@ -1328,8 +1321,10 @@ def make_python_arglists(declaration, is_python_method):
     # keyword inputs:
     # - filter options. after loading the yaml, an upstream step has gathered dtype,
     #   layout et al into a single tensor options arg. here we reintroduce the originals
-    input_kwargs = [arg for arg in input_kwargs if not (arg['name'] in TOUtils.tensor_options_args and TOUtils.check_if_factory_method(declaration['arguments']))]
+    if TOUtils.check_if_factory_method(declaration['arguments']):
+        input_kwargs = [a for a in input_kwargs if not a['name'] in TOUtils.tensor_options_args]
 
+    input_kwargs = [arg for arg in input_kwargs if not (arg['name'] in TOUtils.tensor_options_args and TOUtils.check_if_factory_method(declaration['arguments']))]
     # outputs:
     # - coalesce multiple output args into a single 'out' arg w/type TensorList.
     # - force a default. This is so we can use this sig for both out and non-out variants
@@ -1494,6 +1489,7 @@ def is_tensor_options(arg):
 def is_scatter(arg):
     return arg.get('scatter_args') is not None
 
+
 def is_output(arg):
     return arg.get('output', False)
 
@@ -1502,19 +1498,7 @@ def has_outputs(declaration):
     return any([is_output(arg) for arg in declaration['arguments']])
 
 
-def get_tensor_options(declaration):
-    args = [arg for arg in declaration['arguments'] if is_tensor_options(arg)]
-    if len(args) == 0:
-        return None
-    if len(args) != 1:
-        raise RuntimeError(
-            '{}: multiple tensor options arguments'.
-            format(declaration['name']))
-    return args[0]
-
-
 def has_tensor_options(declaration):
-    #return get_tensor_options(declaration) is not None
     return TOUtils.check_if_factory_method(declaration['arguments'])
 
 

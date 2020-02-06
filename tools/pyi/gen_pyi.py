@@ -39,7 +39,8 @@ read gen_pyi for the gory details.
 
 needed_modules = set()
 
-FACTORY_PARAMS = "dtype: Optional[_dtype]=None, layout: Optional[_layout]=None, device: Union[_device, str, None]=None, requires_grad: _bool=False"
+FACTORY_PARAMS = ("dtype: Optional[_dtype]=None, layout: Optional[_layout]=None, "
+                  "device: Union[_device, str, None]=None, requires_grad: _bool=False")
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
