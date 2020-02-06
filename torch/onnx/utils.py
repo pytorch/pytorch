@@ -503,7 +503,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
                 strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                 val_use_large_model_format, model_file_location)
 
-        if enable_onnx_checker and operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
+        if enable_onnx_checker and \
+           operator_export_type is OperatorExportTypes.ONNX_ATEN_FALLBACK and \
+           not val_use_large_model_format:
             # Only run checker if enabled and we are not using ATEN fallback
             _check_onnx_proto(proto)
 

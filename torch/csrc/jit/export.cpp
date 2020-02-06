@@ -127,6 +127,34 @@ std::string GetFileRootPath(const std::string& rootPath) {
     return folder;
 }
 
+std::string GetExternalFileName(const c10::optional<std::string> external_ref) {
+  auto tensorName = external_ref.value();
+  const std::string illegalChars = "\\/:?\"<>|";
+  for (int i = 0; i < tensorName.size(); i++) {
+    if (illegalChars.find(tensorName[i]) != std::string::npos) {
+        tensorName[i] = '_';
+    }
+  }
+  return tensorName;
+}
+
+void CloseFile(FILE* fp) { 
+  fclose(fp);
+}
+
+void CreateExternalFile(const at::Tensor& tensor, const std::string& tensorName,
+                        const std::string& onnx_file_path) {
+  auto folder = GetFileRootPath(onnx_file_path);
+  std::string fullFilePath = folder + "/" + tensorName;
+  // FILE* fp = fopen(fullFilePath.c_str(), "wb");
+  std::unique_ptr<FILE, decltype(&CloseFile)> fp(fopen(fullFilePath.c_str(), "wb"),
+                                                 &CloseFile);
+  if (fp == NULL) {
+    throw std::runtime_error(std::string("ONNX export failed. Could not open file or directory: ") + fullFilePath);
+  }
+  fwrite(tensor.data_ptr(), tensor.element_size(), tensor.numel(), fp.get());
+} // fclose() called here through CloseFile(), if FILE* is not a null pointer
+
 class EncoderBase {
  public:
   EncoderBase(
@@ -641,14 +669,8 @@ void GraphEncoder::EncodeTensor(
         tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
       printf("The external parameter file name that is saved is %s.\n", external_ref.value().c_str());
-      auto folder = GetFileRootPath(onnx_file_path);
-      auto tensorName = external_ref.value();
-      const std::string illegalChars = "\\/:?\"<>|";
-      for (int i = 0; i < tensorName.size(); i++) {
-        if (illegalChars.find(tensorName[i]) != std::string::npos) {
-            tensorName[i] = '_';
-        }
-      }
+      auto tensorName = GetExternalFileName(external_ref);
+      CreateExternalFile(t, tensorName, onnx_file_path);
       // if (tensorName == std::string("features.2.conv.0.0.weight")) {
       //   printf("I am here.\n");
       //   for (auto d : tensor.sizes()) {
@@ -661,13 +683,7 @@ void GraphEncoder::EncodeTensor(
       //   printf("t.element_size() is %ld.\n",qe1);
         
       // }
-      std::string fullFilePath = folder + "/" + tensorName;
-      FILE* fp = fopen(fullFilePath.c_str(), "wb");
-      if (fp == NULL) {
-        throw std::runtime_error(std::string("ONNX export failed. No such file or directory: ") + fullFilePath);
-      }
-      fwrite(t.data_ptr(), t.element_size(), t.numel(), fp);
-      if (fp) { fclose(fp); }
+      
       onnx::StringStringEntryProto* location = tensor_proto->mutable_external_data()->Add();
       location->set_key("location");
       // location->set_value(external_ref.value());
