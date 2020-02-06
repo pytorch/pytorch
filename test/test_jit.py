@@ -6030,6 +6030,12 @@ a")
         check_indexing_list_int('[::-42]', consec_list(7))
         check_indexing_list_int('[::42]', consec_list(0))
         check_indexing_list_int('[::-42]', consec_list(0))
+        check_indexing_list_int('[::9223372036854775807]', consec_list(42))
+        check_indexing_list_int('[::-9223372036854775807]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_list_int('[::-9223372036854775808]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_list_int('[::0]', consec_list(42))
 
 
     def test_index_ellipses(self):

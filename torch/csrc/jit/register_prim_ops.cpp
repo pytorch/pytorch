@@ -1984,6 +1984,7 @@ int listMulIntRight(Stack& stack) {
 static int64_t PySlice_AdjustIndices(
     int64_t length, int64_t* start, int64_t* stop, int64_t step) {
   TORCH_CHECK(step != 0, "List slice should have non-zero step")
+  TORCH_CHECK(step >= -INT64_MAX, "List slice step is out of bounds")
 
   // Comes from PySlice_Unpack.
   if (*start == INT64_MAX) {
