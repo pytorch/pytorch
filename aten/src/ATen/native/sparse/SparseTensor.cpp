@@ -103,9 +103,9 @@ SparseTensor new_with_dims_and_tensor_sparse(
     ArrayRef<int64_t> size,
     const LongTensor& indices,
     const Tensor& values,
-    ScalarType dtype, 
-    Layout layout, 
-    Device device, 
+    ScalarType dtype,
+    Layout layout,
+    Device device,
     bool pin_memory) {
   const auto options = TensorOptions()
         .dtype(dtype)
@@ -158,9 +158,6 @@ namespace {
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
 
-  // arg checking
-  TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
-
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
@@ -208,8 +205,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, c10::opti
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
 
-  // arg checking
-  TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
@@ -257,9 +252,6 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
 // NB: Got rid of the size == NULL case
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, ArrayRef<int64_t> size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   Tensor values = expand_values_if_needed(values_);
-
-  // arg checking
-TORCH_CHECK(!layout.has_value() || layout.value() == kSparse, "expected sparse layout, but got layout ", layout.value_or(Layout::Unknown));
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;

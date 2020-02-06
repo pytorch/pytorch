@@ -30,7 +30,7 @@ def needs_backend_select(declaration_option):
     if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
         return False
 
-    return declaration_option.get('arguments', '') != '' and TOUtils.check_if_factory_method(declaration_option["arguments"])
+    return declaration_option.get('arguments', '') != '' and TOUtils.check_if_factory_method(declaration_option['arguments'])
 
 def register_backend_select_methods(declarations, template_path, file_manager):
     backend_select_method_definitions = []
