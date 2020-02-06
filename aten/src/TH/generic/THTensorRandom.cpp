@@ -82,45 +82,6 @@ void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_gene
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, double mean, double stddev, at::Generator *_generator)
-{
-  const int64_t size = THTensor_(numel)(self);
-  if (size >= 16 && THTensor_(isContiguous)(self)) {
-    THVector_(normal_fill)(THStorage_(data)(THTensor_getStoragePtr(self)) + self->storage_offset(), size, _generator, mean, stddev);
-  } else {
-    auto gen = at::get_generator_or_default<at::CPUGenerator>(_generator, at::detail::getDefaultCPUGenerator());
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-
-    at::normal_distribution<double> normal(mean, stddev);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)normal(gen););
-  }
-}
-
-void THTensor_(normal_means)(THTensor *self, THTensor *means, double stddev, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, 0, stddev, gen);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
-void THTensor_(normal_stddevs)(THTensor *self, double mean, THTensor *stddevs, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, stddevs);
-  THTensor_(normal)(self, 0, 1, gen);
-  THTensor_(cmul)(self, self, stddevs);
-  at::Tensor self_wrap = THTensor_wrap(self);
-  self_wrap.add_(mean);
-}
-
-void THTensor_(normal_means_stddevs)(THTensor *self, THTensor *means, THTensor *stddevs, at::Generator *gen)
-{
-  THTensor_(resizeAs)(self, means);
-  THTensor_(normal)(self, 0, 1, gen);
-  THTensor_(cmul)(self, self, stddevs);
-  THTensor_(cadd)(self, self, 1, means);
-}
-
 #undef TH_REAL_MIN
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
