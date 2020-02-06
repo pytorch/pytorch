@@ -3799,40 +3799,6 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
-    def test_multi_view_methods(self):
-        # This list should match the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
-        # It maps a function to its arguments for an input of size [3,]
-        fn_to_test = {
-            'split': (2,),
-            'split_with_sizes': ((2, 1),),
-        }
-
-        for fn, arg in fn_to_test.items():
-            inp = torch.rand(3, dtype=torch.double, requires_grad=True)
-
-            def foo(inp, inplace_output=False, inplace_input=False):
-                y = inp * 2
-                x = getattr(y, fn)(*arg)
-                res = 0.
-                for i, el in enumerate(x):
-                    if inplace_output:
-                        el *= 42
-                    res += (i + 1) * el.sum()
-                if inplace_input:
-                    y *= 12
-                # TODO: Add back when https://github.com/pytorch/pytorch/pull/32044 lands again
-                # res += y.sum()
-                return res
-            self.assertTrue(gradcheck(foo, (inp,)))
-            self.assertTrue(gradgradcheck(foo, (inp,)))
-            self.assertTrue(gradcheck(foo, (inp, True)))
-            self.assertTrue(gradgradcheck(foo, (inp, True)))
-            # TODO: Add back when https://github.com/pytorch/pytorch/pull/32044 lands again
-            # with self.assertRaisesRegex(RuntimeError, "one of the variables needed for gradient computation has been modified"):
-            #     gradcheck(foo, (inp, True, True))
-            # with self.assertRaisesRegex(RuntimeError, "one of the variables needed for gradient computation has been modified"):
-            #     gradgradcheck(foo, (inp, True, True))
-
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

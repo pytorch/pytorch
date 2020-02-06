@@ -24,7 +24,7 @@
 #
 from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS, PURE_VIEW_FUNCTIONS
+from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
 # These functions we don't want to record for tracing, because we always want
@@ -782,9 +782,8 @@ def emit_body(declaration):
                 if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
                 # Only allow rebasing of the history if we return a single Tensor
-                # Or if the function is marked as a pure view
                 allow_rebase_history = 'true'
-                if return_info['dynamic_type'] == 'TensorList' and base_name not in PURE_VIEW_FUNCTIONS:
+                if return_info['dynamic_type'] == 'TensorList':
                     allow_rebase_history = 'false'
                 wrapped_call = ("as_differentiable_view(/* base */{}, /* output */ {}, "
                                 "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
