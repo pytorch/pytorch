@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack, enableScriptTest
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -107,16 +107,22 @@ class TestONNXRuntime(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
+        self.is_script_test_enabled = False
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
-        return run_model_test(self, model, batch_size=batch_size,
-                              input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
-                              do_constant_folding=do_constant_folding,
-                              dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
-                              input_names=input_names, output_names=output_names,
-                              fixed_batch_size=fixed_batch_size)
+        def _run_test(m):
+            return run_model_test(self, m, batch_size=batch_size,
+                                  input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
+                                  do_constant_folding=do_constant_folding,
+                                  dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
+                                  input_names=input_names, output_names=output_names,
+                                  fixed_batch_size=fixed_batch_size)
+        if self.is_script_test_enabled:
+            script_model = torch.jit.script(model)
+            _run_test(script_model)
+        _run_test(model)
 
     # Export Torchvision models
 
@@ -589,6 +595,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @enableScriptTest()
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
