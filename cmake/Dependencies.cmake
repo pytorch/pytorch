@@ -540,16 +540,6 @@ if(USE_FBGEMM)
 
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
-    # export(TARGETS fbgemm asmjit cpuinfo clog FILE fbgemmLibraryConfig.cmake)
-    # export(TARGETS fbgemm asmjit cpuinfo clog FILE fbgemmLibraryConfig.cmake)
-    # if (MSVC AND BUILD_SHARED_LIBS)
-    #   install(TARGETS fbgemm EXPORT Caffe2Targets DESTINATION lib)
-    # endif()
-    # export(EXPORT fbgemmLibraryConfig)
-    # install(EXPORT AsmJitTargets DESTINATION share/cmake/asmjit
-    #   FILE AsmJitTargets.cmake)
-    #   EXPORT_LINK_INTERFACE_LIBRARIES)
-    # install(TARGETS fbgemm asmjit cpuinfo clog EXPORT Caffe2Targets DESTINATION share/cmake/fbgemm)
   endif()
 endif()
 
