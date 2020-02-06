@@ -569,7 +569,7 @@ inline IValue toIValue(
 #ifdef USE_DISTRIBUTED
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      AT_ERROR("RRef is only supported with the distributed package")
+      AT_ERROR("RRef is only supported with the distributed package");
 #endif
     }
     case TypeKind::GeneratorType:

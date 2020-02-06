@@ -1110,7 +1110,7 @@ struct Graph {
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
-  TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
+  Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
