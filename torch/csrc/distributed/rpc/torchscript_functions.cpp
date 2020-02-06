@@ -1,8 +1,7 @@
-#include <torch/csrc/distributed/rpc/script_functions.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
@@ -12,21 +11,20 @@ namespace distributed {
 namespace rpc {
 
 c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
-    const std::string& dst,
+    const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack) {
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
-  auto agent = RpcAgent::getCurrentRpcAgent();
+  auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
   auto futMessage = autograd::sendMessageWithAutograd(
-      *agent, agent->getWorkerInfo(dst), std::move(*scriptCall).toMessage());
+      *rpcAgentPtr,
+      rpcAgentPtr->getWorkerInfo(dstWorkerName),
+      std::move(*scriptCall).toMessage());
 
   // Get function return type to construct c10::ivalue::Future.
-  auto returns = PythonRpcHandler::getInstance()
-                     .jitCompilationUnit()
-                     ->get_function(qualifiedName)
-                     .getSchema()
-                     .returns();
+  auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -52,21 +50,20 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 }
 
 std::shared_ptr<UserRRef> remoteTorchscript(
-    const WorkerInfo& dst,
+    const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack) {
+  auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
+  auto dstWorkerInfo = rpcAgentPtr->getWorkerInfo(dstWorkerName);
   auto& ctx = RRefContext::getInstance();
   // TODO: support creating RRefs on a local object.
   TORCH_INTERNAL_ASSERT(
-      ctx.getWorkerId() != dst.id_,
+      ctx.getWorkerId() != dstWorkerInfo.id_,
       "Does not support creating RRef on self yet.");
 
   // Get function return type to construct UserRRef.
-  auto returns = PythonRpcHandler::getInstance()
-                     .jitCompilationUnit()
-                     ->get_function(qualifiedName)
-                     .getSchema()
-                     .returns();
+  auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
       returns.size() == 1,
@@ -75,7 +72,7 @@ std::shared_ptr<UserRRef> remoteTorchscript(
       returns.size());
   auto returnType = returns.at(0).type();
 
-  auto userRRefPtr = ctx.createUserRRef(dst.id_, returnType);
+  auto userRRefPtr = ctx.createUserRRef(dstWorkerInfo.id_, returnType);
 
   auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
       qualifiedName,
@@ -83,9 +80,12 @@ std::shared_ptr<UserRRef> remoteTorchscript(
       userRRefPtr->rrefId(),
       userRRefPtr->forkId());
 
-  auto agent = RpcAgent::getCurrentRpcAgent();
   auto fm = torch::distributed::autograd::sendMessageWithAutograd(
-      *agent, dst, std::move(*scriptRemoteCall).toMessage(), false, nullptr);
+      *rpcAgentPtr,
+      dstWorkerInfo,
+      std::move(*scriptRemoteCall).toMessage(),
+      false,
+      nullptr);
 
   ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
   fm->addCallback(callback::confirmPendingUser);

@@ -85,7 +85,7 @@ fi
 EXTRA_TESTS=()
 
 # CUDA builds always include NCCL support
-if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *-rocm* ]]; then
   EXTRA_TESTS+=("$caffe2_pypath/contrib/nccl")
 fi
 

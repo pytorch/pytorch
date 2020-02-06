@@ -11,34 +11,45 @@ namespace c10 {
 
 namespace impl {
 
-// Take a DispatchKeySet for a Tensor, and combine it with the current thread
-// local valid (implemented) and enabled (not implemented) DispatchKeySets
-// to determine what the actual dispatch DispatchKey should be.  Unlike
-// Tensor::key_set(), the value of this on a tensor can change depending
+// Some keys are ALWAYS considered for inclusion by default, so they are
+// included in the set here.  (const appears to be sufficient for
+// always_included to get inlined, constexpr not necessary)
+const DispatchKeySet always_included{DispatchKey::VariableTensorId};
+
+// Take a DispatchKeySet for a Tensor and determine what the actual dispatch
+// DispatchKey should be, taking into account TLS, and skipping backends which
+// fall through.
+//
+// Unlike Tensor::key_set(), the value of this on a tensor can change depending
 // on TLS.
-//
-// NB: I didn't make this take a Tensor to avoid header include shenanigans.
-//
-// TODO: I'm not sure if this should live in this header or not; the operant
-// question is whether or not we have access to all the relevant TLS at this
-// point.
 static inline DispatchKey dispatchTypeId(
-    DispatchKeySet ts,
-    // This argument is used to mask out fallthrough keys, so we don't
-    // consider them for dispatch.  It's taken in the weird "inverted" form so
-    // that we can do it in one instruction (x & y) rather than two (x & ~y).
-    // These exclusions are NOT tracked in the TLS, but must be applied AFTER
-    // TLS, which is why you have to pass them in to this function (as opposed
-    // to just applying it to the input 'ts').
-    DispatchKeySet non_fallthrough_mask
+    DispatchKeySet ks,
+    // The key mask lets us eliminate (by zero entries) keys which should not
+    // be considered for dispatch.  There is one case when we use this:
+    // if there is no operator registered for a backend whose fallback behavior
+    // is to fallthrough, we eliminate that backend from consideration (since
+    // we want to "fallthrough" to the next valid key.)
+    //
+    // These excluded backends are NOT tracked in the TLS, but must be applied
+    // AFTER TLS (since the backend may have been introduced for consideration
+    // by the included TLS), which is why you have to pass them in to this
+    // function (as opposed to just applying it to the input 'ks').
+    DispatchKeySet key_mask
 ) {
   c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
-  return (((ts | local.included_) - local.excluded_) & non_fallthrough_mask).highestPriorityTypeId();
+  // TODO: It's a bit irritating that we have to do logical ORs here, it would
+  // be nice to only do one.  Can always_included be folded into the TLS?  Well,
+  // it's a bit troublesome, because fastpath TLS access requires the type of
+  // the TLS in question to be zero-initialized, so you don't actually win
+  // anyting in that case.
+  return (((ks | local.included_ | always_included) - local.excluded_) & key_mask).highestPriorityTypeId();
 }
 
 }
 
 namespace detail {
+  // A small gadget to extract the DispatchKeySet from types which are known
+  // to have it.  Used to extract dispatch keys from unboxed calls.
   struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
     DispatchKeySet ts;
     void operator()(const at::Tensor& x) {
@@ -50,6 +61,11 @@ namespace detail {
     void operator()(at::ArrayRef<at::Tensor> xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
+      }
+    }
+    void operator()(at::Generator* gen) {
+      if (gen != nullptr) {
+        ts = ts | gen->key_set();
       }
     }
     template <typename T>
@@ -68,9 +84,16 @@ namespace detail {
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
- * a list of arguments for an operator call. The instance is specific for
- * a certain operator as different operators have different ways to extract
- * the dispatch key (e.g. different numbers of arguments).
+ * a list of arguments for an operator call.
+ *
+ * The instance is specific for a certain operator as:
+ *  - In boxed dispatch, different operators have different ways to extract
+ *    the dispatch key (e.g. different numbers of arguments), and we precompute
+ *    the stack locations we should look at; and
+ *  - In all dispatch, some backends should be excluded from dispatch because
+ *    they have been registered as fallthrough.  The set of excluded backends
+ *    varies from operator, as some operators may have overridden the
+ *    fallthrough with custom behavior.
  */
 struct CAFFE2_API DispatchKeyExtractor final {
 public:
@@ -78,47 +101,57 @@ public:
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
-  c10::optional<DispatchKey> getDispatchKeyBoxed(DispatchKeySet nonFallthroughMask, const torch::jit::Stack* stack) const {
+  DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
-    //      but boxed doesn't yet. These should be aligned and do the same thing.
+    //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
 
-    DispatchKeySet ts;
+    DispatchKeySet ks;
     for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
         // no safe toTensorRef method, alas)
-        ts = ts | ivalue.unsafeToTensorImpl()->key_set();
+        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
         for (const at::Tensor& tensor : ivalue.toTensorList()) {
-          ts = ts | tensor.key_set();
+          ks = ks | tensor.key_set();
         }
       }
     }
-    return dispatchKeySetToDispatchKey_(nonFallthroughMask, ts);
+    return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
   }
 
   template<class... Args>
-  c10::optional<DispatchKey> getDispatchKeyUnboxed(DispatchKeySet nonFallthroughMask, const Args&... args) const {
-    auto key_set = detail::multi_dispatch_key_set(args...);
-    return dispatchKeySetToDispatchKey_(nonFallthroughMask, key_set);
+  DispatchKey getDispatchKeyUnboxed(DispatchKeySet backendsWithoutFallthrough, const Args&... args) const {
+    auto ks = detail::multi_dispatch_key_set(args...);
+    return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
   }
 
   // Used by DispatchTable to maintain the fallthrough invariant, see
-  // docs on nonFallthroughKernels_
-  void setIsOperatorOverridden(DispatchKey k, bool is_overridden);
+  // docs on operatorHasKernelForBackend_
+  void setOperatorHasKernelForBackend(DispatchKey k, bool has_kernel);
 
 private:
-  c10::optional<DispatchKey> dispatchKeySetToDispatchKey_(DispatchKeySet nonFallthroughMask, const DispatchKeySet& keySet) const {
-    if (C10_UNLIKELY(keySet.empty())) {
-      return c10::nullopt;
-    }
-
-    return impl::dispatchTypeId(keySet, nonFallthroughMask | perOperatorOverriddenKernels_);
+  // NB: If there is no valid dispatch key, this will return Undefined
+  DispatchKey dispatchKeySetToDispatchKey_(DispatchKeySet backendsWithoutFallthrough, const DispatchKeySet& ks) const {
+    // We must NOT respect the passed in backendsWithoutFallthrough if an operator has
+    // specifically overridden the backend, since that means we've opted to
+    // not fallthrough and instead apply some specific behavior (which we
+    // must dispatch to).  For now, we assume that operators NEVER override
+    // a backend with a fallthrough kernel (see
+    // https://github.com/pytorch/pytorch/issues/32454) which means we can just
+    // unconditionally fill in the mask when the operator tells us to, via
+    // operatorHasKernelForBackend_.
+    //
+    // This scheme doesn't work if you want to also apply fallthrough on a
+    // per-op basis, but while we could directly fix this by maintaining a
+    // second DispatchKeySet, it doesn't seem that there is any actual use case,
+    // so we are deferring it for #32454.
+    return impl::dispatchTypeId(ks, backendsWithoutFallthrough | operatorHasKernelForBackend_);
   }
 
   explicit DispatchKeyExtractor(size_t num_args)
   : num_args_(num_args)
-  , perOperatorOverriddenKernels_() {}
+  , operatorHasKernelForBackend_() {}
 
   // this is caching the index so we don't have to parse the schema inputs
   // again and again for each dispatcher lookup.
@@ -127,19 +160,8 @@ private:
   // TODO: a potential optimization is to store a bitfield of arg locations,
   size_t num_args_;
 
-  // We must NOT respect the passed in nonFallthroughMask if an operator has
-  // specifically overridden the backend, since that means we've opted to
-  // not fallthrough and instead apply some specific behavior (which we
-  // must dispatch to).  For now, we assume that operators NEVER are the
-  // fallthrough kernel (see https://github.com/pytorch/pytorch/issues/32454)
-  // which means we can just unconditionally fill in the mask when the
-  // operator tells us to.
-  //
-  // This scheme doesn't work if you want to also apply fallthrough on a
-  // per-op basis, but while we could fix this by maintaining a second
-  // DispatchKeySet, it doesn't seem that there is any actual use case,
-  // so we are deferring it for 32454.
-  DispatchKeySet perOperatorOverriddenKernels_;
+  // Set of backends for which the operator has explicitly registered a kernel.
+  DispatchKeySet operatorHasKernelForBackend_;
 };
 
 }
