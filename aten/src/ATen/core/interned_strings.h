@@ -105,6 +105,7 @@ namespace c10 {
   _(aten, __range_length)            \
   _(aten, __derive_index)            \
   _(aten, __round_to_zero_floordiv)  \
+  _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
   _(prim, forkClosure)               \

@@ -203,8 +203,6 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   for (size_t i = 0; i < lhs_outputs.size(); ++i) {
     if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
       return false;
-    if (lhs_outputs[i]->type() == CapsuleType::get())
-      return false;
   }
 
   // Check whether the inputs are the same.
