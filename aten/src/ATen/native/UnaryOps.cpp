@@ -313,7 +313,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkDeviceType(#op, result, DeviceType::device);                  \
     checkLayout(#op, result, Layout::Strided);                         \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
@@ -330,14 +329,19 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
+#define IMPLEMENT_UNARY_OP_VEC_FPGA(op)                                \
+  IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, fpga, FPGA)
+
 IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(cos)
+IMPLEMENT_UNARY_OP_VEC_FPGA(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(tan)
+IMPLEMENT_UNARY_OP_VEC_FPGA(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 

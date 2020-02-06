@@ -419,7 +419,7 @@ Vec256<std::complex<double>> inline operator^(const Vec256<std::complex<double>>
   return _mm256_xor_pd(a, b);
 }
 
-#ifdef __AVX2__
+#if 0
 template <> inline Vec256<std::complex<double>> fmadd(const Vec256<std::complex<double>>& a, const Vec256<std::complex<double>>& b, const Vec256<std::complex<double>>& c) {
   return a * b + c;
 }
