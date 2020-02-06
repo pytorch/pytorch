@@ -675,12 +675,13 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap) {
+    bool check_mem_overlap, bool promoting) {
   auto iter = TensorIterator();
   iter.set_check_mem_overlap(check_mem_overlap);
   iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
+  if(promoting == true) iter.promote_common_dtype();
   iter.build();
   return iter;
 }
