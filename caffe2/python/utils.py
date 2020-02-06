@@ -357,7 +357,10 @@ def BuildUniqueMutexIter(
     from caffe2.python import core
     if not init_net.BlobIsDefined(iter):
         # Add training operators.
-        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+        with core.DeviceScope(
+                core.DeviceOption(caffe2_pb2.CPU,
+                                  extra_info=["device_type_override:cpu"])
+        ):
             iteration = init_net.ConstantFill(
                 [],
                 iter,
