@@ -235,7 +235,7 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
     self.scalar_type(), "cummax_cpu", [&]() -> void {
-    at::native::tensor_dim_apply3<scalar_t, scalar_t>(self, values, indices, dim,
+    at::native::tensor_dim_apply3<scalar_t, scalar_t, int64_t>(self, values, indices, dim,
       [](const scalar_t* self_data, scalar_t* values_data, int64_t* indices_data,
         int self_dim_size, int self_stride, int values_stride, int indices_stride) {
         auto cummax = self_data[0];
@@ -282,7 +282,7 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
       self.scalar_type(), "cummin_cpu", [&]() -> void {
-      at::native::tensor_dim_apply3<scalar_t, scalar_t>(self, values, indices, dim,
+      at::native::tensor_dim_apply3<scalar_t, scalar_t, int64_t>(self, values, indices, dim,
         [](const scalar_t* self_data, scalar_t* values_data, int64_t* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
             auto cummin = self_data[0];

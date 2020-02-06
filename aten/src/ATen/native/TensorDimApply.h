@@ -3,17 +3,14 @@
 namespace at {
   namespace native {
     //input tensors are non-zero dim and non-empty
-    template<typename T1, typename T2, typename Operation>
+    template<typename T1, typename T2, typename T3, typename Operation>
     void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Operation op) {
       int ndims = self.dim();
       int tensor_dim_apply_has_finished = 0;
-      int tensor_dim_apply_i;
-      int64_t tensor_dim_apply_counter[ndims];
-      for(tensor_dim_apply_i = 0; tensor_dim_apply_i < ndims; tensor_dim_apply_i++)
-        tensor_dim_apply_counter[tensor_dim_apply_i] = 0;
+      std::vector<int64_t> counter(ndims, 0);
       T1* self_data = self.data_ptr<T1>();
       T2* values_data = values.data_ptr<T2>();
-      int64_t* indices_data = indices.data_ptr<int64_t>();
+      T3* indices_data = indices.data_ptr<T3>();
       int64_t self_stride = self.stride(dim);
       int64_t values_stride = values.stride(dim);
       int64_t indices_stride = indices.stride(dim);
@@ -23,28 +20,28 @@ namespace at {
         op(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride);
         if(ndims == 1)
            break;
-        for(tensor_dim_apply_i = 0; tensor_dim_apply_i < ndims; tensor_dim_apply_i++) {
-          if(tensor_dim_apply_i == dim) {
-            if(tensor_dim_apply_i == (ndims - 1)) {
+        for(int dim_i = 0; dim_i < ndims; dim_i++) {
+          if(dim_i == dim) {
+            if(dim_i == (ndims - 1)) {
               tensor_dim_apply_has_finished = 1;
               break;
             }
             continue;
           }
-          tensor_dim_apply_counter[tensor_dim_apply_i]++;
-          self_data += self.stride(tensor_dim_apply_i);
-          values_data += values.stride(tensor_dim_apply_i);
-          indices_data += indices.stride(tensor_dim_apply_i);
+          counter[dim_i]++;
+          self_data += self.stride(dim_i);
+          values_data += values.stride(dim_i);
+          indices_data += indices.stride(dim_i);
 
-          if(tensor_dim_apply_counter[tensor_dim_apply_i] == self.size(tensor_dim_apply_i)) {
-            if(tensor_dim_apply_i == ndims-1) {
+          if(counter[dim_i] == self.size(dim_i)) {
+            if(dim_i == ndims-1) {
               tensor_dim_apply_has_finished = 1;
               break;
             } else {
-              self_data -= tensor_dim_apply_counter[tensor_dim_apply_i]*self.stride(tensor_dim_apply_i);
-              values_data -= tensor_dim_apply_counter[tensor_dim_apply_i]*values.stride(tensor_dim_apply_i);
-              indices_data -= tensor_dim_apply_counter[tensor_dim_apply_i]*indices.stride(tensor_dim_apply_i);
-              tensor_dim_apply_counter[tensor_dim_apply_i] = 0;
+              self_data -= counter[dim_i]*self.stride(dim_i);
+              values_data -= counter[dim_i]*values.stride(dim_i);
+              indices_data -= counter[dim_i]*indices.stride(dim_i);
+              counter[dim_i] = 0;
             }
           } else {
             break;
