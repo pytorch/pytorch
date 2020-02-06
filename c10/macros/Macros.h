@@ -213,9 +213,10 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #else // __APPLE__
 #if defined(NDEBUG)
 extern "C" {
-[[noreturn]] void __assert_fail(const char *assertion, const char *file,
-                                unsigned int line, const char *function)
-                                throw();
+  [[noreturn]] __host__ __device__
+  void __assert_fail(const char *assertion, const char *file,
+                unsigned int line, const char *function)
+                throw();
 }
 #endif // NDEBUG
 #define CUDA_ALWAYS_ASSERT(cond)                                         \
