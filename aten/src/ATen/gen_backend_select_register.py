@@ -26,10 +26,10 @@ def needs_backend_select(declaration_option):
     # if a TensorOptions argument has been gathered from its declared args
     # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
     # See TypeDefault.cpp
-    if '_like' in declaration_option['name'] or 'new_' in declaration_option['name']:
+    if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
         return False
 
-    return any("dynamic_type" in a and a["dynamic_type"] == "TensorOptions" for a in declaration_option["arguments"])
+    return any(a.get('dynamic_type') == 'TensorOptions' for a in declaration_option['arguments'])
 
 def register_backend_select_methods(declarations, template_path, file_manager):
     backend_select_method_definitions = []
