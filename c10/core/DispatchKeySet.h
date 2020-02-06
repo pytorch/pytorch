@@ -124,8 +124,12 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // here.  At the moment, RequiresGrad (replacement for Variable)
   // is the most likely key that will need this treatment.
 
-  // BackendSelect is a very special dispatch key which was introduced only for
-  // the factory functions with TensorOptions and should be special cased here.
+  // BackendSelect is a very special dispatch key that doesn't have a dedicated backend.
+  // It was introduced only for the factory functions with TensorOptions. The logic that
+  // uses legacyExtractDispatchKey doesnt expect BackendSelect and VariableTensorId keys.
+  // VariableTensorId is being excluded from a DispatchKeySet right after dispatching
+  // (See variable_excluded_from_dispatch in TensorBody.h)
+  // Now we are getting rid of BackendSelect.
   return s.remove(DispatchKey::BackendSelect).highestPriorityTypeId();
 }
 

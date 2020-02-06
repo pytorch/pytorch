@@ -27,7 +27,7 @@ def needs_backend_select(declaration_option):
     # if a TensorOptions argument has been gathered from its declared args
     # We skip all the 'new_*' and '*_like' ops as they are special cased and avoid dispatching.
     # See TypeDefault.cpp
-    if '_like' in declaration_option['name'] or 'new_' in declaration_option['name']:
+    if declaration_option['name'].endswith('_like') or declaration_option['name'].startswith('new_'):
         return False
 
     return declaration_option.get('arguments', '') != '' and TOUtils.check_if_factory_method(declaration_option["arguments"])
