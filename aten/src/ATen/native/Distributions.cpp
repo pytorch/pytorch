@@ -119,6 +119,7 @@ DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(normal_stub);
 DEFINE_DISPATCH(random_stub);
 DEFINE_DISPATCH(random_from_to_stub);
 DEFINE_DISPATCH(random_full_64_range_stub);
@@ -217,6 +218,49 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+Tensor& normal_cpu_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  normal_stub(kCPU, self, mean, std, gen);
+  return self;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, double std, Generator* gen) {
+  normal_cpu_(output, 0, std, gen);
+  output.add_(mean);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  auto mean_tensor = at::full({}, mean, output.options());
+  output.mul_(std).add_(mean_tensor);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  output.mul_(std).add_(mean);
+  return output;
+}
+
+Tensor normal_cpu(const Tensor& mean, double std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
 Tensor& random_(Tensor& self, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   random_stub(iter.device_type(), iter, gen);
@@ -232,8 +276,14 @@ Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen
     range = *to - from;
     random_from_to_stub(iter.device_type(), iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
-    // [from, std::numeric_limits<int64_t>::max()]
-    range = std::numeric_limits<int64_t>::max() - from + 1;
+    // [from, std::numeric_limits<scalar_t>::max()]
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
+      if (std::is_same<scalar_t, bool>::value) {
+        range = 2;
+      } else {
+        range = static_cast<int64_t>(std::numeric_limits<scalar_t>::max()) - from + 1;
+      }
+    });
     random_from_to_stub(iter.device_type(), iter, range, from, gen);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
