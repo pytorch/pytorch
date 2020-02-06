@@ -10,9 +10,11 @@ TEST(ReduceOpsTest, MaxValuesAndMinValues) {
   const int H = 10;
 
   for (const auto dev : {kCPU, kCUDA}) {
-    std::vector<at::ScalarType> dtypes = {kFloat, kDouble, kShort, kInt, kLong};
+    std::vector<at::ScalarType> dtypes = {kFloat, kDouble, kLong};
     if (hasCUDA()) {
       dtypes.push_back(kHalf);
+      dtypes.push_back(kShort);
+      dtypes.push_back(kInt);
     } else if (dev == kCUDA) {
       // Skip CUDA test in non cuda env
       continue;
