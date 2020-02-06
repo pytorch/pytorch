@@ -3427,6 +3427,7 @@ graph(%Ra, %Rb):
         x = torch.randn(3, 4)
         self.assertEqual(traced(x), imported(x))
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_transpose_incomplete_tensor_type(self):
         with enable_profiling_mode():
             # Smoke test to get us into the state where we are attempting to export
