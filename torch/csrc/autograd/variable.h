@@ -296,10 +296,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///   + if a single autograd Node returns multiple differentiable views, if any
 ///     output is modified by an inplace operation, the autograd engine will make
 ///     an equivalent graph (corresponding to the view operations) without using
-///     the user-provided grad_fn. If the provided grad_fn does more
-///     than the backward of the view, then the DifferentiableViewMeta must be
-///     created with allow_rebase_history=OnRebase::ERROR_REBASE to prevent the engine
-///     from ignoring the provided grad_fn.
+///     equivalent graph, where each output is treated as if it were produced by a
+///     distinct view operation. This discards the original (e.g., user provided)
+///     grad_fn. If the provided grad_fn does more than the backward of the view,
+///     then the DifferentiableViewMeta must be created with allow_rebase_history=
+///     OnRebase::ERROR_REBASE to prevent the engine from ignoring the provided grad_fn.
 ///
 /// Interaction with GradMode:
 /// The particular case that we consider here is:

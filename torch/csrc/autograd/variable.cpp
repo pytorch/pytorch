@@ -325,6 +325,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
     }
     auto current_version = self._version();
     if (diff_view_meta->attr_version != current_version) {
+      TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
       fn->size = self.sizes().vec();
@@ -336,7 +337,6 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
       , self.sizes() // Note: sizes(), not base_.sizes(), is intentional
       , diff_view_meta->base_.device());
       diff_view_meta->grad_fn_ = std::move(fn);
-      diff_view_meta->output_nr_ = 0;
       diff_view_meta->attr_version = current_version;
     }
     return diff_view_meta->grad_fn_;
