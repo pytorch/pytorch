@@ -541,7 +541,7 @@ if(USE_FBGEMM)
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
     install(EXPORT fbgemmLibraryConfig DESTINATION share/cmake/fbgemm
-      FILENAME fbgemmLibraryConfig.cmake)
+      FILE fbgemmLibraryConfig.cmake)
   endif()
 endif()
 
