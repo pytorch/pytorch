@@ -69,7 +69,6 @@ void SGD::step() {
         d_p = d_p.add(p.data(), weight_decay);
       }
       if (momentum != 0) {
-        //auto& param_state = static_cast<SGDParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
         Tensor buf;
         auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
         if(param_state == state_.end()) {
