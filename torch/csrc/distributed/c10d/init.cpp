@@ -476,6 +476,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
               "barrier",
               &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "set_timeout",
+              &::c10d::ProcessGroup::setTimeout,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(

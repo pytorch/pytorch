@@ -353,8 +353,12 @@ void ProcessGroupGloo::SendWork::abort() {
 
 ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
-    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
-    : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
+    std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+    const std::chrono::milliseconds recvTimeout)
+    : tensor_(tensor),
+      buffer_(std::move(buffer)),
+      srcRank_(-1),
+      recvTimeout_(recvTimeout) {}
 
 int ProcessGroupGloo::RecvWork::sourceRank() const {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -365,7 +369,7 @@ bool ProcessGroupGloo::RecvWork::wait() {
   bool recvCompleted = false;
   std::unique_lock<std::mutex> lock(mutex_);
   try {
-    recvCompleted = buffer_->waitRecv(&srcRank_);
+    recvCompleted = buffer_->waitRecv(&srcRank_, recvTimeout_);
   } catch (...) {
     exception_ = std::current_exception();
   }
@@ -500,7 +504,8 @@ ProcessGroupGloo::ProcessGroupGloo(
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
       stop_(false),
-      collectiveCounter_(0) {
+      collectiveCounter_(0),
+      recvTimeout_(kUnsetTimeout) {
   auto& devices = options.devices;
   if (devices.empty()) {
     throw std::runtime_error("No device(s) specified");
@@ -537,6 +542,12 @@ ProcessGroupGloo::ProcessGroupGloo(
   for (size_t i = 0; i < threads_.size(); i++) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+}
+
+void ProcessGroupGloo::setTimeout(const std::chrono::seconds& timeoutSeconds) {
+  std::cout << "SETTING TIMEOUT IN PG GLOO " << timeoutSeconds.count()
+            << " for " << contexts_.size() << " contexts " << std::endl;
+  recvTimeout_ = timeoutSeconds;
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -2294,7 +2305,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf));
+  if (getRank() == 1) {
+    std::cout << "CREATING RTECV WORK WITH TIMEOUT " << recvTimeout_.count()
+              << std::endl;
+  }
+  return std::make_shared<RecvWork>(tensor, std::move(buf), recvTimeout_);
 }
 
 std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
@@ -2322,7 +2337,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::recvAnysource(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return std::make_shared<RecvWork>(tensor, std::move(buf));
+  return std::make_shared<RecvWork>(tensor, std::move(buf), recvTimeout_);
 }
 
 namespace {

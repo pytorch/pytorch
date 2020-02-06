@@ -33,6 +33,10 @@ std::vector<at::Tensor> ProcessGroup::Work::result() const {
 
 void ProcessGroup::Work::synchronize() {}
 
+void ProcessGroup::setTimeout(const std::chrono::seconds& timeoutSeconds) {
+  // Default No-op implementation
+}
+
 bool ProcessGroup::Work::wait() {
   std::unique_lock<std::mutex> lock(mutex_);
   cv_.wait(lock, [&] { return completed_; });

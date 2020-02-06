@@ -144,7 +144,7 @@ class ProcessGroupAgent : public RpcAgent {
   // Main function for receiving messages
   void listenLoop();
   std::exception_ptr listenLoopException_;
-  std::atomic<bool> listenLoopExceptionSet_{false};
+  std::mutex listenLoopExceptionMutex_;
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures

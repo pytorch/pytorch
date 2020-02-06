@@ -1,9 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import time
+from datetime import timedelta
 from functools import partial, wraps
 
 import torch.distributed as dist
+from torch.distributed.distributed_c10d import _get_default_group
 import torch.distributed.rpc as rpc
 from torch.distributed.rpc import _rref_context_get_debug_info
 
@@ -135,6 +137,10 @@ def wait_until_pending_users_flushed():
         time.sleep(0.1)
         num_pending_users = int(_rref_context_get_debug_info()["num_pending_users"])
     return
+
+def set_pg_timeout_for_testing(timeout):
+    """Sets the pg timeout for testing"""
+    _get_default_group().set_timeout(timeout)
 
 def initialize_pg(init_method, rank, world_size):
     # This is for tests using `dist.barrier`.

@@ -109,7 +109,8 @@ class ProcessGroupGloo : public ProcessGroup {
    public:
     explicit RecvWork(
         at::Tensor& tensor,
-        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
+        std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        const std::chrono::milliseconds recvTimeout = kUnsetTimeout);
 
     int sourceRank() const override;
 
@@ -121,6 +122,7 @@ class ProcessGroupGloo : public ProcessGroup {
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
     int srcRank_;
+    std::chrono::milliseconds recvTimeout_;
   };
 
   struct Options {
@@ -221,6 +223,8 @@ class ProcessGroupGloo : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  void setTimeout(const std::chrono::seconds& timeoutSeconds) override;
+
  protected:
   std::unique_ptr<::gloo::rendezvous::Store> store_;
 
@@ -262,6 +266,7 @@ class ProcessGroupGloo : public ProcessGroup {
   std::mutex workMutex_;
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
+  std::chrono::milliseconds recvTimeout_;
 };
 
 } // namespace c10d

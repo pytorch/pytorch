@@ -133,13 +133,13 @@ def _run_function(binary_data, tensor_table):
     except Exception as e:
         # except str = exception info + traceback string
         except_str = "{}\n{}".format(repr(e), traceback.format_exc())
-        result = RemoteException(except_str)
+        result = RemoteException(except_str, type(e))
     return result
 
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise Exception(result.msg)
+        raise result.exception_type(result.msg)
 
 
 def _load_return_value(binary_data, tensor_table):
@@ -190,4 +190,4 @@ def set_process_group_timeout_for_testing(timeout_seconds):
 
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])
-RemoteException = collections.namedtuple("RemoteException", ["msg"])
+RemoteException = collections.namedtuple("RemoteException", ["msg", "exception_type"])

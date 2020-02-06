@@ -268,8 +268,12 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
   // Throw if we previously encountered an exception in ::listenLoop.
-  if (listenLoopExceptionSet_) {
-    std::rethrow_exception(listenLoopException_);
+  {
+    std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
+    if (listenLoopException_) {
+      guard.unlock();
+      std::rethrow_exception(listenLoopException_);
+    }
   }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
@@ -547,15 +551,26 @@ void ProcessGroupAgent::listenLoop() {
     // Error occured in listenLoop(). Stop receiving thread and store exception
     // to indicate that the RPC agent is in an unhealthy state and we should
     // shutdown.
-    LOG(WARNING) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
-                 << e.what();
-    listenLoopException_ = std::current_exception();
-    // Set to signal to other threads
-    listenLoopExceptionSet_.store(true);
+    LOG(ERROR) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
+               << e.what()
+               << " RPC agent is in an unhealthy state and unusable.";
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      listenLoopException_ = std::current_exception();
+    }
   } catch (...) {
-    listenLoopException_ = std::make_exception_ptr(std::runtime_error(
-        "Unknown exception occured in ProcessGroupAgent::listenLoop."));
-    listenLoopExceptionSet_.store(true);
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      std::string unknownErrorMsg =
+          "Unknown exception occured in "
+          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+          "unusable.";
+      LOG(ERROR) << unknownErrorMsg;
+      listenLoopException_ =
+          std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
+    }
   }
 }
 
