@@ -248,10 +248,9 @@ void test_random() {
       exp = static_cast<uint32_t>(val) % range;
     }
 
-    if (!std::is_same<T, bool>::value) {
-      ASSERT_TRUE(0 <= exp);
-      ASSERT_TRUE(exp < range);
-    }
+    ASSERT_TRUE(0 <= static_cast<int64_t>(exp));
+    ASSERT_TRUE(static_cast<int64_t>(exp) < range);
+
     const auto expected = torch::full_like(actual, exp);
     // std::cout << "actual = " << actual << std::endl;
     // std::cout << "expected = " << expected << std::endl;

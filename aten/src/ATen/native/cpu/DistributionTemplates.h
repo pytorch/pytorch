@@ -67,7 +67,7 @@ static void random_kernel(TensorIterator& iter, RNG* generator) {
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
 static void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random64_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random64_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -75,14 +75,8 @@ static void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
         return generator->random64(); // use all 64 bits
       });
-    } else if (std::is_same<scalar_t, bool>::value) {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random() & 1; // use the lowest bit
-      });
     } else {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random(); // use 32/16/8 bits
-      });
+      TORCH_CHECK(false, "random_full_64_range_kernel handles only int64, double and float");
     }
   });
 }
