@@ -556,7 +556,7 @@ Conversion to SSA works in multiple parts.
 - Then we inline the loop condition into the graph loops.
 - Next we erase loads and stores, removing all Stores and replacing all loads
 with whatever the in-scope value of the variable name is.
-- Finally, we remove `prim::LoopContinuations` and `prim::ReturnStmts` in the exit_transform pass.  
+- Finally, we remove `prim::LoopContinuation`s and `prim::ReturnStmt`s in the exit_transform pass.
 
 ## Exit Transform ##
 
@@ -564,7 +564,7 @@ with whatever the in-scope value of the variable name is.
 
 This pass takes in a graph where LoopContinuation & ReturnStmts exist in the graph and erases them, correctly setting block outputs. `prim::LoopContinuation(*vals)` means that the values are targeting the most recent loop block. `prim::ReturnStmt(*vals)` means that the values are targeting the most recent Closure or Graph Block.
 
-Once we hit an Exit Node, we do not not execute any further instructions until the exit target has been reached. If we encounter a node that contains nested blocks that may have hit an exit node, such as an if statement that exits in one block and does not exit in the other, we use a boolean value to indicate if the exit has been hit or not. Then, we conditionalize further execution.
+If a block has an exit node, no further instructions will be executed until the exit target has been reached. If we encounter a node that contains nested blocks that may have hit an exit node, such as an if statement that exits in one block and does not exit in the other, we use a boolean value to indicate if the exit has been hit or not. Then, we conditionalize further execution.
 
 Python example:
 
@@ -599,13 +599,13 @@ if i < 0:
   raise Exception("Negative input")
 else:
   return math.sqrt(i)
-print(i)
+print(i)  # unreachable code
 ```
 
 In the above example, the if statement will have one output, with the value on the false branch being `math.sqrt(i)`. In the true branch, insert and use
 `prim::Uninitialized`. These are values inserted by the compiler when it can prove the value will never be used. It can be introduced by exceptions, breaks, continues, and returns.
 
-We initially considering doing the Transform pass before Loads and Stores were removed from the graph. However, this breaks when a loop carried variable
+We initially considered doing the Transform pass before Loads and Stores were removed from the graph. However, this breaks when a loop carried variable
 is captured in a break or continue and then is refined in the rest of the loop body. In the below example, at the point of the `continue`, `x` has type `Optional[int]` but is refined to `int` after the continue statement.
 
 ```python
