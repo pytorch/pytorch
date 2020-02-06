@@ -11533,6 +11533,7 @@ a")
 
         self.checkModule(C(), (torch.tensor(1),))
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_module(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11652,6 +11653,7 @@ a")
             WarningTest(), torch.randn(42), None, verbose=False,
             example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_python_fail(self):
         with enable_profiling_mode():
             class PythonModule(torch.jit.ScriptModule):
@@ -11679,6 +11681,7 @@ a")
                 torch.onnx._export(mte, (torch.zeros(1, 2, 3),), f, verbose=False,
                                    example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_inline_trace(self):
         with enable_profiling_mode():
             class ModuleToInline(torch.nn.Module):
@@ -11704,6 +11707,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_inline_script(self):
         with enable_profiling_mode():
             class ModuleToInline(torch.jit.ScriptModule):
@@ -11730,6 +11734,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_module_loop(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11751,6 +11756,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_truediv(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11768,6 +11774,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_raw_export_script_truediv(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11785,6 +11792,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs, export_raw_ir=True)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_non_alpha_add_sub(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11802,6 +11810,7 @@ a")
                 mte, (torch.rand(3, 4),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_module_if(self):
         with enable_profiling_mode():
             class ModuleToExport(torch.jit.ScriptModule):
@@ -11820,6 +11829,7 @@ a")
                 mte, (torch.zeros(1, 2, 3),), None, verbose=False,
                 example_outputs=outputs)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_script_inline_params(self):
         with enable_profiling_mode():
             class ModuleToInline(torch.jit.ScriptModule):
@@ -11953,6 +11963,7 @@ a")
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
         FileCheck().check("Double(2, 4)").run(str(foo.graph))
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_speculate(self):
         with enable_profiling_mode():
             class Foo(torch.jit.ScriptModule):
@@ -11996,6 +12007,7 @@ a")
                 (torch.ones(1, 10, dtype=torch.float), ),
                 None, verbose=False, example_outputs=outputs_f2)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_onnx_export_shape_reshape(self):
         with enable_profiling_mode():
             class Foo(torch.nn.Module):
@@ -14499,6 +14511,7 @@ a")
 
         self.assertEqual(foo(input), input)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_export_dynamic_slice(self):
         with enable_profiling_mode():
             class DynamicSliceExportMod(torch.jit.ScriptModule):
