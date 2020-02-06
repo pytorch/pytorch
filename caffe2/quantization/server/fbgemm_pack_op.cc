@@ -1,5 +1,7 @@
 #include "fbgemm_pack_op.h"
 
+#include "caffe2/quantization/server/proto/fbgemm_int8.pb.h"
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/tensor_int8.h"
 
@@ -854,4 +856,130 @@ OPERATOR_SCHEMA(Int8ConvPackWeight)
     .Input(1, "b", "Bias tensor")
     .Output(0, "W_q", "Weight/bias tensor in a packed format");
 
+namespace {
+class FbGemmInt8MatrixSerializer : public BlobSerializerBase {
+ public:
+  FbGemmInt8MatrixSerializer() {}
+  ~FbGemmInt8MatrixSerializer() override {}
+
+  void Serialize(
+      const void* pointer,
+      TypeMeta typeMeta,
+      const string& name,
+      SerializationAcceptor acceptor) override {
+    CAFFE_ENFORCE(typeMeta.Match<Int8FCDNNLowPPackedWeightBlob>());
+
+    const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+        static_cast<const Int8FCDNNLowPPackedWeightBlob*>(pointer);
+    auto* W_quantized_data = int8_tensor->original_tensor.data<int8_t>();
+    BlobProto blob_proto;
+    blob_proto.set_name(name);
+    blob_proto.set_type("Int8FCDNNLowPPackedWeightBlob");
+
+    fbgemm::FbGemmInt8PackedMatrixProto proto;
+    auto shape = int8_tensor->original_tensor.sizes();
+    proto.clear_shape();
+    for (auto x : shape) {
+      proto.add_shape(x);
+    }
+
+    std::vector<dnnlowp::TensorQuantizationParams> qparams =
+        int8_tensor->qparams;
+    for (auto qparam : qparams) {
+      proto.add_scales(qparam.scale);
+      proto.add_zero_points(qparam.zero_point);
+    }
+
+    std::vector<char> char_data(int8_tensor->original_tensor.numel());
+    memcpy(
+        char_data.data(),
+        W_quantized_data,
+        int8_tensor->original_tensor.numel());
+
+    std::string str_data(char_data.begin(), char_data.end());
+    proto.set_bytes_quantized_data(str_data);
+    auto serialized = proto.SerializeAsString();
+
+    if (serialized.empty()) {
+      return;
+    }
+
+    blob_proto.set_content(serialized);
+    acceptor(name, SerializeBlobProtoAsString_EnforceCheck(blob_proto));
+  }
+};
+class FbGemmInt8MatrixDeserializer : public BlobDeserializerBase {
+ public:
+  void Deserialize(const BlobProto& blobProto, Blob* blob) override {
+    OperatorDef operator_def;
+    std::string proto_content = blobProto.content();
+
+    auto serialized = blobProto.content();
+
+    fbgemm::FbGemmInt8PackedMatrixProto proto;
+    if (!proto.ParseFromString(serialized)) {
+      throw std::runtime_error(
+          "Error parsing Int8FCDNNLowPPackedWeightBlob protobuf");
+    }
+    uint64_t numel = proto.bytes_quantized_data().size();
+    vector<int64_t> shape;
+    uint64_t size = 1;
+    for (int i = 0; i < proto.shape().size(); ++i) {
+      shape.push_back(proto.shape()[i]);
+      size *= proto.shape()[i];
+    }
+    if (size != numel) {
+      LOG(WARNING) << "Size mismatch when serializing. Expected size " << size
+                   << " but the actual is " << numel;
+    }
+
+    int64_t N = shape[0];
+    int64_t K = shape[1];
+    auto* base = blob->template GetMutable<Int8FCDNNLowPPackedWeightBlob>();
+
+    if (proto.scales().size() != proto.zero_points().size()) {
+      LOG(WARNING) << "Size mismatch between scales and zero_points";
+    }
+    uint64_t qparams_size = proto.scales().size();
+    for (int i = 0; i < qparams_size; ++i) {
+      dnnlowp::TensorQuantizationParams qparam;
+      qparam.scale = proto.scales()[i];
+      qparam.zero_point = proto.zero_points()[i];
+      base->qparams.push_back(qparam);
+    }
+
+    auto* tensor_size = new ArrayRef<int64_t>(shape);
+    base->original_tensor.Resize(*tensor_size);
+    caffe2::ReinitializeTensor(
+        &base->original_tensor, *tensor_size, at::dtype<int8_t>().device(CPU));
+    int8_t* W_quantized_data =
+        base->original_tensor.template mutable_data<int8_t>();
+    memcpy(
+        W_quantized_data,
+        reinterpret_cast<const int8_t*>(proto.bytes_quantized_data().data()),
+        proto.bytes_quantized_data().size());
+
+    base->column_offsets.reset(new vector<int32_t>());
+    ComputeColumnOffsets(
+        K, N, W_quantized_data, base->qparams, *base->column_offsets);
+
+    base->W.reset(new fbgemm::PackBMatrix<int8_t>(
+        fbgemm::matrix_op_t::Transpose,
+        K,
+        N,
+        W_quantized_data,
+        K,
+        nullptr, // pmat
+        1)); // group
+  }
+};
+
+} // namespace
+
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>()),
+    FbGemmInt8MatrixSerializer);
+REGISTER_BLOB_DESERIALIZER(
+    Int8FCDNNLowPPackedWeightBlob,
+    FbGemmInt8MatrixDeserializer);
 } // namespace caffe2

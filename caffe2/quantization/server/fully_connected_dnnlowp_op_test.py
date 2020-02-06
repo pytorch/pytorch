@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import collections
+from tempfile import NamedTemporaryFile
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -195,4 +196,179 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 self, init_net, net, X, W, b, op_type, engine, None, gc, outputs
             )
 
+        check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)
+
+    @given(
+        input_channels=st.sampled_from([3, 4, 5, 8, 16, 32]),
+        output_channels=st.integers(2, 16),
+        batch_size=st.integers(1, 16),
+        preserve_activation_sparsity=st.booleans(),
+        preserve_weight_sparsity=st.booleans(),
+        **hu.gcs_cpu_only
+    )
+    def test_serializer_for_dnnlowp_fully_connected_op(
+        self,
+        input_channels,
+        output_channels,
+        batch_size,
+        preserve_activation_sparsity,
+        preserve_weight_sparsity,
+        gc,
+        dc,
+    ):
+        X_min = 0 if preserve_activation_sparsity else -77
+        X_max = X_min + 255
+        X = np.round(np.random.rand(batch_size, input_channels) * (X_max - X_min) + X_min)
+        X = X.astype(np.float32)
+        X[:, 0] = X_min
+        X[0, 1] = X_max
+
+        if preserve_weight_sparsity:
+            W_min = -128
+            W_max = 100
+        else:
+            W_min = -100
+            W_max = W_min + 255
+        W = np.round(
+            np.random.rand(output_channels, input_channels) * (W_max - W_min) + W_min
+        )
+        W = W.astype(np.float32)
+        W[0, 0] = W_min
+        W[1, 0] = W_max
+
+        b = np.random.randn(output_channels).astype(np.float32)
+
+        workspace.FeedBlob("X", X, device_option=gc)
+        workspace.FeedBlob("W", W, device_option=gc)
+        workspace.FeedBlob("b", b, device_option=gc)
+
+        x_q_param = dnnlowp_utils.choose_quantization_params(
+            X_min, X_max, preserve_activation_sparsity
+        )
+        pack = core.CreateOperator(
+            "Int8FCPackWeight",
+            ["W"],
+            ["W_packed"],
+            in_scale=x_q_param.scale,
+            preserve_weight_sparsity=preserve_weight_sparsity,
+            save_unpacked_weights=True,
+            engine="DNNLOWP",
+            device_option=gc,
+        )
+        pack_net = core.Net("pack_net")
+        pack_net.Proto().op.extend([pack])
+        workspace.RunNetOnce(pack_net)
+
+        # Save packed weights
+        f = NamedTemporaryFile(delete=True)
+        save_net = core.Net("save_net")
+        save_net.Save("W_packed", [], db=f.name, db_type="minidb", absolute_path=True)
+        workspace.RunNetOnce(save_net)
+        # put garbage into W_packed
+        workspace.FeedBlob("W_packed", np.random.rand(0, 0).astype(np.float32))
+
+        # Load prepacked weights
+        load_net = core.Net("load_net")
+        load_net.Load([], "W_packed", db=f.name, db_type="minidb", absolute_path=True)
+        workspace.RunNetOnce(load_net)
+
+        # Choose output qparams based on ground output
+        def fc_op(X, W, b):
+            return [np.dot(X, W.T) + b]
+
+        ground_output = fc_op(X, W, b)
+        y_q_param = dnnlowp_utils.choose_quantization_params(
+            np.min(ground_output), np.max(ground_output), preserve_activation_sparsity
+        )
+        w_q_param = dnnlowp_utils.choose_quantization_params(
+            W_min, W_max, preserve_weight_sparsity
+        )
+
+        simple_fc_net = core.Net("fc")
+        # Generate X_q
+        simple_fc_net.Int8Quantize(
+            ["X"],
+            ["X_q"],
+            Y_scale=x_q_param.scale,
+            Y_zero_point=x_q_param.zero_point,
+            preserve_activation_sparsity=preserve_activation_sparsity,
+            engine="DNNLOWP",
+            device_option=gc,
+        )
+        # Generate W_q
+        simple_fc_net.Int8Quantize(
+            ["W"],
+            ["W_q"],
+            Y_scale=w_q_param.scale,
+            Y_zero_point=w_q_param.zero_point,
+            preserve_activation_sparsity=preserve_weight_sparsity,
+            engine="DNNLOWP",
+            device_option=gc,
+        )
+
+        # Int8FC using prepacked weights
+        simple_fc_net.Int8FC(
+            ["X_q", "W_packed", "b"],
+            "Y_q",
+            engine="DNNLOWP",
+            Y_scale=y_q_param.scale,
+            Y_zero_point=y_q_param.zero_point,
+            device_option=gc,
+        )
+        # Int8FC using newly packed weights
+        new_pack_op = core.CreateOperator(
+            "Int8FCPackWeight",
+            ["W"],
+            ["W_packed_new"],
+            in_scale=x_q_param.scale,
+            preserve_weight_sparsity=preserve_weight_sparsity,
+            save_unpacked_weights=True,
+            engine="DNNLOWP",
+            device_option=gc,
+        )
+        simple_fc_net.Proto().op.extend([new_pack_op])
+
+        simple_fc_net.Int8FC(
+            ["X_q", "W_packed_new", "b"],
+            ["Y_q_1"],
+            engine="DNNLOWP",
+            Y_scale=y_q_param.scale,
+            Y_zero_point=y_q_param.zero_point,
+            device_option=gc,
+        )
+        # Int8FC using unpacked weights
+        simple_fc_net.Int8FC(
+            ["X_q", "W_q", "b"],
+            "Y_q_2",
+            engine="DNNLOWP",
+            Y_scale=y_q_param.scale,
+            Y_zero_point=y_q_param.zero_point,
+            device_option=gc,
+        )
+        # Int8FC using floating point inputs
+        simple_fc_net.Int8FC(
+            ["X", "W", "b"],
+            "Y_q_3",
+            engine="DNNLOWP",
+            Y_scale=y_q_param.scale,
+            Y_zero_point=y_q_param.zero_point,
+            preserve_weight_sparsity=preserve_weight_sparsity,
+            preserve_activation_sparsity=preserve_activation_sparsity,
+            device_option=gc,
+        )
+
+        # Dequantize outputs
+        simple_fc_net.Int8Dequantize(["Y_q"], ["Y"], engine="DNNLOWP")
+        simple_fc_net.Int8Dequantize(["Y_q_1"], ["Y_1"], engine="DNNLOWP")
+        simple_fc_net.Int8Dequantize(["Y_q_2"], ["Y_2"], engine="DNNLOWP")
+        simple_fc_net.Int8Dequantize(["Y_q_3"], ["Y_3"], engine="DNNLOWP")
+
+        workspace.RunNetOnce(simple_fc_net)
+
+        outputs = []
+        Output = collections.namedtuple("Output", ["Y", "op_type", "engine"])
+        outputs.append(Output(Y=workspace.FetchBlob("Y"), op_type="FC", engine="DNNLOWP"))
+        outputs.append(Output(Y=workspace.FetchBlob("Y_1"), op_type="FC", engine="DNNLOWP"))
+        outputs.append(Output(Y=workspace.FetchBlob("Y_2"), op_type="FC", engine="DNNLOWP"))
+        outputs.append(Output(Y=workspace.FetchBlob("Y_3"), op_type="FC", engine="DNNLOWP"))
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

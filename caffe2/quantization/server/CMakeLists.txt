@@ -9,6 +9,15 @@ set(caffe2_dnnlowp_avx2_ops_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/transpose.cc"
   "${CMAKE_CURRENT_SOURCE_DIR}/norm_minimization_avx2.cc")
 
+  add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8.pb.cc" "${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8.pb.h" "${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8_pb2.py"
+    COMMAND
+      "${CMAKE_CURRENT_SOURCE_DIR}/proto/int8_protobuf.sh"
+      "${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8.proto"
+
+    COMMENT "generated int8 proto files located at: ${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8.pb.cc and ${CMAKE_CURRENT_SOURCE_DIR}/proto/fbgemm_int8.pb.h"
+  )
+
 # ---[ CPU files only
 list(APPEND Caffe2_CPU_SRCS
   "${CMAKE_CURRENT_SOURCE_DIR}/activation_distribution_observer.cc"

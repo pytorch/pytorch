@@ -1,0 +1,11 @@
+syntax = "proto2";
+
+package fbgemm;
+
+message FbGemmInt8PackedMatrixProto {
+  repeated int32 shape = 1;
+  repeated float scales = 2;
+  repeated int32 zero_points = 3;
+  required bytes bytes_quantized_data = 4;
+  optional bool packed = 5 [default = false];
+}
