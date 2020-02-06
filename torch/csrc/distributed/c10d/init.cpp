@@ -262,7 +262,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<const std::string&, int, int, bool>());
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
-      .def(py::init<const std::string&, ::c10d::Store&>());
+      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
