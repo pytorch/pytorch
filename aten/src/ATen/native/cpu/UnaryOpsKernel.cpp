@@ -379,6 +379,17 @@ void uniform_mkl_kernel(Tensor & self, const double from, const double to, Gener
 }
 #endif
 
+static void uniform_cpu_kernel(TensorIterator& iter, const double from, const double to, Generator gen) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_cpu", [&]() {
+    CPUGenerator* generator = at::get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    at::uniform_real_distribution<scalar_t> uniform((scalar_t)from, (scalar_t)to);
+    cpu_serial_kernel(iter, [&uniform, generator]() -> scalar_t {
+      return static_cast<scalar_t>(uniform(generator));
+    });
+  });
+}
+
 static void exponential_kernel(TensorIterator& iter, double lambda, Generator gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "exponential_cpu", [&]() {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -516,6 +527,7 @@ REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
 REGISTER_DISPATCH(uniform_mkl_stub, &uniform_mkl_kernel);
+REGISTER_DISPATCH(uniform_cpu_stub, &uniform_cpu_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);

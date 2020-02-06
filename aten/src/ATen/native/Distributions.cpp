@@ -116,6 +116,7 @@ namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(uniform_mkl_stub);
+DEFINE_DISPATCH(uniform_cpu_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
@@ -200,16 +201,8 @@ Tensor& uniform_cpu_(Tensor& self, double from, double to, Generator* gen) {
     return self;
   }
 #endif
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "uniform_cpu_", [&] {
-    CPUGenerator* generator = at::get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    CPU_tensor_apply1<scalar_t>(
-        self, [generator, from, to](scalar_t& ret_val) {
-          at::uniform_real_distribution<scalar_t> uniform(from, to);
-          ret_val = static_cast<scalar_t>(uniform(generator));
-        });
-  });
+  auto iter = TensorIterator::nullary_op(self);
+  uniform_cpu_stub(iter.device_type(), iter, from, to, gen);
   return self;
 }
 

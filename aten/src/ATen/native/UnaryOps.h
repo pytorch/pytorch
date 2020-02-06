@@ -56,6 +56,7 @@ DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
 DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator), bernoulli_mkl_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, Generator *), uniform_mkl_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), uniform_cpu_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator), cauchy_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator), exponential_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator), geometric_stub);
