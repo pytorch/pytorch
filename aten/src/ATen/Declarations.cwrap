@@ -131,20 +131,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_clone
-  cname: newClone
-  return: THTensor*
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_index_select
   cuda_bool: True
   cname: indexSelect
@@ -1216,54 +1202,7 @@
     - double to
     - THGenerator* generator
 ]]
-[[
-  name: _th_normal
-  cname: normal
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: normal_means
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - double std
-        - THGenerator* generator
-    - cname: normal_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: double mean
-        - THTensor* std
-        - THGenerator* generator
-    - cname: normal_means_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - THTensor* std
-        - THGenerator* generator
-]]
-[[
-  name: _th_normal_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: normal
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double mean
-    - double std
-    - THGenerator* generator
-]]
+
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
