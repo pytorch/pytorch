@@ -528,7 +528,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.max_pool2d(x, 2)
 
         model = MaxPoolModel()
-        x = torch.randn(20, 16, 50)
+        x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
     @skipIfUnsupportedMinOpsetVersion(8)
@@ -575,7 +575,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.avg_pool2d(x, 2)
 
         model = AvgPoolModel()
-        x = torch.randn(20, 16, 50)
+        x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
     def test_avgpool(self):
