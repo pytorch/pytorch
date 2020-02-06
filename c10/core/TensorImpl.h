@@ -1360,8 +1360,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_CHECK(
             dim() == 5,
             "required rank 5 tensor to use channels_last_3d format");
-        TORCH_CHECK(false, "unsupported memory format ", memory_format);
-        //TODO Implement set_sizes_and_strides for channels last 3d
+        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         break;
       }
       case MemoryFormat::Preserve:
@@ -1459,7 +1458,7 @@ private:
    */
   bool compute_contiguous() const;
 
-  bool compute_channels_last_contiguous() const;
+  bool compute_channels_last_contiguous(MemoryFormat memory_format) const;
 
   bool compute_strides_like_channels_last() const;
 
@@ -1479,13 +1478,14 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = compute_channels_last_contiguous();
+    is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
+    is_channels_last_3d_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
     // is_channels_last_ is suggested memory_format.
     // Being channels_last_contiguous doesn't necessarily mean the tensor is
     // strided like channels_last: for strides on size-1 dimension could suggest
     // desired memory_layout, but it doesn't affect memory storage
     is_channels_last_ = compute_strides_like_channels_last();
-    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
   }
 
   /**
@@ -1605,6 +1605,10 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_3d_contiguous_ = false;
 
   // Dense tensor is the tensor that store values in a contiguous block of memory.
   // Non-overlapping tensor is the tensor in which elements occupy individual

@@ -53,12 +53,21 @@ inline std::ostream& operator<<(
 }
 
 inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
-  AT_ASSERT(sizes.size() == 4);
+  AT_ASSERT(sizes.size() == 4 || sizes.size() == 5);
   std::vector<int64_t> strides(sizes.size());
-  strides[1] = 1;
-  strides[3] = sizes[1];
-  strides[2] = strides[3] * sizes[3];
-  strides[0] = strides[2] * sizes[2];
+  std::vector<int64_t> indices;
+
+  if (sizes.size() == 4) {
+    indices.assign({1, 3, 2, 0});
+  }
+  else {
+    indices.assign({1, 4, 3, 2, 0});
+  }
+
+  strides[indices[0]] = 1;
+  for (size_t i = 1; i < indices.size(); ++i) {
+    strides[indices[i]] = strides[indices[i-1]] * sizes[indices[i-1]];
+  }
   return strides;
 }
 
@@ -106,44 +115,56 @@ inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
 // By the time accumulated permutation is enabled to replace implicit
 // memory_foramt through strides, we should be updating our tests and fix the
 // issues in our tests.
+//
+// This function is used for both NCHW and NCDHW, comment is based on NCHW
 inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef strides) {
+  std::vector<int64_t> indices;
+
   if (sizes.size() == 4) {
-    int64_t min = 0;
-    // special case for trivial C dimension. default to NCHW
-    if (strides[1]==0) {
+    indices.assign({1, 3, 2, 0});
+  }
+  else if (sizes.size() == 5){
+    indices.assign({1, 4, 3, 2, 0});
+  }
+
+  if (indices.empty()) {
+    return false;
+  }
+
+  int64_t min = 0;
+  // special case for trivial C dimension. default to NCHW
+  if (strides[1]==0) {
+    return false;
+  }
+  for (auto& d : indices) {
+    if (sizes[d] == 0) {
       return false;
     }
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes[d] == 0) {
-        return false;
-      }
-      if (strides[d] < min) {
-        return false;
-      }
-      // Fallback to NCHW as default layout for ambiguous cases
-      // This is the flaw of implicit memory_format from strides.
-      // N111 tensor with identical strides for size 1 dimension;
-      // Two cases could lead us here:
-      // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
-      // b. N11W contiguous Tensor sliced on the W-dimension. ([N,1,1,1]@[W,W,W,W])
-      if (d==0 && min==strides[1]) {
-        return false;
-      }
-      // This is necessary to:
-      // 1. distinguish the memory_format of N1H1;
-      //     [H, 1, 1, 1] channels_last stride
-      //     [H, H, 1, 1] contiguous stride
-      // 2. permutation of 1C1W:
-      //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
-      //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
-      min = strides[d];
-      if (sizes[d] > 1) {
-        min *= (sizes[d]-1);
-      }
+    if (strides[d] < min) {
+      return false;
     }
-    return true;
+    // Fallback to NCHW as default layout for ambiguous cases
+    // This is the flaw of implicit memory_format from strides.
+    // N111 tensor with identical strides for size 1 dimension;
+    // Two cases could lead us here:
+    // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
+    // b. N11W contiguous Tensor sliced on the W-dimension. ([N,1,1,1]@[W,W,W,W])
+    if (d==0 && min==strides[1]) {
+      return false;
+    }
+    // This is necessary to:
+    // 1. distinguish the memory_format of N1H1;
+    //     [H, 1, 1, 1] channels_last stride
+    //     [H, H, 1, 1] contiguous stride
+    // 2. permutation of 1C1W:
+    //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
+    //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
+    min = strides[d];
+    if (sizes[d] > 1) {
+      min *= sizes[d];
+    }
   }
-  return false;
+  return true;
 }
 
 } // namespace c10

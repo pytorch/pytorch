@@ -96,21 +96,31 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
-bool TensorImpl::compute_channels_last_contiguous() const {
-  if (sizes_.size() == 4) {
-    int64_t expected = 1;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] == expected) {
-          expected *= sizes_[d];
-        } else {
-          return false;
-        }
+bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) const {
+
+  std::vector<int64_t> indices;
+  if (memory_format == MemoryFormat::ChannelsLast && sizes_.size() == 4) {
+    indices.assign({1, 3, 2, 0});
+  }
+  else if (memory_format == MemoryFormat::ChannelsLast3d && sizes_.size() == 5) {
+    indices.assign({1, 4, 3, 2, 0});
+  }
+
+  if (indices.empty()) {
+    return false;
+  }
+
+  int64_t expected = 1;
+  for (auto& d : indices) {
+    if (sizes_[d] != 1) {
+      if (strides_[d] == expected) {
+        expected *= sizes_[d];
+      } else {
+        return false;
       }
     }
-    return true;
   }
-  return false;
+  return true;
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
@@ -179,6 +189,9 @@ bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #endif
   if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
+  }
+  else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+      return is_channels_last_3d_contiguous_;
   }
   return is_contiguous_;
 }
@@ -250,6 +263,7 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
+  dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;

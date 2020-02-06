@@ -210,7 +210,10 @@ class CAFFE2_API Tensor {
     // check 0,1 - sized dimention strides.
     if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
       if (!channels_last_strides_exact_match || get_channels_last_strides(sizes()) == strides()) {
-        return at::MemoryFormat::ChannelsLast;
+        if (sizes().size() == 4) {
+          return at::MemoryFormat::ChannelsLast;
+        }
+        return at::MemoryFormat::ChannelsLast3d;
       }
     }
     return at::MemoryFormat::Contiguous;
