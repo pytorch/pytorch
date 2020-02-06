@@ -25,6 +25,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
     load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
+from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -97,7 +98,7 @@ class TestCuda(TestCase):
 
     def setUp(self):
         super(TestCuda, self).setUp()
-        self.autocast_lists = torch.cuda.amp._AutocastTestLists()
+        self.autocast_lists = AutocastTestLists(torch.device('cuda:0'))
 
     def tearDown(self):
         del self.autocast_lists
