@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 
