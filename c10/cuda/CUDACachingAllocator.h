@@ -11,6 +11,8 @@
 
 namespace c10 {
 
+class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {}
+
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
