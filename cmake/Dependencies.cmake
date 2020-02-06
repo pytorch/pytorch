@@ -539,7 +539,7 @@ if(USE_FBGEMM)
   endif()
 
   if(USE_FBGEMM)
-    list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm DESTINATION lib)
+    list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
     install(TARGETS fbgemm DESTINATION lib)
     if(MSVC AND BUILD_SHARED_LIBS)
       install(FILES $<TARGET_PDB_FILE:fbgemm> DESTINATION lib OPTIONAL)
