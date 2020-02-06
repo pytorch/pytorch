@@ -147,6 +147,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             to 1 by default.
         enable_onnx_checker (bool, default True): If True the onnx model checker will be run
             as part of the export, to ensure the exported model is a valid ONNX model.
+        use_large_model_format (bool, default False): If True, then the model is exported
+            in ONNX large model format, in which case some of the model parameters are stored
+            in separate binary files and not in the ONNX model file itself. If False, then the
+            model is stored in regular format, i.e. model and parameters are all in one file. 
+            This argument is ignored for all export types other than ONNX. 
     """
 
     from torch.onnx import utils

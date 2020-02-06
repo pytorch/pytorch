@@ -112,18 +112,15 @@ void validateGraph(
 
 std::string GetFileRootPath(const std::string& rootPath) {
     std::string rootPath_ = rootPath;
-    // first make slash consistent (sorry for Linux users:this is not necessary for you)
+    // First, making slash consistent.
     std::replace(rootPath_.begin(), rootPath_.end(), '\\', '/');
-
-    // second, remove trailing slash if there is any
+    // Second, remove trailing slashes, if any
     std::regex trailer("/+$");
     std::string root = std::regex_replace(rootPath_, trailer, std::string());
-
     std::string folder = root.substr(0, root.find_last_of('/'));
-    if (folder == rootPath_) {
+    if (folder == rootPath_) { // If no root folder specified, select cwd.
       return std::string(".");
     }
-
     return folder;
 }
 
@@ -146,14 +143,13 @@ void CreateExternalFile(const at::Tensor& tensor, const std::string& tensorName,
                         const std::string& onnx_file_path) {
   auto folder = GetFileRootPath(onnx_file_path);
   std::string fullFilePath = folder + "/" + tensorName;
-  // FILE* fp = fopen(fullFilePath.c_str(), "wb");
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(fopen(fullFilePath.c_str(), "wb"),
                                                  &CloseFile);
   if (fp == NULL) {
     throw std::runtime_error(std::string("ONNX export failed. Could not open file or directory: ") + fullFilePath);
   }
   fwrite(tensor.data_ptr(), tensor.element_size(), tensor.numel(), fp.get());
-} // fclose() called here through CloseFile(), if FILE* is not a null pointer
+} // fclose() called here through CloseFile(), if FILE* is not a null pointer.
 
 class EncoderBase {
  public:
@@ -644,9 +640,9 @@ void GraphEncoder::EncodeTensor(
     t = tensor.contiguous().cpu();
   }
   
-  // Either defer_weight_export should be true (and external_ref must be present)
+  // Either defer_weight_export should be true and external_ref must be present,
   // or use_large_model_format should be true, not both at the same time. They can
-  // both be false at the same time.
+  // both be false at the same time (for ONNX export for regular model size).
   AT_ASSERT(!((defer_weight_export_ && external_ref) && use_large_model_format));
   printf("I am in EncodeTensor checkpoint 1.\n");
   // Add a buffer to the raw_data_export_map for the caller to dump into an
@@ -663,30 +659,15 @@ void GraphEncoder::EncodeTensor(
   } else {
     printf("I am in EncodeTensor checkpoint 1b.\n");
     // printf("The parameter name that is considered is %s.\n", external_ref.value().c_str());
-    int64_t tensorSize = std::accumulate(std::begin(tensor.sizes()), std::end(tensor.sizes()), 
-                                         static_cast<int64_t>(1), std::multiplies<int64_t>());
-    if (use_large_model_format && 
-        tensorSize > ParamSizeThresholdForExternalStorage) {
+    size_t tensorSize = static_cast<size_t>(std::accumulate(std::begin(tensor.sizes()), 
+                        std::end(tensor.sizes()), static_cast<int64_t>(1), std::multiplies<int64_t>()));
+    if (use_large_model_format && tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
       printf("The external parameter file name that is saved is %s.\n", external_ref.value().c_str());
       auto tensorName = GetExternalFileName(external_ref);
-      CreateExternalFile(t, tensorName, onnx_file_path);
-      // if (tensorName == std::string("features.2.conv.0.0.weight")) {
-      //   printf("I am here.\n");
-      //   for (auto d : tensor.sizes()) {
-      //     printf("%ld, ", d);
-      //   }
-      //   printf("TensorSize is %ld.\n",tensorSize);
-      //   auto qe = t.numel();
-      //   printf("t.numel() is %ld.\n",qe);
-      //   auto qe1 = t.element_size();
-      //   printf("t.element_size() is %ld.\n",qe1);
-        
-      // }
-      
+      CreateExternalFile(t, tensorName, onnx_file_path);      
       onnx::StringStringEntryProto* location = tensor_proto->mutable_external_data()->Add();
       location->set_key("location");
-      // location->set_value(external_ref.value());
       location->set_value(tensorName);
       tensor_proto->set_data_location(onnx::TensorProto_DataLocation_EXTERNAL);
     }

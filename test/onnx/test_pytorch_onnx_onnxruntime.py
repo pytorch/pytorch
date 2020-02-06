@@ -126,8 +126,8 @@ class TestONNXRuntime(unittest.TestCase):
         _run_test(model)
 
     def run_large_model_test(self, model, input, rtol=0.001, atol=1e-7,
-                   example_outputs=None, do_constant_folding=True,
-                   dynamic_axes=None, input_names=None, output_names=None):
+                             example_outputs=None, do_constant_folding=True,
+                             dynamic_axes=None, input_names=None, output_names=None):
         import os
         import tempfile
 
@@ -149,21 +149,21 @@ class TestONNXRuntime(unittest.TestCase):
                 # pdb.set_trace()
                 input_copy = copy.deepcopy(input)
                 torch.onnx.export(model, input_copy, model_file_name,
-                                opset_version=self.opset_version,
-                                example_outputs=output,
-                                verbose=False,
-                                do_constant_folding=do_constant_folding,
-                                keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                                dynamic_axes=dynamic_axes,
-                                input_names=input_names, output_names=output_names,
-                                use_large_model_format=True)
+                                  opset_version=self.opset_version,
+                                  example_outputs=output,
+                                  verbose=False,
+                                  do_constant_folding=do_constant_folding,
+                                  keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                                  dynamic_axes=dynamic_axes,
+                                  input_names=input_names, output_names=output_names,
+                                  use_large_model_format=True)
                 # compute onnxruntime output prediction
                 ort_sess = onnxruntime.InferenceSession(model_file_name)
                 input_copy = copy.deepcopy(input)
                 ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
 
-    @skipIfUnsupportedMinOpsetVersion(9) # Because large model format was released with Opset 9.
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because large model format was released with Opset 9.
     @skipIfNotOnnxIRv3()
     def test_large_model_export_embed(self):
         class LargeModel(torch.nn.Module):
@@ -177,6 +177,7 @@ class TestONNXRuntime(unittest.TestCase):
                     self.emb,
                     self.lin1,
                 )
+
             def forward(self, input):
                 return self.seq(input)
 
