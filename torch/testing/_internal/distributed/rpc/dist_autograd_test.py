@@ -1303,26 +1303,6 @@ class DistAutogradTest(RpcAgentTestFixture):
             )
             dist_autograd.backward([ret.sum()])
 
-
-    @dist_init
-    def test_backward_remote_script_module(self):
-        # Run the same code locally and with dist autograd and verify gradients
-        # are same.
-        local_grads = None
-        t1 = torch.rand((3, 3), requires_grad=True)
-        t2 = torch.rand((3, 3), requires_grad=True)
-        for exec_mode in [
-            ExecMode.LOCAL,
-            ExecMode.RPC_SYNC,
-        ]:
-            with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                loss = ret.sum()
-                ret = self._verify_backwards(
-                    exec_mode, [loss], context_id, local_grads, t1, t2
-                )
-                local_grads = ret if ret else local_grads
-
     @staticmethod
     def _complex_python_udf(t1, t2):
         t3 = torch.nn.functional.linear(t1, t2)

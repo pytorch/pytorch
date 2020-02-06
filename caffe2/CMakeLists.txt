@@ -873,6 +873,14 @@ if(USE_ROCM)
     )
 endif()
 
+# Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
+# jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
+if (USE_DISTRIBUTED)
+  target_compile_definitions(torch_cpu PRIVATE
+    USE_DISTRIBUTED
+  )
+endif()
+
 if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   caffe2_interface_library(caffe2_protos caffe2_protos_whole)
   target_link_libraries(torch_cpu PRIVATE caffe2_protos_whole)
