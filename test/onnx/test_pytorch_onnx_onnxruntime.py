@@ -164,7 +164,6 @@ class TestONNXRuntime(unittest.TestCase):
 
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because large model format was released with Opset 9.
-    @skipIfNotOnnxIRv3()
     def test_large_model_export_embed(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):

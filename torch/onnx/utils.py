@@ -506,7 +506,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         if enable_onnx_checker and \
            operator_export_type is OperatorExportTypes.ONNX_ATEN_FALLBACK and \
            not val_use_large_model_format:
-            # Only run checker if enabled and we are not using ATEN fallback
+            # Only run checker if enabled and we are not using ATEN fallback and
+            # large model format export in not enabled.
             _check_onnx_proto(proto)
 
         if export_type == ExportTypes.PROTOBUF_FILE:

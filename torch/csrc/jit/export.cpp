@@ -225,7 +225,7 @@ class EncoderBase {
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
   // tensor, beyond which the parameter is stored in a separate file (if API
-  // argument use_large_model_format is set to True. This threshold is in place
+  // argument use_large_model_format is set to True). This threshold is in place
   // so as not to create too many external files. 
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
@@ -457,11 +457,6 @@ void EncoderBase::EncodeBlock(
     }
   }
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  printf("Names of all parameters are -------- \n");
-  for (const auto& p : initializers ) {
-    std::cout << p.first << std::endl;
-  }
-  printf("------------------------------------- \n");
   for (auto& name_tensor_pair : initializers) {
     auto p = graph_proto->add_initializer();
     p->set_name(name_tensor_pair.first);
@@ -477,7 +472,6 @@ void EncoderBase::AddAttribute(
   auto attr = node_proto->add_attribute();
   AT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
-  auto ii = 0;
   switch (node->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(node->f(name));
@@ -509,18 +503,13 @@ void EncoderBase::AddAttribute(
     case AttributeKind::t: {
       attr->set_type(onnx::AttributeProto_AttributeType_TENSOR);
       auto t = attr->mutable_t();
-      printf("I am in AttributeKind t - going into EncodeTensor. -- ");
       EncodeTensor(t, node->t(name));
-      printf("Done, going out of EncodeTensor.\n");
     } break;
     case AttributeKind::ts:
       attr->set_type(onnx::AttributeProto_AttributeType_TENSORS);
       for (auto& v : node->ts(name)) {
         auto t = attr->add_tensors();
-        printf("I am in AttributeKind ts (%d) - going into EncodeTensor. -- ", ii);
         EncodeTensor(t, v);
-        printf("Done, going out of EncodeTensor.\n");
-        ++ii;
       }
       break;
     case AttributeKind::g: {
@@ -644,12 +633,10 @@ void GraphEncoder::EncodeTensor(
   // or use_large_model_format should be true, not both at the same time. They can
   // both be false at the same time (for ONNX export for regular model size).
   AT_ASSERT(!((defer_weight_export_ && external_ref) && use_large_model_format));
-  printf("I am in EncodeTensor checkpoint 1.\n");
   // Add a buffer to the raw_data_export_map for the caller to dump into an
   // external data store. If external_ref is not specified, we instead dump
   // the contiguous data into the protobuf itself
   if (defer_weight_export_ && external_ref) {
-    printf("I am in EncodeTensor checkpoint 1a.\n");
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
     AT_ASSERT(external_ref.value() == tensor_proto->name());
@@ -657,13 +644,10 @@ void GraphEncoder::EncodeTensor(
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
-    printf("I am in EncodeTensor checkpoint 1b.\n");
-    // printf("The parameter name that is considered is %s.\n", external_ref.value().c_str());
     size_t tensorSize = static_cast<size_t>(std::accumulate(std::begin(tensor.sizes()), 
                         std::end(tensor.sizes()), static_cast<int64_t>(1), std::multiplies<int64_t>()));
     if (use_large_model_format && tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
-      printf("The external parameter file name that is saved is %s.\n", external_ref.value().c_str());
       auto tensorName = GetExternalFileName(external_ref);
       CreateExternalFile(t, tensorName, onnx_file_path);      
       onnx::StringStringEntryProto* location = tensor_proto->mutable_external_data()->Add();
@@ -672,10 +656,8 @@ void GraphEncoder::EncodeTensor(
       tensor_proto->set_data_location(onnx::TensorProto_DataLocation_EXTERNAL);
     }
     else {
-      printf("I am in EncodeTensor checkpoint 2.\n");
       tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
-      printf("I am in EncodeTensor checkpoint 3.\n");
     }
   }
 }
