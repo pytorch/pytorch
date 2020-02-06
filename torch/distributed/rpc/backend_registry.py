@@ -101,19 +101,11 @@ def _process_group_init_backend_handler(
             "Default process group must not be initialized before init_rpc."
         )
 
-    process_group_timeout = (
-        rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
-        if not dist.rpc.internal.TEST_PG_TIMEOUT
-        else dist.rpc.internal.TEST_PG_TIMEOUT
-    )
-
-    print("RANK {} Setting PG timeout of {}, test_pg_timeout is {}".format(rank, process_group_timeout, dist.rpc.internal.TEST_PG_TIMEOUT))
     dist.init_process_group(
         backend="gloo",
         store=store,
         rank=rank,
         world_size=world_size,
-        timeout=process_group_timeout,
     )
 
     try:
