@@ -1392,6 +1392,15 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
+template <class... Contained>
+struct getTypePtr_<std::tuple<Contained...>> final {
+  static TypePtr call() {
+    std::vector<TypePtr> contained_types = {
+      (getTypePtr_<Contained>::call())...
+    };
+    return TupleType::create(std::move(contained_types));
+  }
+};
 } // namespace detail
 template <class T>
 inline TypePtr getTypePtr() {
