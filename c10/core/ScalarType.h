@@ -290,7 +290,8 @@ static inline bool isIntegralType(ScalarType t, bool includeBool) {
 static inline bool isFloatingType(ScalarType t) {
   return (
       t == ScalarType::Double || t == ScalarType::Float ||
-      t == ScalarType::Half || t == ScalarType::BFloat16);
+      t == ScalarType::Half || t == ScalarType::BFloat16) ||
+      t == ScalarType::ComplexFloat || t ==ScalarType::ComplexDouble;
 }
 
 static inline bool isComplexType(ScalarType t) {

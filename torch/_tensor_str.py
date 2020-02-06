@@ -70,7 +70,8 @@ def set_printoptions(
 
 class _Formatter(object):
     def __init__(self, tensor):
-        self.floating_dtype = tensor.dtype.is_floating_point
+        self.floating_dtype = False #tensor.dtype.is_floating_point
+
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
