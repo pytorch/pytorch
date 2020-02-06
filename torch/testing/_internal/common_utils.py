@@ -114,7 +114,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def shell(command, cwd=None):
+def shell(command, cwd=None, env=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -125,7 +125,7 @@ def shell(command, cwd=None):
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
     try:
         return p.wait()
     except KeyboardInterrupt:
