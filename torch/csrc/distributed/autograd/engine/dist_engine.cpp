@@ -256,15 +256,13 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
         [autogradContext, callbackFuture](
             const rpc::Message& message /* unused */,
             const c10::optional<torch::utils::FutureError>& error) {
-          // Clear the context id once we're done with the autograd engine
-          // processing.
-          DistEngine::getInstance().clearInitializedContextId(autogradContext);
-
           if (error) {
+            // Perform cleanup at the end of the backward pass (before we mark
+            // the future as completed).
+            DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+
             // Skip any further processing on errors.
             callbackFuture->setError(error->what());
-            // Reset the graph task once we're done with all processing.
-            autogradContext->resetGraphTask();
             return;
           }
 
@@ -275,14 +273,16 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
               [callbackFuture, autogradContext](
                   const rpc::Message& /* unused */,
                   const c10::optional<torch::utils::FutureError>& error) {
+                // Perform cleanup at the end of the backward pass (before we
+                // mark the future as completed).
+                DistEngine::getInstance().cleanupBackwardPass(autogradContext);
+
                 // Finally mark the 'uber' future as completed.
                 if (!error) {
                   callbackFuture->markCompleted(rpc::Message());
                 } else {
                   callbackFuture->setError(error->what());
                 }
-                // Reset the graph task once we're done with all processing.
-                autogradContext->resetGraphTask();
               });
         });
 
@@ -337,7 +337,12 @@ void DistEngine::execute(const variable_list& roots, bool retainGraph) {
   autogradContext->clearAndWaitForOutstandingRpcsAsync()->wait();
 }
 
-void DistEngine::clearInitializedContextId(const ContextPtr& autogradContext) {
+void DistEngine::cleanupBackwardPass(const ContextPtr& autogradContext) {
+  // Reset the graph task once we're done with all processing.
+  autogradContext->resetGraphTask();
+
+  // Clear the context id once we're done with the autograd engine
+  // processing.
   std::lock_guard<std::mutex> guard(initializedContextIdsLock_);
   initializedContextIds_.erase(autogradContext->contextId());
 }

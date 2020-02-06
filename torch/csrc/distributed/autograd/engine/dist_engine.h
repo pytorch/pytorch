@@ -93,8 +93,8 @@ class TORCH_API DistEngine {
       const std::shared_ptr<torch::autograd::Node>& graphRoot,
       const torch::autograd::edge_list& outputEdges);
 
-  // Removes the provided contextId from the 'initializedContextIds_' map.
-  void clearInitializedContextId(const ContextPtr& autogradContext);
+  // Run after the backward pass is done to appropriately cleanup structures.
+  void cleanupBackwardPass(const ContextPtr& autogradContext);
 
   // Set of autograd context_ids, which we have already initialized for
   // distributed autograd on this node (e.g.: already computed dependencies)
@@ -115,11 +115,7 @@ class BackwardPassCleanupGuard {
       : autogradContext_(autogradContext) {}
 
   ~BackwardPassCleanupGuard() {
-    // Clear the initialized context id.
-    DistEngine::getInstance().clearInitializedContextId(autogradContext_);
-
-    // Reset the graph task once we're done with all processing.
-    autogradContext_->resetGraphTask();
+    DistEngine::getInstance().cleanupBackwardPass(autogradContext_);
   }
 
  private:

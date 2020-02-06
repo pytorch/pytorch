@@ -90,7 +90,9 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanupSendFunction) {
   sendFunction->setGrads({t});
 
   // Execute engine.
-  engine.executeSendFunctionAsync(context, sendFunction, /*retrainGraph*/ false)->wait();
+  engine
+      .executeSendFunctionAsync(context, sendFunction, /*retrainGraph*/ false)
+      ->wait();
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());
