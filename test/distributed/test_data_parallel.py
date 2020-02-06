@@ -630,6 +630,24 @@ class TestDataParallel(TestCase):
                 self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
                 self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_zero_grad(self):
+        # zero_grad should warn about using gradients inside forward
+
+        class Net(torch.nn.Module):
+            def __init__(self, testcase):
+                super(Net, self).__init__()
+                self._testcase = testcase
+
+            def forward(self, x):
+                self._testcase.assertWarnsRegex(
+                    lambda: self.zero_grad(),
+                    "The parameters in data parallel modules are copied from the original module.")
+                return x
+
+        module = Net(self).cuda()
+        dpm = dp.DataParallel(module)
+        dpm(torch.rand(4, 3, 6, 5))
 
 
 if __name__ == '__main__':
