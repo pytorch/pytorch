@@ -28,22 +28,16 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   // add GIL as it is accessing a py::object
   pybind11::gil_scoped_acquire ag;
   TORCH_INTERNAL_ASSERT(
-      pyTuple.size() == RRefForkData::RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain ",
-      RRefForkData::RFD_TUPLE_SIZE,
-      " numbers.");
-  worker_id_t ownerId = pyTuple[RRefForkData::OWNER_IDX].cast<worker_id_t>();
+      pyTuple.size() == 7, "Pickled RRefForkData must contain 7 numbers.");
+  worker_id_t ownerId = pyTuple[0].cast<worker_id_t>();
   // const reference will extend the lifetime of the temporary variable
-  const RRefId& rrefId = RRefId(
-      pyTuple[RRefForkData::RREFID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[RRefForkData::RREFID_ID_IDX].cast<local_id_t>());
-  const RRefId& forkId = RRefId(
-      pyTuple[RRefForkData::FORKID_ON_IDX].cast<worker_id_t>(),
-      pyTuple[RRefForkData::FORKID_ID_IDX].cast<local_id_t>());
+  const RRefId& rrefId =
+      RRefId(pyTuple[1].cast<worker_id_t>(), pyTuple[2].cast<local_id_t>());
+  const RRefId& forkId =
+      RRefId(pyTuple[3].cast<worker_id_t>(), pyTuple[4].cast<local_id_t>());
 
-  worker_id_t parent = pyTuple[RRefForkData::PARENT_IDX].cast<worker_id_t>();
-  const std::string& typeStr =
-      pyTuple[RRefForkData::TYPE_IDX].cast<std::string>();
+  worker_id_t parent = pyTuple[5].cast<worker_id_t>();
+  const std::string& typeStr = pyTuple[6].cast<std::string>();
 
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }

@@ -5,8 +5,8 @@
 #endif
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
-#include "unpickler.h"
 #include <string>
+#include "unpickler.h"
 
 namespace torch {
 namespace jit {
@@ -134,7 +134,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case ClassType::Kind: {
         auto obj = w.value.toObject();
         auto typ = obj->type(); // note: intentionally using the dynamic type,
-            // the static type is potentially less accurate
+                                // the static type is potentially less accurate
         for (size_t i = 0; i < typ->numAttributes(); ++i) {
           Work elem = {typ->getAttribute(i), obj->getSlot(i)};
           to_process.emplace_back(std::move(elem));
@@ -175,7 +175,8 @@ void Unpickler::run() {
   TORCH_CHECK(
       opcode == PickleOpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
+      " of pickle archive, found ",
+      int(static_cast<uint8_t>(opcode)));
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
@@ -221,8 +222,7 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
 // lists are not yet tagged
 template <typename T>
 static std::vector<T> convertList(const IValue& v) {
-  return fmap(
-      v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
+  return fmap(v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -454,11 +454,11 @@ void Unpickler::readGlobal(
         // Pop reduce arg off the stack
         auto data = stack_.back().toTuple()->elements().at(0);
         stack_.pop_back();
-            TORCH_CHECK(
-                tensor_table_,
-                "Found a tensor table reference but Unpickler"
-                " has no tensor table\n");
-            stack_.emplace_back(tensor_table_->at(data.toInt()));
+        TORCH_CHECK(
+            tensor_table_,
+            "Found a tensor table reference but Unpickler"
+            " has no tensor table\n");
+        stack_.emplace_back(tensor_table_->at(data.toInt()));
       });
     } else {
       TypePtr elem_type = nullptr;
@@ -499,19 +499,21 @@ void Unpickler::readGlobal(
       stack_.back() = IValue();
     });
   } else if (module_name == "torch" && class_name == "device") {
-      globals_.emplace_back([this] {
-        auto device_string = stack_.back().toTuple()->elements().at(0);
-        stack_.pop_back();
-        stack_.emplace_back(c10::Device(device_string.toStringRef()));
-      });
-      stack_.emplace_back(int64_t(globals_.size() - 1));
-      return;
+    globals_.emplace_back([this] {
+      auto device_string = stack_.back().toTuple()->elements().at(0);
+      stack_.pop_back();
+      stack_.emplace_back(c10::Device(device_string.toStringRef()));
+    });
+    stack_.emplace_back(int64_t(globals_.size() - 1));
+    return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
-      #ifdef USE_DISTRIBUTED
-        return rebuildRRef();
-      #else
-        TORCH_INTERNAL_ASSERT(false, "RRef unpickling is only supported with the distributed package");
-      #endif
+#ifdef USE_DISTRIBUTED
+    return rebuildRRef();
+#else
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "RRef unpickling is only supported with the distributed package");
+#endif
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -582,7 +584,8 @@ void Unpickler::rebuildTensor(bool quantized) {
         } break;
         case at::kPerChannelAffine: {
           std::vector<double> scales = convertList<double>(qparams.at(1));
-          std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
+          std::vector<int64_t> zero_points =
+              convertList<int64_t>(qparams.at(2));
           int64_t axis = qparams.at(3).toInt();
           result = at::_empty_per_channel_affine_quantized(
               {0},
@@ -620,25 +623,17 @@ void Unpickler::rebuildRRef() {
     auto args = stack_.back().toTuple()->elements();
     stack_.pop_back();
     TORCH_INTERNAL_ASSERT(
-        args.size() == 7,
-        "Pickled RRefForkData must contain 7 numbers.");
-    auto ownerId = static_cast<int16_t>(
-        args.at(0).toInt());
+        args.size() == 7, "Pickled RRefForkData must contain 7 numbers.");
+    auto ownerId = static_cast<int16_t>(args.at(0).toInt());
     // const reference will extend the lifetime of the temporary variable
     const auto& rrefId = distributed::rpc::RRefId(
-        static_cast<int16_t>(
-            args.at(1).toInt()),
-        static_cast<int64_t>(
-            args.at(2).toInt()));
+        static_cast<int16_t>(args.at(1).toInt()),
+        static_cast<int64_t>(args.at(2).toInt()));
     const auto& forkId = distributed::rpc::RRefId(
-        static_cast<int16_t>(
-            args.at(3).toInt()),
-        static_cast<int64_t>(
-            args.at(4).toInt()));
-    auto parent = static_cast<int16_t>(
-        args.at(5).toInt());
-    const auto& typeStr = static_cast<std::string>(
-        args.at(6).toStringRef());
+        static_cast<int16_t>(args.at(3).toInt()),
+        static_cast<int64_t>(args.at(4).toInt()));
+    auto parent = static_cast<int16_t>(args.at(5).toInt());
+    const auto& typeStr = static_cast<std::string>(args.at(6).toStringRef());
     auto rrefForkData = distributed::rpc::RRefForkData(
         ownerId, rrefId, forkId, parent, typeStr);
     auto& ctx = distributed::rpc::RRefContext::getInstance();
@@ -656,7 +651,7 @@ void Unpickler::rebuildRRef() {
 }
 #endif
 
-void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
+void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
   // First, read any partial from buffer (may be 0).
   // We explicitly assume that sz > buffer_remaining_,
   // and that sz is never bigger than buffer_.size().
@@ -674,7 +669,7 @@ void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
     AT_ERROR("Unexpected end of pickler archive.");
   }
   memcpy(dest + from_old_buf, buffer_.data(), needed);
-  buffer_pos_ = needed;  // assignment (0'ed from read)
+  buffer_pos_ = needed; // assignment (0'ed from read)
   buffer_remaining_ -= needed;
 }
 
