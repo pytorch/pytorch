@@ -158,15 +158,55 @@ struct TORCH_API Fusion : public IRInputOutput{
     return it->second;
   }
 
-  /* Return topologically sorted list of exprs. We can start by only traversing back from registered
+  /*
+   * Takes in an unordered map initialized with all Vals to 0, outputs the uses by traversing from
+   * output_vals through their dependency chain.
+   */
+  void populate_uses(std::unordered_map<const Val*, int> &use_count, std::deque<const Val*> outputs) const{
+    std::deque<const Val*> to_visit = outputs; //Could be a stack, but chose deque to match exprs
+    std::set<const Val*> visited;
+    
+    while(!to_visit.empty()){
+      const Val* val;
+      val = to_visit.back();
+      to_visit.pop_back();
+      
+
+      if(visited.find(val) != visited.end())
+        continue;
+      
+      visited.emplace(val);
+      
+      const Expr* orig = origin(val);
+
+      if(orig == nullptr)
+        continue;
+
+      for(const Val* inp : orig->inputs()){
+        use_count[inp]++;
+        if(visited.find(val) != visited.end())
+          to_visit.push_back(inp);
+      }
+
+      for(const Val* out : orig->outputs())
+        if(out != val)
+          visited.emplace(out);
+    }
+
+  }
+
+  /* 
+   * Return topologically sorted list of exprs. We can start by only traversing back from registered
    * outputs, or from any terminating Val. Can also select depth first traversal, or breadth first.
+   * 
+   * TODO: Test this thing!!!
    */
   std::vector<const Expr*> exprs(bool from_outputs_only=false, bool breadth_first=false) const {
 
     if(breadth_first)
       throw std::runtime_error("Not implemented yet.");
 
-    std::deque<const Val*> to_visit;
+    std::deque<const Val*> to_visit;  
     std::set<const Val*> visited;
 
     std::vector<const Expr*> reversed_exprs;
@@ -181,6 +221,14 @@ struct TORCH_API Fusion : public IRInputOutput{
       }
     }
 
+    std::unordered_map<const Val*, int> use_count; //count down to 0, once at 0 all uses have been output, can output origin
+    for(const auto it : val_map_){
+      const Val* val = it.first;
+      use_count[val] = 0;
+    }
+
+    populate_uses(use_count, to_visit);
+
     while(!to_visit.empty()){
       const Val* val;
       if(breadth_first){
@@ -194,13 +242,30 @@ struct TORCH_API Fusion : public IRInputOutput{
 
       if(visited.find(val) != visited.end())
         continue;
-
-      visited.emplace(val);
       
+      //0 uses is an output, can't blindly decrement.
+      if(use_count[val] != 0){
+        use_count[val]--;
+        continue;
+      }
+
       const Expr* orig = origin(val);
 
+      //Orig could be nullptr if its an input. We can simply continue in this case
       if(orig == nullptr)
         continue;
+
+      //If other outputs didn't have all uses, can't process expr
+      for(const Val* out : orig->outputs())
+        if(use_count[out] != 0)
+          continue;
+          
+
+      //We can visit the origin of val, and mark all outputs of the origin as visited.
+      visited.emplace(val);
+      for(const Val* out : orig->outputs())
+        if(out != val)
+          visited.emplace(out);      
 
       reversed_exprs.push_back(orig);
 
@@ -208,11 +273,8 @@ struct TORCH_API Fusion : public IRInputOutput{
         if(visited.find(val) != visited.end())
           to_visit.push_back(inp);
 
-      for(const Val* out : orig->outputs())
-        if(out != val)
-          if(visited.find(val) != visited.end())
-            to_visit.push_back(out);
     }
+    
     std::reverse(reversed_exprs.begin(), reversed_exprs.end());
     return reversed_exprs; //now ordered
   }
