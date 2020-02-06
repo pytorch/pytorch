@@ -12,7 +12,7 @@ namespace autocast {
 
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
-// Our heuristic is to cache FP16 casts of FP32 model weights (see cached_cast below).
+// Our heuristic is to cache fp16 casts of fp32 model weights (see cached_cast below).
 //
 // After discussion with @ezyang, the cache uses the following structure:
 // The key is the source tensor's TensorImpl*, a proxy for a Tensor uuid that's unchanged across shallow copies.
@@ -37,15 +37,21 @@ void clear_cache() {
 }
 
 enum class CastPolicy : uint8_t {
-  fp16 = 0, // Cast all inputs to fp16 before running the op.
+  fp16 = 0, // Cast all inputs to at::kHalf before running the op.
   fp16_with_tensorlist, // Separate from CastPolicy::fp16 due to lifetime concerns of data
                         // viewed by TensorLists.  Maybe some C++ guru can help me unify them.
-  fp32, // Cast all inputs to fp32 before running the op.
-  fp32_set_opt_dtype, // fp32_set_opt_dtype and fp32_append_dtype handle functions that should
-  fp32_append_dtype, // output in fp32 and support an output dtype flag.  The policy is:
-                     // If the user has explicity specified a dtype, respect it.
-                     // Otherwise, set the flag (if present in arglist) or append it
-                     // (if not present) to ensure outputs are fp32.
+  fp32, // Cast all inputs to at::kFloat before running the op.
+  fp32_set_opt_dtype, // Treats functions (like softmax) that
+                      //   1. we'd like to run in fp32 and
+                      //   2. have a c10::optional<ScalarType> arg that controls the output type.
+                      // fp32_set_opt_dtype wrappers' policy is:  if the output type is already set,
+                      // don't touch it, otherwise, set it to at::kFloat.
+  fp32_append_dtype, // Treats functions (like norm) that
+                     //   1. we'd like to run in fp32 and
+                     //   2. have some overloads that accept an output type and other overloads that don't.
+                     // fp32_append_dtype wrappers wrap the overloads that don't have an output dtype.
+                     // The wrapper policy is:  append at::kFloat to the args, and redispatch to the
+                     // type-aware overload.
   promote, // Run in the widest dtype among several args.
   promote_with_tensorlist, // Separate from CastPolicy::promote due to lifetime concerns
                            // of data viewed by TensorLists.
@@ -116,7 +122,7 @@ Logic to apply cached casting to any Tensor argument.
 inline Tensor
 cached_cast(at::ScalarType to_type, const Tensor& arg) {
   if (arg.is_cuda() && arg.is_floating_point() && arg.scalar_type() != to_type) {
-    // Heuristic:  Do what Apex does, and cache FP16 casts of FP32 model weights (leaves).
+    // Heuristic:  Do what Apex does, and cache fp16 casts of fp32 model weights (leaves).
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == at::kHalf && arg.scalar_type() == at::kFloat && arg.requires_grad() && arg.is_leaf());
     if (can_try_cache) {
@@ -336,15 +342,15 @@ namespace {
 /*****************************************************************************************************************
 This section performs load-time registration for autocast wrappers.
 
-It's debatable at which level operations should be patched.
+It's debatable at what level operations should be patched.  We'd like casts to be autograd-exposed
+and precede autograd history recording, so that for fp16 ops, input tensors are saved for backward
+in fp16 rather than fp32.  Saving inputs in fp16 can significantly reduce a model's memory footprint.
 
-Option 1:  Patch only at the level of explicit calls into cudnn/cublas (cudnn_convolution, etc),
+Option 1 (strawman):  Patch only at the level of explicit calls into cudnn/cublas (cudnn_convolution, etc),
 because those are the code paths that are guaranteed to use Tensor Cores, therefore they're the ones that
-will benefit most from FP16.  One difficulty with this approach is that convolutions (and other ops) are wrapped
-in several layers of at::* calls.  Several non-explicitly-registered layers (e.g. at::convolution) could be called
-before we reach cudnn_convolution.  Because they are not explicitly registered, these layers would invoke the
-boxed fallback, which would exclude AutocastTensorId, so by the time at::cudnn_convolution is actually
-called, it wouldn't route back through the autocasting logic at all.
+will benefit most from fp16.   Potential pitfall:  convolutions (and other ops) are wrapped in several
+layers of at::* calls.  If one of those happens to record autograd history, then we've lost the
+opportunity to save inputs in fp16.
 
 Option 2:  Patch the Python-exposed surface of calls, to make 100% sure autograd history
 recording can't sneak in ahead of autocast.  This mirrors Apex most closely.
@@ -356,27 +362,28 @@ auto register_fallthrough = c10::Dispatcher::singleton()
   .registerBackendFallbackKernel(DispatchKey::AutocastTensorId,
                                  KernelFunction::makeFallthrough());
 
-// TODO:  Codegen the stuff below?  Ed said
-// > you are going to have to write the function definition at some point, I wouldn't try to get clever about it
-// Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
+/********************************************************************************************************************
+Explicit registration for out-of-place ops
 
-// Macros to reduce boilerplate somewhat.
-// Common case where registration signature matches redispatch signature
+The stuff below could be codegenned.  Ed said
+> you are going to have to write the function definition at some point, I wouldn't try to get clever about it
+Therefore, for the moment, this is all copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
+********************************************************************************************************************/
+
+// Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
 #define KERNEL(FUNC, REGISTER_SCHEMA, SIGNATURE, POLICY) \
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
     .kernel<SIGNATURE>(DispatchKey::AutocastTensorId, \
-    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call) \
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call))
 
 #define KERNEL_UNBOXED_ONLY(FUNC, REGISTER_SCHEMA, SIGNATURE, POLICY) \
   .op(torch::RegisterOperators::options() \
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<SIGNATURE, \
     &WrapFunction<CastPolicy::POLICY, SIGNATURE, SIGNATURE, FUNC>::type::call \
-    >(DispatchKey::AutocastTensorId) \
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    >(DispatchKey::AutocastTensorId))
 
 // Less-common but still useful case: redispatching to a function with a new signature (e.g. appending a dtype)
 #define KERNEL_UNBOXED_ONLY_DIFFERENT_REDISPATCH_SIGNATURE(REDISPATCH_FUNC, REGISTER_SCHEMA, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, POLICY) \
@@ -384,8 +391,7 @@ auto register_fallthrough = c10::Dispatcher::singleton()
     .schema(REGISTER_SCHEMA) \
     .impl_unboxedOnlyKernel<REGISTER_SIGNATURE, \
     &WrapFunction<CastPolicy::POLICY, REGISTER_SIGNATURE, REDISPATCH_SIGNATURE, REDISPATCH_FUNC>::type::call \
-    >(DispatchKey::AutocastTensorId) \
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+    >(DispatchKey::AutocastTensorId))
 
 /*****************************************
 Explicit registration for out-of-place ops
