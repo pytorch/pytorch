@@ -151,7 +151,8 @@ void test_random_from_to() {
 
           auto actual = torch::empty({3, 3}, S);
           actual.random_(from, to, gen);
-
+          std::cout << "T = " << typeid(T).name() << std::endl;
+          std::cout << "val = " << val << std::endl;
           std::cout << "from = " << from << std::endl;
           T exp;
           if (!to.has_value() && from == std::numeric_limits<int64_t>::min()) {
@@ -165,6 +166,7 @@ void test_random_from_to() {
               range = *to - from;
               from_to_case_covered = true;
             } else {
+              std::cout << "to = none" << std::endl;
               range = static_cast<int64_t>(std::numeric_limits<T>::max()) - from + 1;
               from_case_covered = true;
             }
