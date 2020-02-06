@@ -22,10 +22,15 @@ from torch.testing._internal.dist_utils import (
     get_shutdown_error_regex,
     initialize_pg,
     wait_until_node_failure,
+    wait_until_pending_users_flushed,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+
+
+def foo_add():
+    return torch.add(torch.ones(1), torch.ones(1))
 
 
 def requires_process_group_agent(message=""):
@@ -64,6 +69,9 @@ def _stub_init_rpc_backend_handler(store, name, rank, world_size, rpc_backend_op
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
+def wait_for_value_future():
+    return VALUE_FUTURE.result()
 
 
 def set_and_check_done(value):
@@ -654,14 +662,7 @@ class RpcTest(RpcAgentTestFixture):
                     # this, we wait until the current RRef context doesn't have
                     # any pending users, which indicates that the confirmation
                     # was processed on this worker.
-                    num_pending_users = int(
-                        _rref_context_get_debug_info()["num_pending_users"]
-                    )
-                    while num_pending_users != 0:
-                        time.sleep(0.1)
-                        num_pending_users = int(
-                            _rref_context_get_debug_info()["num_pending_users"]
-                        )
+                    wait_until_pending_users_flushed()
 
             events = prof.function_events
             rpc_event = [
@@ -820,7 +821,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_function_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
 
     @dist_init
@@ -828,7 +829,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             fut.wait()
 
     @dist_init
@@ -842,12 +843,11 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function_exception(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
+        with self.assertRaisesRegex(RuntimeError, r"one_arg\(\) expected at most"):
             ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
 
         with self.assertRaisesRegex(
-            Exception, r"one_arg\(\) expected at most"
+            RuntimeError, r"one_arg\(\) expected at most"
         ):
             rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
 
@@ -1101,11 +1101,11 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
         # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             rref.to_here()
         # check ref to itself
         rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             rref.to_here()
 
     @dist_init
@@ -1372,6 +1372,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 2
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(1, int(info["num_owner_rrefs"]))
@@ -1397,6 +1398,7 @@ class RpcTest(RpcAgentTestFixture):
         # barrier before check 3
         dist.barrier()
 
+        wait_until_pending_users_flushed()
         info = _rref_context_get_debug_info()
         self.assertIn("num_owner_rrefs", info)
         self.assertEqual(2, int(info["num_owner_rrefs"]))
@@ -1683,3 +1685,28 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+    @dist_init
+    def test_function_not_on_callee(self):
+        # test that if a function does not exist on a callee, we don't crash,
+        # instead we get an AttributeError indicating that the func does not exist.
+        this_module = sys.modules[__name__]
+        caller_worker = "worker0"
+        callee_worker = "worker1"
+
+        if self.rank == 1:
+            # Use delattr to remove the binding of a func on this nodes
+            delattr(this_module, "foo_add")
+            # notify remote end that we have removed it.
+            rpc.rpc_sync(caller_worker, set_value, args=(self.rank,))
+
+        if self.rank == 0:
+            # func exists on caller, but not callee.
+            # wait for remote end to remove the binding of foo_add func.
+            wait_for_value_future()
+            # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
+            self.assertTrue(hasattr(this_module, "foo_add"))
+            with self.assertRaisesRegex(
+                AttributeError, "RPC pickler does not serialize"
+            ):
+                rpc.rpc_sync(callee_worker, foo_add, args=())

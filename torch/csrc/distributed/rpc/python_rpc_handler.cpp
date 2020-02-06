@@ -64,8 +64,9 @@ void PythonRpcHandler::cleanup() {
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
-  static PythonRpcHandler handler;
-  return handler;
+  // Leaky singleton to avoid module destructor race.
+  static PythonRpcHandler* handler = new PythonRpcHandler();
+  return *handler;
 }
 
 std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
