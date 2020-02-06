@@ -1985,6 +1985,7 @@ static int64_t PySlice_AdjustIndices(
     int64_t length, int64_t* start, int64_t* stop, int64_t step) {
   TORCH_CHECK(step != 0, "List slice should have non-zero step")
 
+  // Comes from PySlice_Unpack.
   if (*start == INT64_MAX) {
     *start = (step < 0) ? INT64_MAX : 0;
   }
@@ -1992,6 +1993,7 @@ static int64_t PySlice_AdjustIndices(
     *stop = (step < 0) ? INT64_MIN : INT64_MAX;
   }
 
+  // Comes from PySlice_AdjustIndices.
   if (*start < 0) {
     *start += length;
     if (*start < 0) {
@@ -2034,12 +2036,6 @@ int listSlice(Stack& stack) {
   c10::List<T> sliced_list = make_result_list<T>(list.elementType());
   const int64_t num_values =
        PySlice_AdjustIndices(list_size, &start, &stop, step);
-
-  if (num_values == 0) {
-    // early exit if the slice is empty
-    push(stack, std::move(sliced_list));
-    return 0;
-  }
   sliced_list.reserve(num_values);
 
   int i = start;
