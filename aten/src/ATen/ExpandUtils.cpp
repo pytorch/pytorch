@@ -9,6 +9,7 @@ std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   std::vector<int64_t> expandedSizes(ndim);
 
   // Use ptrdiff_t to ensure signed comparison.
+  // NOTE: are_expandable did a similar check, please keep them sync if change is needed
   for (ptrdiff_t i = (ptrdiff_t)ndim - 1; i >= 0; --i) {
     ptrdiff_t offset = ndim - 1 - i;
     ptrdiff_t dimA = dimsA - 1 - offset;
