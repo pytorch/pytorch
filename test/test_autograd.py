@@ -3688,6 +3688,28 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
+        # Should not give non-inputs to mark_dirty
+        class MyAdderBad(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                c = 3 * a
+                c.add_(b)
+                ctx.mark_dirty(c)
+                return c
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                grad = 3 * grad
+                return grad, grad
+
+        a = torch.ones(2, requires_grad=True)
+        b = torch.ones(2, requires_grad=True)
+
+        with warnings.catch_warnings(record=True) as w:
+            MyAdderBad.apply(a.clone(), b)
+        self.assertEqual(len(w), 1)
+
         # II) Multiple outputs
         class MyBadAdder(Function):
             @staticmethod
@@ -3715,11 +3737,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         # The input is a view
-        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        # The "python_error" is for python 2.7 for which current error handling is not perfect.
-        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
-            # TODO: CopySlices does not handle Function with multiple outputs
-            (c * d).sum().backward()
+        inplace_on_view_err = "your Function modifies inplace an input that is a view of another Tensor"
+        with self.assertRaisesRegex(RuntimeError, inplace_on_view_err):
+            c, d = MyBadAdder.apply(a.clone().view_as(a), b)
 
         # III) Inplace + other op
         class MyOutPlaceAdder(Function):
@@ -3740,25 +3760,9 @@ for shape in [(1,), ()]:
             c, d = MyOutPlaceAdder.apply(orig_a, b)
             return (c * d).sum()
 
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        gradcheck(fn, (a, b))
-
-        # We reuse the input
-        def fn(a, b):
-            orig_a = a.clone()
-            c, d = MyOutPlaceAdder.apply(orig_a, b)
-            return (c * d * orig_a).sum()
-
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
-            # TODO: We are not rebasing the history and so the inplace computation is wrong
-            gradcheck(fn, (a, b))
+        bad_mark_dirty_err = "Some elements marked as dirty during the forward method where not returned as output."
+        with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
+            fn(a, b)
 
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
