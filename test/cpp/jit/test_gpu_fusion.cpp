@@ -120,22 +120,18 @@ void testGPU_FusionTopoSort() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Float* v1 = new Float{1.f};
-  Float* v2 = new Float{2.f};
-  Val* v3 = add(v1, v2);
-  Float* v4 = new Float{3.f};
-  Val* v5 = add(v3, v4);
-
-  std::cout << "node0: " << fusion.origin(v3)->name() << std::endl;
-  std::cout << "node1: " << fusion.origin(v5)->name() << std::endl;
-
-  std::cout << "fusion ids: ";
-  for (auto expr : fusion.exprs()) {
-    std::cout << expr->name() << ", ";
-  }
-  std::cout << std::endl;
-
-  // TODO: test multiple output when we have the node;
+  Float* v0 = new Float{1.f};
+  Float* v1 = new Float{2.f};
+  Val* v2 = add(v0, v1);
+  Float* v3 = new Float{3.f};
+  Val* v4 = add(v2, v3);
+  TORCH_CHECK(fusion.origin(v2)->name() == 0);
+  TORCH_CHECK(fusion.origin(v4)->name() == 1);
+  std::vector<const Expr*> exprs = fusion.exprs();
+  TORCH_CHECK(exprs[0] == fusion.origin(v2));
+  TORCH_CHECK(exprs[1] == fusion.origin(v4));
+  
+  // TODO: test exprs with multiple output when we have nodes with multiple outputs
   // case:
   //   %1, %2 = op0(%0)
   //   %3, %4 = op1(%1)
