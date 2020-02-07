@@ -117,20 +117,63 @@ void testGPU_FusionRegister() {
 }
 
 void testGPU_FusionTopoSort() {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    Float* v0 = new Float{1.f};
+    Float* v1 = new Float{2.f};
+    Val* v2 = add(v0, v1);
+    Float* v3 = new Float{3.f};
+    Val* v4 = add(v2, v3);
+    TORCH_CHECK(fusion.origin(v2)->name() == 0);
+    TORCH_CHECK(fusion.origin(v4)->name() == 1);
+    std::vector<const Expr*> exprs = fusion.exprs();
+    TORCH_CHECK(exprs[0] == fusion.origin(v2));
+    TORCH_CHECK(exprs[1] == fusion.origin(v4));
+  }
 
-  Float* v0 = new Float{1.f};
-  Float* v1 = new Float{2.f};
-  Val* v2 = add(v0, v1);
-  Float* v3 = new Float{3.f};
-  Val* v4 = add(v2, v3);
-  TORCH_CHECK(fusion.origin(v2)->name() == 0);
-  TORCH_CHECK(fusion.origin(v4)->name() == 1);
-  std::vector<const Expr*> exprs = fusion.exprs();
-  TORCH_CHECK(exprs[0] == fusion.origin(v2));
-  TORCH_CHECK(exprs[1] == fusion.origin(v4));
+  // Testing from_output when an intermediate Val is marked as output
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    Float* v0 = new Float{1.f};
+    Float* v1 = new Float{2.f};
+    Val* v2 = add(v0, v1);
+    Float* v3 = new Float{3.f};
+    Val* v4 = add(v2, v3);
+    fusion.addOutput(v2);
+    fusion.addOutput(v4);
+    TORCH_CHECK(fusion.origin(v2)->name() == 0);
+    TORCH_CHECK(fusion.origin(v4)->name() == 1);
+    std::vector<const Expr*> exprs = fusion.exprs(true);
+    TORCH_CHECK(exprs[0] == fusion.origin(v2));
+    TORCH_CHECK(exprs[1] == fusion.origin(v4));
+    std::cout << "check expr" << std::endl;
+    for (auto const& expr : exprs) {
+      std::cout << "    " << expr << std::endl;
+    }
+    TORCH_CHECK(exprs.size() == 2);
+  }
+
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+    Float* v0 = new Float{1.f};
+    Float* v1 = new Float{2.f};
+    Val* v2 = add(v0, v1);
+    Float* v3 = new Float{3.f};
+    Val* v4 = add(v2, v3);
+    Float* v5 = new Float{4.f};
+    Val* v6 = add(v2, v5);
+    TORCH_CHECK(fusion.origin(v2)->name() == 0);
+    TORCH_CHECK(fusion.origin(v4)->name() == 1);
+    std::vector<const Expr*> exprs = fusion.exprs();
+    TORCH_CHECK(exprs.size() == 3);
+    TORCH_CHECK(exprs[0] == fusion.origin(v2));
+    TORCH_CHECK(exprs[1] != exprs[2]);
+  }
   
+
   // TODO: test exprs with multiple output when we have nodes with multiple outputs
   // case:
   //   %1, %2 = op0(%0)
