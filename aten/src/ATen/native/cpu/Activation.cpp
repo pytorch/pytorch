@@ -373,24 +373,44 @@ static void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
 }
 
 void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return (a * beta) > threshold ? a
-          : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
-    });
+    const Vec beta_vec(beta);
+    const Vec threshold_vec(threshold);
+    cpu_kernel_vec(
+        iter,
+        [beta, threshold](scalar_t a) -> scalar_t {
+          return (a * beta) > threshold ? a
+            : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
+        },
+        [beta_vec, threshold_vec](Vec a) -> Vec {
+          return Vec::blendv((a * beta_vec).exp().log1p() / beta_vec, a, (a * beta_vec) > threshold_vec);
+        }
+    );
   });
 }
 
 void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
-      scalar_t z = std::exp(b * beta);
-      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
-    });
+    const Vec beta_vec(beta);
+    const Vec threshold_vec(threshold);
+    const Vec one_vec(static_cast<scalar_t>(1.0));
+    cpu_kernel_vec(
+        iter,
+        [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
+          scalar_t z = std::exp(b * beta);
+          return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+        },
+        [beta_vec, one_vec, threshold_vec](Vec a, Vec b) -> Vec {
+          const Vec z = (b * beta_vec).exp();
+          return Vec::blendv(a * (z - one_vec) / z, a, (b * beta_vec) > threshold_vec);
+        }
+    );
   });
 }
 
