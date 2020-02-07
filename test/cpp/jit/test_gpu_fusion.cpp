@@ -103,6 +103,19 @@ void testGPU_FusionMutator(){
 
 }
 
+void testGPU_FusionRegister() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  Float* v1 = new Float{1.f};
+  Float* v2 = new Float{2.f};
+  Val* v3 = add(v1, v2);
+  Val* v4 = add(v1, v2);
+  TORCH_CHECK(v1->name()+1 == v2->name());
+  TORCH_CHECK(v2->name()+1 == v3->name());
+  TORCH_CHECK(v3->name()+1 == v4->name());
+  TORCH_CHECK(fusion.origin(v3)->name()+1 == fusion.origin(v4)->name());
+}
+
 void testGPU_FusionTopoSort() {
   Fusion fusion;
   FusionGuard fg(&fusion);

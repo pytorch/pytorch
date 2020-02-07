@@ -293,6 +293,7 @@ struct TORCH_API Fusion : public IRInputOutput{
         return val->name();
       }
     }
+    val_set_.emplace(val);
     return getValName();
   }
 
@@ -328,6 +329,7 @@ struct TORCH_API Fusion : public IRInputOutput{
       origin_[output] = expr;
     }
 
+    expr_set_.emplace(expr);
     return getExprName();
   }
 
