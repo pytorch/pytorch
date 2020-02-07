@@ -143,16 +143,11 @@ void testGPU_FusionTopoSort() {
     Val* v4 = add(v2, v3);
     fusion.addOutput(v2);
     fusion.addOutput(v4);
-    TORCH_CHECK(fusion.origin(v2)->name() == 0);
     TORCH_CHECK(fusion.origin(v4)->name() == 1);
+    TORCH_CHECK(fusion.origin(v2)->name() == 0);
     std::vector<const Expr*> exprs = fusion.exprs(true);
     TORCH_CHECK(exprs[0] == fusion.origin(v2));
     TORCH_CHECK(exprs[1] == fusion.origin(v4));
-    std::cout << "check expr" << std::endl;
-    for (auto const& expr : exprs) {
-      std::cout << "    " << expr << std::endl;
-    }
-    TORCH_CHECK(exprs.size() == 2);
   }
 
   {

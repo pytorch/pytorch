@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <deque>
+#include <queue>
 #include <iostream>
 #include <set>
 #include <algorithm>
@@ -174,49 +175,61 @@ struct TORCH_API Fusion : public IRInputOutput{
     if(breadth_first)
       throw std::runtime_error("Not implemented yet.");
 
-    std::deque<const Val*> to_visit;  
+    std::queue<const Val*> outputs_to_visit;
     std::set<const Val*> visited;
 
     std::vector<const Expr*> ordered_exprs;
 
     if(from_outputs_only){
-      for(const Val* output : outputs())
-        to_visit.push_back(output);
+      for(const Val* output : outputs()){
+        outputs_to_visit.push(output);
+      }
     }else{
       for(const auto it : val_set_){
         if(uses_.find(it) == uses_.end()) //never used, must be output or unused val
-          to_visit.push_back(it);
+          outputs_to_visit.push(it);
       }
     }
 
-    while(!to_visit.empty()){
-
-      const Val* val;
-
-      val = to_visit.back();
-      visited.emplace(val);
-
-      const Expr* orig = origin(val);
-
-      //If this val doesn't have an origin it's an input, stop processing
-      if(orig == nullptr){
-        to_visit.pop_back();
+    std::deque<const Val*> to_visit;
+    while(!outputs_to_visit.empty()){
+      const Val* next_out = outputs_to_visit.front();
+      outputs_to_visit.pop();
+      if(visited.find(next_out) != visited.end()){
         continue;
       }
+      to_visit.push_back(next_out);
 
-      //Add all inputs of origin that haven't been visited
-      for(const Val* inp : orig->inputs())
-        if(visited.find(inp) == visited.end()){
-          to_visit.push_back(inp);
+      while(!to_visit.empty()){
+
+        const Val* val;
+
+        val = to_visit.back();
+        visited.emplace(val);
+
+        const Expr* orig = origin(val);
+
+        //If this val doesn't have an origin it's an input, stop processing
+        if(orig == nullptr){
+          to_visit.pop_back();
+          continue;
         }
 
-      //If we added any vals we need to process them first
-      if(to_visit.back() != val)
-        continue; 
-      
-      ordered_exprs.push_back(orig);
-      to_visit.pop_back();
+        //Add all inputs of origin that haven't been visited
+        for(const Val* inp : orig->inputs())
+          if(visited.find(inp) == visited.end()){
+            to_visit.push_back(inp);
+          }
+
+        //If we added any vals we need to process them first
+        if(to_visit.back() != val)
+          continue; 
+        
+        ordered_exprs.push_back(orig);
+        to_visit.pop_back();
+      }
     }
+    
     return ordered_exprs;
   }
 
