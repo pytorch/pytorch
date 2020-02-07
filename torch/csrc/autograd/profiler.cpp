@@ -228,7 +228,7 @@ thread_event_lists disableProfiler() {
 
   popCallback();
   state = ProfilerState::Disabled;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();

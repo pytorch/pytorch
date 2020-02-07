@@ -785,6 +785,10 @@ void testRecordFunction() {
       [](const autograd::profiler::RecordFunction&) {},
       /* needs_inputs */ true);
 
+  bool orig_profiler =
+      c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
+
   auto t = torch::randn({1, 2, 3}, at::kCPU);
   t.set_requires_grad(true);
   auto t2 = invokeTestRecordFunction(t);
@@ -800,6 +804,8 @@ void testRecordFunction() {
   traced_inputs.clear();
 
   autograd::profiler::popCallback();
+  c10::impl::tls_set_dispatch_key_included(
+      c10::DispatchKey::Profiler, orig_profiler);
 
   checkTracedInputs(eager_inputs);
   checkTracedInputs(jit_inputs);
