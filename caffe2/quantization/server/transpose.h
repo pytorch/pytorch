@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include "caffe2/quantization/server/dnnlowp_op.h"
+#include "c10/macros/Macros.h"
 
 namespace fbgemm {
 

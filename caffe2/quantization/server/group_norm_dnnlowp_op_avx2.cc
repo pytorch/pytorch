@@ -8,7 +8,7 @@
 #endif
 
 #include <fbgemm/QuantUtils.h>
-#include "caffe2/quantization/server/dnnlowp_op.h"
+#include "c10/macros/Macros.h"
 
 namespace caffe2 {
 

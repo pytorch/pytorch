@@ -1,4 +1,4 @@
-#include "caffe2/quantization/server/pool_dnnlowp_op_avx2.h"
+#include "c10/macros/Macros.h"
 
 #include <immintrin.h>
 #include <algorithm>
