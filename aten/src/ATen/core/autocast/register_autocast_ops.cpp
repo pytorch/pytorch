@@ -38,8 +38,6 @@ void clear_cache() {
 
 enum class CastPolicy : uint8_t {
   fp16 = 0, // Cast all inputs to at::kHalf before running the op.
-  fp16_with_tensorlist, // Separate from CastPolicy::fp16 due to lifetime concerns of data
-                        // viewed by TensorLists.  Maybe some C++ guru can help me unify them.
   fp32, // Cast all inputs to at::kFloat before running the op.
   fp32_set_opt_dtype, // Treats functions (like softmax) that
                       //   1. we'd like to run in fp32 and
@@ -53,8 +51,6 @@ enum class CastPolicy : uint8_t {
                      // The wrapper policy is:  append at::kFloat to the args, and redispatch to the
                      // type-aware overload.
   promote, // Run in the widest dtype among several args.
-  promote_with_tensorlist, // Separate from CastPolicy::promote due to lifetime concerns
-                           // of data viewed by TensorLists.
 };
 
 /********************************************************************
@@ -158,43 +154,6 @@ cached_cast(at::ScalarType to_type, T arg) {
   return arg;
 }
 
-/*******************************************************************************
-Logic to apply cached casting to signatures with Tensors and a single TensorList
-The functions here exist only to support CastPolicy::*_with_tensorlist,
-which store a local vector to preserve the lifetime of data that's viewed by
-TensorLists further down the call chain.
-*******************************************************************************/
-
-// helper to pick out the TensorList arg and create a casted vector
-template<typename Arg0, typename... Args> inline std::vector<Tensor>
-get_casted_vector(at::ScalarType to_type, Arg0 arg0, Args... args) {
-  return get_casted_vector(args...);
-}
-
-// Specialization for the TensorList itself
-template<typename... Args> inline std::vector<Tensor>
-get_casted_vector(at::ScalarType to_type, const TensorList& list, Args... args) {
-  return cached_cast(to_type, list);
-}
-
-// Overload to catch Tensor args
-inline Tensor
-cached_cast_with_vector(at::ScalarType to_type, const std::vector<Tensor>& casted_vector, const Tensor& arg) {
-  return cached_cast(to_type, arg);
-}
-
-// Overload to catch the TensorList arg and swap in our vector
-inline const std::vector<Tensor>&
-cached_cast_with_vector(at::ScalarType to_type, const std::vector<Tensor>& casted_vector, const TensorList& arg) {
-  return casted_vector;
-}
-
-// Template to catch other args.
-template<typename T> inline T
-cached_cast_with_vector(at::ScalarType to_type, const std::vector<Tensor>& casted_vector, T arg) {
-  return arg;
-}
-
 /*******************************************************
 Logic to flip an output dtype flag.
 Keep it simple for now by assuming only one such flag is
@@ -222,9 +181,7 @@ Templates to provide wrapper functions
 I'm copying the pattern used in core/boxing/kernel_function.h to extract args and return type.
 (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
 
-This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
-(in my case several specializations of) an interior "WrapFunction_".
-Interior WrapFunction_ specializations are defined for each CastPolicy.
+This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of an interior "WrapFunction_".
 ********************************************************************************************************/
 
 // Base template for WrapFunction_, which is specialized to host call methods for each CastPolicy
@@ -249,79 +206,26 @@ struct WrapFunction final {
                              typename guts::function_traits<Registered>::parameter_types>;
 };
 
-// Aside from CastPolicy::fp16 and CastPolicy::fp32, the guts of each ::call below need divergent code.
-// Some need to flip a dtype, some need to append a dtype, some need to swap in a new casted vector in
-// place of a TensorList, etc, so I declare specializations.
-// I could deduplicate these by having a single template with more complex (one-size-fits-all) type selection and
-// TensorList handling, but with specializations, each instantiation can compile with only the logic it needs.
-
-// CastPolicy::fp16
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(cached_cast(at::kHalf, args)...);
-  }
-};
-
-// CastPolicy::fp16_with_tensorlist
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp16_with_tensorlist, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    // The TensorList that receives vec will use vec's raw data pointer.
-    // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)().
-    std::vector<Tensor> vec = get_casted_vector(at::kHalf, args...);
-    return (*F)(cached_cast_with_vector(at::kHalf, vec, args)...);
-  }
-};
-
-// CastPolicy::fp32
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(cached_cast(at::kFloat, args)...);
-  }
-};
-
-// CastPolicy::fp32_set_opt_dtype
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(set_opt_dtype(at::kFloat, args)...);
-  }
-};
-
-// CastPolicy::fp32_append_dtype
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    return (*F)(args..., at::kFloat);
-  }
-};
-
-// CastPolicy::promote
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    auto to_type = promote_type(at::kHalf, args...);
-    return (*F)(cached_cast(to_type, args)...);
-  }
-};
-
-// CastPolicy::promote_with_tensorlist
-template<class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<CastPolicy::promote_with_tensorlist, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
-  static Ret call(Args... args) {
-    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    auto to_type = promote_type(at::kHalf, args...);
-    // Create vec out of line to ensure its data's lifetime lasts the full duration of (*F)()
-    std::vector<Tensor> vec = get_casted_vector(to_type, args...);
-    return (*F)(cached_cast_with_vector(to_type, vec, args)...);
+    // Policy is known at compile time, so the compiler should be able to prune unneeded branches.
+    if (policy == CastPolicy::fp16) {
+      return (*F)(cached_cast(at::kHalf, args)...);
+    } else if (policy == CastPolicy::fp32) {
+      return (*F)(cached_cast(at::kFloat, args)...);
+    } else if (policy == CastPolicy::fp32_set_opt_dtype) {
+      return (*F)(set_opt_dtype(at::kFloat, args)...);
+    } else if (policy == CastPolicy::fp32_append_dtype) {
+      return (*F)(args..., at::kFloat);
+    } else if (policy == CastPolicy::promote) {
+      auto to_type = promote_type(at::kHalf, args...);
+      return (*F)(cached_cast(to_type, args)...);
+    } else {
+      static_assert(false, "Instantiating WrapFunction_ with unexpected cast policy");
+      return (*F)(args...);
+    }
   }
 };
 
@@ -398,9 +302,6 @@ Explicit registration for out-of-place ops
 *****************************************/
 auto register_out_of_place = torch::RegisterOperators()
   // fp16
-  // TODO (to consider): should the slow_conv*d from python_nn_functions_dispatch.h go here?
-  // They use unfolding + admm (which may use cublas) so it's possible they benefit from Tensor Cores,
-  // although if that code path is being used, it's probably unsalvageably slow regardless.
   KERNEL_UNBOXED_ONLY(at::_convolution, "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef, int64_t, bool, bool, bool), fp16)
   KERNEL_UNBOXED_ONLY(at::_convolution_nogroup, "aten::_convolution_nogroup(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, bool, IntArrayRef), fp16)
   KERNEL_UNBOXED_ONLY(at::conv1d, "aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, IntArrayRef, IntArrayRef, IntArrayRef, int64_t), fp16)
@@ -426,8 +327,7 @@ auto register_out_of_place = torch::RegisterOperators()
   KERNEL(at::addbmm, "aten::addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(at::baddbmm, "aten::baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", Tensor (const Tensor &, const Tensor &, const Tensor &, Scalar, Scalar), fp16)
   KERNEL(at::bmm, "aten::bmm(Tensor self, Tensor mat2) -> Tensor", Tensor (const Tensor &, const Tensor &), fp16)
-  // fp16_with_tensorlist
-  KERNEL_UNBOXED_ONLY(at::chain_matmul, "aten::chain_matmul(Tensor[] matrices) -> Tensor", Tensor (TensorList), fp16_with_tensorlist)
+  KERNEL_UNBOXED_ONLY(at::chain_matmul, "aten::chain_matmul(Tensor[] matrices) -> Tensor", Tensor (TensorList), fp16)
   // fp32
   KERNEL(at::acos, "aten::acos(Tensor self) -> Tensor", Tensor (const Tensor &), fp32)
   KERNEL(at::asin, "aten::asin(Tensor self) -> Tensor", Tensor (const Tensor &), fp32)
@@ -515,11 +415,10 @@ auto register_out_of_place = torch::RegisterOperators()
   KERNEL_UNBOXED_ONLY(at::tensordot, "aten::tensordot(Tensor self, Tensor other, int[] dims_self, int[] dims_other) -> Tensor", Tensor (const Tensor &, const Tensor &, IntArrayRef, IntArrayRef), promote)
   KERNEL_UNBOXED_ONLY(at::dot, "aten::dot(Tensor self, Tensor tensor) -> Tensor", Tensor (const Tensor &, const Tensor &), promote)
   KERNEL(at::equal, "aten::equal(Tensor self, Tensor other) -> bool", bool (const Tensor &, const Tensor &), promote)
-  // promote_with_tensorlist
-  KERNEL_UNBOXED_ONLY(at::cat, "aten::cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote_with_tensorlist)
-  KERNEL_UNBOXED_ONLY(at::cat, "aten::cat.names(Tensor[] tensors, Dimname dim) -> Tensor", Tensor (TensorList, Dimname), promote_with_tensorlist)
-  KERNEL_UNBOXED_ONLY(at::_cat, "aten::_cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote_with_tensorlist)
-  KERNEL_UNBOXED_ONLY(at::stack, "aten::stack(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote_with_tensorlist)
+  KERNEL_UNBOXED_ONLY(at::cat, "aten::cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(at::cat, "aten::cat.names(Tensor[] tensors, Dimname dim) -> Tensor", Tensor (TensorList, Dimname), promote)
+  KERNEL_UNBOXED_ONLY(at::_cat, "aten::_cat(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote)
+  KERNEL_UNBOXED_ONLY(at::stack, "aten::stack(Tensor[] tensors, int dim=0) -> Tensor", Tensor (TensorList, int64_t), promote)
   ;
 
 auto register_banned = torch::RegisterOperators()
