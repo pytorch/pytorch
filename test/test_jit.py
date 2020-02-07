@@ -1627,6 +1627,178 @@ graph(%input, %weight):
                    .check('GetAttr[name="_quantized_weight"]') \
                    .run(m._c._get_method('forward').graph)
 
+    @_tmp_donotuse_dont_inline_everything
+    def test_fold_quantize_freeze(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.weight = torch.nn.Parameter(torch.tensor([2], dtype=torch.float))
+
+            def forward(self, x):
+                return torch.quantize_per_tensor(self.weight, 2.0, 0, torch.quint8)
+
+        m = torch.jit.script(M())
+        m.eval()
+        torch._C._jit_pass_fold_quantize(m._c, 'forward')
+        m._c = torch._C.freeze_module(m._c)
+        self.assertFalse(m._c.hasattr('_quantized_weight'))
+        FileCheck().check_not('GetAttr[name=') \
+                   .run(m._c._get_method('forward').graph)
+
+    @_tmp_donotuse_dont_inline_everything
+    def test_freeze_module(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.a = 1         # folded
+                self.b = 1.2       # folded
+                self.c = "hello"   # folded
+                self.d = [1, 1]     # folded
+                self.e = [1.0, 1.1]  # not folded. float[] constant not yet supported
+                self.f = ["hello", "world"]
+                self.g = (1, 2)     # not folded. tuple constant not yet supported
+                self.h = {"layer" : "dict"}   # dictionary not supported
+                self.t = torch.tensor([1.2, 2.4], requires_grad=True)  # folded
+                self.ts = [torch.tensor([1.0, 2.0], requires_grad=True), torch.tensor([3.0, 4.0], requires_grad=True)]  # folded
+
+            def forward(self, x):
+                return str(self.a) + str(self.b) + self.c + str(self.d) + \
+                    str(self.e) + str(self.f) + str(self.g) + self.h['layer'] + str(self.t) + str(self.ts)
+
+        m = torch.jit.script(M())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        m._c = torch._C.freeze_module(m._c)
+        self.assertFalse(m._c.hasattr('a'))
+        self.assertFalse(m._c.hasattr('b'))
+        self.assertFalse(m._c.hasattr('c'))
+        self.assertFalse(m._c.hasattr('d'))
+        self.assertTrue(m._c.hasattr('e'))
+        self.assertTrue(m._c.hasattr('f'))
+        self.assertTrue(m._c.hasattr('g'))
+        self.assertTrue(m._c.hasattr('h'))
+        self.assertFalse(m._c.hasattr('t'))
+        self.assertFalse(m._c.hasattr('ts'))
+        output_f = m.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_submodule(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 11
+                self.b = 2
+
+            def forward(self, x):
+                return self.a + self.b
+
+        class SubModule2(torch.nn.Module):
+            def __init__(self):
+                super(SubModule2, self).__init__()
+                self.a = 12
+                self.b = 2
+
+            def forward(self, x):
+                self.b = 30
+                return self.a + self.b
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule2()
+                self.a = 3
+                self.b = 4
+
+            def forward(self, x):
+                self.b = 20
+                return self.sub1(x) + self.a + self.b + self.sub2(x)
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        output_s = m.forward(input)
+        m._c = torch._C.freeze_module(m._c)
+        self.assertFalse(m._c.hasattr('sub'))
+        self.assertFalse(m._c.hasattr('a'))
+        self.assertTrue(m._c.hasattr('b'))
+        self.assertTrue(m._c.hasattr('sub2'))
+        output_f = m.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_module_with_inplace_mutable(self):
+        class FreezeMe2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(FreezeMe2, self).__init__()
+                self.a = [11, 22]
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for i in range(3):
+                    self.a.append(i)
+                return self.a
+
+        m = FreezeMe2()
+        m.eval()
+        m_f = torch._C.freeze_module(m._c)
+        self.assertTrue(m._c.hasattr('a'))
+        m.forward(torch.tensor([3]))
+        out = m_f.forward(torch.tensor([5]))
+        expected = [11, 22, 0, 1, 2, 0, 1, 2]
+        self.assertEqual(out, expected)
+
+    def test_freeze_module_in_training_mode(self):
+        class Net(torch.nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = torch.nn.Conv2d(1, 32, 3, 1)
+                self.conv2 = torch.nn.Conv2d(32, 64, 3, 1)
+                self.dropout1 = torch.nn.Dropout2d(0.25)
+                self.dropout2 = torch.nn.Dropout2d(0.5)
+                self.fc1 = torch.nn.Linear(9216, 128)
+                self.fc2 = torch.nn.Linear(128, 10)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.conv2(x)
+                x = torch.nn.functional.max_pool2d(x, 2)
+                x = self.dropout1(x)
+                x = torch.flatten(x, 1)
+                x = self.fc1(x)
+                x = torch.nn.functional.relu(x)
+                x = self.dropout2(x)
+                x = self.fc2(x)
+                output = torch.nn.functional.log_softmax(x, dim=1)
+                return output
+
+        model = torch.jit.script(Net())
+        model.train()
+
+        with self.assertRaisesRegex(RuntimeError, '!module.is_training()'):
+            mTrain_freezed = torch._C.freeze_module(model._c)
+
+        model.eval()
+        mEval_freezed = torch._C.freeze_module(model._c)
+        self.assertFalse(mEval_freezed.hasattr('conv1'))
+        self.assertFalse(mEval_freezed.hasattr('conv2'))
+        self.assertFalse(mEval_freezed.hasattr('dropout1'))
+        self.assertFalse(mEval_freezed.hasattr('training'))
+        self.assertFalse(mEval_freezed.hasattr('fc1'))
+        self.assertFalse(mEval_freezed.hasattr('dropout2'))
+        self.assertFalse(mEval_freezed.hasattr('fc2'))
+
+    def test_freeze_module_detach_gradient(self):
+        mod = torch.nn.Conv2d(8, 3, 4, 2, 1)
+        self.assertTrue(mod.weight.requires_grad)
+        smod = torch.jit.script(mod)
+        smod.eval()
+        fmod = torch._C.freeze_module(smod._c)
+        self.assertTrue(mod.weight.requires_grad)
+        self.assertTrue(smod.weight.requires_grad)
+        self.assertFalse(fmod.hasattr('weight'))
+
     @unittest.skipUnless(
         'fbgemm' in torch.backends.quantized.supported_engines,
         " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"

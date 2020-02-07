@@ -63,7 +63,8 @@ bool AliasDb::isContainerType(const TypePtr& type) {
 
 AliasDb::~AliasDb() = default;
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
+    : graph_(std::move(graph)), isFrozen_(isFrozen) {
   memoryDAG_ = torch::make_unique<MemoryDAG>();
   analyze(graph_);
   GRAPH_DEBUG(toString());
@@ -347,9 +348,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      return analyzeExtractor(node);
     case prim::unchecked_cast:
-      return makePointerTo(node->output(), node->input());
+      if (isFrozen_ && node->kind() == prim::GetAttr)
+        return analyzeCreator(node);
+      return analyzeExtractor(node);
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
