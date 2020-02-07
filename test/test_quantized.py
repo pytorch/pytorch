@@ -1091,7 +1091,9 @@ class TestQuantizedOps(TestCase):
 
         qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
-        float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias, running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+        float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
+                                 running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+
         quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, torch.quint8)
 
         self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
