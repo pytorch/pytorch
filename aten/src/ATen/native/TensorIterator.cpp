@@ -630,6 +630,7 @@ void TensorIterator::remove_dimension(int dim) {
 void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   TORCH_INTERNAL_ASSERT(dim < ndim() && size >= 1);
   shape_[dim] = size;
+  view_offsets_[dim] += start;
   for (auto& op : operands_) {
     op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
@@ -974,6 +975,9 @@ void TensorIterator::build() {
     TORCH_INTERNAL_ASSERT(op.tensor.defined());
     op.data = op.tensor.data_ptr();
   }
+
+  // zero out offsets
+  view_offsets_ = DimVector(ndim(), 0);
 }
 
 SplitUntil32Bit TensorIterator::with_32bit_indexing() const {

@@ -8448,6 +8448,21 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @slowTest
+    def test_argminmax_large_axis(self, device):
+        # Regression test for gh-32863
+        # Requires > 8 GB of memory. So, if allocation fails just skip it.
+        try:
+            x = torch.zeros((2, 2**32), device=device, dtype=torch.uint8)
+            x[:, -1] = 1
+            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
+            x[:, -1] = -1
+            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
+        except RuntimeError as e:
+            if 'memory' in str(e):
+                raise unittest.SkipTest('Not enough cuda memory')
+            raise
+
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
         x = torch.tensor(23500, dtype=torch.int64, device=device)
