@@ -189,26 +189,6 @@ Interior WrapFunction_ specializations are defined for each CastPolicy.
 // Base template for WrapFunction_, which is specialized to host call methods for each CastPolicy
 template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class ArgList> struct WrapFunction_ {};
 
-// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/kernel_function.h)
-template<CastPolicy policy,
-         class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
-                           // registered functions with arguments matching Registered, so we register
-                           // WrapFunction_::call methods with a matching signature to properly field those arguments.
-                           // guts::function_traits below extracts return_type and parameter_types from Registered,
-                           // which WrapFunction_ templates above use to declare their call methods.
-         class Redispatch, // The signature for the function we're redispatching to.  In most cases this is the same
-                           // as Registered, but for some ops (for example, ops where we append a dtype) it's useful
-                           // to redispatch to a function with a different signature.
-         Redispatch* F>    // The actual function we're redispatching to.
-struct WrapFunction final {
-  using type = WrapFunction_<policy,
-                             Redispatch,
-                             F,
-                             typename guts::function_traits<Registered>::return_type,
-                             typename guts::function_traits<Registered>::parameter_types>;
-};
-
-
 // CastPolicy::fp16
 template<class Redispatch, Redispatch* F, class Ret, class... Args>
 struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
@@ -253,6 +233,25 @@ struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::ty
     auto to_type = promote_type(at::kHalf, args...);
     return (*F)(cached_cast(to_type, args)...);
   }
+};
+
+// Wrapper to infer return_type and parameter_types for WrapFunction_ (imitating core/boxing/kernel_function.h)
+template<CastPolicy policy,
+         class Registered, // The signature for which we're registering.  The dispatcher's calling code invokes our
+                           // registered functions with arguments matching Registered, so we register
+                           // WrapFunction_::call methods with a matching signature to properly field those arguments.
+                           // guts::function_traits below extracts return_type and parameter_types from Registered,
+                           // which WrapFunction_ templates above use to declare their call methods.
+         class Redispatch, // The signature for the function we're redispatching to.  In most cases this is the same
+                           // as Registered, but for some ops (for example, ops where we append a dtype) it's useful
+                           // to redispatch to a function with a different signature.
+         Redispatch* F>    // The actual function we're redispatching to.
+struct WrapFunction final {
+  using type = WrapFunction_<policy,
+                             Redispatch,
+                             F,
+                             typename guts::function_traits<Registered>::return_type,
+                             typename guts::function_traits<Registered>::parameter_types>;
 };
 
 /*******************************
