@@ -179,8 +179,6 @@ class ProcessGroup {
   virtual std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) = 0;
 
-  virtual void setTimeout(const std::chrono::seconds& timeoutSeconds);
-
  protected:
   const int rank_;
   const int size_;

@@ -380,7 +380,6 @@ def init_process_group(backend,
         init_method = "env://"
 
     backend = Backend(backend)
-
     if backend == Backend.MPI:
         _default_pg = _new_process_group_helper(
             -1,
