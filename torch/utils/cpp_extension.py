@@ -466,7 +466,7 @@ class BuildExtension(build_ext, object):
                                              include_dirs, sources,
                                              depends, extra_postargs)
             common_cflags = extra_preargs or []
-            common_cflags.append ('/c')
+            common_cflags.append('/c')
             if debug:
                 common_cflags.extend(self.compile_options_debug)
             else:
