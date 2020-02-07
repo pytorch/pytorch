@@ -1,3 +1,9 @@
+#!/bin/bash
+##############################################################################
+# Invoke code analyzer binary with pre-defined parameters for LibTorch.
+# This script should be called via build.sh. Do NOT use it directly.
+##############################################################################
+
 set -exu
 
 echo "Analyze: ${INPUT}"
