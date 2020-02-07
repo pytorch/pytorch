@@ -396,6 +396,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 #endif
 
   std::vector<perf_t> result;
+  result.reserve(n_algo);
   for (int i = 0; i < n_algo; i++) {
     perf_t perf = perfResults[i];
 
