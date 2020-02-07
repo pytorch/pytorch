@@ -710,7 +710,9 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
-  DecomposeOps(graph);
+  if (!getProfilingMode()) {
+    DecomposeOps(graph);
+  }
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
