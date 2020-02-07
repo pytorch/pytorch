@@ -6,8 +6,11 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
+#include <torch/custom_class.h>
 #include <algorithm>
 #include <vector>
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 namespace caffe2 {
 #ifdef USE_FBGEMM
@@ -298,6 +301,10 @@ class QLinearPackWeightFp16 final : public c10::OperatorKernel {
 
  private:
 };
+
+namespace {
+static auto siof = register_linear_params();
+}  // namespace
 
 static auto registry =
     c10::RegisterOperators()

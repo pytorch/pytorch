@@ -6,9 +6,12 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <torch/custom_class.h>
 
 #include <algorithm>
 #include <string>
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -365,6 +368,10 @@ class QLinearInt8 final : public torch::OperatorKernel {
     }
   }
 };
+
+namespace {
+static auto siof = register_linear_params();
+}  // namespace
 
 static auto registry =
     torch::RegisterOperators()

@@ -4,6 +4,9 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <torch/custom_class.h>
+
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeight::unpack() {
@@ -92,6 +95,10 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
     return packed_weight->unpack();
   }
 };
+
+namespace {
+static auto siof = register_linear_params();
+}  // namespace
 
 static auto registry =
     c10::RegisterOperators()
