@@ -1,8 +1,36 @@
 import torch
 import functools
+import inspect
+
+class _DecoratorContextManager:
+    """Allow a context manager to be used as a decorator"""
+
+    def __call__(self, func):
+        if inspect.isgeneratorfunction(func):
+            return self._wrap_generator(func)
+
+        @functools.wraps(func)
+        def decorate_context(*args, **kwargs):
+            with self:
+                return func(*args, **kwargs)
+        return decorate_context
+
+    def _wrap_generator(self, func):
+        """Wrap each generator invocation with the context manager"""
+        @functools.wraps(func)
+        def generator_context(*args, **kwargs):
+            gen = func(*args, **kwargs)
+            while True:
+                try:
+                    with self:
+                        x = next(gen)
+                    yield x
+                except StopIteration:
+                    break
+        return generator_context
 
 
-class no_grad(object):
+class no_grad(_DecoratorContextManager):
     r"""Context-manager that disabled gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
@@ -42,15 +70,8 @@ class no_grad(object):
         torch.set_grad_enabled(self.prev)
         return False
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_no_grad(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_no_grad
 
-
-class enable_grad(object):
+class enable_grad(_DecoratorContextManager):
     r"""Context-manager that enables gradient calculation.
 
     Enables gradient calculation, if it has been disabled via :class:`~no_grad`
@@ -88,13 +109,6 @@ class enable_grad(object):
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
-
-    def __call__(self, func):
-        @functools.wraps(func)
-        def decorate_enable_grad(*args, **kwargs):
-            with self:
-                return func(*args, **kwargs)
-        return decorate_enable_grad
 
 
 class set_grad_enabled(object):

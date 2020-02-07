@@ -57,7 +57,7 @@ struct Var {
 };
 
 template<typename scalar_t>
-void batch_norm_cpu_inference_collect_liner_and_constant_terms(
+void batch_norm_cpu_inference_collect_linear_and_constant_terms(
     scalar_t* alpha, scalar_t* beta, int64_t n_channel,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& mean, const Tensor& variance, double eps) {
@@ -71,7 +71,7 @@ void batch_norm_cpu_inference_collect_liner_and_constant_terms(
   /// output(n, c, h, w)
   ///     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   ///         + bias(c)
-  ///     = input(n, c, h, w) * inv_var(c) * weight(c) +
+  ///     = input(n, c, h, w) * inv_var(c) * weight(c)
   ///         - mean(c) * inv_var(c) * weight(c) + bias(c),
   /// where inv_var(c) = 1 / sqrt(var(c) + eps).
   /// So the linear term, alpha(c) = inv_var(c) * weight(c),
@@ -103,19 +103,19 @@ void batch_norm_cpu_inference_contiguous(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  // Keep the loop struture simple to make sure compiler vectorization kicks in.
   if (image_size != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t c = 0; c < n_channel; ++c) {
@@ -156,19 +156,19 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   scalar_t* output_data = output.data_ptr<scalar_t>();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
 
-  Tensor alpha = at::empty_like(mean, at::MemoryFormat::Contiguous);
-  Tensor beta = at::empty_like(mean, at::MemoryFormat::Contiguous);
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   scalar_t* alpha_data = alpha.data_ptr<scalar_t>();
   scalar_t* beta_data = beta.data_ptr<scalar_t>();
 
-  batch_norm_cpu_inference_collect_liner_and_constant_terms<scalar_t>(
+  batch_norm_cpu_inference_collect_linear_and_constant_terms<scalar_t>(
       alpha_data, beta_data, n_channel, weight, bias, mean, variance, eps);
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  // Keep the loop struture simple to make sure compiler vectorization kicks in.
   if (n_channel != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t i = 0; i < image_size; ++i) {
@@ -206,7 +206,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
       && running_mean.is_contiguous()
       && running_var.is_contiguous()) {
 
-    Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+    Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     batch_norm_cpu_inference_contiguous<scalar_t>(
       output, input, weight, bias, running_mean, running_var, eps);
     return std::make_tuple(output, save_mean, save_invstd);
@@ -225,7 +225,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   int64_t n_input = input.size(1);
 
@@ -283,7 +283,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
     for (int64_t f = b_begin; f < b_end; ++f) {
       Tensor in = input.select(1, f);
-      
+
       // compute mean per input
       auto iter = TensorIterator();
       iter.add_input(in);
@@ -330,13 +330,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
   Tensor grad_weight;
   Tensor grad_bias;
   if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input, at::MemoryFormat::Contiguous);
+    grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_weight = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    grad_bias = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
@@ -393,8 +393,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(const Tensor
           if (train) {
             // when in training mode
             // Q(X) = X - E[x] ; i.e. input centered to zero mean
-            // Y = Q(X) / σ    ; i.e. BN output before weight and bias
-            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / σ * w
+            // Y = Q(X) / sigma    ; i.e. BN output before weight and bias
+            // dL/dX = (Q(dL/dY) - dot(Y, dL/dY) * Y) / sigma * w
 
             // projection of gradOutput on to output scaled by std
             scalar_t k = (scalar_t) dotp * invstd * invstd / n;
@@ -464,7 +464,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
-               && input.size(0) <= 131070
+               && ((input.dim() == 2 && input.size(0) <= 131070 && training) // per-activation, training
+                 || (input.dim() == 2 && input.size(0) <= 262136 && !training) // per-activation, eval
+                 || (input.dim() >= 3 && input.size(0) <= 880801 && training) // spatial, training
+                 || (input.dim() >= 3 && input.size(0) <= 65535 && !training)) //spatial, eval
                && detail::getCUDAHooks().compiledWithCuDNN()
                && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
 
@@ -531,6 +534,13 @@ Tensor batch_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
+  if (input.numel()==0){
+    //don't return view of input, don't return empty tensor because it will break gradient chain
+    auto out = input.clone();
+    if (weight.defined()) out = out * weight[0];
+    if (bias.defined()) out = out + bias[0];
+    return out; 
+  }
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
@@ -590,7 +600,8 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
              " and input of shape ", input.sizes());
 
     // Apply group norm
-    auto input_reshaped = input.contiguous().view({1, b * num_groups, -1});
+    // view(..., -1) does not work for empty tensor
+    auto input_reshaped = input.contiguous().view({1, b * num_groups, b ? -1 : 1});
 
     auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
                               cudnn_enabled);

@@ -1160,6 +1160,13 @@ def softsign(input):
 
 softplus = _add_docstr(torch._C._nn.softplus, r"""
 softplus(input, beta=1, threshold=20) -> Tensor
+
+Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+
+For numerical stability the implementation reverts to the linear function
+when :math:`input \times \beta > threshold`.
+
+See :class:`~torch.nn.Softplus` for more details.
 """)
 
 
@@ -1279,14 +1286,14 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
-    gumbels = -torch.empty_like(logits).exponential_().log()  # ~Gumbel(0,1)
+    gumbels = -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()  # ~Gumbel(0,1)
     gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:
         # Straight through.
         index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(logits).scatter_(dim, index, 1.0)
+        y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
@@ -1486,8 +1493,8 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
 
 def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
                   scale_grad_by_freq=False, mode='mean', sparse=False,
-                  per_sample_weights=None):
-    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor]) -> Tensor
+                  per_sample_weights=None, include_last_offset=False):
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor], bool) -> Tensor
     r"""Computes sums, means or maxes of `bags` of embeddings, without instantiating the
     intermediate embeddings.
 
@@ -1518,6 +1525,9 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             to indicate all weights should be taken to be 1. If specified, :attr:`per_sample_weights`
             must have exactly the same shape as input and is treated as having the same
             :attr:`offsets`, if those are not None.
+
+        include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
+        The last element is the size of the input, or the ending index position of the last bag (sequence).
 
 
     Shape:
@@ -1636,8 +1646,27 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         scale_grad_by_freq,
         mode_enum,
         sparse,
-        per_sample_weights)
+        per_sample_weights,
+        include_last_offset)
     return ret
+
+
+def _verify_batch_size(size):
+    # type: (List[int]) -> None    
+    # XXX: JIT script does not support the reduce from functools, and mul op is a
+    # builtin, which cannot be used as a value to a func yet, so rewrite this size
+    # check to a simple equivalent for loop
+    #
+    # TODO: make use of reduce like below when JIT is ready with the missing features:
+    # from operator import mul
+    # from functools import reduce
+    #
+    #   if reduce(mul, size[2:], size[0]) == 1
+    size_prods = size[0]
+    for i in range(len(size) - 2):
+        size_prods *= size[i + 2]
+    if size_prods == 1:
+        raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
@@ -1649,21 +1678,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = input.size()
-        # XXX: JIT script does not support the reduce from functools, and mul op is a
-        # builtin, which cannot be used as a value to a func yet, so rewrite this size
-        # check to a simple equivalent for loop
-        #
-        # TODO: make use of reduce like below when JIT is ready with the missing features:
-        # from operator import mul
-        # from functools import reduce
-        #
-        #   if reduce(mul, size[2:], size[0]) == 1
-        size_prods = size[0]
-        for i in range(len(size) - 2):
-            size_prods *= size[i + 2]
-        if size_prods == 1:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+        _verify_batch_size(input.size())
 
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
@@ -1680,6 +1695,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+    _verify_batch_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
@@ -1702,6 +1718,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    _verify_batch_size(input.size())
     return torch.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
@@ -2417,7 +2434,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -2450,6 +2467,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             when :attr:`scale_factor` is kept the same. This only has an effect when :attr:`mode`
             is ``'linear'``, ``'bilinear'``, ``'bicubic'`` or ``'trilinear'``.
             Default: ``False``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
+            to compute the `output_size`.  If `recompute_scale_factor` is ```True`` or not specified,
+            a new `scale_factor` will be computed based on the output and input sizes for use in the
+            interpolation computation (i.e. the computation will be identical to if the computed
+            `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
+            be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+            the recomputed scale_factor may differ from the one passed in due to rounding and precision
+            issues.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -2466,6 +2492,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         See :class:`~torch.nn.Upsample` for concrete examples on how this
         affects the outputs.
 
+    .. warning::
+        When scale_factor is specified, if recompute_scale_factor=True,
+        scale_factor is used to compute the output_size which will then
+        be used to infer new scales for the interpolation. This is the current
+        default behavior when recompute_scale_factor is not specified.
+        The default behavior for recompute_scale_factor will change to False
+        in 1.6.0, and scale_factor will be used in the interpolation
+        calculation.
+
     .. include:: cuda_deterministic_backward.rst
     """
     from .modules.utils import _ntuple
@@ -2479,6 +2514,16 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                 and len(scale_factor) != dim:
             raise ValueError('scale_factor shape must match input shape. '
                              'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
+        if scale_factor is not None and recompute_scale_factor is None:
+            # only warn when the scales have floating values since
+            # the result for ints is the same with/without recompute_scale_factor
+            is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
+            if is_float_scale_factor:
+                warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
+                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "instead of relying on the computed output size. "
+                              "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
+                              "See the documentation of nn.Upsample for details. ")
 
     def _output_size(dim):
         _check_size_scale_factor(dim)
@@ -2494,6 +2539,13 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         else:
             return [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
 
+    def _scale_factors(dim):
+        scale_factor_len = dim - 2
+        scale_factor_list = _ntuple(scale_factor_len)(None)
+        if scale_factor is not None and recompute_scale_factor is False:
+            scale_factor_list = _ntuple(scale_factor_len)(scale_factor)
+        return scale_factor_list
+
     if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
@@ -2506,12 +2558,15 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                           "See the documentation of nn.Upsample for details.".format(mode))
             align_corners = False
 
+    scale_factor_list = _scale_factors(input.dim())
+
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _output_size(1))
+        return torch._C._nn.upsample_nearest1d(input, _output_size(1), scale_factor_list[0])
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _output_size(2))
+        return torch._C._nn.upsample_nearest2d(input, _output_size(2), scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _output_size(3))
+        return torch._C._nn.upsample_nearest3d(input, _output_size(3),
+                                               scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 3 and mode == 'area':
         return adaptive_avg_pool1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'area':
@@ -2519,7 +2574,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'area':
         return adaptive_avg_pool3d(input, _output_size(3))
     elif input.dim() == 3 and mode == 'linear':
-        return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
+        return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners, scale_factor_list[0])
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -2527,7 +2582,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners)
+        return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -2535,9 +2590,10 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
+        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners,
+                                                 scale_factor_list[0], scale_factor_list[1], scale_factor_list[2])
     elif input.dim() == 4 and mode == 'bicubic':
-        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners)
+        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners, scale_factor_list[0], scale_factor_list[1])
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | bicubic | trilinear"
@@ -2843,16 +2899,16 @@ def pad(input, pad, mode='constant', value=0):
         >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p1d = (1, 1) # pad last dim by 1 on each side
         >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
-        >>> print(out.data.size())
+        >>> print(out.size())
         torch.Size([3, 3, 4, 4])
         >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
         >>> out = F.pad(t4d, p2d, "constant", 0)
-        >>> print(out.data.size())
+        >>> print(out.size())
         torch.Size([3, 3, 8, 4])
         >>> t4d = torch.empty(3, 3, 4, 2)
         >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
         >>> out = F.pad(t4d, p3d, "constant", 0)
-        >>> print(out.data.size())
+        >>> print(out.size())
         torch.Size([3, 9, 7, 3])
 
     """
@@ -3042,10 +3098,10 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
                                 operation won't be differentiable.
     """
     if out is None:
-        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
+        denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
     else:
-        denom = input.norm(p, dim, True).clamp_min(eps).expand_as(input)
+        denom = input.norm(p, dim, keepdim=True).clamp_min_(eps).expand_as(input)
         return torch.div(input, denom, out=out)
 
 
@@ -3177,10 +3233,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
-        attn_mask: mask that prevents attention to certain positions. This is an additive mask
-            (i.e. the values will be added to the attention layer).
+        attn_mask: 2D or 3D mask that prevents attention to certain positions. This is an additive mask
+            (i.e. the values will be added to the attention layer). A 2D mask will be broadcasted for all
+            the batches while a 3D mask allows to specify a different mask for the entries of each batch.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
-            and value in differnt forms. If false, in_proj_weight will be used, which is
+            and value in different forms. If false, in_proj_weight will be used, which is
             a combination of q_proj_weight, k_proj_weight, v_proj_weight.
         q_proj_weight, k_proj_weight, v_proj_weight, in_proj_bias: input projection weight and bias.
         static_k, static_v: static key and value used for attention operators.
@@ -3195,7 +3252,9 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
-        - attn_mask: :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
+          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
+          S is the source sequence length.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3208,9 +3267,6 @@ def multi_head_attention_forward(query,                           # type: Tensor
           L is the target sequence length, S is the source sequence length.
     """
 
-    qkv_same = torch.equal(query, key) and torch.equal(key, value)
-    kv_same = torch.equal(key, value)
-
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
@@ -3219,12 +3275,12 @@ def multi_head_attention_forward(query,                           # type: Tensor
     assert head_dim * num_heads == embed_dim, "embed_dim must be divisible by num_heads"
     scaling = float(head_dim) ** -0.5
 
-    if use_separate_proj_weight is not True:
-        if qkv_same:
+    if not use_separate_proj_weight:
+        if torch.equal(query, key) and torch.equal(key, value):
             # self-attention
             q, k, v = linear(query, in_proj_weight, in_proj_bias).chunk(3, dim=-1)
 
-        elif kv_same:
+        elif torch.equal(key, value):
             # encoder-decoder attention
             # This is inline in_proj function with in_proj_weight and in_proj_bias
             _b = in_proj_bias
@@ -3300,20 +3356,26 @@ def multi_head_attention_forward(query,                           # type: Tensor
             v = linear(value, v_proj_weight_non_opt, in_proj_bias)
     q = q * scaling
 
+    if attn_mask is not None:
+        if attn_mask.dim() == 2:
+            attn_mask = attn_mask.unsqueeze(0)
+            if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 2D attn_mask is not correct.')
+        elif attn_mask.dim() == 3:
+            if list(attn_mask.size()) != [bsz * num_heads, query.size(0), key.size(0)]:
+                raise RuntimeError('The size of the 3D attn_mask is not correct.')
+        else:
+            raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
+        # attn_mask's dim is 3 now.
+
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
             k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
             v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
             if attn_mask is not None:
-                attn_mask = torch.cat([attn_mask,
-                                      torch.zeros((attn_mask.size(0), 1),
-                                                  dtype=attn_mask.dtype,
-                                                  device=attn_mask.device)], dim=1)
+                attn_mask = pad(attn_mask, (0, 1))
             if key_padding_mask is not None:
-                key_padding_mask = torch.cat(
-                    [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                                   dtype=key_padding_mask.dtype,
-                                                   device=key_padding_mask.device)], dim=1)
+                key_padding_mask = pad(key_padding_mask, (0, 1))
         else:
             assert static_k is None, "bias cannot be added to static key."
             assert static_v is None, "bias cannot be added to static value."
@@ -3348,20 +3410,14 @@ def multi_head_attention_forward(query,                           # type: Tensor
         k = torch.cat([k, torch.zeros((k.size(0), 1) + k.size()[2:], dtype=k.dtype, device=k.device)], dim=1)
         v = torch.cat([v, torch.zeros((v.size(0), 1) + v.size()[2:], dtype=v.dtype, device=v.device)], dim=1)
         if attn_mask is not None:
-            attn_mask = torch.cat([attn_mask, torch.zeros((attn_mask.size(0), 1),
-                                                          dtype=attn_mask.dtype,
-                                                          device=attn_mask.device)], dim=1)
+            attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
-            key_padding_mask = torch.cat(
-                [key_padding_mask, torch.zeros((key_padding_mask.size(0), 1),
-                                               dtype=key_padding_mask.dtype,
-                                               device=key_padding_mask.device)], dim=1)
+            key_padding_mask = pad(key_padding_mask, (0, 1))
 
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:
-        attn_mask = attn_mask.unsqueeze(0)
         attn_output_weights += attn_mask
 
     if key_padding_mask is not None:

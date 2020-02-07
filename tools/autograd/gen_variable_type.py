@@ -27,12 +27,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-# These functions are written manually in templates/VariableType.cpp
-MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
-}
-
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
 # of proper scopes, where subsequent compilation passes can ask for the unfolding
@@ -76,11 +70,11 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
-    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
-    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
 }
@@ -189,14 +183,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(DispatchKey::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .kernel<${return_type} (${formal_types})>(DispatchKey::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -512,7 +506,7 @@ def gen_variable_type(out, aten_declarations, template_path):
 
     # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'einsum'):
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
             registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
 
     env = {
@@ -531,17 +525,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
-        if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
+        if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        if declaration['use_c10_dispatcher'] == 'full':
-            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
-        else:
-            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
+            if declaration['use_c10_dispatcher'] == 'full':
+                wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -814,12 +808,10 @@ def emit_body(declaration):
                 output_var = return_info['name']
                 if output_idx in view_info_dict:
                     stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                elif 'Tensor' in return_info['type']:
-                    stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
                 extra_wrapping_stmts.append(stmt)
             return call, extra_wrapping_stmts
         else:
-            return 'as_variable(std::move({}))'.format(call), []
+            return 'std::move({})'.format(call), []
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -998,7 +990,7 @@ def unpack_args(env, declaration):
             ))
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
-            # although it's stll getting the non-variable from the variable
+            # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 

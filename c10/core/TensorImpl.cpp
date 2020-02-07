@@ -2,7 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/WrapDimMinimal.h>
-#include <c10/core/impl/LocalTensorTypeSet.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 
 C10_DEFINE_bool(
@@ -44,13 +44,13 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set)
-    : TensorImpl(std::move(storage), type_set, storage.dtype(), storage.device()) {}
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set)
+    : TensorImpl(std::move(storage), key_set, storage.dtype(), storage.device()) {}
 
-TensorImpl::TensorImpl(TensorTypeSet type_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
-    : TensorImpl({}, type_set, data_type, std::move(device_opt)) {}
+TensorImpl::TensorImpl(DispatchKeySet key_set, const caffe2::TypeMeta& data_type, c10::optional<c10::Device> device_opt)
+    : TensorImpl({}, key_set, data_type, std::move(device_opt)) {}
 
-TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::TypeMeta& data_type,
+TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                        c10::optional<c10::Device> device_opt)
     : storage_(std::move(storage)),
       sizes_{0},
@@ -58,8 +58,8 @@ TensorImpl::TensorImpl(Storage&& storage, TensorTypeSet type_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      type_set_(type_set.add(TensorTypeId::VariableTensorId)) {
-  if (!type_set.empty()) {
+      key_set_(key_set) {
+  if (!key_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
     // UndefinedTensorImpl is a singleton, so we skip logging it
@@ -84,9 +84,9 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    if (size(d) != 1) {
-      if (stride(d) == z) {
-        z *= size(d);
+    if (sizes_[d] != 1) {
+      if (strides_[d] == z) {
+        z *= sizes_[d];
       } else {
         is_contiguous = false;
         break;
@@ -97,12 +97,12 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous() const {
-  if (dim() == 4) {
+  if (sizes_.size() == 4) {
     int64_t expected = 1;
     for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) == expected) {
-          expected *= size(d);
+      if (sizes_[d] != 1) {
+        if (strides_[d] == expected) {
+          expected *= sizes_[d];
         } else {
           return false;
         }
@@ -114,25 +114,12 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (dim() == 4) {
-    int64_t min = 0;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (size(d) != 1) {
-        if (stride(d) > min) {
-          min = stride(d);
-        } else {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-  return false;
+  return is_channels_last_strides(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
   if (dim() == 1) {
-    return size(0) < 2 || stride(0) == 1;
+    return sizes_[0] < 2 || strides_[0] == 1;
   }
   SmallVector<int64_t,5> perm;
   perm.resize(dim());
@@ -180,14 +167,6 @@ int64_t TensorImpl::size(int64_t d) const {
 int64_t TensorImpl::stride(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
   return strides_[d];
-}
-
-TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  bool set_zero_dim = condition_when_zero_dim && this->sizes().size() == 1 && this->size(0) == 1;
-  if (set_zero_dim) {
-    resize_dim(0);
-  }
-  return this;
 }
 
 bool TensorImpl::has_storage() const {
@@ -268,7 +247,7 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->type_set_ = src_impl->type_set_;
+  dest_impl->key_set_ = src_impl->key_set_;
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;

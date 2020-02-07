@@ -1,4 +1,4 @@
-#include <ATen/native/Indexing.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
@@ -108,7 +108,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
+  // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
   stride[tensor.dim() - 1] = 1;
@@ -191,8 +191,8 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       const bool permuted = !src.is_contiguous();
       auto src_ = permuted ? src.contiguous() : src;
       linearIndex = linearIndex.view(-1);
-      auto sorted_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
-      auto orig_indices = at::empty_like(linearIndex, at::MemoryFormat::Contiguous);
+      auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     
@@ -224,8 +224,9 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(C10_WARP_SIZE, indices_per_block);
-  
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
+      
+      AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
+      value_.scalar_type(), "indexing_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
         sorted_indices.data_ptr<int64_t>(),
         orig_indices.data_ptr<int64_t>(),
