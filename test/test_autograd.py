@@ -3760,7 +3760,7 @@ for shape in [(1,), ()]:
             c, d = MyOutPlaceAdder.apply(orig_a, b)
             return (c * d).sum()
 
-        bad_mark_dirty_err = "Some elements marked as dirty during the forward method where not returned as output."
+        bad_mark_dirty_err = "Some elements marked as dirty during the forward method were not returned as output."
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
