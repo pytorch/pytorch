@@ -794,7 +794,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionFwdAlgoPerf_t &fwdAlgPerf){
-      Tensor workspace = at::empty({fwdAlgPerf.memory}, input.options().dtype(kByte));
+      Tensor workspace = at::empty({static_cast<int64_t>(fwdAlgPerf.memory)}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -929,7 +929,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdDataAlgoPerf_t &bwdDataAlgPerf){
-      Tensor workspace = at::empty({bwdDataAlgPerf.memory}, grad_output.options().dtype(kByte));
+      Tensor workspace = at::empty({static_cast<int64_t>(bwdDataAlgPerf.memory)}, grad_output.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -1090,7 +1090,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdFilterAlgoPerf_t &bwdFilterAlgPerf){
-      Tensor workspace = at::empty({bwdFilterAlgPerf.memory}, input.options().dtype(kByte));
+      Tensor workspace = at::empty({static_cast<int64_t>(bwdFilterAlgPerf.memory)}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
