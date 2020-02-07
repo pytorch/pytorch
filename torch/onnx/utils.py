@@ -317,6 +317,7 @@ def _model_to_graph(model, args, verbose=False, training=False,
     if isinstance(model, torch.jit.ScriptModule):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
         try:
+            # Running the model once to ensure the graph is profiled.
             model(*args)
             method_graph, params = torch._C._jit_pass_lower_graph(model.forward._profiled_graph, model._c)
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
