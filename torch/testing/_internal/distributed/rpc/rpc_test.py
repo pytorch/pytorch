@@ -1749,7 +1749,7 @@ class RpcTest(RpcAgentTestFixture):
                 with self.assertRaisesRegex(
                     RuntimeError, "Timed out waiting"
                 ):
-                    rpc.rpc_async("worker0", torch.add, args=(1, 1)).wait()
+                    rpc.rpc_sync("worker0", torch.add, args=(1, 1))
             else:
                 wait_until_node_failure(
                     rank=1, sleep_duration=pg_sleep_interval, backoff=1.5
@@ -1759,5 +1759,5 @@ class RpcTest(RpcAgentTestFixture):
                     RuntimeError,
                     "Encountered exception in ProcessGroupAgent::enqueueSend",
                 ):
-                    rpc.rpc_async("worker1", torch.add, args=(1, 1)).wait()
+                    rpc.rpc_sync("worker1", torch.add, args=(1, 1))
             rpc.shutdown(graceful=False)

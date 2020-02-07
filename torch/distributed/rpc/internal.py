@@ -184,9 +184,7 @@ TEST_PG_TIMEOUT = None
 
 def set_process_group_timeout_for_testing(timeout_seconds):
     global TEST_PG_TIMEOUT
-    print('Setting timeout seconds to {}'.format(timeout_seconds))
     TEST_PG_TIMEOUT = timedelta(seconds=timeout_seconds)
-    print('TEST_PG_TIMEOUT is now {}'.format(TEST_PG_TIMEOUT))
 
 
 PythonUDF = collections.namedtuple("PythonUDF", ["func", "args", "kwargs"])

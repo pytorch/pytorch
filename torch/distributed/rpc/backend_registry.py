@@ -107,9 +107,8 @@ def _process_group_init_backend_handler(
         else dist.rpc.internal.TEST_PG_TIMEOUT
     )
 
-    print("RANK {} Setting PG timeout of {}, test_pg_timeout is {}".format(rank, process_group_timeout, dist.rpc.internal.TEST_PG_TIMEOUT))
     dist.init_process_group(
-        backend="gloo",
+        backend=dist.Backend.GLOO,
         store=store,
         rank=rank,
         world_size=world_size,

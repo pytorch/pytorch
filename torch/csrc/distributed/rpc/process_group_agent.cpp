@@ -2,9 +2,6 @@
 
 #include <c10/util/C++17.h>
 #include <c10d/ProcessGroup.hpp>
-#ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
-#endif
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 

@@ -143,6 +143,8 @@ class ProcessGroupAgent : public RpcAgent {
   void listenLoopInternal();
   // Main function for receiving messages
   void listenLoop();
+  // exception_pointer correspnding to an exception raised in listenLoop (if
+  // there is one), and lock to guard access.
   std::exception_ptr listenLoopException_;
   std::mutex listenLoopExceptionMutex_;
   // poll for timed out RPCs
