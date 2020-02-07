@@ -158,45 +158,6 @@ struct TORCH_API Fusion : public IRInputOutput{
     return it->second;
   }
 
-  /*
-   * Takes in an unordered map initialized with all Vals to 0, outputs the uses by traversing from
-   * output_vals through their dependency chain.
-   */
-  void populate_uses(std::unordered_map<const Val*, int> &use_count, std::deque<const Val*> outputs) const{
-    // outputs is passed by value here.
-    std::deque<const Val*> to_visit = outputs; //Could be a stack, but chose deque to match exprs
-    std::set<const Val*> visited;
-    
-    while(!to_visit.empty()){
-      const Val* val;
-      val = to_visit.back();
-      to_visit.pop_back();
-      
-
-      if(visited.find(val) != visited.end())
-        continue;
-      
-      visited.emplace(val);
-      
-      const Expr* orig = origin(val);
-
-      if(orig == nullptr)
-        continue;
-
-      for(const Val* inp : orig->inputs()){
-        use_count[inp]++;
-        // you mean visited.find(inp) instead?
-        if(visited.find(inp) != visited.end())
-          to_visit.push_back(inp);
-      }
-
-      for(const Val* out : orig->outputs())
-        if(out != val)
-          visited.emplace(out);
-    }
-
-  }
-
   /* 
    * Return topologically sorted list of exprs. We can start by only traversing back from registered
    * outputs, or from any terminating Val. Can also select depth first traversal, or breadth first.
@@ -204,14 +165,19 @@ struct TORCH_API Fusion : public IRInputOutput{
    * TODO: Test this thing!!!
    */
   std::vector<const Expr*> exprs(bool from_outputs_only=false, bool breadth_first=false) const {
-
+    /*
+    std::vector<const Expr*> expr_vec;
+    for(const Expr* expr : expr_set_)
+      expr_vec.push_back(expr);
+    return expr_vec;
+    */
     if(breadth_first)
       throw std::runtime_error("Not implemented yet.");
 
     std::deque<const Val*> to_visit;  
     std::set<const Val*> visited;
 
-    std::vector<const Expr*> reversed_exprs;
+    std::vector<const Expr*> ordered_exprs;
 
     if(from_outputs_only){
       for(const Val* output : outputs())
@@ -223,62 +189,35 @@ struct TORCH_API Fusion : public IRInputOutput{
       }
     }
 
-    std::unordered_map<const Val*, int> use_count; //count down to 0, once at 0 all uses have been output, can output origin
-    for(const auto it : val_set_){
-      use_count[it] = 0;
-    }
-
-    populate_uses(use_count, to_visit);
-
     while(!to_visit.empty()){
-      const Val* val;
-      if(breadth_first){
-        val = to_visit.front();
-        to_visit.pop_front();
-      }else{
-        val = to_visit.back();
-        to_visit.pop_back();
-      }
-      
 
-      // hmm, should we assert here? If we went through a different path to a visited node, that means we screw up the use_count at the first place?
-      if(visited.find(val) != visited.end())
-        continue;
-      
-      //0 uses is an output, can't blindly decrement.
-      if(use_count[val] != 0){
-        use_count[val]--;
-        continue;
-      }
+      const Val* val;
+
+      val = to_visit.back();
+      visited.emplace(val);
 
       const Expr* orig = origin(val);
 
-      //Orig could be nullptr if its an input. We can simply continue in this case
-      if(orig == nullptr)
+      //If this val doesn't have an origin it's an input, stop processing
+      if(orig == nullptr){
+        to_visit.pop_back();
         continue;
+      }
 
-      //If other outputs didn't have all uses, can't process expr
-      for(const Val* out : orig->outputs())
-        if(use_count[out] != 0)
-          continue;
-          
-
-      //We can visit the origin of val, and mark all outputs of the origin as visited.
-      visited.emplace(val);
-      for(const Val* out : orig->outputs())
-        if(out != val)
-          visited.emplace(out);      
-
-      reversed_exprs.push_back(orig);
-
+      //Add all inputs of origin that haven't been visited
       for(const Val* inp : orig->inputs())
-        if(visited.find(val) != visited.end())
+        if(visited.find(inp) == visited.end()){
           to_visit.push_back(inp);
+        }
 
+      //If we added any vals we need to process them first
+      if(to_visit.back() != val)
+        continue; 
+      
+      ordered_exprs.push_back(orig);
+      to_visit.pop_back();
     }
-    
-    std::reverse(reversed_exprs.begin(), reversed_exprs.end());
-    return reversed_exprs; //now ordered
+    return ordered_exprs;
   }
 
 

@@ -39,9 +39,9 @@ int IRPrinter::handle(const Statement* const statement){
 int IRPrinter::handle(const Float* const f){
   printValPreamble(out_, f) << "f";
   if (f->isSymbolic()) {
-    out_ << "?";
+    out_ << f->name();
   } else {
-    out_ << *(f->value());
+    out_ << f->name() << "{" << *(f->value()) <<"}";
   }
   return 0;
 }
@@ -54,9 +54,9 @@ int IRPrinter::handle(const Tensor* const t){
 int IRPrinter::handle(const Int* const i){
   printValPreamble(out_, i) << "i";
   if (i->isSymbolic()) {
-    out_ << "?";
+    out_ << i->name();
   } else {
-    out_ << *(i->value());
+    out_ << i->name() << "{" << *(i->value()) << "}";
   }
   return 0;
 }
