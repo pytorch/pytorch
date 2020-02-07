@@ -9,15 +9,18 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/TensorOptions.h>
 
+
+#ifndef USE_STATIC_DISPATCH
 namespace at {
+
 namespace {
 
 ${backend_select_method_definitions}
 
-#ifndef USE_STATIC_DISPATCH
 static auto registry = torch::RegisterOperators()
   ${backend_select_function_registrations};
-#endif
+
 
 } // namespace
 } // at
+#endif
