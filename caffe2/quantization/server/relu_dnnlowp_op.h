@@ -26,18 +26,6 @@ namespace internal {
 template <typename T>
 void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
 
-template CAFFE2_API void ReluAVX2<uint8_t>(
-    const int N,
-    const int zero_point,
-    const uint8_t* X,
-    uint8_t* Y);
-
-template CAFFE2_API void ReluAVX2<uint16_t>(
-    const int N,
-    const int zero_point,
-    const uint16_t* X,
-    uint16_t* Y);
-
 } // namespace internal
 
 } // namespace caffe2

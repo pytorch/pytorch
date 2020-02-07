@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <immintrin.h>
+#include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 
@@ -152,7 +153,7 @@ void ElementWiseSumAVX2(
   }
 }
 
-template void ElementWiseSumAVX2<uint8_t, false>(
+template CAFFE2_API void ElementWiseSumAVX2<uint8_t, false>(
     const uint8_t* input0,
     const uint8_t* input1,
     uint8_t* output,
@@ -164,7 +165,7 @@ template void ElementWiseSumAVX2<uint8_t, false>(
     float c_scale,
     int32_t c_zero_point);
 
-template void ElementWiseSumAVX2<uint8_t, true>(
+template CAFFE2_API void ElementWiseSumAVX2<uint8_t, true>(
     const uint8_t* input0,
     const uint8_t* input1,
     uint8_t* output,
@@ -176,7 +177,7 @@ template void ElementWiseSumAVX2<uint8_t, true>(
     float c_scale,
     int32_t c_zero_point);
 
-template void ElementWiseSumAVX2<uint16_t, false>(
+template CAFFE2_API void ElementWiseSumAVX2<uint16_t, false>(
     const uint16_t* input0,
     const uint16_t* input1,
     uint16_t* output,
@@ -188,7 +189,7 @@ template void ElementWiseSumAVX2<uint16_t, false>(
     float c_scale,
     int32_t c_zero_point);
 
-template void ElementWiseSumAVX2<uint16_t, true>(
+template CAFFE2_API void ElementWiseSumAVX2<uint16_t, true>(
     const uint16_t* input0,
     const uint16_t* input1,
     uint16_t* output,

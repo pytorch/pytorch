@@ -8,6 +8,7 @@
 #endif
 
 #include <fbgemm/QuantUtils.h>
+#include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 
@@ -57,7 +58,7 @@ template <typename T>
 void VectorMomentsAVX2(const int N, const T* src, int64_t* sum, int64_t* sumsq);
 
 template <>
-void VectorMomentsAVX2<uint8_t>(
+CAFFE2_API void VectorMomentsAVX2<uint8_t>(
     const int N,
     const uint8_t* src,
     int64_t* sum,
@@ -198,7 +199,7 @@ void AffineBatchChannelAndRequantizeNCHWAVX2(
     T* Y);
 
 template <>
-void AffineBatchChannelAndRequantizeNCHWAVX2<uint8_t>(
+CAFFE2_API void AffineBatchChannelAndRequantizeNCHWAVX2<uint8_t>(
     const int N,
     const int C,
     const int HxW,
@@ -236,7 +237,7 @@ void AffineBatchChannelAndRequantizeNCHWAVX2<uint8_t>(
 }
 
 template <typename T>
-void AffineBatchChannelAndRequantizeNHWCAVX2(
+CAFFE2_API void AffineBatchChannelAndRequantizeNHWCAVX2(
     const int N,
     const int C,
     const int HxW,

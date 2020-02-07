@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include <immintrin.h>
+#include "caffe2/quantization/server/dnnlowp_op.h"
 
 namespace caffe2 {
 
@@ -11,7 +12,7 @@ template <typename T>
 void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
 
 template <>
-void ReluAVX2<uint8_t>(
+CAFFE2_API void ReluAVX2<uint8_t>(
     const int N,
     const int zero_point,
     const uint8_t* X,
@@ -31,7 +32,7 @@ void ReluAVX2<uint8_t>(
 }
 
 template <>
-void ReluAVX2<uint16_t>(
+CAFFE2_API void ReluAVX2<uint16_t>(
     const int N,
     const int zero_point,
     const uint16_t* X,

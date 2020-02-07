@@ -105,54 +105,6 @@ void ElementWiseSumAVX2(
     float c_scale,
     int32_t c_zero_points);
 
-template CAFFE2_API void ElementWiseSumAVX2<uint8_t, false>(
-    const uint8_t* input0,
-    const uint8_t* input1,
-    uint8_t* output,
-    int len,
-    float a_scale,
-    int32_t a_zero_point,
-    float b_scale,
-    int32_t b_zero_point,
-    float c_scale,
-    int32_t c_zero_point);
-
-template CAFFE2_API void ElementWiseSumAVX2<uint8_t, true>(
-    const uint8_t* input0,
-    const uint8_t* input1,
-    uint8_t* output,
-    int len,
-    float a_scale,
-    int32_t a_zero_point,
-    float b_scale,
-    int32_t b_zero_point,
-    float c_scale,
-    int32_t c_zero_point);
-
-template CAFFE2_API void ElementWiseSumAVX2<uint16_t, false>(
-    const uint16_t* input0,
-    const uint16_t* input1,
-    uint16_t* output,
-    int len,
-    float a_scale,
-    int32_t a_zero_point,
-    float b_scale,
-    int32_t b_zero_point,
-    float c_scale,
-    int32_t c_zero_point);
-
-template CAFFE2_API void ElementWiseSumAVX2<uint16_t, true>(
-    const uint16_t* input0,
-    const uint16_t* input1,
-    uint16_t* output,
-    int len,
-    float a_scale,
-    int32_t a_zero_point,
-    float b_scale,
-    int32_t b_zero_point,
-    float c_scale,
-    int32_t c_zero_point);
-
 }
 
 } // namespace caffe2
