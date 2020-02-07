@@ -3,7 +3,7 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils
+from torch.onnx import utils, OperatorExportTypes
 from torch.onnx.symbolic_helper import _set_opset_version
 from test_pytorch_common import skipIfUnsupportedOpsetVersion
 
@@ -57,7 +57,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(3, 2)
         graph, _, __ = utils._model_to_graph(TransposeModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
             assert node.kind() != "onnx::Cast"
@@ -75,7 +76,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(NarrowModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Cast"
@@ -93,7 +95,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(SliceIndexExceedsDimModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
 
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
@@ -112,7 +115,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(1, 3)
         graph, _, __ = utils._model_to_graph(SliceNegativeIndexModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Cast"
@@ -130,7 +134,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(1, 2, 3)
         graph, _, __ = utils._model_to_graph(UnsqueezeModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Unsqueeeze"
             assert node.kind() != "onnx::Cast"
@@ -165,7 +170,8 @@ class TestUtilityFuns(TestCase):
         x = torch.ones(2, 3)
         graph, _, __ = utils._model_to_graph(ConcatModule(), (x, ),
                                              do_constant_folding=True,
-                                             _disable_torch_constant_prop=True)
+                                             _disable_torch_constant_prop=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Cast"
@@ -185,7 +191,8 @@ class TestUtilityFuns(TestCase):
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
         graph, _, __ = utils._model_to_graph(GruNet(), (input, h0),
-                                             do_constant_folding=True)
+                                             do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Concat"
@@ -204,7 +211,8 @@ class TestUtilityFuns(TestCase):
         _set_opset_version(self.opset_version)
         A = torch.randn(2, 3)
         graph, _, __ = utils._model_to_graph(MatMulNet(), (A),
-                                             do_constant_folding=True)
+                                             do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Transpose"
         assert len(list(graph.nodes())) == 1
@@ -221,7 +229,8 @@ class TestUtilityFuns(TestCase):
 
         _set_opset_version(self.opset_version)
         x = torch.randn(4, 5)
-        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ), do_constant_folding=True)
+        graph, _, __ = utils._model_to_graph(ReshapeModule(), (x, ), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1
@@ -238,7 +247,8 @@ class TestUtilityFuns(TestCase):
 
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
-        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Div"
         assert len(list(graph.nodes())) == 1
@@ -255,7 +265,8 @@ class TestUtilityFuns(TestCase):
 
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
-        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
@@ -272,7 +283,8 @@ class TestUtilityFuns(TestCase):
 
         x = torch.randn(2, 5)
         _set_opset_version(self.opset_version)
-        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True)
+        graph, _, __ = utils._model_to_graph(Module(), (x, ), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
         for node in graph.nodes():
             assert node.kind() != "onnx::Sqrt"
         assert len(list(graph.nodes())) == 1
