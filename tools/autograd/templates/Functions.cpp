@@ -1792,6 +1792,55 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
+Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, const Tensor& lambda, const Tensor& v) {
+  // This gradient only works for real eigenvalues at the moment.
+  TORCH_CHECK(eigenvectors,
+           "eig_backward: Setting eigenvectors to false in torch.eig doesn't compute eigenvectors ",
+           "and hence we cannot compute backward. Please use torch.eig(eigenvectors=True)");
+  auto imag_idx = at::ones({1}, lambda.options().dtype(at::kLong));
+  auto real_idx = at::zeros({1}, lambda.options().dtype(at::kLong));
+  auto zeros = at::zeros({1}, lambda.options());
+  TORCH_CHECK(
+      at::allclose(
+        at::index_select(lambda, /*dim=*/-1, /*index=*/imag_idx),
+        zeros),
+      "eig_backward: Backward calculation does not support complex eigenvalues at the moment.");
+
+  auto glambda = grads[0];
+  auto gv = grads[1];
+  auto vt = v.transpose(-2, -1);
+
+  Tensor result;
+  // contribution from the eigenvectors
+  if (gv.defined()) {
+    auto rlambda = at::index_select(lambda, /*dim=*/-1, /*index=*/real_idx);
+
+    auto hm = rlambda.transpose(-2,-1) - rlambda;
+    hm.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+    hm.pow_(-1.0);
+
+    auto gvortho = gv - at::sum(gv * v, /*dim=*/-2, /*keepdim=*/true) * v;
+    auto B = hm * at::matmul(vt, gvortho);
+    auto A = at::matmul(B, vt);
+
+    std::tie(result, std::ignore) = at::solve(A, vt);
+  }
+  else {
+    result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  }
+  // contribution from eigenvalues
+  if (glambda.defined()) {
+    Tensor result1;
+    auto grlambda = at::index_select(glambda, /*dim=*/-1, /*index=*/real_idx) * vt;
+    auto A = at::matmul(v, grlambda);
+    auto vvt = at::matmul(v, vt);
+    std::tie(result1, std::ignore) = at::solve(A, vvt);
+    result = result.add(result1);
+  }
+  return result;
+}
+
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
