@@ -89,12 +89,12 @@ struct TORCH_API Fusion : public IRInputOutput{
 
   ~Fusion(){
 
-    for (auto it = val_map_.begin(); it != val_map_.end(); ++it) {
-      delete it->first;
+    for (auto it = val_set_.begin(); it != val_set_.end(); ++it) {
+      delete *it;
     }
 
-    for (auto it = expr_map_.begin(); it != expr_map_.end(); ++it) {
-      delete it->first;
+    for (auto it = expr_set_.begin(); it != expr_set_.end(); ++it) {
+      delete *it;
     }
   };
 
@@ -119,7 +119,7 @@ struct TORCH_API Fusion : public IRInputOutput{
       }
     }
 
-    expr_map_.erase(expr);
+    expr_set_.erase(expr);
 
     delete expr;
   }
@@ -142,9 +142,9 @@ struct TORCH_API Fusion : public IRInputOutput{
     bool infusion = stmt->fusion() == this;
 
     if(stmt->isExpr())
-      infusion &= expr_map_.find(static_cast<const Expr*>(stmt)) != expr_map_.end();
+      infusion &= expr_set_.find(static_cast<const Expr*>(stmt)) != expr_set_.end();
     if(stmt->isVal())
-      infusion &= val_map_.find(static_cast<const Val*>(stmt)) != val_map_.end();
+      infusion &= val_set_.find(static_cast<const Val*>(stmt)) != val_set_.end();
 
     return infusion;
   }
@@ -163,6 +163,7 @@ struct TORCH_API Fusion : public IRInputOutput{
    * output_vals through their dependency chain.
    */
   void populate_uses(std::unordered_map<const Val*, int> &use_count, std::deque<const Val*> outputs) const{
+    // outputs is passed by value here.
     std::deque<const Val*> to_visit = outputs; //Could be a stack, but chose deque to match exprs
     std::set<const Val*> visited;
     
@@ -184,7 +185,8 @@ struct TORCH_API Fusion : public IRInputOutput{
 
       for(const Val* inp : orig->inputs()){
         use_count[inp]++;
-        if(visited.find(val) != visited.end())
+        // you mean visited.find(inp) instead?
+        if(visited.find(inp) != visited.end())
           to_visit.push_back(inp);
       }
 
@@ -215,16 +217,15 @@ struct TORCH_API Fusion : public IRInputOutput{
       for(const Val* output : outputs())
         to_visit.push_back(output);
     }else{
-      for(const auto it : val_map_){
-        if(uses_.find(it.first) == uses_.end()) //never used, must be output or unused val
-          to_visit.push_back(it.first);
+      for(const auto it : val_set_){
+        if(uses_.find(it) == uses_.end()) //never used, must be output or unused val
+          to_visit.push_back(it);
       }
     }
 
     std::unordered_map<const Val*, int> use_count; //count down to 0, once at 0 all uses have been output, can output origin
-    for(const auto it : val_map_){
-      const Val* val = it.first;
-      use_count[val] = 0;
+    for(const auto it : val_set_){
+      use_count[it] = 0;
     }
 
     populate_uses(use_count, to_visit);
@@ -240,6 +241,7 @@ struct TORCH_API Fusion : public IRInputOutput{
       }
       
 
+      // hmm, should we assert here? If we went through a different path to a visited node, that means we screw up the use_count at the first place?
       if(visited.find(val) != visited.end())
         continue;
       
@@ -286,26 +288,26 @@ struct TORCH_API Fusion : public IRInputOutput{
    */
   StmtNameType registerVal(const Val* val) {
     if (val->fusion()) {
-      TORCH_CHECK(inFusion(val)); //Registered with another fusion
-      return val->name();
+      TORCH_CHECK(val->fusion() == this);
+      if(inFusion(val)) {
+        return val->name();
+      }
     }
-    val_map_[val] = val->name();
-    return val->name();
+    return getValName();
   }
 
   /*
    * When we register an expression, we want to update the dependency tracking
-   * of Vals. We add expr to our general expr_map_, we add use tracking for inputs
+   * of Vals. We add expr to our general expr_set_, we add use tracking for inputs
    * and origin tracking for outputs.
    */ 
   StmtNameType registerExpr(const Expr* expr){
     if (expr->fusion()) {
       TORCH_CHECK(expr->fusion() == this);
-      if(inFusion(expr))
+      if(inFusion(expr)) {
         return expr->name();
+      }
     }
-
-    expr_map_[expr] = expr->name();
 
     for (const Val* input : expr->inputs()) {
       registerVal(input);
@@ -326,7 +328,7 @@ struct TORCH_API Fusion : public IRInputOutput{
       origin_[output] = expr;
     }
 
-    return expr->name();
+    return getExprName();
   }
 
   StmtNameType registerStatement(const Statement* stmt) {
@@ -348,8 +350,8 @@ struct TORCH_API Fusion : public IRInputOutput{
   }
 
 private:
-  std::unordered_map<const Val*, StmtNameType> val_map_;
-  std::unordered_map<const Expr*, StmtNameType> expr_map_;
+  std::set<const Val*> val_set_;
+  std::set<const Expr*> expr_set_;
 
   StmtNameType val_name_counter_ = 0;
   StmtNameType expr_name_counter_ = 0;
