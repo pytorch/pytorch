@@ -57,6 +57,11 @@ class LinearPackedParams(torch.nn.Module):
     #   self
     #   |--- _packed_params : LinearPackedParamsBase
     #   |--- dtype : torch.dtype
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(LinearPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + 'dtype'] = self.dtype
+        destination[prefix + '_packed_params'] = self._weight_bias()
+
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
@@ -71,6 +76,11 @@ class LinearPackedParams(torch.nn.Module):
             self.set_weight_bias(state_dict[prefix + 'weight'], state_dict[prefix + 'bias'])
             state_dict.pop(prefix + 'weight')
             state_dict.pop(prefix + 'bias')
+
+        if version == 3:
+            weight, bias = state_dict[prefix + '_packed_params']
+            state_dict.pop(prefix + '_packed_params')
+            self.set_weight_bias(weight, bias)
 
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
