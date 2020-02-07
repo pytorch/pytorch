@@ -38,15 +38,19 @@ enum class DispatchKey : uint8_t {
   // Alternately, it is placed in the "back" of the dispatch hierarchy,
   // as it is handled last and is a terminal handler.
   //
-  // The set of backends is not really ordered (except in the case of
-  // sparse), but as our model of dispatching requires every dispatch key
-  // to participate in a total order, we have an unused ordering here.)
+  // Due to the nature of the enum, these backends are specified in
+  // an ordered way, but for most backends this order is not semantically
+  // meaningful (e.g., it's valid to reorder these backends without changing
+  // semantics).  The only situation when backend ordering is meaningful
+  // is when the backend participates in multiple dispatch with another
+  // backend; e.g., CPUTensorId and SparseCPUTensorId (sparse must have
+  // higher priority).
 
   // Here are backends which you think of as traditionally specifying
   // how to implement operations on some device.
   CPUTensorId,    // registered at build/aten/src/ATen/CPUType.cpp
   CUDATensorId,   // registered at build/aten/src/ATen/CUDAType.cpp
-  HIPTensorId,    // TODO: I think this is not actually used, due to Note [Masquerading as CUDA]
+  HIPTensorId,    // NB: I think this is not actually used, due to Note [Masquerading as CUDA]
   MSNPUTensorId,  // tested at test/cpp_extensions/msnpu_extension.cpp
                   // NB: we suspect that MSNPU is defunct
   XLATensorId,    // lives out of tree at https://github.com/pytorch/xla
@@ -102,7 +106,8 @@ enum class DispatchKey : uint8_t {
   // layer which happens on top of all backends.  It inspects the autograd
   // metadata of all inputs, determines what autograd metadata should be
   // constructed by the output, and otherwise defers to the backend to
-  // actually do the numeric computation.
+  // actually do the numeric computation.  VariableTensorId contains
+  // the bulk of this logic.
   VariableTensorId,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
