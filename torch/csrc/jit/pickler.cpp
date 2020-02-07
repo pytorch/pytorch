@@ -133,13 +133,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 
 void Pickler::pushDevice(const IValue& ivalue) {
   auto device = ivalue.toDevice();
-  auto it = memoized_devices_map_.find(device.str());
+  auto deviceStr = device.str();
+  auto it = memoized_devices_map_.find(deviceStr);
   if (it == memoized_devices_map_.end()) {
     pushGlobal("torch", "device");
-    pushString(ivalue.toDevice().str());
+    pushString(deviceStr);
     push<PickleOpCode>(PickleOpCode::TUPLE1);
     push<PickleOpCode>(PickleOpCode::REDUCE);
-    memoized_devices_map_[device.str()] = pushNextBinPut();
+    memoized_devices_map_[deviceStr] = pushNextBinPut();
   } else {
     pushBinGet(it->second);
   }
@@ -170,7 +171,7 @@ void Pickler::pushIValue(const IValue& ivalue) {
     pushIValueImpl(ivalue);
 
     memoized_ivalues_.push_back(ivalue);
-    memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
+    memoized_ivalue_map_[ptr] = pushNextBinPut();
   } else {
     pushIValueImpl(ivalue);
   }
