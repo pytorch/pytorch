@@ -59,6 +59,19 @@ enum class DispatchKey : uint8_t {
 
   VariableTensorId,
 
+  // Pre-autograd backend keys allow backends to override the autograd behavior
+  // (aka VariableTensorId) for operators which have a Variable kernel
+  // already registered.  For example, XLA wants to define autograd for
+  // einsum directly.  Registering a custom autograd implementation at the
+  // XLATensorId key won't work because we process VariableTensorId
+  // before XLATensorId.  This key has higher priority and gets processed
+  // first.  You generally should NOT redispatch after handling autograd
+  // here (since that would result in execution of the VariableTensorId
+  // operator, which you're trying to skip).  In PreAutograd implementations,
+  // you are responsible for handling autograd yourself, or deferring to other
+  // operators which support autograd.
+  XLAPreAutograd,
+
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
   // process test.  Use it by creating a TensorImpl with this DispatchKey, and
