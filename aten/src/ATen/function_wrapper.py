@@ -103,34 +103,36 @@ ${return_type} ${api_name}(${type_method_formals}) {
 }
 """)
 
+# A schema registration specifies alias analysis for an operator, but doesn't
+# actually provide an implementation.  Although our registration API allows you
+# to specify all of this information at a function registration site, it's
+# better to do it once at a schema registration so that we don't have to
+# repeat ourselves everywhere else.
+SCHEMA_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>())
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(DispatchKey::${Backend}TensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(DispatchKey::${Backend}TensorId))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-DEFAULT_SCHEMA_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name}))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types})>(DispatchKey::${Backend}TensorId, &${Type}::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .kernel<${return_type} (${formals_types})>(DispatchKey::${Backend}TensorId, &${Type}::${api_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -1214,11 +1216,10 @@ def create_generic(top_env, declarations):
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
-            if option['manual_kernel_registration']:
-                op_registrations.append(OpRegistration(
-                    operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
-            else:
+            op_registrations.append(OpRegistration(
+                operator_name=OPERATOR_NAME.substitute(option),
+                registration_code=SCHEMA_REGISTRATION.substitute(option)))
+            if not option['manual_kernel_registration']:
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
