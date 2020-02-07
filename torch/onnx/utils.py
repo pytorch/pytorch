@@ -463,9 +463,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             else:
                 operator_export_type = OperatorExportTypes.ONNX
 
-            if operator_export_type is OperatorExportTypes.ONNX and export_type is not ExportTypes.PROTOBUF_FILE:
-                raise RuntimeError('If operator export type is ONNX, export_type must be ExportTypes.PROTOBUF_FILE.')
-
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
