@@ -1,5 +1,6 @@
 #include <limits>
 #include <vector>
+#include <functional>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
@@ -641,20 +642,20 @@ class AlgoIterator {
 public:
   AlgoIterator(const ConvolutionArgs &args, bool benchmark): args(args), benchmark(benchmark) {}
 
-  void try_all(void f(const perf_t &perf)) {
+  void try_all(std::function<void (const perf_t &perf)> f) {
     using search = algorithm_search<perf_t>;
     auto& cache = search::cache();
 
     perf_t algoPerf;
 
     if (args.params.deterministic && !benchmark) {
-      algoPerf->algo = search::DEFAULT_ALGO;
+      algoPerf.algo = search::DEFAULT_ALGO;
       if (args.params.dataType == CUDNN_DATA_HALF) {
-        algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
+        algoPerf.mathType = CUDNN_TENSOR_OP_MATH;
       } else {
-        algoPerf->mathType = CUDNN_DEFAULT_MATH;
+        algoPerf.mathType = CUDNN_DEFAULT_MATH;
       }
-      search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
+      search::getWorkspaceSize(args, algoPerf.algo, &(algoPerf.memory));
       f(algoPerf);
       return;
     }
@@ -804,7 +805,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionFwdAlgoPerf_t &fwdAlgPerf){
-      Tensor workspace = at::native::empty({fwdAlgPerf->memory}, input.options().dtype(kByte));
+      Tensor workspace = at::native::empty({fwdAlgPerf.memory}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -818,7 +819,7 @@ void raw_cudnn_convolution_forward_out_32bit(
         args.handle,
         &one, args.idesc.desc(), input.data_ptr(),
         args.wdesc.desc(), weight.data_ptr(),
-        args.cdesc.desc(), fwdAlgPerf.algo, workspace.data_ptr(), fwdAlgPerf->memory,
+        args.cdesc.desc(), fwdAlgPerf.algo, workspace.data_ptr(), fwdAlgPerf.memory,
         &zero, args.odesc.desc(), output.data_ptr()));
       }
   );
@@ -939,7 +940,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdDataAlgoPerf_t &bwdDataAlgPerf){
-      Tensor workspace = at::native::empty({bwdDataAlgPerf->memory}, input.options().dtype(kByte));
+      Tensor workspace = at::native::empty({bwdDataAlgPerf.memory}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -953,7 +954,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
           args.handle,
           &one, args.wdesc.desc(), weight.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
-          args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf->memory,
+          args.cdesc.desc(), bwdDataAlgPerf.algo, workspace.data_ptr(), bwdDataAlgPerf.memory,
           &zero, args.idesc.desc(), grad_input.data_ptr()));
     }
   );
@@ -1100,7 +1101,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdFilterAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdFilterAlgoPerf_t &bwdFilterAlgPerf){
-      Tensor workspace = at::native::empty({bwdFilterAlgPerf->memory}, input.options().dtype(kByte));
+      Tensor workspace = at::empty({bwdFilterAlgPerf.memory}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -1114,7 +1115,7 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
           args.handle,
           &one, args.idesc.desc(), input.data_ptr(),
           args.odesc.desc(), grad_output.data_ptr(),
-          args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace..data_ptr(), bwdFilterAlgPerf->memory,
+          args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace.data_ptr(), bwdFilterAlgPerf.memory,
           &zero, args.wdesc.desc(), grad_weight.data_ptr()));
     }
   );
