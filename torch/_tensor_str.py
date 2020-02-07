@@ -1,5 +1,7 @@
+
 import math
 import torch
+import types
 from torch._six import inf
 
 
@@ -70,8 +72,8 @@ def set_printoptions(
 
 class _Formatter(object):
     def __init__(self, tensor):
-        self.floating_dtype = False #tensor.dtype.is_floating_point
-
+        self.floating_dtype = tensor.dtype.is_floating_point
+        self.complex_mode = tensor.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
@@ -79,7 +81,7 @@ class _Formatter(object):
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
-        if not self.floating_dtype:
+        if self.complex_mode or not self.floating_dtype:
             for value in tensor_view:
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
@@ -135,7 +137,10 @@ class _Formatter(object):
 
     def format(self, value):
         if self.floating_dtype:
-            if self.sci_mode:
+            if self.complex_mode:
+                #TODO: single precision for float, double precision for double
+                ret = '({0:.2f} {1} {2:.2f}j)'.format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            elif self.sci_mode:
                 ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             elif self.int_mode:
                 ret = '{:.0f}'.format(value)
@@ -164,7 +169,6 @@ def _vector_str(self, indent, formatter, summarize):
                 [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
         data = [formatter.format(val) for val in self.tolist()]
-
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
     return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
