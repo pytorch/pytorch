@@ -215,10 +215,6 @@ struct WrapFunction_<Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
       return (*F)(cached_cast(at::kHalf, args)...);
     } else if (policy == CastPolicy::fp32) {
       return (*F)(cached_cast(at::kFloat, args)...);
-    } else if (policy == CastPolicy::fp32_set_opt_dtype) {
-      return (*F)(set_opt_dtype(at::kFloat, args)...);
-    } else if (policy == CastPolicy::fp32_append_dtype) {
-      return (*F)(args..., at::kFloat);
     } else if (policy == CastPolicy::promote) {
       auto to_type = promote_type(at::kHalf, args...);
       return (*F)(cached_cast(to_type, args)...);
@@ -226,6 +222,24 @@ struct WrapFunction_<Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
       static_assert(false, "Instantiating WrapFunction_ with unexpected cast policy");
       return (*F)(args...);
     }
+  }
+};
+
+// CastPolicy::fp32_set_opt_dtype
+template<class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32_set_opt_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+  static Ret call(Args... args) {
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    return (*F)(set_opt_dtype(at::kFloat, args)...);
+  }
+};
+
+// CastPolicy::fp32_append_dtype
+template<class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+  static Ret call(Args... args) {
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    return (*F)(args..., at::kFloat);
   }
 };
 
