@@ -145,6 +145,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
+    "torch/csrc/jit/passes/pretranspose_weights.cpp",
     "torch/csrc/jit/print_handler.cpp",
     "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/register_prim_ops_c10.cpp",

@@ -36,6 +36,7 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/pretranspose_weights.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -203,6 +204,7 @@ void initJITBindings(PyObject* module) {
           },
           py::arg("module"))
       .def("_jit_pass_fuse_linear", &FuseLinear)
+      .def("_jit_pass_pretranspose_weights", &PretransposeWeights)
       .def(
           "_jit_pass_fold_quantize",
           [](script::Module& module, const std::string& method_name) {

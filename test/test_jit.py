@@ -1907,6 +1907,47 @@ graph(%input, %weight):
             "Expected to have 2 relu modules after dedup module uses"
         self.assertEqual(res, ref_res)
 
+    def test_pretranspose_weights(self):
+        class Test(torch.jit.ScriptModule):
+            def __init__(self, w):
+                super(Test, self).__init__()
+                self.weight = w
+
+            @torch.jit.script_method
+            def forward(self, b, x):
+                return torch.addmm(b, x, self.weight)
+
+        b = torch.randn(4, 1)
+        x = torch.randn(4, 2)
+        w = torch.randn(3, 2).t()
+
+
+        def test_success():
+            mod = Test(w)
+            out_ref = mod(b, x)
+
+            mod.eval()
+            test_frozen = torch._C.freeze_module(mod._c)
+            self.run_pass('pretranspose_weights', test_frozen.forward.graph)
+            out_test = test_frozen.forward(b, x)
+
+            self.assertEqual(out_ref, out_test)
+
+        def test_noop():
+            mod_noop = Test(w)
+            out_ref = mod_noop(b, x)
+
+            # pretranspose fails because weight is not constant, but module should
+            # still run correctly
+            self.run_pass('pretranspose_weights', mod_noop.forward.graph)
+            out_noop = mod_noop(b, x)
+
+            self.assertEqual(out_ref, out_noop)
+            self.assertFalse(mod_noop._c.getattr('weight').is_contiguous())
+
+        test_success()
+        test_noop()
+
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
         # --> mulmul(mulmul(x,y,z), x, y)
