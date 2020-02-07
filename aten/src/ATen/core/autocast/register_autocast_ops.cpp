@@ -181,7 +181,9 @@ Templates to provide wrapper functions
 I'm copying the pattern used in core/boxing/kernel_function.h to extract args and return type.
 (see also https://stackoverflow.com/questions/46533698/how-to-deduce-argument-list-from-function-pointer)
 
-This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of an interior "WrapFunction_".
+This strategy uses an exterior "WrapFunction" that extracts arguments on behalf of
+(in my case several specializations of) an interior "WrapFunction_".
+Interior WrapFunction_ specializations are defined for each CastPolicy.
 ********************************************************************************************************/
 
 // Base template for WrapFunction_, which is specialized to host call methods for each CastPolicy
@@ -206,22 +208,22 @@ struct WrapFunction final {
                              typename guts::function_traits<Registered>::parameter_types>;
 };
 
-template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<policy, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+
+// CastPolicy::fp16
+template<class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp16, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
-    // Policy is known at compile time, so the compiler should be able to prune unneeded branches.
-    if (policy == CastPolicy::fp16) {
-      return (*F)(cached_cast(at::kHalf, args)...);
-    } else if (policy == CastPolicy::fp32) {
-      return (*F)(cached_cast(at::kFloat, args)...);
-    } else if (policy == CastPolicy::promote) {
-      auto to_type = promote_type(at::kHalf, args...);
-      return (*F)(cached_cast(to_type, args)...);
-    } else {
-      static_assert(false, "Instantiating WrapFunction_ with unexpected cast policy");
-      return (*F)(args...);
-    }
+    return (*F)(cached_cast(at::kHalf, args)...);
+  }
+};
+
+// CastPolicy::fp32
+template<class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::fp32, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+  static Ret call(Args... args) {
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    return (*F)(cached_cast(at::kFloat, args)...);
   }
 };
 
@@ -240,6 +242,16 @@ struct WrapFunction_<CastPolicy::fp32_append_dtype, Redispatch, F, Ret, guts::ty
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     return (*F)(args..., at::kFloat);
+  }
+};
+
+// CastPolicy::promote
+template<class Redispatch, Redispatch* F, class Ret, class... Args>
+struct WrapFunction_<CastPolicy::promote, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+  static Ret call(Args... args) {
+    c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
+    auto to_type = promote_type(at::kHalf, args...);
+    return (*F)(cached_cast(to_type, args)...);
   }
 };
 
