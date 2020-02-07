@@ -414,7 +414,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
         }
 #endif
 
-        result.push_back(n_algo);
+        result.push_back(perf);
       }
     }
   }
@@ -648,19 +648,7 @@ public:
 
     perf_t algoPerf;
 
-    if (args.params.deterministic && !benchmark) {
-      algoPerf.algo = search::DEFAULT_ALGO;
-      if (args.params.dataType == CUDNN_DATA_HALF) {
-        algoPerf.mathType = CUDNN_TENSOR_OP_MATH;
-      } else {
-        algoPerf.mathType = CUDNN_DEFAULT_MATH;
-      }
-      search::getWorkspaceSize(args, algoPerf.algo, &(algoPerf.memory));
-      f(algoPerf);
-      return;
-    }
-
-    if (cache.find(args.params, algoPerf)) {
+    if (cache.find(args.params, &algoPerf)) {
       f(algoPerf);
       return;
     }
@@ -669,7 +657,7 @@ public:
     for (auto &algoPerf : perfResults) {
       try {
         f(algoPerf);
-        cache.insert(args.params, perfResults);
+        cache.insert(args.params, algoPerf);
         return;
       } catch (const std::exception& e) {
         cudaGetLastError(); // clear CUDA error
@@ -677,7 +665,7 @@ public:
     }
     TORCH_CHECK(false, "Unable to find a valid cuDNN algorithm to run convolution");
   }
-}
+};
 
 // NOTE [ Convolution design ]
 //
@@ -805,7 +793,7 @@ void raw_cudnn_convolution_forward_out_32bit(
   // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   AlgoIterator<cudnnConvolutionFwdAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionFwdAlgoPerf_t &fwdAlgPerf){
-      Tensor workspace = at::native::empty({fwdAlgPerf.memory}, input.options().dtype(kByte));
+      Tensor workspace = at::empty({fwdAlgPerf.memory}, input.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
@@ -940,7 +928,7 @@ void raw_cudnn_convolution_backward_input_out_32bit(
 
   AlgoIterator<cudnnConvolutionBwdDataAlgoPerf_t>(args, benchmark).try_all(
     [&](const cudnnConvolutionBwdDataAlgoPerf_t &bwdDataAlgPerf){
-      Tensor workspace = at::native::empty({bwdDataAlgPerf.memory}, input.options().dtype(kByte));
+      Tensor workspace = at::empty({bwdDataAlgPerf.memory}, grad_output.options().dtype(kByte));
 
       // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
       // whether to use Tensor core kernels or not
