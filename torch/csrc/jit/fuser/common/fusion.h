@@ -163,15 +163,9 @@ struct TORCH_API Fusion : public IRInputOutput{
    * Return topologically sorted list of exprs. We can start by only traversing back from registered
    * outputs, or from any terminating Val. Can also select depth first traversal, or breadth first.
    * 
-   * TODO: Test this thing!!!
+   * TODO: Add more tests.
    */
   std::vector<const Expr*> exprs(bool from_outputs_only=false, bool breadth_first=false) const {
-    /*
-    std::vector<const Expr*> expr_vec;
-    for(const Expr* expr : expr_set_)
-      expr_vec.push_back(expr);
-    return expr_vec;
-    */
     if(breadth_first)
       throw std::runtime_error("Not implemented yet.");
 
