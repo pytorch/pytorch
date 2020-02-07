@@ -180,7 +180,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
+${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
