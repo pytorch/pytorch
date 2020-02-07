@@ -118,7 +118,6 @@ The following simple script shows how a runtime of matrix multiplication changes
 
 .. code-block:: python
 
-    import torch
     import timeit
     runtimes = []
     threads = [1] + [t for t in range(2, 49, 2)]
@@ -128,7 +127,7 @@ The following simple script shows how a runtime of matrix multiplication changes
         runtimes.append(r)
     # ... plotting (threads, runtimes) ...
 
-Using a system based on Intel Xeon E5-2680 CPU (24 physical cores), this script results in the following plot:
+Running the script on a system with 24 physical CPU cores (Xeon E5-2680, MKL and OpenMP based build) results in the following runtimes:
 
 .. image:: cpu_threading_runtimes.svg
    :width: 75%
