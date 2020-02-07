@@ -148,6 +148,12 @@ static auto registry = torch::RegisterOperators().op(
     return at::add(a, b, c);
   })
 ).op(
+  "_aten::sub.Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
+    return at::sub(a, b, c);
+  })
+).op(
   "_aten::add.Scalar",
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](at::Tensor a, at::Scalar b, at::Scalar c) -> at::Tensor {
@@ -385,6 +391,12 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&softmax_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
+  "_aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor& self, Scalar beta, Scalar threshold) {
+    return at::softplus(self, beta, threshold);
+  })
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel<&warn_kernel>()
