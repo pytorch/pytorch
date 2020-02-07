@@ -4,7 +4,7 @@
 
 namespace fbgemm {
 
-void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
+CAFFE2_API void transpose_4rows(int N, const std::uint8_t* src, std::uint8_t* dst) {
   constexpr int M = 4;
   int j;
   // vectorized loop

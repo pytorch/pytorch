@@ -8,7 +8,7 @@ namespace caffe2 {
 
 using namespace std;
 
-void max_pool_avx2(
+CAFFE2_API void max_pool_avx2(
     const uint8_t* Xdata,
     int n,
     int height,
@@ -68,7 +68,7 @@ void max_pool_avx2(
   } // ph loop
 }
 
-void average_pool_avx2(
+CAFFE2_API void average_pool_avx2(
     const uint8_t* Xdata,
     int n,
     int height,
@@ -199,7 +199,7 @@ void average_pool_avx2(
   } // ph loop
 }
 
-void average_pool_3d_avx2(
+CAFFE2_API void average_pool_3d_avx2(
     const uint8_t* Xdata,
     int n,
     int height,

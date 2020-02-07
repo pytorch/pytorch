@@ -14,7 +14,7 @@ using namespace std;
 constexpr int VLEN = 8;
 
 template <typename T, bool ReluFused>
-void ElementWiseSumAVX2(
+CAFFE2_API void ElementWiseSumAVX2(
     const T* input0,
     const T* input1,
     T* output,
@@ -153,7 +153,7 @@ void ElementWiseSumAVX2(
   }
 }
 
-template CAFFE2_API void ElementWiseSumAVX2<uint8_t, false>(
+template void ElementWiseSumAVX2<uint8_t, false>(
     const uint8_t* input0,
     const uint8_t* input1,
     uint8_t* output,
@@ -165,7 +165,7 @@ template CAFFE2_API void ElementWiseSumAVX2<uint8_t, false>(
     float c_scale,
     int32_t c_zero_point);
 
-template CAFFE2_API void ElementWiseSumAVX2<uint8_t, true>(
+template void ElementWiseSumAVX2<uint8_t, true>(
     const uint8_t* input0,
     const uint8_t* input1,
     uint8_t* output,
@@ -177,7 +177,7 @@ template CAFFE2_API void ElementWiseSumAVX2<uint8_t, true>(
     float c_scale,
     int32_t c_zero_point);
 
-template CAFFE2_API void ElementWiseSumAVX2<uint16_t, false>(
+template void ElementWiseSumAVX2<uint16_t, false>(
     const uint16_t* input0,
     const uint16_t* input1,
     uint16_t* output,
@@ -189,7 +189,7 @@ template CAFFE2_API void ElementWiseSumAVX2<uint16_t, false>(
     float c_scale,
     int32_t c_zero_point);
 
-template CAFFE2_API void ElementWiseSumAVX2<uint16_t, true>(
+template void ElementWiseSumAVX2<uint16_t, true>(
     const uint16_t* input0,
     const uint16_t* input1,
     uint16_t* output,

@@ -9,7 +9,7 @@ namespace caffe2 {
 namespace internal {
 
 template <typename T>
-void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
+CAFFE2_API void ReluAVX2(const int N, const int zero_point, const T* X, T* Y);
 
 template <>
 CAFFE2_API void ReluAVX2<uint8_t>(

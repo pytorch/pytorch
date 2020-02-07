@@ -2,6 +2,7 @@
 #include <limits>
 
 #include <immintrin.h>
+#include "c10/macros/Macros.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -14,7 +15,7 @@ namespace caffe2 {
 namespace internal {
 
 template <typename T>
-void SpatialBNNHWCAVX2(
+CAFFE2_API void SpatialBNNHWCAVX2(
     const int N,
     const int C,
     const int HxW,
@@ -27,7 +28,7 @@ void SpatialBNNHWCAVX2(
     bool relu_fused);
 
 template <bool ReluFused>
-void SpatialBNNHWCAVX2_uint8(
+CAFFE2_API void SpatialBNNHWCAVX2_uint8(
     const int N,
     const int C,
     const int HxW,
@@ -121,7 +122,7 @@ void SpatialBNNHWCAVX2_uint8(
 }
 
 template <>
-void SpatialBNNHWCAVX2<uint8_t>(
+CAFFE2_API void SpatialBNNHWCAVX2<uint8_t>(
     const int N,
     const int C,
     const int HxW,
