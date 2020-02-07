@@ -28,13 +28,13 @@ void compute_fused_params(
   // output(n, c, h, w)
   //     = (input(n, c, h, w) - mean(c)) / sqrt(var(c) + eps) * weight(c)
   //         + bias(c)
-  // We factor out inv_var(c) = 1 / sqrt(var(c) + eps).
+  // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
   for (int64_t c = 0; c < channels; c++) {
-    float inv_var = 1 / std::sqrt(var_data[c] + static_cast<float>(eps));
+    float inv_sigma = 1 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;
     float bias_v = bias_data ? bias_data[c] : 0;
-    alpha_data[c] = inv_var * weight_v * (input_scale / output_scale);
-    beta_data[c] = (bias_v - mean_data[c] * inv_var * weight_v) / output_scale;
+    alpha_data[c] = inv_sigma * weight_v * (input_scale / output_scale);
+    beta_data[c] = (bias_v - mean_data[c] * inv_sigma * weight_v) / output_scale;
   }
 }
 
@@ -48,6 +48,9 @@ Tensor q_batch_norm_impl(
     double eps,
     float output_scale,
     int64_t output_zero_point) {
+
+  TORCH_CHECK(qx.scalar_type() == kQUInt8, "QuantizedBatchNorm2d expects uint8 input.");
+
   if (qx.numel() == 0) {
     auto out = qx.clone();
     return out;

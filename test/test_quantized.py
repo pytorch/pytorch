@@ -1075,28 +1075,30 @@ class TestQuantizedOps(TestCase):
                                               min_side=1, max_side=5),
                        qparams=hu.qparams(dtypes=torch.quint8)),
            Y_scale=st.floats(0.2, 2.6),
-           Y_zero_point=st.integers(0, 5))
-    def test_batch_norm(self, X, Y_scale, Y_zero_point):
-        X, (scale_x, zero_point_x, dtype_x) = X
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_batch_norm(self, X, Y_scale, Y_zero_point, qengine):
+        with override_quantized_engine(qengine):
+            X, (scale_x, zero_point_x, dtype_x) = X
 
-        X = torch.from_numpy(X)
-        c = X.shape[1]
+            X = torch.from_numpy(X)
+            c = X.shape[1]
 
-        mean = torch.rand(c).float()
-        var = torch.rand(c).float()
-        weight = torch.rand(c).float()
-        bias = torch.rand(c).float()
-        eps = 0.001
-        qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, torch.quint8)
+            mean = torch.rand(c).float()
+            var = torch.rand(c).float()
+            weight = torch.rand(c).float()
+            bias = torch.rand(c).float()
+            eps = 0.001
+            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, torch.quint8)
 
-        qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+            qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
-        float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
-                                 running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
+                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
 
-        quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, torch.quint8)
+            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, torch.quint8)
 
-        self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
+            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
