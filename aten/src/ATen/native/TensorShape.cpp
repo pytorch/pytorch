@@ -777,9 +777,15 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
   return splits;
 }
 
+// Precondition: tensors is non-empty
 static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
   std::vector<Tensor> inputs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  inputs[0] = tensors[0].unsqueeze(dim);
+  for (size_t i = 1; i < tensors.size(); ++i) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
     inputs[i] = tensors[i].unsqueeze(dim);
   }
   return inputs;
