@@ -117,44 +117,33 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_differentiable_view(const Tensor & base, Tensor tensor, bool allow_rebase_history) {
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable, bool allow_rebase_history=true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
-  return make_variable_differentiable_view(std::move(base_var), std::move(tensor), allow_rebase_history);
+  if (is_differentiable) {
+    return make_variable_differentiable_view(std::move(base_var), std::move(tensor), allow_rebase_history);
+  } else {
+    TORCH_CHECK(allow_rebase_history, "Non-differentiable views cannot set allow_rebase_history=false");
+    return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
+  }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_differentiable_view(const Tensor & base, std::vector<Tensor> tensors,
-                                                  bool allow_rebase_history) {
+inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
+                                   bool allow_rebase_history=true) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
   for(Tensor &tensor : tensors) {
-    tensor = make_variable_differentiable_view(base_var, std::move(tensor), allow_rebase_history);
-  }
-  return tensors;
-}
-
-// See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_non_differentiable_view(const Tensor & base, Tensor tensor) {
-  auto base_var = Variable(base);
-  if (base_var.is_view()) {
-    base_var = base_var.base();
-  }
-  return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
-}
-
-// See NOTE [ Autograd View Variables ] for details.
-inline std::vector<Tensor> as_non_differentiable_view(const Tensor & base, std::vector<Tensor> tensors) {
-  auto base_var = Variable(base);
-  if (base_var.is_view()) {
-    base_var = base_var.base();
-  }
-  for(Tensor &tensor : tensors) {
-    tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+    if (is_differentiable) {
+      tensor = make_variable_differentiable_view(base_var, std::move(tensor), allow_rebase_history);
+    } else {
+      TORCH_CHECK(allow_rebase_history, "Non-differentiable views cannot set allow_rebase_history=false");
+      tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
+    }
   }
   return tensors;
 }
