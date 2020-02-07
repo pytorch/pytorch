@@ -17,6 +17,17 @@ class RRef;
 class RRefContext;
 class UserRRef;
 
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int PARENT_IDX = 5; // index of parent in the tuple
+constexpr int TYPE_IDX = 6; // index of parent in the tuple
+
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
+
 // Represents fork of an RRef to be sent over the wire.
 struct TORCH_API RRefForkData {
   const worker_id_t ownerId_;
@@ -24,25 +35,6 @@ struct TORCH_API RRefForkData {
   const ForkId forkId_;
   const worker_id_t parent_;
   const std::string typeStr_;
-
-  // index of ownerId in the tuple
-  static constexpr int OWNER_IDX = 0;
-  // index of RRefId.createdOn_ in the tuple
-  static constexpr int RREFID_ON_IDX = 1;
-  // index of RRefId.localId_ in the tuple
-  static constexpr int RREFID_ID_IDX = 2;
-  // index of ForkId.createdOn_ in the tuple
-  static constexpr int FORKID_ON_IDX = 3;
-  // index of ForkId.localId_ in the tuple
-  static constexpr int FORKID_ID_IDX = 4;
-  // index of parent in the tuple
-  static constexpr int PARENT_IDX = 5;
-  // index of parent in the tuple
-  static constexpr int TYPE_IDX = 6;
-
-  // NB: if more fields are added, make sure this field is also bumped
-  // number of RRefForkData fields in py::tuple
-  static constexpr int RFD_TUPLE_SIZE = 7;
 
   RRefForkData(
       worker_id_t ownerId,

@@ -623,17 +623,21 @@ void Unpickler::rebuildRRef() {
     auto args = stack_.back().toTuple()->elements();
     stack_.pop_back();
     TORCH_INTERNAL_ASSERT(
-        args.size() == 7, "Pickled RRefForkData must contain 7 numbers.");
-    auto ownerId = static_cast<int16_t>(args.at(0).toInt());
+        args.size() == distributed::rpc::RFD_TUPLE_SIZE,
+        "Pickled RRefForkData must contain 7 numbers.");
+    auto ownerId =
+        static_cast<int16_t>(args.at(distributed::rpc::OWNER_IDX).toInt());
     // const reference will extend the lifetime of the temporary variable
     const auto& rrefId = distributed::rpc::RRefId(
-        static_cast<int16_t>(args.at(1).toInt()),
-        static_cast<int64_t>(args.at(2).toInt()));
+        static_cast<int16_t>(args.at(distributed::rpc::RREFID_ON_IDX).toInt()),
+        static_cast<int64_t>(args.at(distributed::rpc::RREFID_ID_IDX).toInt()));
     const auto& forkId = distributed::rpc::RRefId(
-        static_cast<int16_t>(args.at(3).toInt()),
-        static_cast<int64_t>(args.at(4).toInt()));
-    auto parent = static_cast<int16_t>(args.at(5).toInt());
-    const auto& typeStr = static_cast<std::string>(args.at(6).toStringRef());
+        static_cast<int16_t>(args.at(distributed::rpc::FORKID_ON_IDX).toInt()),
+        static_cast<int64_t>(args.at(distributed::rpc::FORKID_ID_IDX).toInt()));
+    auto parent =
+        static_cast<int16_t>(args.at(distributed::rpc::PARENT_IDX).toInt());
+    const auto& typeStr = static_cast<std::string>(
+        args.at(distributed::rpc::TYPE_IDX).toStringRef());
     auto rrefForkData = distributed::rpc::RRefForkData(
         ownerId, rrefId, forkId, parent, typeStr);
     auto& ctx = distributed::rpc::RRefContext::getInstance();
