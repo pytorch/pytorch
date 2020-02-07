@@ -4,7 +4,6 @@
 #include "llvm/Pass.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 
 using namespace llvm;
@@ -20,7 +19,6 @@ cl::opt<std::string> InputFilename(
 } // namespace
 
 int main(int argc, char **argv) {
-  InitLLVM X(argc, argv);
   LLVMContext Context;
   cl::ParseCommandLineOptions(argc, argv);
   SMDiagnostic Err;
