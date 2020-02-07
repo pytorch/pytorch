@@ -11,15 +11,19 @@ TEST(ReduceOpsTest, MaxValuesAndMinValues) {
 
   for (const auto dev : {kCPU, kCUDA}) {
     std::vector<at::ScalarType> dtypes = {kFloat, kDouble, kShort, kInt, kLong};
-    if (hasCUDA()) {
-      dtypes.push_back(kHalf);
-    } else if (dev == kCUDA) {
-      // Skip CUDA test in non cuda env
+
+    // Skip CUDA test in non cuda env
+    if (!hasCUDA() && dev == kCUDA) {
       continue;
     }
 
+    // Enable half float test for CUDA
+    if (dev == kCUDA) {
+      dtypes.push_back(kHalf);
+    }
+
     for (const auto dtype : dtypes) {
-      auto a = (at::rand({H, W}, TensorOptions(dev).dtype(kFloat)) * 10).to(dtype);
+      auto a = at::randint(-10, 10, {H, W}, TensorOptions(dev).dtype(dtype));
       ASSERT_FLOAT_EQ(
         a.max_values(c10::IntArrayRef{0, 1}).item<double>(),
         a.max().item<double>()
