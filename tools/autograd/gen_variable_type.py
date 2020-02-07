@@ -774,10 +774,10 @@ def emit_body(declaration):
 
             if len(differentiable_output_vars) == 0:
                 # no output is differentiable (.indices() for SparseTensors for example)
-                return 'as_non_differentiable_view({}, {})'.format(view_info, call)
+                return 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, call)
             elif len(differentiable_output_vars) == 1:
                 # Single differentiable output (Tensor or Tensor[])
-                return_info = returns[0]
+                return_info = differentiable_outputs[0]
                 # We only support simple Tensor or a TensorList for functions that return views
                 if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
@@ -785,7 +785,7 @@ def emit_body(declaration):
                 allow_rebase_history = 'true'
                 if return_info['dynamic_type'] == 'TensorList':
                     allow_rebase_history = 'false'
-                wrapped_call = ("as_differentiable_view(/* base */{}, /* output */ {}, "
+                wrapped_call = ("as_view(/* base */{}, /* output */ {}, /* is_differentiable */ true, "
                                 "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
                 return wrapped_call
             else:
