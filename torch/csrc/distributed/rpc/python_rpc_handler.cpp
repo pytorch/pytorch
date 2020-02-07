@@ -64,8 +64,9 @@ void PythonRpcHandler::cleanup() {
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
-  static PythonRpcHandler handler;
-  return handler;
+  // Leaky singleton to avoid module destructor race.
+  static PythonRpcHandler* handler = new PythonRpcHandler();
+  return *handler;
 }
 
 std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
@@ -116,6 +117,10 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
 
 void PythonRpcHandler::handleException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
+  pyHandleException_(obj);
+}
+
+void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
   pyHandleException_(obj);
 }
 

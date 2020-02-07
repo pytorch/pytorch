@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack, enableScriptTest
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -107,16 +107,22 @@ class TestONNXRuntime(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
         np.random.seed(seed=0)
+        self.is_script_test_enabled = False
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
-        return run_model_test(self, model, batch_size=batch_size,
-                              input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
-                              do_constant_folding=do_constant_folding,
-                              dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
-                              input_names=input_names, output_names=output_names,
-                              fixed_batch_size=fixed_batch_size)
+        def _run_test(m):
+            return run_model_test(self, m, batch_size=batch_size,
+                                  input=input, use_gpu=use_gpu, rtol=rtol, atol=atol,
+                                  do_constant_folding=do_constant_folding,
+                                  dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
+                                  input_names=input_names, output_names=output_names,
+                                  fixed_batch_size=fixed_batch_size)
+        if self.is_script_test_enabled:
+            script_model = torch.jit.script(model)
+            _run_test(script_model)
+        _run_test(model)
 
     # Export Torchvision models
 
@@ -227,6 +233,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -266,6 +273,7 @@ class TestONNXRuntime(unittest.TestCase):
         images = [image]
         return images
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -273,6 +281,7 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
+    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
@@ -314,6 +323,11 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_index_2d_neg_slice(self):
         self._test_index_generic(lambda input: input[0:-1, :])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_index_mask(self):
+        self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.uint8)])
+        self._test_index_generic(lambda input: input[torch.tensor([0, 1, 0], dtype=torch.bool)])
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -581,6 +595,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @enableScriptTest()
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
@@ -703,6 +718,11 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(8, 3, 2)
         self.run_test(ArangeModel(), x, test_with_inputs=[y],
                       input_names=['input_1'],
+                      output_names=['output_1', 'output_2', 'output_3'],
+                      dynamic_axes={'input_1': [0],
+                                    'output_1': [0]})
+        self.run_test(torch.jit.script(ArangeModel()), x,
+                      test_with_inputs=[y], input_names=['input_1'],
                       output_names=['output_1', 'output_2', 'output_3'],
                       dynamic_axes={'input_1': [0],
                                     'output_1': [0]})
@@ -1027,9 +1047,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), x)
 
     def _interpolate_script(self, x, mode, use_size, is_upsample, align_corners=False):
-        return  # TEMPORARILY DISABLED Until ONNX Export of List[Float] constants fixe
-
-
         class MyModel(torch.jit.ScriptModule):
             __constants__ = ['mode', 'use_size', 'is_upsample', 'size', 'scale', 'size_array', 'scale_array', 'align_corners']
 
@@ -2441,6 +2458,43 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
+    @unittest.skip("Enable this once einsum supported in ORT")
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_einsum(self):
+        class EinsumModelBatchDiagonal(torch.nn.Module):
+            def forward(self, *tensor_list):
+                eqn = '...ii ->...i'
+                return torch.einsum(eqn, *tensor_list)
+
+        x = torch.randn(3, 5, 5)
+        self.run_test(EinsumModelBatchDiagonal(), input=(x,))
+
+        class EinsumModelBatchMatmul(torch.nn.Module):
+            def forward(self, *tensor_list):
+                eqn = 'bij, bjk -> bik'
+                return torch.einsum(eqn, *tensor_list)
+
+        x = torch.randn(5, 2, 3)
+        y = torch.randn(5, 3, 4)
+        self.run_test(EinsumModelBatchMatmul(), input=(x, y))
+
+        class EinsumModelInnerProd(torch.nn.Module):
+            def forward(self, *tensor_list):
+                eqn = 'i,i'
+                return torch.einsum(eqn, *tensor_list)
+
+        x = torch.randn(5)
+        y = torch.randn(5)
+        self.run_test(EinsumModelInnerProd(), input=(x, y))
+
+        class EinsumModelTranspose(torch.nn.Module):
+            def forward(self, *tensor_list):
+                eqn = 'ij->ji'
+                return torch.einsum(eqn, *tensor_list)
+
+        x = torch.randn(3, 4)
+        self.run_test(EinsumModelTranspose(), input=(x,))
+
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -2707,6 +2761,10 @@ TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=11))
 
+# opset 12 tests
+TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=12))
 
 # opset 9 tests, with keep_initializers_as_inputs=False for
 # IR version 4 style export.
@@ -2729,6 +2787,13 @@ TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
 TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
                                     (unittest.TestCase,),
                                     dict(TestONNXRuntime.__dict__, opset_version=11,
+                                    keep_initializers_as_inputs=False))
+
+# opset 12 tests, with keep_initializers_as_inputs=False for
+# IR version 4 style export.
+TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
+                                    (unittest.TestCase,),
+                                    dict(TestONNXRuntime.__dict__, opset_version=12,
                                     keep_initializers_as_inputs=False))
 
 
