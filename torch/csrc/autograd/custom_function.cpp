@@ -116,7 +116,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
   // All the modified Tensors must be returned as is for the rewrite to be valid.
   for (auto& dirty_input : dirty_inputs) {
     TORCH_CHECK(outputs_impl.count(dirty_input) > 0,
-                "Some elements marked as dirty during the forward method where not returned as output. The"
+                "Some elements marked as dirty during the forward method were not returned as output. The"
                 " inputs that are modified inplace must all be outputs of the Function.");
   }
 
