@@ -207,7 +207,7 @@ struct WrapFunction final {
 };
 
 template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class... Args>
-struct WrapFunction_<Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
+struct WrapFunction_<policy, Redispatch, F, Ret, guts::typelist::typelist<Args...>> {
   static Ret call(Args... args) {
     c10::impl::ExcludeDispatchKeyGuard no_autocasting(DispatchKey::AutocastTensorId);
     // Policy is known at compile time, so the compiler should be able to prune unneeded branches.
