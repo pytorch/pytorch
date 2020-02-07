@@ -37,11 +37,11 @@ namespace ProfiledType {
 
 struct AutoNonProfileTypeMode {
   AutoNonProfileTypeMode() {
-    orig_state = c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::ProfilerId);
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::ProfilerId, false);
+    orig_state = c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Profiler);
+    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, false);
   }
   ~AutoNonProfileTypeMode() {
-    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::ProfilerId, orig_state);
+    c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, orig_state);
   }
   bool orig_state;
 };

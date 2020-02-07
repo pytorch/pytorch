@@ -197,7 +197,7 @@ void enableProfiler(ProfilerConfig config) {
       },
       config.report_input_shapes);
   state = new_state;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::ProfilerId, true);
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
 
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
@@ -228,7 +228,7 @@ thread_event_lists disableProfiler() {
 
   popCallback();
   state = ProfilerState::Disabled;
-  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::ProfilerId, true);
+  c10::impl::tls_set_dispatch_key_included(c10::DispatchKey::Profiler, true);
 
   if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
@@ -378,14 +378,14 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 }  // namespace
 
-// void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-//   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::ProfilerId);
-//   RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
-//   callBoxedWorkaround(op, stack);
-// }
+void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::Profiler);
+  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
+  callBoxedWorkaround(op, stack);
+}
 
-// auto registry = c10::Dispatcher::singleton()
-//   .registerBackendFallbackKernel(
-//     c10::DispatchKey::ProfilerId,
-//     c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>()
-//   );
+auto registry = c10::Dispatcher::singleton()
+  .registerBackendFallbackKernel(
+    c10::DispatchKey::Profiler,
+    c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>()
+  );

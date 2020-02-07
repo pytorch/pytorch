@@ -59,7 +59,7 @@ enum class DispatchKey : uint8_t {
 
   VariableTensorId,
 
-  ProfilerId,
+  Profiler,
 
   // Pre-autograd backend keys allow backends to override the autograd behavior
   // (aka VariableTensorId) for operators which have a Variable kernel

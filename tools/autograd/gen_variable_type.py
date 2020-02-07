@@ -313,19 +313,11 @@ ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
 # ProfiledType templates
-PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+PROFILE_DISPATCH_TO_NON_VAR_TYPE = CodeTemplate("""\
 {
     AutoNonProfileTypeMode non_prof_type_mode;
     RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
     return ${base_type_call};
-}
-""")
-
-PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
-{
-  AutoNonProfileTypeMode non_prof_type_mode;
-  RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
-  ${base_type_call};
 }
 """)
 
@@ -335,14 +327,14 @@ self.${api_name}(${unpacked_method_args})""")
 PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &ProfiledType::${api_name}>(DispatchKey::ProfilerId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &ProfiledType::${api_name}>(DispatchKey::Profiler)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 PROFILE_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(DispatchKey::ProfilerId, &ProfiledType::${api_name})
+  .kernel<${return_type} (${formal_types})>(DispatchKey::Profiler, &ProfiledType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -636,18 +628,11 @@ def emit_profiled_body(declaration):
             arg['name'] for arg in declaration['arguments']
             if check_record_function_input_type(arg['simple_type'])])
 
-    if returns_void:
-        call = PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
-            base_type_call=base_type_call,
-            name=name,
-            input_names=record_function_input_names(),
-        )
-    else:
-        call = PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
-            base_type_call=base_type_call,
-            name=name,
-            input_names=record_function_input_names(),
-        )
+    call = PROFILE_DISPATCH_TO_NON_VAR_TYPE.substitute(
+        base_type_call=base_type_call,
+        name=name,
+        input_names=record_function_input_names(),
+    )
 
     return [call]
 
