@@ -86,7 +86,9 @@ namespace jit {
   _(GPU_FusionContainer)         \
   _(GPU_FusionSimpleTypePromote) \
   _(GPU_FusionDispatch)          \
-  _(GPU_FusionMutator)       \
+  _(GPU_FusionMutator)           \
+  _(GPU_FusionTopoSort)          \
+  _(GPU_FusionRegister)          \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

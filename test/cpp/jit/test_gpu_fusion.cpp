@@ -103,7 +103,46 @@ void testGPU_FusionMutator(){
 
 }
 
-void testGPU_Fusion() {}
+void testGPU_FusionRegister() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  Float* v1 = new Float{1.f};
+  Float* v2 = new Float{2.f};
+  Val* v3 = add(v1, v2);
+  Val* v4 = add(v1, v2);
+  TORCH_CHECK(v1->name()+1 == v2->name());
+  TORCH_CHECK(v2->name()+1 == v3->name());
+  TORCH_CHECK(v3->name()+1 == v4->name());
+  TORCH_CHECK(fusion.origin(v3)->name()+1 == fusion.origin(v4)->name());
+}
 
+void testGPU_FusionTopoSort() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Float* v1 = new Float{1.f};
+  Float* v2 = new Float{2.f};
+  Val* v3 = add(v1, v2);
+  Float* v4 = new Float{3.f};
+  Val* v5 = add(v3, v4);
+
+  std::cout << "node0: " << fusion.origin(v3)->name() << std::endl;
+  std::cout << "node1: " << fusion.origin(v5)->name() << std::endl;
+
+  std::cout << "fusion ids: ";
+  for (auto expr : fusion.exprs()) {
+    std::cout << expr->name() << ", ";
+  }
+  std::cout << std::endl;
+
+  // TODO: test multiple output when we have the node;
+  // case:
+  //   %1, %2 = op0(%0)
+  //   %3, %4 = op1(%1)
+  //   %5 = op2(%2, %4)
+  //   output (%4, %5)
+}
+
+void testGPU_Fusion() {}
 
 }} // torch::jit
