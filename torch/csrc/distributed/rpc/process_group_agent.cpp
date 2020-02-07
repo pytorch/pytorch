@@ -271,6 +271,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
       guard.unlock();
       std::rethrow_exception(listenLoopException_);
     }
+    LOG(INFO) << "NO exception currently";
   }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(

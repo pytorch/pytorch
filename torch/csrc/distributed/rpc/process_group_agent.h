@@ -140,7 +140,7 @@ class ProcessGroupAgent : public RpcAgent {
   void enqueueRecv(RecvWork work);
   // Loop for receiving messages. Calls listenLoopInternal and handles errors
   // such as timeouts on the process group.
-  void listenLoopInternal();
+  virtual void listenLoopInternal();
   // Main function for receiving messages
   void listenLoop();
   // exception_pointer correspnding to an exception raised in listenLoop (if
