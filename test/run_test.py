@@ -21,7 +21,9 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
-    'test_cpp_extensions',
+    'test_cpp_extensions_aot',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_jit',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
     'test_cuda',
@@ -90,7 +92,9 @@ WINDOWS_BLACKLIST = [
 ]
 
 ROCM_BLACKLIST = [
-    'test_cpp_extensions',
+    'test_cpp_extensions_aot',
+    'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_jit',
     'distributed/test_distributed',
     'test_multiprocessing',
     'distributed/rpc/test_rpc_spawn',
@@ -122,10 +126,10 @@ SIGNALS_TO_NAMES_DICT = {getattr(signal, n): n for n in dir(signal)
                          if n.startswith('SIG') and '_' not in n}
 
 CPP_EXTENSIONS_ERROR = """
-Ninja (https://ninja-build.org) must be available to run C++ extensions tests,
-but it could not be found. Install ninja with `pip install ninja`
-or `conda install ninja`. Alternatively, disable C++ extensions test with
-`run_test.py --exclude cpp_extensions`.
+Ninja (https://ninja-build.org) is required for some of the C++ extensions
+tests, but it could not be found. Install ninja with `pip install ninja`
+or `conda install ninja`. Alternatively, disable said tests with
+`run_test.py --exclude test_cpp_extensions_aot test_cpp_extensions_jit`.
 """
 
 
@@ -148,23 +152,36 @@ def run_test(executable, test_module, test_directory, options, *extra_unittest_a
 def test_cuda_primary_ctx(executable, test_module, test_directory, options):
     return run_test(executable, test_module, test_directory, options, '--subprocess')
 
-def test_cpp_extensions(executable, test_module, test_directory, options):
-    try:
-        cpp_extension.verify_ninja_availability()
-    except RuntimeError:
-        print(CPP_EXTENSIONS_ERROR)
-        return 1
+
+def _test_cpp_extensions_aot(executable, test_module, test_directory, options, use_ninja):
+    if use_ninja:
+        try:
+            cpp_extension.verify_ninja_availability()
+        except RuntimeError:
+            print(CPP_EXTENSIONS_ERROR)
+            return 1
+
+    # Wipe the build folder, if it exists already
     cpp_extensions_test_dir = os.path.join(test_directory, 'cpp_extensions')
-    return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                        cwd=cpp_extensions_test_dir)
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, 'build')
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    shell_env = os.environ.copy()
+    shell_env['USE_NINJA'] = str(1 if use_ninja else 0)
+    cmd = [sys.executable, 'setup.py', 'install', '--root', './install']
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
     if sys.platform != 'win32':
-        return_code = shell([sys.executable, 'setup.py', 'install', '--root', './install'],
-                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'))
+        return_code = shell(cmd,
+                            cwd=os.path.join(cpp_extensions_test_dir, 'no_python_abi_suffix_test'),
+                            env=shell_env)
         if return_code != 0:
             return return_code
 
+    # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
@@ -180,6 +197,16 @@ def test_cpp_extensions(executable, test_module, test_directory, options):
         return run_test(executable, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+
+
+def test_cpp_extensions_aot(executable, test_module, test_directory, options):
+    return _test_cpp_extensions_aot(executable, test_module, test_directory,
+                                    options, use_ninja=True)
+
+
+def test_cpp_extensions_aot_no_ninja(executable, test_module, test_directory, options):
+    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot',
+                                    test_directory, options, use_ninja=False)
 
 
 def test_distributed(executable, test_module, test_directory, options):
@@ -234,7 +261,8 @@ def test_distributed(executable, test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
-    'test_cpp_extensions': test_cpp_extensions,
+    'test_cpp_extensions_aot': test_cpp_extensions_aot,
+    'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
     'distributed/test_distributed': test_distributed,
 }
 
@@ -371,8 +399,8 @@ def find_test_index(test, selected_tests, find_last_index=False):
 
 
 def exclude_tests(exclude_list, selected_tests, exclude_message=None):
-    tests_copy = selected_tests[:]
     for exclude_test in exclude_list:
+        tests_copy = selected_tests[:]
         for test in tests_copy:
             if test.startswith(exclude_test):
                 if exclude_message is not None:
@@ -402,7 +430,9 @@ def get_selected_tests(options):
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
-            WINDOWS_BLACKLIST.append('cpp_extensions')
+            WINDOWS_BLACKLIST.append('cpp_extensions_aot')
+            WINDOWS_BLACKLIST.append('cpp_extensions_aot_no_ninja')
+            WINDOWS_BLACKLIST.append('cpp_extensions_jit')
             WINDOWS_BLACKLIST.append('jit')
             WINDOWS_BLACKLIST.append('jit_fuser')
 

@@ -38,6 +38,7 @@ def register_backend_select_methods(declarations, template_path, file_manager):
     for decl in declarations:
         for option in decl["options"]:
             if needs_backend_select(option):
+                assert option['use_c10_dispatcher'] == 'unboxed_only'
 
                 name = option['name']
                 if option.get('overload_name', '') != '':

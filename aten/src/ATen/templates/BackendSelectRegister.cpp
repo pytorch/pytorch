@@ -14,8 +14,10 @@ namespace {
 
 ${backend_select_method_definitions}
 
+#ifndef USE_STATIC_DISPATCH
 static auto registry = torch::RegisterOperators()
   ${backend_select_function_registrations};
+#endif
 
 } // namespace
 } // at
