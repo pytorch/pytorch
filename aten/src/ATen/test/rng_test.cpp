@@ -186,17 +186,6 @@ void test_random_from_to() {
           if (std::is_same<T, bool>::value) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
-            if (!torch::allclose(actual, expected)) {
-              std::cout << "T = " << typeid(T).name() << std::endl;
-              std::cout << "val = " << val << std::endl;
-              std::cout << "from = " << from << std::endl;
-              if (to.has_value()) {
-                std::cout << "to = " << *to << std::endl;
-              }
-              std::cout << "range = " << range << std::endl;
-              std::cout << "actual = " << actual << std::endl;
-              std::cout << "expected = " << expected << std::endl;
-            }
             ASSERT_TRUE(torch::allclose(actual, expected));
           }
         }
@@ -249,8 +238,6 @@ void test_random() {
     } else {
       range = static_cast<uint64_t>(std::numeric_limits<T>::max()) + 1;
     }
-    // std::cout << "val = " << val << std::endl;
-    // std::cout << "range = " << range << std::endl;
     T exp;
     if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
       exp = val % range;
@@ -262,12 +249,9 @@ void test_random() {
     ASSERT_TRUE(static_cast<int64_t>(exp) < range);
 
     const auto expected = torch::full_like(actual, exp);
-    // std::cout << "actual = " << actual << std::endl;
-    // std::cout << "expected = " << expected << std::endl;
     if (std::is_same<T, bool>::value) {
       ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
     } else {
-      // std::cout << "(expected - actual) = " << (expected - actual) << std::endl;
       ASSERT_TRUE(torch::allclose(actual, expected));
     }
   }
