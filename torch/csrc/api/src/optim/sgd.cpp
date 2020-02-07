@@ -114,7 +114,7 @@ void SGD::load(serialize::InputArchive& archive) {
     torch::optim::serialize(archive, "iteration_", iteration_);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
-    for (size_t idx = 0; idx < params.size(); idx++) {
+    for (size_t idx = 0; idx < momentum_buffers.size(); idx++) {
       auto state = std::make_unique<SGDParamState>();
       state->momentum_buffer(momentum_buffers[idx]);
       state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);

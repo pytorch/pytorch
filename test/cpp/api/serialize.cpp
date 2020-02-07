@@ -111,9 +111,10 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   step(optim2, model2);
   step(optim2_2, model2);
 
-  // Do 2 steps of model 3 while saving the optimizer
+  // Do 1 step of model 3
   step(optim3, model3);
 
+  // save the optimizer
   auto optim_tempfile = c10::make_tempfile();
   torch::save(optim3, optim_tempfile.name);
   torch::load(optim3_2, optim_tempfile.name);
@@ -125,7 +126,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
 
   // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  //ASSERT_TRUE(optim3_2_state.size() == 2);
+  ASSERT_TRUE(optim3_2_state.size() == 2);
 
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
@@ -138,7 +139,9 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
     is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim3_state);
   }
 
+  // Do step2 for model 3
   step(optim3_2, model3);
+
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
   param3 = model3->named_parameters();
@@ -509,12 +512,14 @@ TEST(SerializeTest, Optim_Adagrad) {
 }
 
 TEST(SerializeTest, Optim_SGD) {
-  test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1));
+  test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
-  auto optim1 = torch::optim::SGD(
-      model1->parameters(), torch::optim::SGDOptions(0.01).momentum(0.9));
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::SGD(model1_params, torch::optim::SGDOptions(0.01).momentum(0.9));
 
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -524,16 +529,18 @@ TEST(SerializeTest, Optim_SGD) {
     optimizer.step();
   };
   step(optim1, model1);
-  auto optim1_2 = SGD(model1->parameters(), torch::optim::SGDOptions(1e-1));
+  auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1));
 
   std::vector<at::Tensor> momentum_buffers;
   int64_t iteration_{0};
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (size_t i = 0; i < params_.size(); i++) {
-    auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-    const SGDParamState& curr_state_ = static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
-    momentum_buffers.emplace_back(curr_state_.momentum_buffer());
+    if(i != (params_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      const SGDParamState& curr_state_ = static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
+      momentum_buffers.emplace_back(curr_state_.momentum_buffer());
+    }
   }
   // write momentum_buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
