@@ -281,7 +281,10 @@ Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen
       if (std::is_same<scalar_t, bool>::value) {
         range = 2;
       } else {
-        range = static_cast<int64_t>(std::numeric_limits<scalar_t>::max()) - from + 1;
+        const auto t_max_val = std::numeric_limits<scalar_t>::max();
+        const auto int64_max_val = std::numeric_limits<int64_t>::max();
+        const int64_t max_val = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
+        range = max_val - from + 1;
       }
     });
     random_from_to_stub(iter.device_type(), iter, range, from, gen);

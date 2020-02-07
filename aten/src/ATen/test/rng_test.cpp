@@ -46,7 +46,10 @@ Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generat
       if (std::is_same<scalar_t, bool>::value) {
         range = 2;
       } else {
-        range = static_cast<int64_t>(std::numeric_limits<scalar_t>::max()) - from + 1;
+        const auto t_max_val = std::numeric_limits<scalar_t>::max();
+        const auto int64_max_val = std::numeric_limits<int64_t>::max();
+        const int64_t max_val = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
+        range = max_val - from + 1;
       }
     });
     native::templates::random_from_to_kernel(iter, range, from, gen);
@@ -91,9 +94,13 @@ class RNGTest : public ::testing::Test {
 template<c10::ScalarType S, typename T>
 void test_random_from_to() {
   const auto t_min_val = std::numeric_limits<T>::lowest();
-  const auto int64_min_value = std::numeric_limits<int64_t>::lowest();
-  const int64_t min_val = std::is_floating_point<T>::value ? int64_min_value : static_cast<int64_t>(t_min_val);
-  const auto max_val = std::numeric_limits<T>::max();
+  const auto int64_min_val = std::numeric_limits<int64_t>::lowest();
+  const int64_t min_val = std::is_floating_point<T>::value ? int64_min_val : static_cast<int64_t>(t_min_val);
+
+  const auto t_max_val = std::numeric_limits<T>::max();
+  const auto int64_max_val = std::numeric_limits<int64_t>::max();
+  const int64_t max_val = std::is_floating_point<T>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
+
   const auto uint64_max_val = std::numeric_limits<uint64_t>::max();
 
   std::vector<int64_t> froms;
@@ -154,7 +161,7 @@ void test_random_from_to() {
 
           T exp;
           uint64_t range;
-          if (!to.has_value() && from == std::numeric_limits<int64_t>::min()) {
+          if (!to.has_value() && from == int64_min_val) {
             exp = val;
             full_64_bit_range_case_covered = true;
           } else {
@@ -162,7 +169,7 @@ void test_random_from_to() {
               range = *to - from;
               from_to_case_covered = true;
             } else {
-              range = static_cast<int64_t>(std::numeric_limits<T>::max()) - from + 1;
+              range = max_val - from + 1;
               from_case_covered = true;
             }
             if (range < (1ULL << 32)) {
