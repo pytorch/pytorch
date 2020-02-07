@@ -106,15 +106,15 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
 
   module.def(
       "backward",
-      [](const std::vector<torch::Tensor>& roots) {
+      [](const std::vector<torch::Tensor>& roots, bool retainGraph = false) {
         torch::autograd::variable_list variables;
         for (const auto& root : roots) {
           variables.emplace_back(root);
         }
-        DistEngine::getInstance().execute(variables);
+        DistEngine::getInstance().execute(variables, retainGraph);
       },
       R"(
-backward(roots: List[Tensor]) -> None
+backward(roots: List[Tensor], retain_graph = False) -> None
 
 Kicks off the distributed backward pass using the provided roots. This
 currently implements the :ref:`fast-mode-algorithm` which
@@ -135,6 +135,11 @@ gradients using the :meth:`~torch.distributed.autograd.get_gradients` API.
 Arguments:
     roots (list): Tensors which represent the roots of the autograd
                   computation. All the tensors should be scalars.
+    retain_graph(bool, optional): If False, the graph used to compute the grad
+                  will be freed. Note that in nearly all cases setting this
+                  option to True is not needed and often can be worked around
+                  in a much more efficient way. Usually, you need to set this
+                  to True to run backward multiple times.
 
 Example::
 
@@ -145,6 +150,7 @@ Example::
     >>      dist_autograd.backward(loss)
 )",
       py::arg("roots"),
+      py::arg("retain_graph") = false,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

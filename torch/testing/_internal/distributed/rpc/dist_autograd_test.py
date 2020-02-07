@@ -1528,7 +1528,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         offsets = torch.LongTensor([0, 4])
 
         local_res = local_embedding(input, offsets, per_sample_weights)
-        local_res.sum().backward()
+
+        # Run backward twice.
+        torch.autograd.backward([local_res.sum()], retain_graph=True)
+        torch.autograd.backward([local_res.sum()])
         local_grad = local_embedding.weight.grad
 
         with dist_autograd.context() as context_id:
@@ -1538,6 +1541,8 @@ class DistAutogradTest(RpcAgentTestFixture):
                 args=(remote_embedding, input, offsets, per_sample_weights),
             )
 
+            # Run backward twice to test accumulation of sparse gradients.
+            dist_autograd.backward([res.sum()], retain_graph=True)
             dist_autograd.backward([res.sum()])
 
             remote_grad = rpc.rpc_sync(
@@ -1682,6 +1687,60 @@ class DistAutogradTest(RpcAgentTestFixture):
 
         dist.barrier()
 
+    @dist_init
+    def test_backward_accumulate_grads(self):
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            t3 = torch.matmul(t1, t2)
+            # Run backward twice.
+            torch.autograd.backward([t3.sum()], retain_graph=True)
+            torch.autograd.backward([t3.sum()])
+
+            t3 = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul, args=(t1, t2))
+            # Run backward twice.
+            dist_autograd.backward([t3.sum()], retain_graph=True)
+            dist_autograd.backward([t3.sum()])
+
+            # Verify the gradients are same for local and remote execution.
+            grads = dist_autograd.get_gradients(context_id)
+            self.assertEqual(2, len(grads))
+            self.assertIn(t1, grads)
+            self.assertIn(t2, grads)
+            self.assertEqual(t1.grad, grads[t1])
+            self.assertEqual(t2.grad, grads[t2])
+
+    @staticmethod
+    def _test_nested_backward_accumulate_grads(t1, t2, dst_rank):
+        return rpc.rpc_sync('worker{}'.format(dst_rank), torch.matmul, args=(t1, t2))
+
+    @dist_init
+    def test_nested_backward_accumulate_grads(self):
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            loss = rpc.rpc_sync(
+                'worker{}'.format(self._next_rank()),
+                DistAutogradTest._test_nested_backward_accumulate_grads,
+                args=(t1, t2, self._next_rank())).sum()
+
+            # Run backward twice.
+            dist_autograd.backward([loss], retain_graph=True)
+            dist_autograd.backward([loss])
+
+    @dist_init
+    def test_multiple_backward(self):
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            loss = rpc.rpc_sync(
+                'worker{}'.format(self._next_rank()),
+                torch.add,
+                args=(t1, t2, self._next_rank())).sum()
+
+            # Run backward in a loop multiple times.
+            for i in range(1000):
+                dist_autograd.backward([loss], retain_graph=True)
 
 @unittest.skipIf(
     not torch._six.PY3,
