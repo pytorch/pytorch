@@ -207,15 +207,22 @@ class CAFFE2_API Tensor {
   at::MemoryFormat suggest_memory_format(
       bool channels_last_strides_exact_match = false) const {
     // Setting channels_last_strides_exact_match to true forces function to
-    // check 0,1 - sized dimention strides.
-    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
-      if (!channels_last_strides_exact_match || get_channels_last_strides(sizes()) == strides()) {
-        if (sizes().size() == 4) {
+    // check 0,1 - sized dimension strides.
+    if (!is_mkldnn() && !is_sparse()) {
+      if (impl_->is_strides_like_channels_last()) {
+        if (!channels_last_strides_exact_match ||
+            get_channels_last_strides(sizes(), at::MemoryFormat::ChannelsLast) == strides()) {
           return at::MemoryFormat::ChannelsLast;
         }
-        return at::MemoryFormat::ChannelsLast3d;
+      }
+      else if (impl_->is_strides_like_channels_last_3d()) {
+        if (!channels_last_strides_exact_match ||
+            get_channels_last_strides(sizes(), at::MemoryFormat::ChannelsLast3d) == strides()) {
+          return at::MemoryFormat::ChannelsLast3d;
+        }
       }
     }
+
     return at::MemoryFormat::Contiguous;
   }
 

@@ -97,19 +97,11 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) const {
-
-  std::vector<int64_t> indices;
-  if (memory_format == MemoryFormat::ChannelsLast && sizes_.size() == 4) {
-    indices.assign({1, 3, 2, 0});
-  }
-  else if (memory_format == MemoryFormat::ChannelsLast3d && sizes_.size() == 5) {
-    indices.assign({1, 4, 3, 2, 0});
-  }
-
-  if (indices.empty()) {
+  if (!is_supported_channels_last_memory_format(sizes_, memory_format)) {
     return false;
   }
 
+  std::vector<int64_t> indices = get_channels_last_stride_indices(sizes_, memory_format);
   int64_t expected = 1;
   for (auto& d : indices) {
     if (sizes_[d] != 1) {
@@ -123,8 +115,8 @@ bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) co
   return true;
 }
 
-bool TensorImpl::compute_strides_like_channels_last() const {
-  return is_channels_last_strides(sizes_, strides_);
+bool TensorImpl::compute_strides_like_channels_last(MemoryFormat memory_format) const {
+  return is_channels_last_strides(sizes_, strides_, memory_format);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {
@@ -265,6 +257,7 @@ void TensorImpl::copy_tensor_metadata(
   dest_impl->is_channels_last_contiguous_ = src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ = src_impl->is_channels_last_3d_contiguous_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
+  dest_impl->is_channels_last_3d_ = src_impl->is_channels_last_3d_;
   dest_impl->is_non_overlapping_and_dense_ = src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;

@@ -1353,14 +1353,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes(), MemoryFormat::ChannelsLast));
         break;
       }
       case MemoryFormat::ChannelsLast3d: {
         TORCH_CHECK(
             dim() == 5,
             "required rank 5 tensor to use channels_last_3d format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes(), MemoryFormat::ChannelsLast3d));
         break;
       }
       case MemoryFormat::Preserve:
@@ -1376,6 +1376,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_strides_like_channels_last_3d() const {
+    return is_channels_last_3d_;
   }
 
   bool is_non_overlapping_and_dense() const {
@@ -1460,7 +1464,7 @@ private:
 
   bool compute_channels_last_contiguous(MemoryFormat memory_format) const;
 
-  bool compute_strides_like_channels_last() const;
+  bool compute_strides_like_channels_last(MemoryFormat memory_format) const;
 
   bool compute_non_overlapping_and_dense() const;
 
@@ -1480,11 +1484,12 @@ protected:
     is_contiguous_ = compute_contiguous();
     is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
     is_channels_last_3d_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
-    // is_channels_last_ is suggested memory_format.
+    // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
     // Being channels_last_contiguous doesn't necessarily mean the tensor is
-    // strided like channels_last: for strides on size-1 dimension could suggest
+    // strided like channels_last: for strides on channel dimension could suggest
     // desired memory_layout, but it doesn't affect memory storage
-    is_channels_last_ = compute_strides_like_channels_last();
+    is_channels_last_ = compute_strides_like_channels_last(MemoryFormat::ChannelsLast);
+    is_channels_last_3d_ = (!is_channels_last_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast3d));
     is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
   }
 
@@ -1596,8 +1601,8 @@ protected:
   // should pack this into a bitfield.
   bool is_contiguous_ = true;
 
-  // Tensor is stored in the channels last memory format, when dimensions
-  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // Tensor is stored in the channels last 2d memory format, when dimensions
+  // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
   bool is_channels_last_ = false;
@@ -1605,6 +1610,12 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Tensor is stored in the channels last 3d memory format, when dimensions
+  // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (< N-strides)
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
+  bool is_channels_last_3d_ = false;
 
   // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
   // contiguous memory block.
@@ -1698,7 +1709,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 30,
+              sizeof(TensorImpl) == sizeof(int64_t) * 31,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
