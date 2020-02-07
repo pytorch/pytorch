@@ -1073,7 +1073,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=5),
-                       qparams=hu.qparams()),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5))
     def test_batch_norm(self, X, Y_scale, Y_zero_point):
