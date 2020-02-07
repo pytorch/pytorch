@@ -22,8 +22,7 @@ int main(int argc, char **argv) {
   LLVMContext Context;
   cl::ParseCommandLineOptions(argc, argv);
   SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseIRFile(
-      InputFilename, Err, Context, true /*!NoVerify*/, "" /*ClDataLayout*/);
+  std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
 
   auto opDependencyPass = PassRegistry::getPassRegistry()
       ->getPassInfo(StringRef("op_dependency"))
