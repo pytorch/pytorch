@@ -1295,6 +1295,15 @@ class TestONNXRuntime(unittest.TestCase):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
+    def test_take(self):
+        class TakeModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.take(x, y)
+
+        x = torch.randn(6, 4, 3, 3)
+        y = torch.tensor([4, 1, 7, 15, 63])
+        self.run_test(TakeModel(), (x, y))
+
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
