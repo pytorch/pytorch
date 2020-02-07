@@ -1,4 +1,3 @@
-#ifdef USE_FBGEMM
 
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 
@@ -12,9 +11,12 @@
 
 #include <torch/custom_class.h>
 
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+
+#ifdef USE_FBGEMM
 
 namespace at {
 namespace native {

@@ -15,7 +15,7 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion, skipIfNoLapack, enableScriptTest
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack, enableScriptTest
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -233,7 +233,6 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -273,7 +272,6 @@ class TestONNXRuntime(unittest.TestCase):
         images = [image]
         return images
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
@@ -281,7 +279,6 @@ class TestONNXRuntime(unittest.TestCase):
         images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([12])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_keypoint_rcnn(self):
         class KeyPointRCNN(torch.nn.Module):
@@ -939,6 +936,16 @@ class TestONNXRuntime(unittest.TestCase):
         update = torch.randn(1, 2)
         self.run_test(CopyModel3(), (x, update))
 
+        class CopyModel4(torch.nn.Module):
+            def forward(self, x, ind, data):
+                x[ind] = data
+                return x
+
+        x = torch.randn(3, 4)
+        ind = torch.tensor(2)
+        data = torch.randn(4)
+        self.run_test(CopyModel4(), (x, ind, data))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_ellipsis(self):
         class CopyModel(torch.nn.Module):
@@ -994,6 +1001,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandNLike(), x)
+        self.run_test(torch.jit.script(RandNLike()), x)
 
         class RandLike(torch.nn.Module):
             def forward(self, x):
