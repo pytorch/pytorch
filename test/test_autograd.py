@@ -2304,6 +2304,12 @@ class TestAutograd(TestCase):
         def func(B):
             return torch.eig(B, eigenvectors=True)
 
+        def func_eigvals(B):
+            return torch.eig(B, eigenvectors=True)[0]
+
+        def func_eigvecs(B):
+            return torch.eig(B, eigenvectors=True)[1]
+
         def run_test(dims):
             # The backward operation for eig only works for real eigenvalues,
             # so the matrix should be B = U^{-1}*A*U where A is a random
@@ -2318,6 +2324,10 @@ class TestAutograd(TestCase):
 
             gradcheck(func, [B])
             gradgradcheck(func, [B])
+            gradcheck(func_eigvals, [B])
+            gradgradcheck(func_eigvals, [B])
+            gradcheck(func_eigvecs, [B])
+            gradgradcheck(func_eigvecs, [B])
 
         for dims in [(3, 3), (5, 5)]:
             run_test(dims)
