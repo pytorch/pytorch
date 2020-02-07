@@ -186,7 +186,7 @@ This strategy uses an exterior "WrapFunction" that extracts arguments on behalf 
 Interior WrapFunction_ specializations are defined for each CastPolicy.
 ********************************************************************************************************/
 
-// Base template for WrapFunction_, which is specialized to host call methods for each CastPolicy
+// Base template for WrapFunction_, which is specialized to contain a "call" method each CastPolicy
 template<CastPolicy policy, class Redispatch, Redispatch* F, class Ret, class ArgList> struct WrapFunction_ {};
 
 // CastPolicy::fp16
