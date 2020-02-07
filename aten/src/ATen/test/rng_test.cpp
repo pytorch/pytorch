@@ -151,26 +151,20 @@ void test_random_from_to() {
 
           auto actual = torch::empty({3, 3}, S);
           actual.random_(from, to, gen);
-          std::cout << "T = " << typeid(T).name() << std::endl;
-          std::cout << "val = " << val << std::endl;
-          std::cout << "from = " << from << std::endl;
+
           T exp;
+          uint64_t range;
           if (!to.has_value() && from == std::numeric_limits<int64_t>::min()) {
             exp = val;
             full_64_bit_range_case_covered = true;
-            std::cout << "to = full" << std::endl;
           } else {
-            uint64_t range;
             if (to.has_value()) {
-              std::cout << "to = " << *to << std::endl;
               range = *to - from;
               from_to_case_covered = true;
             } else {
-              std::cout << "to = none" << std::endl;
               range = static_cast<int64_t>(std::numeric_limits<T>::max()) - from + 1;
               from_case_covered = true;
             }
-            std::cout << "range = " << range << std::endl;
             if (range < (1ULL << 32)) {
               exp = static_cast<T>(static_cast<int64_t>((static_cast<uint32_t>(val) % range + from)));
             } else {
@@ -178,17 +172,24 @@ void test_random_from_to() {
             }
           }
           ASSERT_TRUE(from <= exp);
-          // std::cout << from << " <= " << exp;
           if (to) {
-            // std::cout << " < " << *to << std::endl;
             ASSERT_TRUE(static_cast<int64_t>(exp) < *to);
           }
           const auto expected = torch::full_like(actual, exp);
-          std::cout << "actual = " << actual << std::endl;
-          std::cout << "expected = " << expected << std::endl;
           if (std::is_same<T, bool>::value) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
+            if (!torch::allclose(actual, expected)) {
+              std::cout << "T = " << typeid(T).name() << std::endl;
+              std::cout << "val = " << val << std::endl;
+              std::cout << "from = " << from << std::endl;
+              if (to.has_value()) {
+                std::cout << "to = " << *to << std::endl;
+              }
+              std::cout << "range = " << range << std::endl;
+              std::cout << "actual = " << actual << std::endl;
+              std::cout << "expected = " << expected << std::endl;
+            }
             ASSERT_TRUE(torch::allclose(actual, expected));
           }
         }
