@@ -383,7 +383,7 @@ size_t getMaxWorkspaceSize(
 }
 
 template<typename perf_t>
-perf_t getValidAlgorithms(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
+std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
 
 // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
@@ -469,6 +469,11 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size));
+
+      // Free the cached blocks in our caching allocator. They are
+      // needed here because the above benchmarking uses a huge amount of memory,
+      // e.g. a few GBs.
+      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
@@ -534,6 +539,11 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size));
+
+      // Free the cached blocks in our caching allocator. They are
+      // needed here because the above benchmarking uses a huge amount of memory,
+      // e.g. a few GBs.
+      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
@@ -601,6 +611,11 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size));
+
+      // Free the cached blocks in our caching allocator. They are
+      // needed here because the above benchmarking uses a huge amount of memory,
+      // e.g. a few GBs.
+      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
@@ -619,77 +634,20 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 };
 
 template<typename perf_t>
-void findAlgorithm(const ConvolutionArgs& args, bool benchmark, perf_t* algoPerf) {
-  using search = algorithm_search<perf_t>;
-  auto& cache = search::cache();
-
-  if (cache.find(args.params, algoPerf)) {
-    return;
-  }
-
-  if (args.params.deterministic && !benchmark) {
-    algoPerf->algo = search::DEFAULT_ALGO;
-    if (args.params.dataType == CUDNN_DATA_HALF) {
-      algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
-    } else {
-      algoPerf->mathType = CUDNN_DEFAULT_MATH;
-    }
-    search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
-    return;
-  }
-
-  if (benchmark) {
-    if (cache.find(args.params, algoPerf)) {
-      // re-check cache since another thread may have benchmarked the algorithm
-      return;
-    }
-  }
-
-  auto perfResults = search::findAlgorithms(args, benchmark);
-  // for deterministic algo, look at all the perf results and return the best
-  // deterministic algo
-  if (perfResults.status == CUDNN_STATUS_SUCCESS &&
-      !(args.params.deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
-
-      // if benchmarking, map the original params with the found algo+math type for re-use
-      if (benchmark) {
-        cache.insert(args.params, perfResults);
-
-        // Free the cached blocks in our caching allocator. They are
-        // needed here because the above benchmarking uses a huge amount of memory,
-        // e.g. a few GBs.
-        c10::cuda::CUDACachingAllocator::emptyCache();
-      }
-
-      *algoPerf = perfResults;
-  } else {
-      algoPerf->algo = search::DEFAULT_ALGO;
-      if (args.params.dataType == CUDNN_DATA_HALF) {
-        algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
-      } else {
-        algoPerf->mathType = CUDNN_DEFAULT_MATH;
-      }
-      search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
-  }
-}
-
-template<typename perf_t>
 class AlgoIterator {
+  const ConvolutionArgs &args;
+  bool benchmark;
 
 public:
+  AlgoIterator(const ConvolutionArgs &args, bool benchmark): args(args), benchmark(benchmark) {}
+
   void try_all(void f(const perf_t &perf)) {
-    perf_t algoPerf;
-    findAlgorithm(args, benchmark, algoPerf);
-
     using search = algorithm_search<perf_t>;
-    try {
-      f(algoPerf);
-    } catch (const std::exception& e) {
+    auto& cache = search::cache();
 
-      cudaGetLastError(); // clear OOM error
+    perf_t algoPerf;
 
-      // switch to default algorithm and record it in the cache to prevent
-      // further OOM errors
+    if (args.params.deterministic && !benchmark) {
       algoPerf->algo = search::DEFAULT_ALGO;
       if (args.params.dataType == CUDNN_DATA_HALF) {
         algoPerf->mathType = CUDNN_TENSOR_OP_MATH;
@@ -697,9 +655,26 @@ public:
         algoPerf->mathType = CUDNN_DEFAULT_MATH;
       }
       search::getWorkspaceSize(args, algoPerf->algo, &(algoPerf->memory));
-      search::cache().insert(args.params, *algoPerf);
-      return Workspace(algoPerf->memory);
+      f(algoPerf);
+      return;
     }
+
+    if (cache.find(args.params, algoPerf)) {
+      f(algoPerf);
+      return;
+    }
+
+    auto perfResults = search::findAlgorithms(args, benchmark);
+    for (auto &algoPerf : perfResults) {
+      try {
+        f(algoPerf);
+        cache.insert(args.params, perfResults);
+        return;
+      } catch (const std::exception& e) {
+        cudaGetLastError(); // clear CUDA error
+      }
+    }
+    TORCH_CHECK(false, "Unable to find a valid cuDNN algorithm to run convolution");
   }
 }
 
