@@ -378,14 +378,14 @@ void callBoxedWorkaround(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 }  // namespace
 
-void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::ProfilerId);
-  RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
-  callBoxedWorkaround(op, stack);
-}
+// void profile_wrapper(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+//   c10::impl::ExcludeDispatchKeyGuard key_guard(c10::DispatchKey::ProfilerId);
+//   RECORD_FUNCTION(op.schema().name(), *stack, torch::autograd::Node::peek_at_next_sequence_nr());
+//   callBoxedWorkaround(op, stack);
+// }
 
-auto registry = c10::Dispatcher::singleton()
-  .registerBackendFallbackKernel(
-    c10::DispatchKey::ProfilerId,
-    c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>()
-  );
+// auto registry = c10::Dispatcher::singleton()
+//   .registerBackendFallbackKernel(
+//     c10::DispatchKey::ProfilerId,
+//     c10::KernelFunction::makeFromBoxedFunction<&profile_wrapper>()
+//   );

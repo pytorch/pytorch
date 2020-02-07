@@ -23,7 +23,8 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
-from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
+from .utils import CodeTemplate, nested_dict, write, uninplace_api_name, \
+    is_tensor_method
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
@@ -254,6 +255,10 @@ if (${cond}) {
 }
 """)
 
+RECORD_FUNCTION = CodeTemplate("""\
+RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+""")
+
 SELECT = CodeTemplate("""\
 
 if (${cond}) {
@@ -307,6 +312,39 @@ REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
+# ProfiledType templates
+PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES = CodeTemplate("""\
+{
+    AutoNonProfileTypeMode non_prof_type_mode;
+    RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+    return ${base_type_call};
+}
+""")
+
+PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES = CodeTemplate("""\
+{
+  AutoNonProfileTypeMode non_prof_type_mode;
+  RECORD_FUNCTION("${name}", std::vector<c10::IValue>({${input_names}}), Node::peek_at_next_sequence_nr());
+  ${base_type_call};
+}
+""")
+
+PROFILE_CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
+self.${api_name}(${unpacked_method_args})""")
+
+PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &ProfiledType::${api_name}>(DispatchKey::ProfilerId)
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
+PROFILE_WRAPPER_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .kernel<${return_type} (${formal_types})>(DispatchKey::ProfilerId, &ProfiledType::${api_name})
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
 
 FACTORY_FUNCTION_NAMES = None
 
@@ -513,10 +551,13 @@ def gen_variable_type(out, aten_declarations, template_path):
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
+    PROFILED_TYPE_CPP = CodeTemplate.from_file(template_path + '/ProfiledType.cpp')
 
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
+    profiled_method_definitions = []
+    profiled_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
@@ -533,16 +574,82 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
 
+            # TODO: ????? type mismatch in generated wrapper?
+            if declaration['name'] != 'polygamma':
+                # Emit ProfiledType code
+                profiled_body = emit_profiled_body(declaration)
+                profiled_method_definitions.append(METHOD_DEFINITION.substitute(
+                    declaration, type_definition_body=profiled_body))
+
+                if declaration['use_c10_dispatcher'] == 'full':
+                    profiled_wrapper_registrations.append(PROFILE_WRAPPER_REGISTRATION.substitute(
+                        declaration, formal_types=formal_types))
+                else:
+                    assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                    profiled_wrapper_registrations.append(PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                        declaration, formal_types=formal_types))
+
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
+        'profiled_method_definitions': profiled_method_definitions,
+        'profiled_wrapper_registrations': profiled_wrapper_registrations
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
 
+    write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
+
+def emit_profiled_body(declaration):
+    arguments = declaration['arguments']
+    returns = declaration['returns']
+    func = declaration['derivative']
+    name = declaration['name']
+    inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 0
+
+    processed_args = []
+    for a in arguments:
+        processed_args.append('{}'.format(a['name']))
+
+    if is_tensor_method(declaration):
+        base_type_call = PROFILE_CALL_DISPATCH_VIA_METHOD.substitute(
+            api_name=name,
+            unpacked_method_args=processed_args[1:]
+        )
+    else:
+        base_type_call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
+            api_name=name,
+            unpacked_args=processed_args
+        )
+
+    def check_record_function_input_type(simple_type):
+        return simple_type in ['Tensor', 'Scalar']
+
+    def record_function_input_names():
+        return ', '.join([
+            arg['name'] for arg in declaration['arguments']
+            if check_record_function_input_type(arg['simple_type'])])
+
+    if returns_void:
+        call = PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
+            base_type_call=base_type_call,
+            name=name,
+            input_names=record_function_input_names(),
+        )
+    else:
+        call = PROFILE_DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
+            base_type_call=base_type_call,
+            name=name,
+            input_names=record_function_input_names(),
+        )
+
+    return [call]
 
 def emit_body(declaration):
     strategy = dispatch_strategy(declaration)

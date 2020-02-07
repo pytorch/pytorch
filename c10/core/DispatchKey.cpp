@@ -44,6 +44,8 @@ const char* toString(DispatchKey t) {
       return "TESTING_ONLY_GenericModeTensorId";
     case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
       return "TESTING_ONLY_GenericWrapperTensorId";
+    case DispatchKey::ProfilerId:
+      return "ProfileId";
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
