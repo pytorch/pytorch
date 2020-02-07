@@ -1004,6 +1004,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandNLike(), x)
+        self.run_test(torch.jit.script(RandNLike()), x)
 
         class RandLike(torch.nn.Module):
             def forward(self, x):
