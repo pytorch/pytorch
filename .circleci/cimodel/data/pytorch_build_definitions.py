@@ -13,7 +13,7 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = "a8006f9a-272d-4478-b137-d121c6f05c83"
+DOCKER_IMAGE_VERSION = "07597f23-fa81-474c-8bef-5c8a91b50595"
 
 
 @dataclass
@@ -261,7 +261,7 @@ def instantiate_configs():
                 and fc.find_prop('compiler_version') == '5.4':
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (compiler_name == "gcc"

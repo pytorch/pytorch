@@ -131,8 +131,8 @@ static Variable applySelect(const Variable& self, int64_t dim, PyObject* index, 
   return self.select(dim, unpacked_index);
 }
 
-static Variable sequenceToVariable(c10::TensorTypeId type_id, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(type_id, kLong, c10::nullopt, seq);
+static Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObject* seq) {
+  return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
 static Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
@@ -213,7 +213,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (PySequence_Check(obj)) {
       // TODO: Naughty naughty get out of jail free
       // (Fixing this means I have to fix the call chain though :/)
-      handle_var(sequenceToVariable(legacyExtractTypeId(self), obj));
+      handle_var(sequenceToVariable(legacyExtractDispatchKey(self), obj));
     } else {
       auto index = THPObjectPtr(PyNumber_Index(obj));
       if (!index) {

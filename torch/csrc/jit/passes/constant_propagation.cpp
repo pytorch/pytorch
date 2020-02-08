@@ -48,13 +48,6 @@ std::unordered_set<Symbol> skip_list = {
     // where the constant tensor would be large but cheap to create.
 };
 
-std::unordered_set<Symbol> tuple_ops = {
-    prim::TupleSlice,
-    prim::TupleIndex,
-    prim::TupleUnpack,
-    prim::TupleConstruct,
-};
-
 struct ConstantPropagator {
   // Runs constant propagation with an aliasing db and checks if inputs or
   // outputs might be mutated in the graph
@@ -82,20 +75,11 @@ struct ConstantPropagator {
     }
   }
 
-  void pushIValue(Value* v, Stack& stack) {
-    if (tuples.count(v)) {
-      const auto& ival = tuples[v];
-      stack.push_back(ival);
-    } else {
-      stack.push_back(*toIValue(v));
-    }
-  }
-
   std::vector<IValue> runNode(Node* n) {
     auto op = getOperation(n);
     Stack stack;
     for (auto input : n->inputs()) {
-      pushIValue(input, stack);
+      stack.push_back(*toIValue(input));
     }
     op(stack);
     auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
@@ -115,34 +99,6 @@ struct ConstantPropagator {
       }
     });
     return var_outputs;
-  }
-
-  // Tuples are not representable as constants, however
-  // we can try to insert each tuple element and then create a TupleConstruct
-  // from the elements
-  Value* tryInsertTuple(const IValue& tuple, Value* tuple_to_replace) {
-    auto type = tuple_to_replace->type();
-    TupleTypePtr tup_type;
-    if (auto opt = type->cast<OptionalType>()) {
-      tup_type = opt->getElementType()->expect<TupleType>();
-    } else {
-      tup_type = type->expect<TupleType>();
-    }
-    auto type_elements = tup_type->elements();
-    const auto& tuple_elements = tuple.toTuple()->elements();
-    std::vector<Value*> inputs;
-    for (size_t i = 0; i < type_elements.size(); ++i) {
-      auto inp = tryInsertConstant(*graph_, tuple_elements[i]);
-      if (inp) {
-        inputs.push_back(*inp);
-      } else {
-        return nullptr;
-      }
-    }
-    auto new_tuple = graph_->insertNode(graph_->createTuple(inputs));
-    tuple_to_replace->replaceAllUsesWith(new_tuple->output());
-    new_tuple->output()->copyMetadata(tuple_to_replace);
-    return new_tuple->output();
   }
 
   void propagateNode(Node* n) {
@@ -168,19 +124,6 @@ struct ConstantPropagator {
           (*new_output)->setType(n->outputs()[i]->type());
         }
         n->outputs()[i]->replaceAllUsesWith(*new_output);
-      } else if (outputs[i].isTuple()) {
-        // we save the new Tuple ivalue in case it is used in an op that
-        // forwards tuples later in the graph, such as a Tuple index
-        auto tuple_val = n->outputs()[i];
-        if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
-          GRAPH_UPDATE(
-              "Folding tuple %",
-              n->outputs()[i]->debugName(),
-              " with ",
-              getHeader(new_tup->node()));
-          tuple_val = new_tup;
-        }
-        tuples[tuple_val] = std::move(outputs[i]);
       }
       // If we cannot insert the IValue as a constant, give up replacing the
       // node and let DCE remove it
@@ -322,12 +265,6 @@ struct ConstantPropagator {
         })) {
       return true;
     }
-    if (tuple_ops.count(n->kind())) {
-      return (
-          std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-            return v->node()->kind() == prim::Constant || tuples.count(v);
-          }));
-    }
     return false;
   };
 
@@ -390,8 +327,6 @@ struct ConstantPropagator {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
-  // these are tuples which we know the computed IValue for
-  std::unordered_map<Value*, IValue> tuples;
 };
 } // anonymous namespace
 

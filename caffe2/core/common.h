@@ -92,7 +92,7 @@ inline Dst dynamic_cast_if_rtti(Src ptr) {
 }
 
 // SkipIndices are used in operator_fallback_gpu.h and operator_fallback_mkl.h
-// as utilty functions that marks input / output indices to skip when we use a
+// as utility functions that marks input / output indices to skip when we use a
 // CPU operator as the fallback of GPU/MKL operator option.
 template <int... values>
 class SkipIndices {

@@ -114,8 +114,11 @@ namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
 DEFINE_DISPATCH(cauchy_stub);
+DEFINE_DISPATCH(exponential_stub);
 DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
+DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(normal_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -184,10 +187,23 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+Tensor& log_normal_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_stub(iter.device_type(), iter, mean, std, gen);
+  return self;
+}
 
 Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& exponential_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_stub(iter.device_type(), iter, lambda, gen);
   return self;
 }
 
@@ -196,6 +212,49 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
   auto iter = TensorIterator::nullary_op(self);
   geometric_stub(iter.device_type(), iter, p, gen);
   return self;
+}
+
+Tensor& normal_cpu_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  normal_stub(kCPU, self, mean, std, gen);
+  return self;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, double std, Generator* gen) {
+  normal_cpu_(output, 0, std, gen);
+  output.add_(mean);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  auto mean_tensor = at::full({}, mean, output.options());
+  output.mul_(std).add_(mean_tensor);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  output.mul_(std).add_(mean);
+  return output;
+}
+
+Tensor normal_cpu(const Tensor& mean, double std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
