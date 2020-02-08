@@ -55,7 +55,7 @@ template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl, c10::ScalarType dtype) {
   Tensor result = at::empty({0}, self.options().dtype(dtype));
   out_impl(result, self, true); // true for dtype promotion
-  return result; 
+  return result;
 }
 
 template <typename OutImpl>
