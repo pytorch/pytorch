@@ -566,20 +566,20 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
 
-            # TODO: ????? type mismatch in generated wrapper?
-            if declaration['name'] != 'polygamma':
-                # Emit ProfiledType code
-                profiled_body = emit_profiled_body(declaration)
-                profiled_method_definitions.append(METHOD_DEFINITION.substitute(
-                    declaration, type_definition_body=profiled_body))
+        # TODO: ????? type mismatch in generated wrapper?
+        if declaration['name'] != 'polygamma':
+            # Emit ProfiledType code
+            profiled_body = emit_profiled_body(declaration)
+            profiled_method_definitions.append(METHOD_DEFINITION.substitute(
+                declaration, type_definition_body=profiled_body))
 
-                if declaration['use_c10_dispatcher'] == 'full':
-                    profiled_wrapper_registrations.append(PROFILE_WRAPPER_REGISTRATION.substitute(
-                        declaration, formal_types=formal_types))
-                else:
-                    assert declaration['use_c10_dispatcher'] == 'unboxed_only'
-                    profiled_wrapper_registrations.append(PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                        declaration, formal_types=formal_types))
+            if declaration['use_c10_dispatcher'] == 'full':
+                profiled_wrapper_registrations.append(PROFILE_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                profiled_wrapper_registrations.append(PROFILE_UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,

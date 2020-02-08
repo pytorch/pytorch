@@ -2558,6 +2558,12 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def test_profiler_unboxed_only(self):
+        x = torch.rand(3, 4)
+
+        with torch.autograd.profiler.profile() as prof:
+            x.resize_([3, 2])
+
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
         with profile() as p:
