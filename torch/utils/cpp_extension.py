@@ -505,8 +505,9 @@ class BuildExtension(build_ext, object):
             from distutils.spawn import _nt_quote_args
             cflags = _nt_quote_args(cflags)
             post_cflags = _nt_quote_args(post_cflags)
-            cuda_cflags = _nt_quote_args(cuda_cflags)
-            cuda_post_cflags = _nt_quote_args(cuda_cflags)
+            if with_cuda:
+                cuda_cflags = _nt_quote_args(cuda_cflags)
+                cuda_post_cflags = _nt_quote_args(cuda_post_cflags)
 
             _write_ninja_file_and_compile_objects(
                 sources=sources,
