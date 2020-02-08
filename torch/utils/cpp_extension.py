@@ -1515,6 +1515,7 @@ def _write_ninja_file(path,
         rule = 'cuda_compile' if is_cuda_source else 'compile'
         if IS_WINDOWS:
             source_file = source_file.replace(':', '$:')
+            object_file = object_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(object_file, rule, source_file))
 
