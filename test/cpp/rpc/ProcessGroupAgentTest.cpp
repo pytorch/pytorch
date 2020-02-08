@@ -4,7 +4,7 @@
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/lib/c10d/HashStore.hpp>
 #include <torch/lib/c10d/ProcessGroupGloo.hpp>
-#include <torch/torch.h> /
+#include <torch/torch.h>
 
 #include <memory>
 #include <string>
