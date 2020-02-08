@@ -319,7 +319,6 @@ current_settings['deadline'] = None
 if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
     current_settings['timeout'] = hypothesis.unlimited
 def assert_deadline_disabled():
-    assert settings().deadline is None
     if hypothesis_version < (3, 27, 0):
         import warnings
         warning_message = (
@@ -328,3 +327,5 @@ def assert_deadline_disabled():
             "Current hypothesis version: {}".format(hypothesis.__version__)
         )
         warnings.warn(warning_message)
+    else:
+        assert settings().deadline is None
