@@ -60,6 +60,15 @@ class TORCH_API SGD : public Optimizer {
 
   void step() override;
 
+  /// Adds the given vector of parameters to the optimizer's parameter list.
+  void add_parameters(const std::vector<Tensor>& parameters) override;
+
+  /// Provides a const reference to the parameters this optimizer holds.
+  const std::vector<Tensor>& parameters() const noexcept override;
+
+  /// Provides a reference to the parameters this optimizer holds.
+  std::vector<Tensor>& parameters() noexcept override;
+
   /// Returns the number of parameters referenced by the optimizer.
   size_t size() const noexcept override;
 

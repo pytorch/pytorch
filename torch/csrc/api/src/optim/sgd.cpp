@@ -91,6 +91,18 @@ void SGD::step() {
   }
 }
 
+void SGD::add_parameters(const std::vector<Tensor>& parameters) {
+  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
+}
+
+const std::vector<Tensor>& SGD::parameters() const noexcept {
+  return param_groups_.at(0).params();
+}
+
+std::vector<Tensor>& SGD::parameters() noexcept {
+  return param_groups_.at(0).params();
+}
+
 size_t SGD::size() const noexcept {
   return _size_new_design();
 }
