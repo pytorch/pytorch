@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/script/resolver.h>
 #include <torch/csrc/jit/script/script_type_parser.h>
 
+#include <regex>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -262,14 +264,16 @@ struct SourceImporterImpl : public Resolver,
   c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
       const QualifiedName& qualified_classname,
       const Assign& assign) {
-    if (qualified_classname ==
-            c10::QualifiedName(
-                "__torch__.torch.nn.quantized.modules.linear.LinearPackedParams") ||
-        qualified_classname ==
-            c10::QualifiedName(
-                "__torch__.torch.nn.quantized.modules.linear.Linear")) {
+    std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto replaced_string =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    if (replaced_string ==
+            "__torch__.torch.nn.quantized.modules.linear.LinearPackedParams" ||
+        replaced_string ==
+            "__torch__.torch.nn.quantized.modules.linear.Linear") {
       auto lhs = Var(assign.lhs());
       if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
+        ;
         return c10::nullopt;
       }
       auto type = Var(assign.type().get());
