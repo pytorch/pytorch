@@ -178,7 +178,7 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
         int64_t idx_dim = index_data[i * index_dim_stride];
         // we are not putting idx_dim in the error message because it disables
         // loop optimization in some compilers
-        TORCH_CHECK_INDEX(idx_dim >= 0 && idx_dim < self_dim_size,
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
         result_data[i * result_dim_stride] = self_data[idx_dim * self_dim_stride];
@@ -210,7 +210,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
         int64_t idx_dim = index_data[i * index_dim_stride];
         // we are not putting idx_dim in the error message because it disables
         // loop optimizations in some compilers
-        TORCH_CHECK_INDEX(idx_dim >= 0 && idx_dim < self_dim_size,
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
         self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
