@@ -460,6 +460,8 @@ class BuildExtension(build_ext, object):
                                    extra_postargs=None,
                                    depends=None):
 
+            if not self.compiler.initialized:
+                self.compiler.initialize()
             output_dir = os.path.abspath(output_dir)
             _, objects, extra_postargs, pp_opts, _ = \
                 self.compiler._setup_compile(output_dir, macros,
