@@ -3357,12 +3357,13 @@ Example::
 
 add_docstr(torch.mean,
            r"""
-.. function:: mean(input) -> Tensor
+.. function:: mean(input, dtype=None) -> Tensor
 
 Returns the mean value of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+    {dtype}
 
 Example::
 
@@ -3372,7 +3373,7 @@ Example::
     >>> torch.mean(a)
     tensor(0.3367)
 
-.. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: mean(input, dim, keepdim=False, out=None, dtype=None) -> Tensor
 
 Returns the mean value of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -3384,6 +3385,8 @@ Args:
     {input}
     {dim}
     {keepdim}
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`) Only floating point types are supported.
     {out}
 
 Example::
