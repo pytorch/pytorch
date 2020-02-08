@@ -22,7 +22,7 @@
           use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
           cuda_version: "10"
@@ -34,7 +34,7 @@
           test_name: pytorch-windows-test2
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
           cuda_version: "10"
@@ -56,7 +56,7 @@
           use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -68,4 +68,4 @@
           use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
