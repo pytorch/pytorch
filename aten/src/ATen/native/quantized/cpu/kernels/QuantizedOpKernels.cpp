@@ -963,87 +963,50 @@ void qtopk_kernel(Tensor& values,
 
 template <bool ReluFused>
 void q_batch_norm_kernel(
-    int N,
-    int C,
-    int HxW,
-    const int in_zero_point,
-    const int out_zero_point,
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    const int64_t in_zero_point,
+    const int64_t out_zero_point,
     const uint8_t* X,
     const float* alpha,
     const float* beta,
     uint8_t* Y) {
-#if defined(__AVX2__)
+#if defined(__AVX2__) && defined(__FMA__)
+
   constexpr int kVLen = 8;
   const int outer_size = N * HxW;
-  const __m256i min_v = _mm256_set1_epi32(std::numeric_limits<uint8_t>::min());
-  const __m256i max_v = _mm256_set1_epi32(std::numeric_limits<uint8_t>::max());
-  const __m256i shuffle_mask_v = _mm256_set_epi8(
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0x0c,
-      0x08,
-      0x04,
-      0x00,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0xff,
-      0x0c,
-      0x08,
-      0x04,
-      0x00);
-  const __m256i permute_mask_v =
-      _mm256_set_epi32(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
-  const __m256i in_zero_point_v = _mm256_set1_epi32(in_zero_point);
-  const __m256i out_zero_point_v = _mm256_set1_epi32(out_zero_point);
-#ifdef _OPENMP
-#pragma omp parallel for
-#endif
+  using Vec = Vec256<quint8>;
   for (int i = 0; i < outer_size; ++i) {
-    int n = C / kVLen * kVLen;
-    int r = C % kVLen;
+    int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
+    int64_t r = C % (Vec::float_num_vecs() * kVLen);
     const uint8_t* X_ptr = X + i * C;
     uint8_t* Y_ptr = Y + i * C;
-    for (int j = 0; j < n; j += kVLen) {
-      const __m256i cur_v = _mm256_cvtepu8_epi32(
-          _mm_loadl_epi64(reinterpret_cast<const __m128i*>(X_ptr + j)));
-      const __m256 cur_v_float =
-          _mm256_cvtepi32_ps(_mm256_sub_epi32(cur_v, in_zero_point_v));
-      const __m256 alpha_v = _mm256_loadu_ps(alpha + j);
-      const __m256 beta_v = _mm256_loadu_ps(beta + j);
-      const __m256 result_float_v =
-          _mm256_fmadd_ps(alpha_v, cur_v_float, beta_v);
-      const __m256i result_rounded_v = _mm256_cvtps_epi32(result_float_v);
-      __m256i result_v = _mm256_add_epi32(result_rounded_v, out_zero_point_v);
-      if (ReluFused) {
-        result_v = _mm256_max_epi32(result_v, out_zero_point_v);
+
+    // Hoisted variables
+    auto in_zp_vec = Vec256<float>(static_cast<float>(in_zero_point));
+    auto fake_scale = Vec256<float>(1.0f);
+    auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
+    auto out_zero_point_v = Vec(c10::quint8(out_zero_point));
+
+    for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
+      auto vals_q = Vec::loadu(X_ptr + j);
+      // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
+      auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
+      for (int idx = 0; idx < vals_dq.size(); ++idx) {
+        auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
+        auto beta_v = Vec256<float>::loadu(beta + j /** Vec::float_num_vecs()*/ + idx * kVLen);
+        vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
       }
-      __m256i clipped_v =
-          _mm256_max_epi32(min_v, _mm256_min_epi32(max_v, result_v));
-      clipped_v = _mm256_shuffle_epi8(clipped_v, shuffle_mask_v);
-      clipped_v = _mm256_permutevar8x32_epi32(clipped_v, permute_mask_v);
-      *reinterpret_cast<int64_t*>(Y_ptr + j) =
-          _mm256_extract_epi64(clipped_v, 0);
+      // Fake scale again
+      auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+      if (ReluFused) {
+        outputs_q = outputs_q.relu(out_zero_point_v);
+      }
+      outputs_q.store(Y_ptr + j);
     }
-    for (int j = 0; j < r; ++j) {
+
+    for (int64_t j = 0; j < r; ++j) {
       long quantized_down = out_zero_point +
           std::lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
                       beta[n + j]);
@@ -1057,8 +1020,8 @@ void q_batch_norm_kernel(
           std::max<long>(quantized_down, std::numeric_limits<uint8_t>::min()),
           std::numeric_limits<uint8_t>::max());
 #endif
-    }
   }
+}
 
 #else
   for (int i = 0; i < N * HxW; ++i) {
