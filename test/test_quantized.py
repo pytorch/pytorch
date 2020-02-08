@@ -1082,7 +1082,7 @@ class TestQuantizedOps(TestCase):
         if qengine not in torch.backends.quantized.supported_engines:
             return
 
-        with override_quantized_engine("fbgemm"):
+        with override_quantized_engine(qengine):
             X, (scale_x, zero_point_x, dtype_x) = X
 
             X = torch.from_numpy(X)
