@@ -50,6 +50,9 @@ static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument
 
 namespace at { namespace native {
 
+// `needs_dynamic_casting` compares the types expected by iterator
+// (i.e. dtypes of the operands) with the actual type of the arguments
+// of func_t
 template<typename func_t, int nargs=function_traits<func_t>::arity>
 struct needs_dynamic_casting {
   static bool check(TensorIterator& iter) {
