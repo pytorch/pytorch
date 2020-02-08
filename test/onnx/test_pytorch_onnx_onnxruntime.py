@@ -534,6 +534,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Unsqueeze(), x)
 
+    def test_maxpool_default_stride(self):
+        class MaxPoolModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.max_pool2d(x, 2)
+
+        model = MaxPoolModel()
+        x = torch.randn(10, 20, 16, 50)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
@@ -570,6 +579,15 @@ class TestONNXRuntime(unittest.TestCase):
     def test_maxpool_dilation(self):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
         x = torch.randn(20, 16, 50)
+        self.run_test(model, x)
+
+    def test_avgpool_default_stride(self):
+        class AvgPoolModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.avg_pool2d(x, 2)
+
+        model = AvgPoolModel()
+        x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
     def test_avgpool(self):
