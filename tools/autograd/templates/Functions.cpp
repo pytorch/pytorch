@@ -1823,17 +1823,20 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
     auto A = at::matmul(B, vt);
 
     std::tie(result, std::ignore) = at::solve(A, vt);
-  } else {
-    result = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
   // contribution from eigenvalues
   if (glambda.defined()) {
-    Tensor result1;
     auto grlambda = glambda.slice(/*dim=*/-1, /*start=*/0, /*end=*/1) * vt;
     auto A = at::matmul(v, grlambda);
     auto vvt = at::matmul(v, vt);
-    std::tie(result1, std::ignore) = at::solve(A, vvt);
-    result = result.add(result1);
+    if (result.defined()) {
+      Tensor result1;
+      std::tie(result1, std::ignore) = at::solve(A, vvt);
+      result = result.add(result1);
+    }
+    else {
+      std::tie(result, std::ignore) = at::solve(A, vvt);
+    }
   }
   return result;
 }
