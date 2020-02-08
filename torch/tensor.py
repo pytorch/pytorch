@@ -376,6 +376,12 @@ class Tensor(torch._C._TensorBase):
         """
         if isinstance(split_size, int):
             return super(Tensor, self).split(split_size, dim)
+        elif isinstance(split_size, Tensor):
+            try:
+                split_size = int(split_size)
+                return super(Tensor, self).split(split_size, dim)
+            except ValueError:
+                return super(Tensor, self).split_with_sizes(split_size, dim)
         else:
             return super(Tensor, self).split_with_sizes(split_size, dim)
 
