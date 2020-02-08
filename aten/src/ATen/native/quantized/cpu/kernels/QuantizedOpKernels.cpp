@@ -995,7 +995,7 @@ void q_batch_norm_kernel(
       auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
       for (int idx = 0; idx < vals_dq.size(); ++idx) {
         auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
-        auto beta_v = Vec256<float>::loadu(beta + j /** Vec::float_num_vecs()*/ + idx * kVLen);
+        auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
         vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
       }
       // Fake scale again
