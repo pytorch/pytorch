@@ -473,6 +473,9 @@ jobs:
   pytorch_windows_build:
     <<: *pytorch_windows_params
     parameters:
+      test_name:
+        type: string
+        default: ""
       cuda_version:
         type: string
         default: "10"
