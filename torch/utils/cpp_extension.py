@@ -473,7 +473,7 @@ class BuildExtension(build_ext, object):
                 common_cflags.extend(self.compiler.compile_options_debug)
             else:
                 common_cflags.extend(self.compiler.compile_options)
-            common_cflags.append('/EHsc')
+            common_cflags.extend(COMMON_MSVC_FLAGS)
             cflags = common_cflags + pp_opts
             with_cuda = any(map(_is_cuda_file, sources))
 
@@ -496,6 +496,7 @@ class BuildExtension(build_ext, object):
                     else:
                         cuda_cflags.append('-Xcompiler')
                         cuda_cflags.append(common_cflag)
+                cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
