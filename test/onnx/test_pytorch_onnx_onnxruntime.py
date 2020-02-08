@@ -2545,7 +2545,22 @@ class TestONNXRuntime(unittest.TestCase):
             torch._C._check_onnx_proto(model.SerializeToString())
         self.assertRaises(RuntimeError, check_proto)
 
+    def test_split_tensor_scalar(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.split(x, x.size(1))
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(SplitModel(), x)
 
+    def test_split_tensor_multi(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.split(x, torch.ones(3))
+        x = torch.randn(1, 2, 3, requires_grad=True)
+
+        def run_model():
+            SplitModel(x)
+        self.assertRaises(TypeError, run_model)            
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
