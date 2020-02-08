@@ -468,9 +468,9 @@ class BuildExtension(build_ext, object):
             common_cflags = extra_preargs or []
             common_cflags.append('/c')
             if debug:
-                common_cflags.extend(self.compile_options_debug)
+                common_cflags.extend(self.compiler.compile_options_debug)
             else:
-                common_cflags.extend(self.compile_options)
+                common_cflags.extend(self.compiler.compile_options)
             common_cflags.append('/EHsc')
             cflags = common_cflags + pp_opts
             with_cuda = any(map(_is_cuda_file, sources))
