@@ -14,7 +14,7 @@ DEFINE_DISPATCH(qbatch_norm_stub);
 
 namespace {
 void compute_fused_params(
-    const int channels,
+    const int64_t channels,
     const float* weight_data,
     const float* bias_data,
     const float* mean_data,
@@ -30,7 +30,7 @@ void compute_fused_params(
   //         + bias(c)
   // We factor out inv_sigma(c) = 1 / sqrt(var(c) + eps).
   for (int64_t c = 0; c < channels; c++) {
-    float inv_sigma = 1 / std::sqrt(var_data[c] + static_cast<float>(eps));
+    float inv_sigma = 1.0 / std::sqrt(var_data[c] + static_cast<float>(eps));
     float weight_v = weight_data ? weight_data[c] : 1;
     float bias_v = bias_data ? bias_data[c] : 0;
     alpha_data[c] = inv_sigma * weight_v * (input_scale / output_scale);
@@ -55,12 +55,12 @@ Tensor q_batch_norm_impl(
     auto out = qx.clone();
     return out;
   }
-  int ndim = qx.dim();
+  int64_t ndim = qx.dim();
   TORCH_CHECK(ndim == 4, "Expecting the input tensor of rank 4.");
-  const int N = qx.size(0);
-  const int C = qx.size(1);
-  const int H = qx.size(2);
-  const int W = qx.size(3);
+  const int64_t N = qx.size(0);
+  const int64_t C = qx.size(1);
+  const int64_t H = qx.size(2);
+  const int64_t W = qx.size(3);
 
   TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
   TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
