@@ -45,11 +45,11 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/script.h>
 #include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/script/iremitter.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
-#include <torch/script.h>
 
 #include "onnx/onnx_pb.h"
 

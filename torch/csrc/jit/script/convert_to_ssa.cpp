@@ -2,9 +2,9 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/ir_views.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/exit_transforms.h>
 #include <torch/csrc/jit/script/inline_loop_condition.h>
+#include <torch/csrc/jit/script/iremitter.h>
 #include <torch/csrc/jit/script/mini_environment.h>
 
 namespace torch {

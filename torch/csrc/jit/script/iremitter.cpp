@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/iremitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -46,6 +46,7 @@ struct Refinement {
   TypePtr type() const {
     return type_;
   }
+
  private:
   std::string identifier_;
   TypePtr type_;
@@ -1571,8 +1572,7 @@ struct to_ir {
     RefinementSet refinement;
     if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
-      Refinement isinstance(
-          std::move(ident), gathered.types.at(0));
+      Refinement isinstance(std::move(ident), gathered.types.at(0));
       refinement = RefinementSet({isinstance}, {});
     }
 
@@ -2648,7 +2648,10 @@ struct to_ir {
     }
   }
 
-  Value* emitUnaryOp(const TreeRef& tree, const std::string &magicMethod, const c10::Symbol &opSymbol) {
+  Value* emitUnaryOp(
+      const TreeRef& tree,
+      const std::string& magicMethod,
+      const c10::Symbol& opSymbol) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
     auto val =

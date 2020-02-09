@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/iremitter.h>
 
 namespace torch {
 namespace jit {

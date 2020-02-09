@@ -15,7 +15,7 @@
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/iremitter.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>

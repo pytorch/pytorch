@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/iremitter.h>
 
 namespace torch {
 namespace jit {

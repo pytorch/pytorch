@@ -3,7 +3,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/import.h>
 #include <torch/csrc/jit/python_ivalue.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/iremitter.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/python_sugared_value.h>
