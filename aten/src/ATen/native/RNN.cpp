@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/c10_utils.h>
 
 namespace at { namespace native {
@@ -275,28 +275,59 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
   return result;
 }
 
+static std::vector<QuantizedCellParamsDynamic> _quantized_params_dynamic(
+  TensorList params, std::string qengine) {
+
+    static at::Tensor undefined;
+    std::vector<QuantizedCellParamsDynamic> result;
+    for (size_t i = 0; i < params.size(); i += 2) {
+      at::Tensor bias_ih, bias_hh;
+
+      if (qengine == "fbgemm") {
+#ifdef USE_FBGEMM
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias.value_or(undefined);
+        bias_hh = packed_struct_hh.bias.value_or(undefined);
+#endif
+      } else if (qengine == "qnnpack") {
+#ifdef USE_PYTORCH_QNNPACK
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias;
+        bias_hh = packed_struct_hh.bias;
+#endif
+      }
+      result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
+    }
+    return result;
+}
+
 static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
     TensorList params) {
-  static at::Tensor undefined;
-  std::vector<QuantizedCellParamsDynamic> result;
+
   TORCH_CHECK(
       params.size() % 2 == 0,
       "got an incorrect number of quantized RNN parameters");
-  // PackedLinearWeight is only defined when USE_FBGEMM is defined
+  auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-  for (size_t i = 0; i < params.size(); i += 2) {
-    auto& packed_struct_ih =
-        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
-    auto& packed_struct_hh =
-        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
-    auto bias_ih = packed_struct_ih.bias.value_or(undefined);
-    auto bias_hh = packed_struct_hh.bias.value_or(undefined);
-    result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
+  if (ctx.qEngine() == at::QEngine::FBGEMM){
+    return _quantized_params_dynamic(params, "fbgemm");
+}
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      return _quantized_params_dynamic(params, "qnnpack");
   }
-  return result;
-#else // USE_FBGEMM
-  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM!")
-#endif // USE_FBGEMM
+#endif
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
+
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(

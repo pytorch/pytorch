@@ -458,6 +458,7 @@ struct CAFFE2_API TensorType : public Type {
     return requires_grad_ ? *requires_grad_ : true;
   }
 
+  bool isCompatibleWithInCurrentExecutionContext(at::Tensor& t) const;
 
   bool operator==(const Type& rhs) const override {
     if (rhs.kind() != kind()) {
@@ -582,6 +583,10 @@ struct CAFFE2_API TensorType : public Type {
         strides_(tensor.sizes().size()),
         requires_grad_(tensor.requires_grad()),
         undefined_(!tensor.defined()) {
+    // any updates to `isSubtypeOf`, TensorType c-tor or
+    // `isCompatibleWithInCurrentExecutionContext` need to maintain the
+    // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+    //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
     if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
       sizes_ = tensor.sizes().vec();
       strides_ = tensor.strides().vec();
@@ -1168,7 +1173,8 @@ struct VarType : public Type {
 
 struct CapsuleType;
 using CapsuleTypePtr = std::shared_ptr<CapsuleType>;
-// This type represents a Python Capsule
+// This type represents a Python Capsule.
+// It does not appear in the IR and is only used during runtime
 struct CAFFE2_API CapsuleType : public Type {
   static CapsuleTypePtr create() {
     return CapsuleTypePtr(new CapsuleType()); // NOLINT(modernize-make-shared)
@@ -1384,6 +1390,15 @@ struct getTypePtr_<at::optional<T>> final {
   static TypePtr call() {
     static auto type = OptionalType::create(getTypePtr_<T>::call());
     return type;
+  }
+};
+template <class... Contained>
+struct getTypePtr_<std::tuple<Contained...>> final {
+  static TypePtr call() {
+    std::vector<TypePtr> contained_types = {
+      (getTypePtr_<Contained>::call())...
+    };
+    return TupleType::create(std::move(contained_types));
   }
 };
 } // namespace detail

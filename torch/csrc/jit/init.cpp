@@ -297,16 +297,10 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
-      .def("_jit_has_cpp_tests", []() {
-        return true;
-      })
+      .def("_jit_has_cpp_tests", []() { return true; })
 #else
-      .def("_jit_run_cpp_tests", []() {
-        throw std::exception();
-      })
-      .def("_jit_has_cpp_tests", []() {
-        return false;
-      })
+      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def("_jit_has_cpp_tests", []() { return false; })
 #endif
       .def(
           "_jit_flatten",
@@ -359,6 +353,20 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def(
+          "_jit_set_num_profiled_runs",
+          [](size_t num) {
+            size_t old_num = getNumProfiledRuns();
+            getNumProfiledRuns() = num;
+            return old_num;
+          })
+      .def(
+          "_jit_set_bailout_depth",
+          [](size_t depth) {
+            size_t old_depth = getBailoutDepth();
+            getBailoutDepth() = depth;
+            return old_depth;
+          })
+      .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
@@ -404,13 +412,20 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
-    std::vector<GraphExecutorState> states;
-    for (auto& e : c.grad_executors()) {
-      states.emplace_back(e->getDebugState());
-    }
-    return states;
-  });
+  py::class_<Code>(m, "Code")
+      .def(
+          "grad_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
+      .def("request_bailout", [](Code& c, size_t index) {
+        c.request_bailout(index);
+      });
 
   py::class_<ExecutionPlan>(m, "ExecutionPlan")
       .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
@@ -471,19 +486,50 @@ void initJITBindings(PyObject* module) {
     BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
+      start_offset_ = py::cast<size_t>(current);
       buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
-      size_ = py::cast<size_t>(buffer.attr("tell")());
+      size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
+
+      // If we can read directly into a buffer, do that instead of an extra copy
+      use_readinto_ = py::hasattr(buffer, "readinto");
     }
 
     size_t size() const override {
       return size_;
     }
 
+    THPObjectPtr getMemview(void* buf, size_t n) const {
+#if PY_MAJOR_VERSION >= 3
+      THPObjectPtr memview(PyMemoryView_FromMemory(
+          reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
+#else
+      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
+#endif
+      if (!memview) {
+        throw python_error();
+      }
+      return memview;
+    }
+
     size_t read(uint64_t pos, void* buf, size_t n, const char* what)
         const override {
-      // Seek to desired position
-      buffer_.attr("seek")(pos);
+      // Seek to desired position (NB: this has to be a Py_ssize_t or Python
+      // throws a weird error)
+      Py_ssize_t absolute_pos = start_offset_ + pos;
+      buffer_.attr("seek")(absolute_pos);
+
+      if (use_readinto_) {
+        auto memview = getMemview(buf, n);
+        auto res =
+            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
+        if (res) {
+          int i = PyInt_AsLong(res);
+          if (i > 0) {
+            return i;
+          }
+        }
+      }
 
       // Read bytes into `buf` from the buffer
       std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
@@ -496,6 +542,8 @@ void initJITBindings(PyObject* module) {
 
     py::object buffer_;
     size_t size_;
+    size_t start_offset_;
+    bool use_readinto_;
   };
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")

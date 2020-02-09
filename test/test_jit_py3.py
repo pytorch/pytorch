@@ -34,6 +34,23 @@ class TestScriptPy3(JitTestCase):
         self.assertAlmostEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
+    def test_optional_dict_construct(self):
+        class M(torch.nn.Module):
+            def use(self, buffer: Dict[str, Optional[torch.Tensor]]):
+                return buffer["prev_key"]
+
+            def forward(self, x):
+                prev_key = torch.rand(2, 3)
+                next_key = torch.rand(2, 3)
+                saved_state: Dict[str, Optional[torch.Tensor]] = {
+                    "prev_key": prev_key,
+                    "next_key": next_key,
+                }
+
+                return self.use(saved_state)
+
+        self.checkModule(M(), (torch.rand(2, 2),))
+
     def test_kwarg_support(self):
         with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "variable number of arguments"):
             class M(torch.nn.Module):
@@ -69,6 +86,17 @@ class TestScriptPy3(JitTestCase):
             return rv
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
+
+    def test_named_tuple_constant(self):
+        class Tup(NamedTuple):
+            a: int
+            b: int
+
+        @torch.jit.script
+        def foo():
+            return Tup(1, 2)
+
+        self.assertEqual(foo(), Tup(1, 2))
 
     @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
     def test_dict_preserves_order(self):
