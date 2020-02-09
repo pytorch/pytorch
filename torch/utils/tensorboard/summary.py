@@ -6,7 +6,6 @@ import json
 import logging
 import numpy as np
 import os
-import re as _re
 
 # pylint: disable=unused-import
 from six.moves import range
@@ -21,9 +20,6 @@ from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.custom_scalar import layout_pb2
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
-
-
-_INVALID_TAG_CHARACTERS = _re.compile(r'[^-/\w\.]')
 
 
 def _calc_scale_factor(tensor):
