@@ -36,8 +36,9 @@ const Statement* BaseMutator::mutate(const Add* const add){
 }
 
 void BaseMutator::mutate(Fusion* fusion){
+
   std::vector<const Expr*> new_exprs;
-  std::vector<const Expr*> orig_exprs = fusion->exprs();
+  std::vector<const Expr*> orig_exprs(fusion->exprs().begin(), fusion->exprs().end());
 
   for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
       const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);

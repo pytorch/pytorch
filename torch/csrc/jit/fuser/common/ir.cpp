@@ -89,9 +89,8 @@ T* ptr(T* obj) { return obj; }
 
 template <typename T>
 int Statement::dispatch(T handler) const{
-  const auto maybe_val_type = getValType();
-  if (maybe_val_type) {
-    switch (*maybe_val_type) {
+  if (isVal()) {
+    switch (*getValType()) {
       case ValType::Tensor:
         return ptr(handler)->handle(static_cast<const Tensor*>(this));
       case ValType::Float:
@@ -103,12 +102,17 @@ int Statement::dispatch(T handler) const{
     }
   }
 
-  switch (*getExprType()) {
-    case ExprType::Add:
-      return ptr(handler)->handle(static_cast<const Add*>(this));
-    default:
-      throw std::runtime_error("Unknown exprtype in dispatch!");
+  if(isExpr()){
+    switch (*getExprType()) {
+      case ExprType::Add:
+        return ptr(handler)->handle(static_cast<const Add*>(this));
+      default:
+        throw std::runtime_error("Unknown exprtype in dispatch!");
+    }
   }
+
+  throw std::runtime_error("Unknown stmttype in dispatch!");
+
 }
 
 /*
@@ -129,9 +133,8 @@ int Statement::dispatch(T handler) const{
 //otherwise you'll end in an infinite loop with mutate.
 template <typename T>
 const Statement* Statement::dispatch_mutator(T mutator) const{
-  const auto maybe_val_type = getValType();
-  if (maybe_val_type) {
-    switch (*maybe_val_type) {
+  if (isVal()) {
+    switch (*getValType()) {
       case ValType::Tensor:
         return ptr(mutator)->mutate(static_cast<const Tensor*>(this));
       case ValType::Float:
@@ -139,16 +142,19 @@ const Statement* Statement::dispatch_mutator(T mutator) const{
       case ValType::Int:
         return ptr(mutator)->mutate(static_cast<const Int*>(this));
       default:
-        throw std::runtime_error("Unknown valtype in dispatch!");
+        throw std::runtime_error("Unknown valtype in dispatch_mutator!");
     }
   }
 
-  switch (*getExprType()) {
-    case ExprType::Add:
-      return ptr(mutator)->mutate(static_cast<const Add*>(this));
-    default:
-      throw std::runtime_error("Unknown exprtype in dispatch!");
+  if(isExpr()){
+    switch (*getExprType()) {
+      case ExprType::Add:
+        return ptr(mutator)->mutate(static_cast<const Add*>(this));
+      default:
+        throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
+    }
   }
+  throw std::runtime_error("Unknown stmttype in dispatch_mutator!");
 }
 
 
@@ -160,12 +166,6 @@ template int Statement::dispatch(IRPrinter*) const;
 
 template const Statement* Statement::dispatch_mutator(BaseMutator) const;
 template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
-
-std::ostream& operator<<(std::ostream& out, const Statement* const stmt) {
-  IRPrinter printer{out};
-  stmt->dispatch(printer);
-  return out;
-}
 
 /*
 * Val member definitions

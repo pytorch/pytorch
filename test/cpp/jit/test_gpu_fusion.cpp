@@ -3,9 +3,9 @@
 // #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/visitor.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
 #include <torch/csrc/jit/fuser/common/arith.h>
+#include <torch/csrc/jit/fuser/common/iriostream.h>
 
 #include <iostream>
 
@@ -38,7 +38,6 @@ void testGPU_FusionDispatch(){
   Statement* s = static_cast<Statement*>(f);
   const auto s_result = s->dispatch(handler);
   std::cout << "Dispatch 2.f by Statement reference: " << s_result << std::endl;
-
 }
 
 void testGPU_FusionSimpleArith(){
@@ -116,85 +115,82 @@ void testGPU_FusionRegister() {
   TORCH_CHECK(fusion.origin(v3)->name()+1 == fusion.origin(v4)->name());
 }
 
+
+//dummy expr with 2 outputs only for toposort test.
+struct TORCH_API DummyExpr : public Expr {
+  ~DummyExpr () = default;
+  DummyExpr (
+    const Val* _outlhs
+  , const Val* _outrhs
+  , const Val* _lhs
+  , const Val* _rhs):Expr(ExprType::Add) //Not terribly safe...
+  {
+    addOutput(_outlhs);
+    addOutput(_outrhs);
+    addInput(_lhs);
+    addInput(_rhs);
+    this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  }
+  DummyExpr(const DummyExpr& other) = delete;
+  DummyExpr& operator=(const DummyExpr& other) = delete;
+  DummyExpr(DummyExpr&& other) = delete;
+  DummyExpr& operator=(DummyExpr&& other) = delete;
+};
+
 void testGPU_FusionTopoSort() {
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-    Float* v0 = new Float{1.f};
-    Float* v1 = new Float{2.f};
-    Val* v2 = add(v0, v1);
-    Float* v3 = new Float{3.f};
-    Val* v4 = add(v2, v3);
-    TORCH_CHECK(fusion.origin(v2)->name() == 0);
-    TORCH_CHECK(fusion.origin(v4)->name() == 1);
-    std::vector<const Expr*> exprs = fusion.exprs();
-    TORCH_CHECK(exprs[0] == fusion.origin(v2));
-    TORCH_CHECK(exprs[1] == fusion.origin(v4));
-    TORCH_CHECK(exprs.size() == 2);
-  }
+  Fusion fusion;
+  FusionGuard fg(&fusion);
 
-  // Testing from_output when an intermediate Val is marked as output
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-    Float* v0 = new Float{1.f};
-    Float* v1 = new Float{2.f};
-    Val* v2 = add(v0, v1);
-    Float* v3 = new Float{3.f};
-    Val* v4 = add(v2, v3);
-    fusion.addOutput(v2);
-    fusion.addOutput(v4);
-    TORCH_CHECK(fusion.origin(v4)->name() == 1);
-    TORCH_CHECK(fusion.origin(v2)->name() == 0);
-    std::vector<const Expr*> exprs = fusion.exprs(true);
-    TORCH_CHECK(exprs[0] == fusion.origin(v2));
-    TORCH_CHECK(exprs[1] == fusion.origin(v4));
-    TORCH_CHECK(exprs.size() == 2);
-  }
- 
- {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-    Float* v0 = new Float{1.f};
-    Float* v1 = new Float{2.f};
-    Val* v2 = add(v0, v1);
-    Float* v3 = new Float{3.f};
-    Val* v4 = add(v2, v3);
-    fusion.addOutput(v4);
-    fusion.addOutput(v2);
-    TORCH_CHECK(fusion.origin(v4)->name() == 1);
-    TORCH_CHECK(fusion.origin(v2)->name() == 0);
-    std::vector<const Expr*> exprs = fusion.exprs(true);
-    TORCH_CHECK(exprs[0] == fusion.origin(v2));
-    TORCH_CHECK(exprs[1] == fusion.origin(v4));
-    TORCH_CHECK(exprs.size() == 2);
-  }
+  //e0: v3, v2 = dummy(v1, v0)
+  //e1: v4     =   add(v3, v2)
+  //e2: v5     =   add(v2, v4)
+  Float* v0 = new Float{1.f};
+  Float* v1 = new Float{2.f};
+  Float* v2 = new Float();
+  Float* v3 = new Float();
+  Float* v4 = new Float();
+  Float* v5 = new Float();
 
-  {
-    Fusion fusion;
-    FusionGuard fg(&fusion);
-    Float* v0 = new Float{1.f};
-    Float* v1 = new Float{2.f};
-    Val* v2 = add(v0, v1);
-    Float* v3 = new Float{3.f};
-    Val* v4 = add(v2, v3);
-    Float* v5 = new Float{4.f};
-    Val* v6 = add(v2, v5);
-    TORCH_CHECK(fusion.origin(v2)->name() == 0);
-    TORCH_CHECK(fusion.origin(v4)->name() == 1);
-    std::vector<const Expr*> exprs = fusion.exprs();
-    TORCH_CHECK(exprs.size() == 3);
-    TORCH_CHECK(exprs[0] == fusion.origin(v2));
-    TORCH_CHECK(exprs[1] != exprs[2]);
-  }
+  Expr* e0 = new DummyExpr(v3, v2, v1, v0);
+  Expr* e1 = new Add(v4, v3, v2);
+  Expr* e2 = new Add(v5, v2, v4);
   
+  std::vector<const Expr*> exprs = fusion.exprs();
 
-  // TODO: test exprs with multiple output when we have nodes with multiple outputs
-  // case:
-  //   %1, %2 = op0(%0)
-  //   %3, %4 = op1(%1)
-  //   %5 = op2(%2, %4)
-  //   output (%4, %5)
+  TORCH_CHECK(exprs.size() == 3);
+  TORCH_CHECK(exprs[0] == e0);
+  TORCH_CHECK(exprs[1] == e1);
+  TORCH_CHECK(exprs[2] == e2);
+  
+  fusion.addOutput(v2);
+  exprs = fusion.exprs(true);
+  TORCH_CHECK(exprs.size() == 1);
+  TORCH_CHECK(exprs[0] == e0);
+
+  fusion.addOutput(v5);
+  exprs = fusion.exprs(true);
+  TORCH_CHECK(exprs[0] == e0);
+  TORCH_CHECK(exprs[1] == e1);
+  TORCH_CHECK(exprs[2] == e2);
+
+  fusion.addOutput(v4);
+  exprs = fusion.exprs(true);
+  TORCH_CHECK(exprs[0] == e0);
+  TORCH_CHECK(exprs[1] == e1);
+  TORCH_CHECK(exprs[2] == e2);
+
+  fusion.addOutput(v3);
+  exprs = fusion.exprs(true);
+  TORCH_CHECK(exprs[0] == e0);
+  TORCH_CHECK(exprs[1] == e1);
+  TORCH_CHECK(exprs[2] == e2);
+
+
+  TORCH_CHECK(fusion.origin(v2)->name() == 0);
+  TORCH_CHECK(fusion.origin(v3)->name() == 0);
+  TORCH_CHECK(fusion.origin(v4)->name() == 1);
+  TORCH_CHECK(fusion.origin(v5)->name() == 2);
+
 }
 
 void testGPU_Fusion() {}
