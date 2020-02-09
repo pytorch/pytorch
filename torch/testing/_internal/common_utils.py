@@ -1318,6 +1318,26 @@ def brute_pdist(inp, p=2):
     return unroll[..., inds.cumsum(0)]
 
 
+def pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
+    x = torch.randn(shape, dtype=dtype, device=device)
+    if trans:
+        x.transpose_(-2, -1)
+    if grad_check:
+        x.requires_grad_()
+        y = x.detach().clone().requires_grad_()
+    else:
+        y = x
+    actual = torch.pdist(x, p=p)
+    expected = brute_pdist(y, p=p)
+    self.assertEqual(expected.shape, actual.shape)
+    self.assertTrue(torch.allclose(expected, actual))
+    if grad_check and expected.size() != torch.Size([0]):
+        g0 = torch.rand_like(actual)
+        actual.backward(g0)
+        expected.backward(g0)
+        self.assertTrue(torch.allclose(x.grad, y.grad))
+
+
 def brute_cdist(x, y, p=2):
     r1 = x.shape[-2]
     r2 = y.shape[-2]
