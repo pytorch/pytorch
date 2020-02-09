@@ -145,8 +145,6 @@ class TestONNXRuntime(unittest.TestCase):
             # export the model to ONNX
             with tempfile.TemporaryDirectory() as tmpdirname:
                 model_file_name = os.path.join(tmpdirname, 'model.onnx')
-                # import pdb
-                # pdb.set_trace()
                 input_copy = copy.deepcopy(input)
                 torch.onnx.export(model, input_copy, model_file_name,
                                   opset_version=self.opset_version,

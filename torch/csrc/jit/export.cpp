@@ -644,10 +644,12 @@ void GraphEncoder::EncodeTensor(
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
+    AT_ASSERT(t.is_contiguous());
     size_t tensorSize = static_cast<size_t>(std::accumulate(std::begin(tensor.sizes()), 
                         std::end(tensor.sizes()), static_cast<int64_t>(1), std::multiplies<int64_t>()));
     if (use_large_model_format && tensorSize > ParamSizeThresholdForExternalStorage) {
       AT_ASSERT(!onnx_file_path.empty());
+      AT_ASSERT((external_ref != c10::nullopt) && (external_ref.value() == tensor_proto->name()));
       auto tensorName = GetExternalFileName(external_ref);
       CreateExternalFile(t, tensorName, onnx_file_path);      
       onnx::StringStringEntryProto* location = tensor_proto->mutable_external_data()->Add();
