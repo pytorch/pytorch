@@ -261,23 +261,23 @@ def parsed_arg_expr(arg, arg_index):
         default_init = arg['python_default_init']
         if typename not in UNPACK_WITH_DEFAULT_METHODS:
             raise RuntimeError(
-                'type \'{0}\' is not supported in python_default_init'.
+                'type \'{}\' is not supported in python_default_init'.
                 format(typename))
         unpack_with_default = UNPACK_WITH_DEFAULT_METHODS[typename]
-        return '_r.{0}({1}, {2})'.format(unpack_with_default, arg_index, default_init)
+        return '_r.{}({}, {})'.format(unpack_with_default, arg_index, default_init)
 
     size = arg.get('size')
     if size is not None:
         if typename not in UNPACK_WITH_SIZE_METHODS:
             raise RuntimeError(
-                'type \'{0}\' with definite size ({1}) is not supported'.
+                'type \'{}\' with definite size ({}) is not supported'.
                 format(typename, size))
         unpack_with_size = UNPACK_WITH_SIZE_METHODS[typename].format(size)
-        return '_r.{0}({1})'.format(unpack_with_size, arg_index)
+        return '_r.{}({})'.format(unpack_with_size, arg_index)
 
     unpack = UNPACK_METHODS.get(typename)
     if unpack is None:
-        raise RuntimeError('type \'{0}\' is not supported'.format(typename))
+        raise RuntimeError('type \'{}\' is not supported'.format(typename))
 
     return '_r.{}({})'.format(unpack, arg_index)
 
