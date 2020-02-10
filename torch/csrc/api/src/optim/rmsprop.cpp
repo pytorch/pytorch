@@ -64,6 +64,7 @@ void RMSpropParamState::serialize(torch::serialize::InputArchive& archive) {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
+//check where Nograd should be used
 void RMSprop::step() {
   for (auto& group : param_groups_) {
     for (auto& p : group.params()) {
@@ -90,31 +91,36 @@ void RMSprop::step() {
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
 
-    //  auto square_avg = state_[c10::guts::to_string(p.unsafeGetTensorImpl())].square_avg();
-    //  auto alpha = group['alpha']
+      auto state = static_cast<RMSpropParamState&>(*state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto square_avg = state.square_avg();
+      auto alpha = options.alpha();
+
+      state.step()+=1;
+
       if (options.weight_decay() != 0) {
         grad = grad.add(p.data(), options.weight_decay());
       }
-      // if (momentum != 0) {
-      //   Tensor buf;
-      //   auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
-      //   if(param_state == state_.end()) {
-      //     buf = torch::clone(d_p).detach();
-      //     auto state = std::make_unique<SGDParamState>();
-      //     state->momentum_buffer(buf);
-      //     state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
-      //   } else {
-      //     buf = static_cast<SGDParamState&>(*param_state->second).momentum_buffer();
-      //     buf.mul_(momentum).add_(d_p, 1 - dampening);
-      //   }
-      //   if (nesterov) {
-      //     d_p = d_p.add(buf, momentum);
-      //   } else {
-      //     d_p = buf;
-      //   }
+
+      square_avg.mul_(alpha).addcmul_(grad, grad, 1 - alpha);
+
+      Tensor avg;
+      if(options.centered()) {
+        auto grad_avg = state.grad_avg();
+        grad_avg.mul_(alpha).add_(grad, 1-alpha);
+        avg = square_avg.addcmul(grad_avg, grad_avg, -1).sqrt_().add_(options.eps());
+      } else {
+        avg = square_avg.sqrt().add_(options.eps());
       }
-      p.data().add_(d_p, -1 * options.lr());
+
+      if(options.momentum() > 0) {
+        auto buf = state.momentum_buffer();
+        buf.mul_(options.momentum()).addcdiv_(grad, avg);
+        p.data().add_(buf, -options.lr());
+      } else {
+        p.data().addcdiv_(grad, avg, -options.lr());
+      }
     }
+  }
 }
 
 void RMSprop::save(serialize::OutputArchive& archive) const {
@@ -123,6 +129,27 @@ void RMSprop::save(serialize::OutputArchive& archive) const {
 
 void RMSprop::load(serialize::InputArchive& archive) {
   //serialize(*this, archive);
+}
+
+void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
+  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
+}
+
+const std::vector<Tensor>& RMSprop::parameters() const noexcept {
+  return param_groups_.at(0).params();
+}
+
+std::vector<Tensor>& RMSprop::parameters() noexcept {
+  return param_groups_.at(0).params();
+}
+
+size_t RMSprop::size() const noexcept {
+  // TODO: call _size_new_design once sgd PR(which contains the changes) is pushed
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
 }
 } // namespace optim
 } // namespace torch
