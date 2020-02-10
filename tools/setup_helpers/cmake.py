@@ -335,7 +335,7 @@ class CMake:
         # minimum, which provides a '-j' option: build_args += ['-j', max_jobs]
         # would be sufficient by then.
         if IS_WINDOWS and not USE_NINJA:  # We are likely using msbuild here
-            build_args += ['--', '/maxcpucount:{}'.format(max_jobs)]
+            build_args += ['--', '/p:CL_MPCount={}'.format(max_jobs)]
         else:
             build_args += ['--', '-j', max_jobs]
         self.run(build_args, my_env)
