@@ -3930,7 +3930,7 @@
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
@@ -3940,7 +3940,7 @@
 - func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_fill_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
