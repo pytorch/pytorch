@@ -111,7 +111,9 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 
 struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   ModuleValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
-      : self_(self), concreteType_(std::move(concreteType)) {}
+      : self_(self), concreteType_(std::move(concreteType)) {
+        std::cout << "Constructing modulevalue\n";
+      }
 
   std::string kind() const override {
     return "module";
@@ -153,6 +155,22 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
+};
+
+struct VISIBILITY_HIDDEN ModuleListValue : public ModuleValue {
+  ModuleListValue(Value* self, std::shared_ptr<ConcreteModuleType> concreteType)
+      : ModuleValue(self, concreteType) {}
+
+  std::string kind() const override {
+    return "module list";
+  }
+
+  // expression for ith elemement for iterable value
+  std::shared_ptr<SugaredValue> getitem(
+      const SourceRange& loc,
+      Function& m,
+      Value* idx) override;
+
 };
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {

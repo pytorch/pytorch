@@ -209,6 +209,7 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
     Function& m,
     const std::string& field) {
   py::object member = getattr(loc, field);
+  std::cout << "getting attr " << field << "\n";
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
   // even though it is possible, though rare, for someone to mutate them
@@ -303,6 +304,17 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
     // ...if it's a submodule, return it as a new ModuleValue.
     const auto submoduleConcreteType =
         concreteType_->findSubmoduleConcreteType(field);
+  //   std::cout << "Making module\n";
+  // py::object obj = py::getattr(
+  //     concreteType_->getPyClass(),
+  //     field.c_str(),
+  //     pybind11::cast<pybind11::none>(Py_None));
+  //   py::module::import("torch.jit").attr("inspec")(concreteType_->getPyClass());
+  //   std::cout << "GOT " << py::str(obj) << "\n";
+    if (field == "modlist") {
+    return std::make_shared<ModuleListValue>(
+        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    }
     return std::make_shared<ModuleValue>(
         m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
   } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
@@ -410,6 +422,14 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
   return desugarModuleContainer(get_keys, get_values, loc, m);
 }
 
+std::shared_ptr<SugaredValue> ModuleListValue::getitem(
+    const SourceRange& loc,
+    Function& m,
+    Value* idx) {
+  std::cout << "Meow " << idx->type()->python_str() << "\n";
+  return nullptr;
+}
+
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
       const SourceRange& loc,
       Function& m,
@@ -481,6 +501,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     Function& m,
     SourceRange loc,
     bool is_constant) {
+  std::cout << "Sugaring " << py::str(obj) << "\n";
 
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:

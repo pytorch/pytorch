@@ -73,6 +73,9 @@ else:
     def Attribute(value, type):
         return value
 
+def inspec(obj):
+    breakpoint()
+
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
     """
