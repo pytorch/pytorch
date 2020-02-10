@@ -2300,6 +2300,39 @@ class TestAutograd(TestCase):
             _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
+    def test_eig(self):
+        def func(B):
+            return torch.eig(B, eigenvectors=True)
+
+        def func_eigvals(B):
+            return torch.eig(B, eigenvectors=True)[0]
+
+        def func_eigvecs(B):
+            return torch.eig(B, eigenvectors=True)[1]
+
+        def run_test(dims):
+            # The backward operation for eig only works for real eigenvalues,
+            # so the matrix should be B = U^{-1}*A*U where A is a random
+            # symmetric matrix and U is a random full-rank matrix.
+            # Slight change to the matrix should not make the eigenvalues
+            # complex, so we apply requires_grad_ to B, not A and U
+
+            A = random_symmetric_matrix(dims[-1], *dims[:-2])
+            U = torch.rand(*dims)
+            Uinv = torch.inverse(U)
+            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
+
+            gradcheck(func, [B])
+            gradgradcheck(func, [B])
+            gradcheck(func_eigvals, [B])
+            gradgradcheck(func_eigvals, [B])
+            gradcheck(func_eigvecs, [B])
+            gradgradcheck(func_eigvecs, [B])
+
+        for dims in [(3, 3), (5, 5)]:
+            run_test(dims)
+
+    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
@@ -3139,6 +3172,20 @@ class TestAutograd(TestCase):
             self.assertIn('MyFunc.apply', str(w[0].message))
 
     @skipIfNoLapack
+    def test_eig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
+    def test_eig_complex_eigenvalues(self):
+        A = torch.tensor([[0., -1.], [1., 0.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=True)
+        with self.assertRaisesRegex(RuntimeError, 'does not support complex eigenvalues'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -3469,10 +3516,11 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
+        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, None))
+                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3687,6 +3735,28 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
+        # Should not give non-inputs to mark_dirty
+        class MyAdderBad(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                c = 3 * a
+                c.add_(b)
+                ctx.mark_dirty(c)
+                return c
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                grad = 3 * grad
+                return grad, grad
+
+        a = torch.ones(2, requires_grad=True)
+        b = torch.ones(2, requires_grad=True)
+
+        with warnings.catch_warnings(record=True) as w:
+            MyAdderBad.apply(a.clone(), b)
+        self.assertEqual(len(w), 1)
+
         # II) Multiple outputs
         class MyBadAdder(Function):
             @staticmethod
@@ -3714,11 +3784,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         # The input is a view
-        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        # The "python_error" is for python 2.7 for which current error handling is not perfect.
-        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
-            # TODO: CopySlices does not handle Function with multiple outputs
-            (c * d).sum().backward()
+        inplace_on_view_err = "your Function modifies inplace an input that is a view of another Tensor"
+        with self.assertRaisesRegex(RuntimeError, inplace_on_view_err):
+            c, d = MyBadAdder.apply(a.clone().view_as(a), b)
 
         # III) Inplace + other op
         class MyOutPlaceAdder(Function):
@@ -3739,25 +3807,9 @@ for shape in [(1,), ()]:
             c, d = MyOutPlaceAdder.apply(orig_a, b)
             return (c * d).sum()
 
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        gradcheck(fn, (a, b))
-
-        # We reuse the input
-        def fn(a, b):
-            orig_a = a.clone()
-            c, d = MyOutPlaceAdder.apply(orig_a, b)
-            return (c * d * orig_a).sum()
-
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
-            # TODO: We are not rebasing the history and so the inplace computation is wrong
-            gradcheck(fn, (a, b))
+        bad_mark_dirty_err = "Some elements marked as dirty during the forward method were not returned as output."
+        with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
+            fn(a, b)
 
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
@@ -3797,32 +3849,6 @@ for shape in [(1,), ()]:
         c = torch.sum(s**b)
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
-
-    def test_multi_view_methods(self):
-        # This list should math the PURE_VIEW_FUNCTIONS in `tools/autograd/gen_autograd.py
-        # It maps a function its arguments for an input of size [3,]
-        fn_to_test = {
-            'split': (2,),
-            'split_with_sizes': ((2, 1),),
-            'unbind': (0,)
-        }
-
-        for fn, arg in fn_to_test.items():
-            inp = torch.rand(3, dtype=torch.double, requires_grad=True)
-
-            def foo(inp, inplace=False):
-                x = inp * 2
-                x = getattr(x, fn)(*arg)
-                res = 0.
-                for i, el in enumerate(x):
-                    if inplace:
-                        el *= 42
-                    res += (i + 1) * el.sum()
-                return res
-            self.assertTrue(gradcheck(foo, (inp,)))
-            self.assertTrue(gradgradcheck(foo, (inp,)))
-            self.assertTrue(gradcheck(foo, (inp, True)))
-            self.assertTrue(gradgradcheck(foo, (inp, True)))
 
 
 def index_variable(shape, max_indices):
@@ -3879,7 +3905,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -4298,7 +4324,7 @@ class TestAutogradDeviceType(TestCase):
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
+            gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
     @skipCUDAIfRocm

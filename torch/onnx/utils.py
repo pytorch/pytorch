@@ -18,7 +18,7 @@ import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
-from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes
+from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -49,7 +49,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False, export_raw_ir=False,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
-           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None):
+           dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
+           enable_onnx_checker=True):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -64,7 +65,7 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets)
+            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -432,7 +433,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
-            fixed_batch_size=False, custom_opsets=None, add_node_names=True):
+            fixed_batch_size=False, custom_opsets=None, add_node_names=True,
+            enable_onnx_checker=True):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -484,6 +486,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
             proto, export_map = graph._export_onnx(
                 {}, opset_version, dynamic_axes, False, operator_export_type,
                 strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
+
+        if enable_onnx_checker and operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
+            # Only run checker if enabled and we are not using ATEN fallback
+            _check_onnx_proto(proto)
 
         if export_type == ExportTypes.PROTOBUF_FILE:
             assert(len(export_map) == 0)
@@ -719,6 +725,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.kindOf("value") == "fs":
+                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                    return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
                 else:
@@ -851,7 +860,11 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets
+
+    for version in _onnx_stable_opsets:
+        if version >= opset_version:
+            sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):

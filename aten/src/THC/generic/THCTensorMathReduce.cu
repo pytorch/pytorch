@@ -117,6 +117,7 @@ void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dime
 void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
+  dimension = at::maybe_wrap_dim(dimension, src);
   THArgCheck(dimension >= 0 && dimension < THCTensor_(nDimensionLegacyNoScalars)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<scalar_t>::gt(value, scalar_cast<scalar_t>(0)), 2, "non-positive-norm not supported");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");

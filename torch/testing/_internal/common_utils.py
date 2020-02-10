@@ -12,6 +12,7 @@ import re
 import gc
 import types
 import inspect
+import io
 import argparse
 import unittest
 import warnings
@@ -113,7 +114,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def shell(command, cwd=None):
+def shell(command, cwd=None, env=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -124,7 +125,7 @@ def shell(command, cwd=None):
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -984,7 +985,13 @@ class TestCase(expecttest.TestCase):
             callable()
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
+            if not found:
+                m = 'Caught unexpected warnings: ' + msg + '\n'
+                for w in ws:
+                    m += warnings.formatwarning(
+                        w.message, w.category, w.filename, w.lineno, w.line)
+                    m += '\n'
+                self.fail(m)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
@@ -1446,6 +1453,13 @@ def load_tests(loader, tests, pattern):
             test_suite.addTest(test)
     return test_suite
 
+
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
