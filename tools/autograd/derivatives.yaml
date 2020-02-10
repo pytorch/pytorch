@@ -304,7 +304,7 @@
   self: _fused_dropout_backward(grad, result1, p)
 
 - name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: not_implemented("eig")
+  self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
