@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/lib/c10d/HashStore.hpp>
 #include <torch/lib/c10d/ProcessGroupGloo.hpp>
@@ -39,7 +40,7 @@ constexpr auto kRpcTimeout = std::chrono::milliseconds(250);
 constexpr auto kMinimalTime = std::chrono::milliseconds(10);
 }; // namespace
 
-class EchoingRequestCallback : public RequestCallback {
+class TORCH_API EchoingRequestCallback : public RequestCallback {
  public:
   std::shared_ptr<FutureMessage> processMessage(
       Message& request) const override {
@@ -83,7 +84,7 @@ class EchoingRequestCallback : public RequestCallback {
   mutable std::vector<std::thread> finishingThreads_;
 };
 
-class EchoingProcessGroupAgent : public ProcessGroupAgent {
+class TORCH_API EchoingProcessGroupAgent : public ProcessGroupAgent {
  public:
   EchoingProcessGroupAgent(
       std::string workerName,

@@ -12,14 +12,14 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
+struct TORCH_API ProcessGroupRpcBackendOptions : public RpcBackendOptions {
   ProcessGroupRpcBackendOptions() = default;
   int numSendRecvThreads;
 };
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
-struct SendWork {
+struct TORCH_API SendWork {
   SendWork(const WorkerInfo& to, Message&& message)
       : to_(to), message_(message) {}
 
@@ -29,7 +29,7 @@ struct SendWork {
 
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
 // to allow us to run serialization/deserialization in the worker threads.
-struct RecvWork {
+struct TORCH_API RecvWork {
   RecvWork(
       const WorkerInfo& from,
       MessageType type,
@@ -43,7 +43,7 @@ struct RecvWork {
   torch::Tensor payload_;
 };
 
-class ProcessGroupAgent : public RpcAgent {
+class TORCH_API ProcessGroupAgent : public RpcAgent {
  public:
   ProcessGroupAgent(
       std::string workerName,
