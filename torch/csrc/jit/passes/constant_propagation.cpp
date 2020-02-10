@@ -270,7 +270,7 @@ struct ConstantPropagator {
     if (aliasDb_) {
       no_mutation = !aliasDb_->hasWriters(n);
       // outputs may be written to if they escape scope
-      no_mutation = no_mutation && !aliasDb_->escapesScope(n->outputs())
+      no_mutation = no_mutation && !aliasDb_->escapesScope(n->outputs());
     } else {
       no_mutation =
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
