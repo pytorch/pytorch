@@ -263,7 +263,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: index
     - THTensor* self
     - long dim
     - THIndexTensor* index
