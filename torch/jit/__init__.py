@@ -216,6 +216,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -284,7 +286,7 @@ def _get_trace_graph(f, args=(), kwargs=None, _force_outplace=False,
 
 
 def _unique_state_dict(module, keep_vars=False):
-    # since Parameter.data always creates a new torch.Tensor instance,
+    # since Parameter.detach() always creates a new torch.Tensor instance,
     # id(v) doesn't work with it. So we always get the Parameter or Buffer
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
@@ -297,7 +299,7 @@ def _unique_state_dict(module, keep_vars=False):
         if keep_vars:
             filtered_dict[k] = v
         else:
-            filtered_dict[k] = v.data
+            filtered_dict[k] = v.detach()
     return filtered_dict
 
 
@@ -379,7 +381,7 @@ def _clone_inputs(args):
             return None
         elif isinstance(a, torch.Tensor):
             # TODO: figure out one liner to .clone() and set requires_grad
-            v = Variable(a.data.clone(memory_format=torch.preserve_format), requires_grad=a.requires_grad)
+            v = a.detach().clone(memory_format=torch.preserve_format).requires_grad_(a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v
@@ -490,11 +492,11 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             raise ValueError(("Model returns {} outputs, but default loss function "
                               "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
-        saved_outs = [v.data.clone(memory_format=torch.preserve_format) for v in out_vars]
+        saved_outs = [v.detach().clone(memory_format=torch.preserve_format) for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
         # TODO: I'm not sure if the clone here is necessary but it is safer
-        saved_grads = [v.data.clone(memory_format=torch.preserve_format) for v in grads]
+        saved_grads = [v.detach().clone(memory_format=torch.preserve_format) for v in grads]
         return (saved_outs, saved_grads)
 
     with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
@@ -1653,6 +1655,20 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
+        def _save_for_lite_interpreter(self, *args, **kwargs):
+            r"""
+            _save_for_lite_interpreter(f)
+
+            Add (or update) the bytecode session to the script model. The updated model is used
+            in lite interpreter for mobile applications.
+
+            Arguments:
+                f: a string containing a file name.
+                _extra_files: Map from filename to contents which will be stored as part of 'f'.
+
+            """
+            return self._c._save_for_mobile(*args, **kwargs)
+
         def save_to_buffer(self, *args, **kwargs):
             return self._c.save_to_buffer(*args, **kwargs)
 
@@ -1856,6 +1872,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
@@ -1973,8 +1992,7 @@ def _add_script_class(cls, name):
 def _get_script_class(name):
     global _script_classes
     if name not in _script_classes:
-        raise RuntimeError("Unknown reference to ScriptClass '{}'. "
-                           "Did you forget to import it?".format(name))
+        return None
     return _script_classes[name]
 
 # overloads are registered in _jit_internal and compiled here so that _overload

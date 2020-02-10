@@ -696,9 +696,17 @@ struct to_ir {
   }
 
   // see [setstate type]
-  static TypePtr getTypeForSetStateArg(const Self* self) {
+  static TypePtr getTypeForSetStateArg(const Def& def, const Self* self) {
     TORCH_CHECK(self, "Expected __setstate__ to have a `self` argument");
-    self->getClassType()->getMethod("__getstate__")->ensure_defined();
+    auto getstate = self->getClassType()->getMethod("__getstate__");
+    if (!getstate) {
+      throw ErrorReport(def.range())
+          << "`__setstate__` defined but not `__getstate__`. "
+          << "You must have both defined on a ScriptModule "
+          << "to customize serialization.\n"
+          << "Did you forget to use `@torch.jit.export`?";
+    }
+    getstate->ensure_defined();
     return self->getClassType()
         ->getMethod("__getstate__")
         ->getSchema()
@@ -725,10 +733,10 @@ struct to_ir {
     // well-formed
     TORCH_INTERNAL_ASSERT(def.name().name() == "__setstate__");
     const auto numDeclParams = def.decl().params().size();
-    TORCH_CHECK(
-        numDeclParams,
-        "Expected 2 arguments for __setstate__, got: ",
-        numDeclParams);
+    if (numDeclParams != 2) {
+      throw ErrorReport(def.range())
+          << "Expected 2 arguments for `__setstate__`, got: " << numDeclParams;
+    }
     return true;
   }
 
@@ -783,7 +791,7 @@ struct to_ir {
       auto arg = schema.arguments().at(arg_annotation_idx++);
       if (shouldDeriveType) {
         TORCH_INTERNAL_ASSERT(schema.arguments().size() == 1);
-        const auto& inferredStateType = getTypeForSetStateArg(self);
+        const auto& inferredStateType = getTypeForSetStateArg(def, self);
         arg = arg.cloneWithType(inferredStateType);
       }
 
@@ -1122,8 +1130,12 @@ struct to_ir {
             }
           }
         }
-        return CondValue(
-            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+        auto expr_out = emitToBool(emitExpr(expr));
+        c10::optional<bool> static_if = c10::nullopt;
+        if (expr_out->node()->kind() == aten::is_scripting) {
+          static_if = true;
+        }
+        return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }
   }
@@ -2219,11 +2231,10 @@ struct to_ir {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
     const auto lhs = Select(stmt.lhs());
-    const auto basename = Var(lhs.value()).name();
+    auto lhsObject = emitSugaredExpr(lhs.value(), 1);
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
                               ->asValue(stmt.rhs().range(), method);
-    auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+    lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -3326,13 +3337,21 @@ c10::QualifiedName CompilationUnit::mangle(
   for (auto& atom : atoms) {
     auto pos = atom.find(manglePrefix);
     if (pos != std::string::npos) {
-      std::string newAtom;
-      newAtom.reserve(atom.size());
+      auto num = atom.substr(pos + manglePrefix.size());
+      // current mangle index in the name
+      size_t num_i = c10::stoi(num);
+      // bump the mangleIndex_ to num_i + 1
+      mangleIndex_ = std::max(mangleIndex_, num_i + 1);
+      std::string newAtomPrefix;
+      newAtomPrefix.reserve(atom.size());
       // Append the part of the name up to the end of the prefix
-      newAtom.append(atom, 0, pos);
-      newAtom.append(manglePrefix);
-      newAtom.append(c10::to_string(mangleIndex_++));
-      atom = newAtom;
+      newAtomPrefix.append(atom, 0, pos);
+      newAtomPrefix.append(manglePrefix);
+      atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      // increment mangleIndex_ until the type is not defined
+      while (get_type(QualifiedName(atoms))) {
+        atom = newAtomPrefix + c10::to_string(mangleIndex_++);
+      }
       return QualifiedName(atoms);
     }
   }

@@ -235,10 +235,6 @@ void TensorIterator::compute_types() {
       }
     }
 
-    if (is_different && !skip_output) {
-      have_differing_types_ = true;
-    }
-
     if (op.tensor.defined() && op.device != op.tensor.device()) {
       if (op.is_output) {
         TORCH_CHECK(false, "output with device ", op.tensor.device(),
@@ -593,13 +589,7 @@ bool TensorIterator::is_contiguous() const {
   if (ndim() != 1) {
     return false;
   }
-  int num_tensors = ntensors();
-  for (int i = 0; i < num_tensors; i++) {
-    if (strides(i)[0] != element_size(i)) {
-      return false;
-    }
-  }
-  return true;
+  return has_contiguous_first_dim();
 }
 
 
@@ -681,7 +671,6 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
   iter.allow_cpu_scalars_ = true;
   iter.compute_common_dtype_only_for_inputs();
   iter.build();
-  iter.dynamic_cast_if(iter.dtype() != kBool);
   return iter;
 }
 

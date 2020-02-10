@@ -48,7 +48,7 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   char* in_ptr = (char*)iter.data_ptr(1);
 
   auto offset_calc = index_make_offset_calculator<3>(iter);
-  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
+  legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int idx) {
     auto offsets = offset_calc.get(idx);
     char* out_data = out_ptr + offsets[0];
     char* in_data = in_ptr + offsets[1];

@@ -2,6 +2,7 @@
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
@@ -107,6 +108,12 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
+
+    if (py::isinstance<ScriptClass>(obj)) {
+      auto script_class = py::cast<ScriptClass>(obj);
+      return script_class.class_type_.type_;
+    }
+
     py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
     if (!py::cast<bool>(isClass)) {
       return nullptr;
@@ -554,9 +561,9 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
       for (size_t i = 0; i < at->elements().size(); ++i) {
         work.emplace_back(Work{at->elements().at(i), bt->elements().at(i)});
       }
-    } else if (item.a.isGenericList()) {
-      auto al = item.a.toGenericList();
-      auto bl = item.b.toGenericList();
+    } else if (item.a.isList()) {
+      auto al = item.a.toList();
+      auto bl = item.b.toList();
       for (size_t i = 0; i < al.size(); ++i) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }
@@ -673,13 +680,15 @@ static py::dict _jit_debug_module_iterators(Module& module) {
   return result;
 }
 
-
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   // STL containers are not mutable by default and hence we need to bind as
   // follows.
   py::bind_map<ExtraFilesMap>(m, "ExtraFilesMap");
+
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<c10::intrusive_ptr<CustomClassHolder>>(m, "Capsule");
 
   py::class_<Object>(m, "ScriptObject")
       .def("_type", [](Module& m) { return m.type(); })
@@ -728,11 +737,63 @@ void initJitScriptBindings(PyObject* module) {
             return bool(self.find_method(name));
           })
       .def(
-          "_method_names", [](Object& self) {
+          "_method_names",
+          [](Object& self) {
             return fmap(self.get_methods(), [](const Method& method) {
               return method.name();
             });
-          });
+          })
+      .def(py::pickle(
+          [](const Object& self)
+              -> std::tuple<py::object, std::string> { // __getstate__
+            if (auto getstate_method = self.find_method("__getstate__")) {
+              auto object_state = toPyObject((*getstate_method)(Stack{}));
+              TORCH_INTERNAL_ASSERT(self.type()->name());
+              return std::make_tuple(
+                  object_state, self.type()->name()->qualifiedName());
+            }
+            std::stringstream err;
+            err << "Tried to serialize object ";
+            if (auto qualname = self.type()->name()) {
+              err << qualname->qualifiedName() << " ";
+            }
+            err << "which does not have a __getstate__ method defined!";
+            throw std::runtime_error(err.str());
+          },
+          [](std::tuple<py::object, std::string> state_tup) -> Object {
+            py::object state;
+            std::string qualname;
+            std::tie(state, qualname) = state_tup;
+            auto class_type = classCU()->get_class(qualname);
+            TORCH_CHECK(
+                class_type,
+                "Tried to deserialize class ",
+                qualname,
+                " which is not known to the runtime. "
+                "If this is a custom C++ class, make "
+                "sure the appropriate code is linked.");
+
+            auto self = script::Object(c10::ivalue::Object::create(
+                c10::StrongTypePtr(classCU(), class_type), 1));
+            if (auto setstate_method = self.find_method("__setstate__")) {
+              auto setstate_schema = setstate_method->function().getSchema();
+              TORCH_INTERNAL_ASSERT(
+                  setstate_schema.arguments().size() == 2,
+                  "__setstate__ method for class ",
+                  class_type->python_str(),
+                  " must have exactly 2 arguments!");
+              auto state_type = setstate_schema.arguments().at(1).type();
+              (*setstate_method)(Stack{toIValue(state, state_type)});
+              return self;
+            }
+            std::stringstream err;
+            err << "Tried to deserialize object ";
+            if (auto qualname = class_type->name()) {
+              err << qualname->qualifiedName() << " ";
+            }
+            err << "which does not have a __setstate__ method defined!";
+            throw std::runtime_error(err.str());
+          }));
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -755,6 +816,15 @@ void initJitScriptBindings(PyObject* module) {
             m.save(buf, _extra_files);
             return py::bytes(buf.str());
           },
+          py::arg("_extra_files") = ExtraFilesMap())
+      .def(
+          "_save_for_mobile",
+          [](Module& m,
+             const std::string& filename,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+            m._save_for_mobile(filename, _extra_files);
+          },
+          py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap())
       .def("_set_optimized", &Module::set_optimized)
       .def(
@@ -882,7 +952,7 @@ void initJitScriptBindings(PyObject* module) {
              const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
             Module module("__torch__.PlaceholderModule");
             // [issue 27343]
-            // Modules have 'training' attributes by defualt, but due to
+            // Modules have 'training' attributes by default, but due to
             // https://github.com/pytorch/pytorch/issues/27343, functions end
             // up having a training attribute when they are loaded. This adds
             // a fake 'training' attribute that shouldn't be used, but prevents
@@ -1124,6 +1194,15 @@ void initJitScriptBindings(PyObject* module) {
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);
+  m.def("_ivalue_debug_python_object", [](py::object py_obj) {
+    // convert to IValue first, IValue will incref via py::object
+    IValue pyobj_ivalue = toIValue(std::move(py_obj), PyObjectType::get());
+    // convert back to PyObject by borrowing the reference, which also
+    // incref, after the return of this function, IValue is out of scope
+    // which decref, so the return value is original refcount + 1
+    py::object ret = toPyObject(pyobj_ivalue);
+    return ret;
+  });
   m.def("_jit_debug_module_iterators", _jit_debug_module_iterators);
 
   py::class_<testing::FileCheck>(m, "FileCheck")
@@ -1297,6 +1376,15 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
+  m.def("_check_onnx_proto",
+     [](const std::string& proto_string) {
+            check_onnx_proto(proto_string);
+        },
+        py::arg("proto_string")
+      );
+  m.def("_jit_is_script_object", [](const py::object& obj) {
+    return py::isinstance<script::Object>(obj);
+  });
 }
 } // namespace script
 } // namespace jit

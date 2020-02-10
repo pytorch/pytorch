@@ -82,6 +82,14 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
 }
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return moveToIntrusivePtr<ivalue::PyObjectHolder>();
+}
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return toIntrusivePtr<ivalue::PyObjectHolder>();
+}
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   return at::Tensor(moveToIntrusivePtr<at::TensorImpl, at::UndefinedTensorImpl>());
@@ -182,6 +190,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 };
 
 struct Object;
+struct PyObjectHolder;
 }
 
 // Future
@@ -341,7 +350,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
   const IValue& getSlot(size_t slot) const {
-    return slots_.at(slot);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(slot < slots_.size());
+    // NOTE: This lookup is fairly hot, so we use unchecked access to the
+    // vector.  Errors should still be detectable with ASan.
+    return slots_[slot];
   }
 
   void unsafeRemoveSlot(size_t slot) {
@@ -388,6 +400,15 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   void resizeObject(size_t slot);
   StrongTypePtr type_;
   std::vector<IValue> slots_;
+};
+
+// virtual ivalue PyObjectHolder that hold a py::object, we make this virtual
+// because the py::object and refcounting logic should happen in libtorch_python
+// see concrete implementation in python_ivalue.h
+struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
+ public:
+  virtual PyObject* getPyObject() = 0;
+  virtual ~PyObjectHolder() {};
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
@@ -446,7 +467,7 @@ DEFINE_TO(c10::List<int64_t>, toIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
 DEFINE_TO(c10::List<at::Tensor>, toTensorList)
-DEFINE_TO(c10::impl::GenericList, toGenericList)
+DEFINE_TO(c10::impl::GenericList, toList)
 DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
@@ -508,7 +529,7 @@ template <typename Elem>
 c10::List<Elem> generic_to(
     IValue ivalue,
     _fake_type<c10::List<Elem>>) {
-  return impl::toTypedList<Elem>(std::move(ivalue).toGenericList());
+  return impl::toTypedList<Elem>(std::move(ivalue).toList());
 }
 
 template <typename Key, typename Value>
@@ -594,7 +615,7 @@ inline c10::List<int64_t> IValue::toIntList() const & {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return c10::List<int64_t>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<int64_t> IValue::toIntListRef() const {
+inline std::vector<int64_t> IValue::toIntVector() const {
   AT_ASSERT(isIntList(), "Expected IntList but got ", tagKind());
   return createVectorFromList<int64_t>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -606,7 +627,7 @@ inline c10::List<double> IValue::toDoubleList() const & {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return c10::List<double>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<double> IValue::toDoubleListRef() const {
+inline std::vector<double> IValue::toDoubleVector() const {
   AT_ASSERT(isDoubleList(), "Expected DoubleList but got ", tagKind());
   return createVectorFromList<double>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
@@ -626,20 +647,20 @@ inline c10::List<at::Tensor> IValue::toTensorList() const & {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline std::vector<at::Tensor> IValue::toTensorListRef() const {
+inline std::vector<at::Tensor> IValue::toTensorVector() const {
   AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
   return createVectorFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
-inline c10::List<IValue> IValue::toGenericList() && {
-  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
+inline c10::List<IValue> IValue::toList() && {
+  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::List<IValue> IValue::toGenericList() const & {
-  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
+inline c10::List<IValue> IValue::toList() const & {
+  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return c10::List<IValue>(toIntrusivePtr<c10::detail::ListImpl>());
 }
-inline c10::ArrayRef<IValue> IValue::toGenericListRef() const {
-  AT_ASSERT(isGenericList(), "Expected GenericList but got ", tagKind());
+inline c10::ArrayRef<IValue> IValue::toListRef() const {
+  AT_ASSERT(isList(), "Expected GenericList but got ", tagKind());
   return static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr)->list;
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() && {
@@ -689,7 +710,7 @@ inline IValue::IValue(c10::impl::GenericList v)
 }
 
 template<class T> inline IValue::IValue(c10::List<T> v)
-: IValue(impl::toGenericList<T>(std::move(v))) {}
+: IValue(impl::toList<T>(std::move(v))) {}
 template<class T> inline IValue::IValue(at::ArrayRef<T> v)
 : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -736,6 +757,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
+: tag(Tag::PyObject), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
 : tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -749,6 +774,9 @@ inline const std::string& IValue::toStringRef() const {
   return toString()->string();
 }
 
+inline PyObject* IValue::toPyObject() const {
+  return toPyObjectHolder()->getPyObject();
+}
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {
@@ -819,7 +847,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(res->second, 1);
+  auto retObject = ivalue::Object::create(res, 1);
   auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
 
   retObject->setSlot(0, IValue(objPtr));

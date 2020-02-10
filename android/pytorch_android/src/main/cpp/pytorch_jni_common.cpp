@@ -340,8 +340,8 @@ facebook::jni::local_ref<JIValue> JIValue::newJIValueFromAtIValue(
       (*jArray)[index++] = TensorHybrid::newJTensorFromAtTensor(e);
     }
     return jMethodTensorListArr(JIValue::javaClassStatic(), jArray);
-  } else if (ivalue.isGenericList()) {
-    auto list = ivalue.toGenericList();
+  } else if (ivalue.isList()) {
+    auto list = ivalue.toList();
     static auto jMethodListArr =
         JIValue::javaClassStatic()
             ->getStaticMethod<facebook::jni::local_ref<JIValue>(

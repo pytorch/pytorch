@@ -25,23 +25,24 @@ from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 from torch.utils.checkpoint import checkpoint
-from common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
-                          suppress_warnings, slowTest,
-                          load_tests, random_symmetric_pd_matrix, random_symmetric_matrix, IS_WINDOWS, IS_MACOS)
+from torch.testing._internal.common_utils import (TEST_MKL, TEST_WITH_ROCM, TestCase, run_tests, skipIfNoLapack,
+                                                  suppress_warnings, slowTest,
+                                                  load_tests, random_symmetric_pd_matrix, random_symmetric_matrix,
+                                                  IS_WINDOWS, IS_MACOS)
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import randn_like
-from common_methods_invocations import (method_tests,
-                                        create_input, unpack_variables,
-                                        EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK,
-                                        EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
-                                        exclude_tensor_method,
-                                        mask_not_all_zeros,
-                                        S)
-from common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
-                                deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
+from torch.testing._internal.common_methods_invocations import (method_tests,
+                                                                create_input, unpack_variables,
+                                                                EXCLUDE_FUNCTIONAL, EXCLUDE_GRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK,
+                                                                EXCLUDE_GRADGRADCHECK_BY_TEST_NAME,
+                                                                exclude_tensor_method,
+                                                                mask_not_all_zeros,
+                                                                S)
+from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
+                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -2299,6 +2300,39 @@ class TestAutograd(TestCase):
             _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
+    def test_eig(self):
+        def func(B):
+            return torch.eig(B, eigenvectors=True)
+
+        def func_eigvals(B):
+            return torch.eig(B, eigenvectors=True)[0]
+
+        def func_eigvecs(B):
+            return torch.eig(B, eigenvectors=True)[1]
+
+        def run_test(dims):
+            # The backward operation for eig only works for real eigenvalues,
+            # so the matrix should be B = U^{-1}*A*U where A is a random
+            # symmetric matrix and U is a random full-rank matrix.
+            # Slight change to the matrix should not make the eigenvalues
+            # complex, so we apply requires_grad_ to B, not A and U
+
+            A = random_symmetric_matrix(dims[-1], *dims[:-2])
+            U = torch.rand(*dims)
+            Uinv = torch.inverse(U)
+            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
+
+            gradcheck(func, [B])
+            gradgradcheck(func, [B])
+            gradcheck(func_eigvals, [B])
+            gradgradcheck(func_eigvals, [B])
+            gradcheck(func_eigvecs, [B])
+            gradgradcheck(func_eigvecs, [B])
+
+        for dims in [(3, 3), (5, 5)]:
+            run_test(dims)
+
+    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
@@ -3017,14 +3051,14 @@ class TestAutograd(TestCase):
     def test_inplace_view_backward(self):
         # Issue #10532: Make sure that this does not raise RuntimeError.
         net = nn.Sequential(
-            nn.InstanceNorm2d(1),
+            nn.InstanceNorm2d(2),
             nn.ReLU(True)
         )
 
-        x = torch.tensor([[[[1.0]]]], requires_grad=True)
-        g, = torch.autograd.grad(net(x).pow(2), [x], create_graph=True)
+        x = torch.tensor([[[[1.0, 1.0]]]], requires_grad=True)
+        g, = torch.autograd.grad(net(x).pow(2), [x], grad_outputs=x.new_ones(x.shape) , create_graph=True)
         torch.autograd.grad(g.sum(), [x])
-        self.assertEqual(x, torch.tensor([[[[1.0]]]]))
+        self.assertEqual(x, torch.tensor([[[[1.0, 1.0]]]]))
 
         # https://discuss.pytorch.org/t/freeing-buffer-strange-behavior/31955/8
         inputs = torch.ones((1, 3, 256, 256), requires_grad=True)
@@ -3136,6 +3170,20 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    @skipIfNoLapack
+    def test_eig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
+    def test_eig_complex_eigenvalues(self):
+        A = torch.tensor([[0., -1.], [1., 0.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=True)
+        with self.assertRaisesRegex(RuntimeError, 'does not support complex eigenvalues'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
 
     @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
@@ -3687,6 +3735,28 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
+        # Should not give non-inputs to mark_dirty
+        class MyAdderBad(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                c = 3 * a
+                c.add_(b)
+                ctx.mark_dirty(c)
+                return c
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                grad = 3 * grad
+                return grad, grad
+
+        a = torch.ones(2, requires_grad=True)
+        b = torch.ones(2, requires_grad=True)
+
+        with warnings.catch_warnings(record=True) as w:
+            MyAdderBad.apply(a.clone(), b)
+        self.assertEqual(len(w), 1)
+
         # II) Multiple outputs
         class MyBadAdder(Function):
             @staticmethod
@@ -3714,11 +3784,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         # The input is a view
-        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        # The "python_error" is for python 2.7 for which current error handling is not perfect.
-        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
-            # TODO: CopySlices does not handle Function with multiple outputs
-            (c * d).sum().backward()
+        inplace_on_view_err = "your Function modifies inplace an input that is a view of another Tensor"
+        with self.assertRaisesRegex(RuntimeError, inplace_on_view_err):
+            c, d = MyBadAdder.apply(a.clone().view_as(a), b)
 
         # III) Inplace + other op
         class MyOutPlaceAdder(Function):
@@ -3739,25 +3807,9 @@ for shape in [(1,), ()]:
             c, d = MyOutPlaceAdder.apply(orig_a, b)
             return (c * d).sum()
 
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        gradcheck(fn, (a, b))
-
-        # We reuse the input
-        def fn(a, b):
-            orig_a = a.clone()
-            c, d = MyOutPlaceAdder.apply(orig_a, b)
-            return (c * d * orig_a).sum()
-
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
-            # TODO: We are not rebasing the history and so the inplace computation is wrong
-            gradcheck(fn, (a, b))
+        bad_mark_dirty_err = "Some elements marked as dirty during the forward method were not returned as output."
+        with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
+            fn(a, b)
 
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
@@ -3784,6 +3836,20 @@ for shape in [(1,), ()]:
         MyFunction.apply(inp).sum().backward()
         # Case where original==True
         MyFunction.apply(inp).sum().backward(create_graph=True)
+
+    def test_power_function(self):
+        a = torch.tensor([0., 0., 0.])
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(a**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
+        s = 0
+        b = torch.tensor([-1., 0., 1.], requires_grad=True)
+        c = torch.sum(s**b)
+        c.backward()
+        self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -3839,7 +3905,7 @@ def gradgradcheck_method_precision_override(test_name):
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION, nondet_tol=1e-10))
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -4258,7 +4324,7 @@ class TestAutogradDeviceType(TestCase):
                 log_probs = torch.log_softmax(x_full, 2)
                 return torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
-            gradcheck(ctc_after_softmax, [x], nondet_tol=1e-7)
+            gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
     @skipCUDAIfRocm
