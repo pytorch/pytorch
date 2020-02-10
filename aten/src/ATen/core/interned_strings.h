@@ -209,6 +209,7 @@ namespace c10 {
   _(onnx, Mod)                       \
   _(onnx, Sqrt)                      \
   _(onnx, SplitToSequence)           \
+  _(onnx, SequenceAt)                \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
