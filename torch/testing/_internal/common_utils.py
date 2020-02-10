@@ -985,7 +985,13 @@ class TestCase(expecttest.TestCase):
             callable()
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            self.assertTrue(found, msg)
+            if not found:
+                m = 'Caught unexpected warnings: ' + msg + '\n'
+                for w in ws:
+                    m += warnings.formatwarning(
+                        w.message, w.category, w.filename, w.lineno, w.line)
+                    m += '\n'
+                self.fail(m)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
