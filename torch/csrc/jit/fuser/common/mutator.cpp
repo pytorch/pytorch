@@ -38,7 +38,7 @@ const Statement* BaseMutator::mutate(const Add* const add){
 void BaseMutator::mutate(Fusion* fusion){
 
   std::vector<const Expr*> new_exprs;
-  std::vector<const Expr*> orig_exprs(fusion->exprs().begin(), fusion->exprs().end());
+  std::vector<const Expr*> orig_exprs = fusion->exprs();
 
   for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
       const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);
@@ -46,7 +46,7 @@ void BaseMutator::mutate(Fusion* fusion){
       new_exprs.push_back(static_cast<const Expr*>(new_stmt));  
   }
 
-  for(std::vector<const Expr*>::size_type i = 0; i < fusion->exprs().size(); i++){
+  for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
     if(orig_exprs[i] != new_exprs[i]){
         fusion->removeExpr(orig_exprs[i]);
     }

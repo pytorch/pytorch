@@ -83,7 +83,6 @@ void testGPU_FusionSimpleTypePromote(){
 }
 
 void testGPU_FusionMutator(){
-  /*BROKEN
   Fusion fusion;
   FusionGuard fg(&fusion);
   
@@ -94,7 +93,7 @@ void testGPU_FusionMutator(){
   BaseMutator mutator;
   mutator.mutate(&fusion);
   std::cout<<"Replaced: "<<fusion<<std::endl;
-  */
+  
 }
 
 void testGPU_FusionRegister() {
