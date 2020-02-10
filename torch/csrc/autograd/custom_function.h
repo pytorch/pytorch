@@ -238,6 +238,12 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     }
   }
 
+  // Acquire lock to here protect thread safety on custom C++ Autograd Node
+  // This is needed for the custom Autograd Node since we don't know if the
+  // user defined Node will write to the shared data during backward.
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
+
   auto outputs = T::backward(&ctx_, backward_inputs);
 
   int num_forward_inputs = is_variable_input_.size();
@@ -291,6 +297,8 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
 
 template<class T>
 void CppNode<T>::release_variables() {
+  // lock to ensure thread safety, see [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
   ctx_.saved_variables_.clear();
   ctx_.has_freed_buffers_ = true;
 }

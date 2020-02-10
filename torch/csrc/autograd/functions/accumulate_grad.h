@@ -4,6 +4,8 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <mutex>
+
 namespace torch { namespace autograd {
 
 struct TORCH_API AccumulateGrad : public Node {

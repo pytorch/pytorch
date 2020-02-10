@@ -15,6 +15,7 @@ using torch::autograd::Engine;
 using torch::autograd::FutureVariableList;
 using torch::autograd::GraphRoot;
 using torch::autograd::GraphTask;
+using torch::autograd::ReadyQueue;
 using torch::autograd::Node;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
@@ -77,6 +78,7 @@ void DistEngine::computeDependencies(
       /* keep_graph */ false,
       /* create_graph */ false,
       /* depth */ 0,
+      /* cpu_ready_queue */ nullptr,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -343,9 +345,10 @@ size_t DistEngine::numBackwardPasses() const {
 
 std::unordered_map<std::string, std::string> DistEngine::getDebugInfo() const {
   std::unordered_map<std::string, std::string> debugInfo;
+  auto autogradContext = DistAutogradContainer::getInstance().currentContext();
   debugInfo[kNumBackwardPasses] = std::to_string(numBackwardPasses());
   debugInfo[kEngineCPUQueueSize] =
-      std::to_string(engine_.ready_queue_size(at::kCPU));
+      std::to_string(engine_.ready_queue_size(autogradContext->retrieveGraphTask(), at::kCPU));
   debugInfo[kNumAutogradContexts] = std::to_string(
       DistAutogradContainer::getInstance().numAutogradContexts());
   return debugInfo;

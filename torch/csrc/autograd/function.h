@@ -347,6 +347,35 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // fields.
   const uint64_t sequence_nr_;
 
+  // Note [Thread Safety on Autograd Node]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Since we could allow the owning thread to call Engine::execute and drive the
+  // execution by itself, there might be cases that part of the GraphTask is shared
+  // across different `backward()` or `grad()` calls, i.e. fork new threads in the
+  // middle of the forward and call `backward()` separately from different threads.
+  // We need to protect the thread safety on NodeTask to prevent data racing on
+  // shared variables read/write.
+  //
+  // Here we add a thread mutex to protect the Node's thread safety, so that different
+  // threads cannot race the shared data when executing the same NodeTask from multiple
+  // CPU threads. The strategy of thread safety on autograd Node:
+  //
+  // - lock the mutex during Node::apply(), this is to ensure Node that writing to
+  //   the shared variable are not racing across threads (i.e. AccumulateGrad and
+  //   custom C++ Autograd Node if writing to shared variables )
+  // - lock the mutex during Node::release_variables(), this serve the purpose that
+  //   when we release saved_variables from one thread, no other threads can call
+  //   the Node::apply(), this ensures the variable references from other threads
+  //   aren't dangling.
+  // - if we don't release any variables and no shared data read/write in the Node
+  //   i.e. purely functional, we don't lock the mutex
+  //
+  // This way we could protect the thread safety on Autograd Node, but we could still
+  // not protect the thread safety on Node pre/post C++ hooks (python hooks are
+  // automatically thread safe), we rely on the user to write thread safe C++ hooks
+  // if they want the hook to be correctly applied in multithreading environment.
+  std::mutex mutex_;
+
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
