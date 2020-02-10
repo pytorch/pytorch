@@ -1,4 +1,5 @@
 #include <ATen/core/boxing/boxing.h>
+#include <ATen/core/boxing/kernel_functor.h>
 
 namespace c10 {
 
@@ -7,13 +8,15 @@ inline KernelFunction::KernelFunction()
 , functor_(nullptr)
 , boxed_kernel_func_(nullptr)
 , unboxed_kernel_func_(nullptr)
+, inferred_function_schema_(nullptr)
 {}
 
-inline KernelFunction::KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func)
+inline KernelFunction::KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema> inferred_function_schema)
 : functorFactory_(std::move(functorFactory))
 , functor_(std::move(functor))
 , boxed_kernel_func_(boxed_kernel_func)
 , unboxed_kernel_func_(unboxed_kernel_func)
+, inferred_function_schema_(std::move(inferred_function_schema))
 {}
 
 template<KernelFunction::BoxedKernelFunction* func>
@@ -76,7 +79,8 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
         nullptr,  // no functorFactory_, this can only be called in a boxed way.
         nullptr,  // no functor_ object either
         &make_boxed_function<func>,
-        nullptr  // no unboxed function pointer
+        nullptr,  // no unboxed function pointer
+        nullptr   // no inferred schema
     );
 }
 
@@ -85,7 +89,8 @@ inline KernelFunction KernelFunction::makeFallthrough() {
         nullptr,  // no functorFactory_, this can only be called in a boxed way.
         nullptr,  // no functor_ object either
         &fallthrough_kernel,
-        nullptr  // no unboxed function pointer
+        nullptr,  // no unboxed function pointer
+        nullptr   // no inferred schema
     );
 }
 
@@ -98,7 +103,8 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctor(std::unique_ptr<Ope
         nullptr, // no functorFactory_ because we already have the functor_
         std::move(kernelFunctor),
         &detail::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        detail::FunctionSchemaInferer<KernelFunctor>().run()
     );
 }
 
@@ -111,7 +117,8 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunctorFactory(std::functio
         std::move(kernelFunctorFactory),
         nullptr, // delay creation of functor_ (it will be created by calling functorFactory_ later)
         &detail::make_boxed_from_unboxed_functor<KernelFunctor, AllowLegacyTypes>::call,
-        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        detail::FunctionSchemaInferer<KernelFunctor>().run()
     );
 }
 
@@ -127,7 +134,9 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunctor(std::unique_ptr
         nullptr, // no functorFactory_ because we already have the functor_
         std::move(kernelFunctor),
         nullptr, // Don't create a boxed kernel for this
-        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call)
+        reinterpret_cast<void*>(&detail::wrap_kernel_functor_unboxed<KernelFunctor>::call),
+        // Some native functions don't support schema inference
+        nullptr
     );
 }
 

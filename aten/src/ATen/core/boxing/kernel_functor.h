@@ -305,6 +305,9 @@ namespace detail {
   class FunctionSchemaInferer final {
   public:
     using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
+    std::unique_ptr<FunctionSchema> run() const {
+      return inferFunctionSchema_<func_type>();
+    }
     std::unique_ptr<FunctionSchema> operator()() const {
       return inferFunctionSchema_<func_type>();
     }

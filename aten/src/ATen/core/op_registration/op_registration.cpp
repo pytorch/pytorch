@@ -44,11 +44,11 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
     const FunctionSchema& schema = options.schemaOrName_->right();
 
     for (auto& kernel : options.kernels) {
-      if (nullptr != kernel.inferred_function_schema.get()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.inferred_function_schema);
+      if (nullptr != kernel.func.inferred_function_schema()) {
+        c10::optional<std::string> schema_difference = findSchemaDifferences(schema, *kernel.func.inferred_function_schema());
         if (schema_difference.has_value()) {
           TORCH_CHECK(false, "In operator registration: Specified function schema [", toString(schema), "] ",
-                   "doesn't match inferred function schema [", toString(*kernel.inferred_function_schema), "]. ",
+                   "doesn't match inferred function schema [", toString(*kernel.func.inferred_function_schema()), "]. ",
                    *schema_difference);
         }
       }
@@ -92,16 +92,16 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorNam
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {
-    if (nullptr != kernel.inferred_function_schema.get()) {
+    if (nullptr != kernel.func.inferred_function_schema()) {
       if (inferred_schema.has_value()) {
-        c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.inferred_function_schema);
+        c10::optional<std::string> schema_difference = findSchemaDifferences(*inferred_schema, *kernel.func.inferred_function_schema());
         if (schema_difference.has_value()) {
           TORCH_CHECK(false, "In operator registration: Tried to register kernels for same operator that infer a different function schema: [", toString(*inferred_schema), "] ",
-                   "doesn't match [", toString(*kernel.inferred_function_schema), "]. ",
+                   "doesn't match [", toString(*kernel.func.inferred_function_schema()), "]. ",
                    *schema_difference);
         }
       } else {
-        inferred_schema = *kernel.inferred_function_schema;
+        inferred_schema = *kernel.func.inferred_function_schema();
       }
     }
   }

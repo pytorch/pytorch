@@ -5,6 +5,7 @@
 #include <ATen/core/boxing/kernel_functor.h>
 #include <ATen/core/boxing/kernel_function.h>
 #include <ATen/core/boxing/kernel_lambda.h>
+#include <ATen/core/op_registration/infer_schema.h>
 
 namespace c10 {
 
@@ -209,9 +210,13 @@ public:
   template<bool AllowLegacyTypes = false, class Lambda>
   static KernelFunction makeFromUnboxedLambda(Lambda&& lambda);
 
+  FunctionSchema* inferred_function_schema() const {
+    return inferred_function_schema_.get();
+  }
+
 private:
 
-  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
+  explicit KernelFunction(std::function<std::unique_ptr<OperatorKernel>()> functorFactory, std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func, std::unique_ptr<FunctionSchema> inferred_function_schema);
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
@@ -233,6 +238,8 @@ private:
 
   InternalBoxedKernelFunction* boxed_kernel_func_;
   void* unboxed_kernel_func_;
+
+  std::shared_ptr<FunctionSchema> inferred_function_schema_;
 };
 
 }

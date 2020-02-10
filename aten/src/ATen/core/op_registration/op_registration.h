@@ -53,13 +53,13 @@ public:
     // internal-only for registering stack based kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& kernel(DispatchKey dispatch_key) && {
-      return std::move(*this).kernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
+      return std::move(*this).rawKernel(dispatch_key, KernelFunction::makeFromBoxedFunction<kernel_func>());
     }
 
     // internal-only for registering stack based catch-all kernels
     template<KernelFunction::BoxedKernelFunction* kernel_func>
     Options&& catchAllKernel() && {
-      return std::move(*this).kernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>(), nullptr);
+      return std::move(*this).rawKernel(c10::nullopt, KernelFunction::makeFromBoxedFunction<kernel_func>());
     }
 
     // internal only for registering caffe2 ops
@@ -145,10 +145,9 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
-        detail::FunctionSchemaInferer<KernelFunctor>()()
+        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...))
       );
     }
 
@@ -196,10 +195,9 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
-        detail::FunctionSchemaInferer<KernelFunctor>()()
+        KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...))
       );
     }
 
@@ -223,11 +221,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>()
       );
     }
 
@@ -251,11 +247,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<typename detail::WrapKernelFunction<FuncType, kernel_func>::type>()()
+        KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>()
       );
     }
 
@@ -265,11 +259,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func)
       );
     }
 
@@ -279,11 +271,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
-        // TODO Do schema inference without relying on WrapKernelFunction
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+        KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func)
       );
     }
 
@@ -294,10 +284,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func)
       );
     }
 
@@ -308,10 +297,9 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
-        nullptr // disable function schema inference because some ops from native_functions.yaml don't support it yet
+        KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func)
       );
     }
 
@@ -347,11 +335,9 @@ public:
       // issues this causes), let's just forbid stateful lambdas altogether.
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor))
       );
     }
 
@@ -387,11 +373,9 @@ public:
       // in their .cpp file next to the kernel lambda.
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
-      return std::move(*this).kernel(
+      return std::move(*this).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(lambda))
       );
     }
 
@@ -402,11 +386,10 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<DispatchKey>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& rawKernel(c10::optional<DispatchKey>&& dispatch_key, KernelFunction&& func) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
-      config.inferred_function_schema = std::move(inferred_function_schema);
       kernels.push_back(std::move(config));
       return std::move(*this);
     }
@@ -423,12 +406,10 @@ public:
       KernelRegistrationConfig()
         : dispatch_key(c10::nullopt)
         , func()
-        , inferred_function_schema(nullptr)
       {}
 
       c10::optional<DispatchKey> dispatch_key;
       KernelFunction func;
-      std::unique_ptr<FunctionSchema> inferred_function_schema;
     };
 
     c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
@@ -514,11 +495,9 @@ public:
    std::enable_if_t<guts::is_function_type<FuncType>::value && !std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, RegisterOperators&&>
    op(const std::string& schemaOrName, FuncType* func, Options&& options = RegisterOperators::options()) && {
      constexpr bool AllowLegacyTypes = true;
-     return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
+     return std::move(*this).op(std::move(options).schema(schemaOrName).rawKernel(
        c10::nullopt,
-       KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func),
-       // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-       detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<FuncType>>>()()
+       KernelFunction::makeFromUnboxedRuntimeFunction<AllowLegacyTypes>(func)
      ));
    }
 
@@ -544,11 +523,9 @@ public:
       static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
       constexpr bool AllowLegacyTypes = true;
-      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
+      return std::move(*this).op(std::move(options).schema(schemaOrName).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda))
       ));
     }
 
@@ -560,11 +537,9 @@ public:
       static_assert(!std::is_base_of<OperatorKernel, Lambda>::value, "c10::OperatorKernel is part of the new kernel registration API and shouldn't be used together with the deprecated registration API. Please use the new RegisterOperators::options().kernel() based API instead.");
 
       constexpr bool AllowLegacyTypes = true;
-      return std::move(*this).op(std::move(options).schema(schemaOrName).kernel(
+      return std::move(*this).op(std::move(options).schema(schemaOrName).rawKernel(
         c10::nullopt,
-        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda)),
-        // TODO Do schema inference without relying on WrapRuntimeKernelFunctor
-        detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()()
+        KernelFunction::makeFromUnboxedLambda<AllowLegacyTypes>(std::forward<Lambda>(lambda))
       ));
     }
 
