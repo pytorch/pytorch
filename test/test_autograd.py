@@ -2300,6 +2300,39 @@ class TestAutograd(TestCase):
             _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
+    def test_eig(self):
+        def func(B):
+            return torch.eig(B, eigenvectors=True)
+
+        def func_eigvals(B):
+            return torch.eig(B, eigenvectors=True)[0]
+
+        def func_eigvecs(B):
+            return torch.eig(B, eigenvectors=True)[1]
+
+        def run_test(dims):
+            # The backward operation for eig only works for real eigenvalues,
+            # so the matrix should be B = U^{-1}*A*U where A is a random
+            # symmetric matrix and U is a random full-rank matrix.
+            # Slight change to the matrix should not make the eigenvalues
+            # complex, so we apply requires_grad_ to B, not A and U
+
+            A = random_symmetric_matrix(dims[-1], *dims[:-2])
+            U = torch.rand(*dims)
+            Uinv = torch.inverse(U)
+            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
+
+            gradcheck(func, [B])
+            gradgradcheck(func, [B])
+            gradcheck(func_eigvals, [B])
+            gradgradcheck(func_eigvals, [B])
+            gradcheck(func_eigvecs, [B])
+            gradgradcheck(func_eigvecs, [B])
+
+        for dims in [(3, 3), (5, 5)]:
+            run_test(dims)
+
+    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
@@ -3139,6 +3172,20 @@ class TestAutograd(TestCase):
             self.assertIn('MyFunc.apply', str(w[0].message))
 
     @skipIfNoLapack
+    def test_eig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
+    def test_eig_complex_eigenvalues(self):
+        A = torch.tensor([[0., -1.], [1., 0.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=True)
+        with self.assertRaisesRegex(RuntimeError, 'does not support complex eigenvalues'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -3688,6 +3735,28 @@ for shape in [(1,), ()]:
         c.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
+        # Should not give non-inputs to mark_dirty
+        class MyAdderBad(Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                c = 3 * a
+                c.add_(b)
+                ctx.mark_dirty(c)
+                return c
+
+            @staticmethod
+            def backward(ctx, grad):
+                bw_called[0] += 1
+                grad = 3 * grad
+                return grad, grad
+
+        a = torch.ones(2, requires_grad=True)
+        b = torch.ones(2, requires_grad=True)
+
+        with warnings.catch_warnings(record=True) as w:
+            MyAdderBad.apply(a.clone(), b)
+        self.assertEqual(len(w), 1)
+
         # II) Multiple outputs
         class MyBadAdder(Function):
             @staticmethod
@@ -3715,11 +3784,9 @@ for shape in [(1,), ()]:
         self.assertTrue(bw_called[0] == 1)
 
         # The input is a view
-        c, d = MyBadAdder.apply(a.clone().view_as(a), b)
-        # The "python_error" is for python 2.7 for which current error handling is not perfect.
-        with self.assertRaisesRegex(RuntimeError, "missing 1 required positional argument: \'gab\'|python_error"):
-            # TODO: CopySlices does not handle Function with multiple outputs
-            (c * d).sum().backward()
+        inplace_on_view_err = "your Function modifies inplace an input that is a view of another Tensor"
+        with self.assertRaisesRegex(RuntimeError, inplace_on_view_err):
+            c, d = MyBadAdder.apply(a.clone().view_as(a), b)
 
         # III) Inplace + other op
         class MyOutPlaceAdder(Function):
@@ -3740,25 +3807,9 @@ for shape in [(1,), ()]:
             c, d = MyOutPlaceAdder.apply(orig_a, b)
             return (c * d).sum()
 
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        gradcheck(fn, (a, b))
-
-        # We reuse the input
-        def fn(a, b):
-            orig_a = a.clone()
-            c, d = MyOutPlaceAdder.apply(orig_a, b)
-            return (c * d * orig_a).sum()
-
-        bw_called[0] = 0
-        fn(a, b).backward()
-        self.assertTrue(bw_called[0] == 1)
-
-        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 1"):
-            # TODO: We are not rebasing the history and so the inplace computation is wrong
-            gradcheck(fn, (a, b))
+        bad_mark_dirty_err = "Some elements marked as dirty during the forward method were not returned as output."
+        with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
+            fn(a, b)
 
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
