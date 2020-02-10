@@ -742,3 +742,16 @@ def _kl_independent_independent(p, q):
     if shared_ndims:
         kl = _sum_rightmost(kl, shared_ndims)
     return kl
+
+@register_kl(Independent, MultivariateNormal)
+def _kl_independent_mvn(p, q):
+    if isinstance(p.base_dist, Normal) and p.reinterpreted_batch_ndims == 1:
+        dim = q.event_shape[0]
+        p_cov = p.base_dist.scale ** 2
+        q_precision = q.precision_matrix.diagonal(dim1=-2, dim2=-1)
+        return (0.5 * (p_cov * q_precision).sum(-1)
+                - 0.5 * dim * (1 + math.log(2 * math.pi))
+                - q.log_prob(p.base_dist.loc)
+                - p.base_dist.scale.log().sum(-1))
+
+    raise NotImplementedError
