@@ -705,7 +705,22 @@ auto reg_str_ops_2 =
                       std::reverse(substr.begin(), substr.end());
                       splits.emplace(splits.begin(), substr);
                       return splits;
-                    }));
+                    }))
+
+        .op("aten::join(str self, str[] values) -> str",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+                .catchAllKernel([](const std::string& string,
+                                   const c10::List<std::string>& values) {
+                  std::stringstream ss;
+                  for (auto it = values.begin(); it != values.end(); ++it) {
+                    ss << static_cast<std::string>(*it);
+                    if (it != values.end() - 1) {
+                      ss << string;
+                    }
+                  }
+                  return ss.str();
+                }));
 } // namespace
 } // namespace jit
 } // namespace torch
