@@ -150,10 +150,10 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu_leaky(self, X):
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
+    def test_qrelu_leaky(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
-        alpha = 0.1
 
         X = torch.from_numpy(X)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,

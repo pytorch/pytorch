@@ -200,15 +200,15 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
 
   int64_t o_zp = out.q_zero_point();
   float o_scale = out.q_scale();
-  float o_inv_scale = 1.0 / o_scale;
+  float o_inv_scale = 1.0f / o_scale;
 
   float negval = negval_.to<float>();
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "leaky_qrelu", [&] {
     using Vec = Vec256<float>;  // Naïve implementation uses dequant/quant loop.
     using qVec = Vec256<scalar_t>;
-    Vec zero_vec = Vec((float)(0.0f));
-    Vec one_vec = Vec((float)(1.0f));
+    Vec zero_vec = Vec(0.0f);
+    Vec one_vec = Vec(1.0f);
 
     Vec i_scale_vec = Vec((float)i_scale);
     Vec i_zp_vec = Vec((float)i_zp);
@@ -226,12 +226,18 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
           return at::quantize_val<scalar_t>(o_scale, o_zp, value_dy);
         },
         [&](qVec qx_vec) -> qVec {
+          /* Vectorized implementation creates a multiplicand vector, which has
+           * "alpha" for all negative dx values and ones-vector for all
+           * positive values of dx. The multiplicand then is multiplied by the
+           * input.
+           */
           auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
                                               i_scale_zp_neg_premul_vec);
           for (int idx = 0; idx < dx_vec_vec.size(); ++idx) {
             const auto dx_vec = dx_vec_vec[idx];
-            const auto r = Vec::blendv(negval_vec, one_vec, dx_vec > zero_vec);
-            dx_vec_vec[idx] = dx_vec * r;
+            const auto multiplicand = Vec::blendv(negval_vec, one_vec,
+                                                  dx_vec > zero_vec);
+            dx_vec_vec[idx] = dx_vec * multiplicand;
           }
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
