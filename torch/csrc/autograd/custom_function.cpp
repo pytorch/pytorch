@@ -175,7 +175,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   }
 }
 
-const std::unordered_set<at::TensorImpl*>& AutogradContext::get_dirty() const {
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {
+  for (auto& var : dirty_inputs_) {
+    var->bump_version();
+  }
   return dirty_inputs_;
 }
 
