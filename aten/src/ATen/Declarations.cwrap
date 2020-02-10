@@ -33,8 +33,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Byte
+      - THTensor* self
       - THByteTensor* mask
       - real value
 ]]
@@ -49,8 +48,7 @@
   return: self
   options:
     - arguments:
-      - arg: THTensor* self
-        broadcast: mask inplace fallback types:Bool
+      - THTensor* self
       - THBoolTensor* mask
       - real value
 ]]
@@ -64,8 +62,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Byte
+    - THTensor* self
     - THByteTensor* mask
     - THTensor* source
 ]]
@@ -79,8 +76,7 @@
   variants: function
   return: self
   arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Bool
+    - THTensor* self
     - THBoolTensor* mask
     - THTensor* source
 ]]
@@ -135,20 +131,6 @@
     - THTensor* self
 ]]
 [[
-  name: _th_clone
-  cname: newClone
-  return: THTensor*
-  variants:
-    - function
-  cpu_half: True
-  cpu_bool: True
-  cuda_bool: True
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  arguments:
-    - THTensor* self
-]]
-[[
   name: _th_index_select
   cuda_bool: True
   cname: indexSelect
@@ -162,8 +144,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
 ]]
 [[
@@ -175,8 +156,7 @@
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
     - THTensor* source
 ]]
@@ -220,8 +200,7 @@
   options:
     - arguments:
       - THTensor* self
-      - arg: long dim
-        wrap_dim: self
+      - long dim
       - THIndexTensor* index
       - real value
 ]]
@@ -235,15 +214,13 @@
     - cname: scatter
       arguments:
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - THIndexTensor* index
         - THTensor* src
     - cname: scatterFill
       arguments:
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - THIndexTensor* index
         - real value
 ]]
@@ -257,8 +234,7 @@
   variants: function
   arguments:
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
     - THTensor* src
 ]]
@@ -276,8 +252,7 @@
       output: True
       resize: index
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - THIndexTensor* index
 ]]
 [[
@@ -304,14 +279,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmin
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_min
@@ -327,8 +294,7 @@
         - arg: THIndexTensor* min_indices
           output: True
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - bool keepdim
 ]]
 [[
@@ -342,14 +308,6 @@
       return: real
       arguments:
         - THTensor* self
-    - cname: cmax
-      return: argument 0
-      arguments:
-      - arg: THTensor* result
-        output: True
-      - arg: THTensor* self
-        broadcast: other fallback
-      - THTensor* other
 ]]
 [[
   name: _th_max
@@ -365,8 +323,7 @@
         - arg: THIndexTensor* max_indices
           output: True
         - THTensor* self
-        - arg: long dim
-          wrap_dim: self
+        - long dim
         - bool keepdim
 ]]
 [[
@@ -380,8 +337,7 @@
     - arg: THIndexTensor* indices
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool keepdim
 ]]
 [[
@@ -396,8 +352,7 @@
     - arg: THIndexTensor* indices
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool descending
 ]]
 [[
@@ -415,8 +370,7 @@
       output: True
     - THTensor* self
     - long k
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - bool largest
     - bool sorted
 ]]
@@ -578,8 +532,7 @@
       output: True
     - THTensor* self
     - real p
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - real maxnorm
 ]]
 [[
@@ -596,8 +549,7 @@
     - THTensor* self
     - THTensor* self
     - real p
-    - arg: long dim
-      wrap_dim: self
+    - long dim
     - real maxnorm
 ]]
 [[
@@ -648,8 +600,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
 ]]
 [[
   name: _th_cumprod
@@ -662,8 +613,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
-      wrap_dim: self
+    - long dim
 ]]
 [[
   name: _th_trace
@@ -1239,54 +1189,7 @@
     - double to
     - THGenerator* generator
 ]]
-[[
-  name: _th_normal
-  cname: normal
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: normal_means
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - double std
-        - THGenerator* generator
-    - cname: normal_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: double mean
-        - THTensor* std
-        - THGenerator* generator
-    - cname: normal_means_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - THTensor* std
-        - THGenerator* generator
-]]
-[[
-  name: _th_normal_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: normal
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double mean
-    - double std
-    - THGenerator* generator
-]]
+
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps

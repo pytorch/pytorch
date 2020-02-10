@@ -17,6 +17,7 @@
 #include <thrust/sort.h>
 #include <algorithm> // for std::min
 #include <c10/macros/Macros.h>
+#include <ATen/WrapDimUtils.h>
 
 // We prefer this kernel to avoid reloading index points if the number
 // of indices is a small number.

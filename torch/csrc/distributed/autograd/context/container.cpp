@@ -59,8 +59,9 @@ DistAutogradContainer& DistAutogradContainer::getInstance() {
 }
 
 DistAutogradContainer& DistAutogradContainer::getInstanceInternal() {
-  static DistAutogradContainer container;
-  return container;
+  // Leaky singleton to avoid module destructor race.
+  static DistAutogradContainer* container = new DistAutogradContainer();
+  return *container;
 }
 
 int64_t DistAutogradContainer::newAutogradMessageId() {
