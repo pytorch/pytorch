@@ -3,21 +3,21 @@
 namespace at {
   namespace native {
     //input tensors are non-zero dim and non-empty
-    template<typename T1, typename T2, typename T3, typename Operation>
-    void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Operation op) {
+    template<typename T1, typename T2, typename Function, typename Operation>
+    void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Operation op, Function func) {
       int ndims = self.dim();
       int tensor_dim_apply_has_finished = 0;
       std::vector<int64_t> counter(ndims, 0);
       T1* self_data = self.data_ptr<T1>();
-      T2* values_data = values.data_ptr<T2>();
-      T3* indices_data = indices.data_ptr<T3>();
+      T1* values_data = values.data_ptr<T1>();
+      T2* indices_data = indices.data_ptr<T2>();
       int64_t self_stride = self.stride(dim);
       int64_t values_stride = values.stride(dim);
       int64_t indices_stride = indices.stride(dim);
       int self_dim_size = self.size(dim);
 
       while(!tensor_dim_apply_has_finished) {
-        op(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride);
+        func(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride, op);
         if(ndims == 1)
            break;
         for(int dim_i = 0; dim_i < ndims; dim_i++) {
