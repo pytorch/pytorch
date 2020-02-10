@@ -42,15 +42,26 @@ def _standard_normal(shape, dtype, device):
 
 
 def _sum_rightmost(value, dim):
-    r"""
-    Sum out ``dim`` many rightmost dimensions of a given tensor.
-
-    Args:
-        value (Tensor): A tensor of ``.dim()`` at least ``dim``.
-        dim (int): The number of rightmost dims to sum out.
     """
+    Sum out ``dim`` many rightmost dimensions of a given tensor.
+    If ``dim`` is 0, no dimensions are summed out.
+    If ``dim`` is ``float('inf')``, then all dimensions are summed out.
+    If ``dim`` is 1, the rightmost 1 dimension is summed out.
+    If ``dim`` is 2, the rightmost two dimensions are summed out.
+    If ``dim`` is -1, all but the leftmost 1 dimension is summed out.
+    If ``dim`` is -2, all but the leftmost 2 dimensions are summed out.
+    etc.
+    :param torch.Tensor value: A tensor of ``.dim()`` at least ``dim``.
+    :param int dim: The number of rightmost dims to sum out.
+    """
+    if isinstance(value, Number):
+        return value
+    if dim < 0:
+        dim += value.dim()
     if dim == 0:
         return value
+    if dim >= value.dim():
+        return value.sum()
     required_shape = value.shape[:-dim] + (-1,)
     return value.reshape(required_shape).sum(-1)
 

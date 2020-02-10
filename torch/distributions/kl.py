@@ -733,7 +733,12 @@ def _kl_uniform_pareto(p, q):
 
 @register_kl(Independent, Independent)
 def _kl_independent_independent(p, q):
-    if p.reinterpreted_batch_ndims != q.reinterpreted_batch_ndims:
-        raise NotImplementedError
-    result = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(result, p.reinterpreted_batch_ndims)
+    shared_ndims = min(p.reinterpreted_batch_ndims, q.reinterpreted_batch_ndims)
+    p_ndims = p.reinterpreted_batch_ndims - shared_ndims
+    q_ndims = q.reinterpreted_batch_ndims - shared_ndims
+    p = Independent(p.base_dist, p_ndims) if p_ndims else p.base_dist
+    q = Independent(q.base_dist, q_ndims) if q_ndims else q.base_dist
+    kl = kl_divergence(p, q)
+    if shared_ndims:
+        kl = _sum_rightmost(kl, shared_ndims)
+    return kl
