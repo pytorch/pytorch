@@ -152,6 +152,9 @@ auto result_ = (${first}).${name}(
 );
 """)
 CALL_NAMESPACE_WITH_TENSOR_OPTIONS = CodeTemplate("""\
+// This is a hack.
+// Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+// In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
@@ -164,6 +167,9 @@ const auto options = TensorOptions()
 #endif
 """)
 CALL_NAMESPACE_WITH_TENSOR_OPTIONS_ARANGE = CodeTemplate("""\
+// This is a hack.
+// Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+// In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
@@ -177,6 +183,9 @@ const auto options = TensorOptions()
 #endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
+// This is a hack.
+// Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+// In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
 const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
