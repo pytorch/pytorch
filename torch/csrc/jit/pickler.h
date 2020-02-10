@@ -99,6 +99,9 @@ struct WriteableTensorData {
   size_t numel() const {
     return tensor_.storage().numel();
   }
+  bool storageHasDeleter() const {
+    return tensor_.storage().data_ptr().get_context() != nullptr;
+  }
 
  private:
   friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
