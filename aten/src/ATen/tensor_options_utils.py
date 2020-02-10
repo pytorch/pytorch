@@ -165,8 +165,11 @@ def collapse_formals_list(formals):
 
     return collapsed
 
-
-def check_hack(name):
+# This is a hack.
+# Please see [All schemas in native_functions.yaml that have TensorOptions
+# should be have optional ScalarType, Layout, Device and pin memory]
+# In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
+def check_special_factories(name):
     return name in ['randint_like',
                     'rand_like',
                     'randn_like',

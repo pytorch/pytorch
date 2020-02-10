@@ -48,7 +48,11 @@ def register_backend_select_methods(declarations, template_path, file_manager):
                 func_reg = FUNCTION_REGISTRATION.substitute(schema_string=option['schema_string'],
                                                             function_name=name)
 
-                if TOUtils.check_hack(name):
+                # This is a hack.
+                # Please see [All schemas in native_functions.yaml that have TensorOptions
+                # should be have optional ScalarType, Layout, Device and pin memory]
+                # In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
+                if TOUtils.check_special_factories(name):
                     dispatch_key_args = "dtype, layout, device"
                 else:
                     dispatch_key_args = "dtype.value_or(ScalarType::Float), layout.value_or(kStrided), device.value_or(kCPU)"

@@ -523,7 +523,11 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
         if 'pin_memory' in lambda_args:
             lambda_args.insert(lambda_args.index('pin_memory') + 1, 'requires_grad')
 
-        if TOUtils.check_hack(declaration['name']):
+        # This is a hack.
+        # Please see [All schemas in native_functions.yaml that have TensorOptions
+        # should be have optional ScalarType, Layout, Device and pin memory]
+        # In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
+        if TOUtils.check_special_factories(declaration['name']):
             for arg in dispatch_args:
                 if arg in TOUtils.tensor_options_args:
                     dispatch_args[dispatch_args.index(arg)] = arg + ".value()"
