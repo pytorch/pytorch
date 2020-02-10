@@ -981,7 +981,7 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
   bool is_contiguous = true;
   bool is_channels_last = true;
   bool is_non_overlapping_and_dense = true;
-  for (auto& op : operands_) {
+  for (const auto& op : operands_) {
     if (op.tensor.defined()) {
       is_contiguous &= op.tensor.is_contiguous(at::MemoryFormat::Contiguous);
       is_channels_last &= op.tensor.is_contiguous(at::MemoryFormat::ChannelsLast);
@@ -1000,14 +1000,31 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
-    for (int64_t i = 0; i < ntensors(); ++i) {
-      if (operands_[i].tensor.defined()) {
+    bool restride_output = false;
+    // iterate from back to favor input's strides since we will restride the output tensor
+    // if only output's stride is not the same as input and all inputs' stride are the same
+    for (int64_t i = ntensors() - 1; i >= 0; --i) {
+      const auto& op = operands_[i];
+      if (op.tensor.defined()) {
         if (prev < 0) {
           prev = i;
           continue;
         }
-        if (!operands_[prev].tensor.strides().equals(operands_[i].tensor.strides())) {
-          return FastSetupType::NONE;
+        if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
+          if (!resize_outputs_ || !op.is_output || op.is_read_write) {
+            return FastSetupType::NONE;
+          }
+          if (!restride_output) {
+            restride_output = true;
+          }
+        }
+      }
+    }
+    if (restride_output) {
+      const auto& op = operands_[prev];
+      for (int64_t i = 0; i < num_outputs_; ++i) {
+        if (prev != i) {
+          operands_[i].tensor.as_strided_(op.tensor.sizes(), op.tensor.strides());
         }
       }
     }
