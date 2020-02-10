@@ -4,12 +4,16 @@
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <limits>
 #include <mutex>
 
-namespace at { namespace native { namespace templates {
+namespace at {
+namespace native {
+namespace templates {
+namespace cpu {
 
 template<typename RNG>
-static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* generator) {
+void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_from_to_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if ((
@@ -28,8 +32,37 @@ static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t 
   });
 }
 
+// This is the special kernel to handle single specific case:
+// from(inclusive) = std::numeric_limits<int64_t>::lowest()
+// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-static void random_kernel(TensorIterator& iter, RNG* generator) {
+void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random_full_64_range_cpu", [&] {
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    if (std::is_same<scalar_t, int64_t>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, float>::value) {
+      cpu_serial_kernel(iter, [generator]() -> scalar_t {
+        return generator->random64(); // use all 64 bits
+      });
+    } else {
+      TORCH_CHECK(false, "random_full_64_range_kernel handles only int64, double and float");
+    }
+  });
+}
+
+template<typename RNG>
+struct RandomFromToKernel {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
+    random_from_to_kernel(iter, range, base, gen);
+  }
+  void operator()(TensorIterator& iter, RNG* gen) {
+    random_full_64_range_kernel(iter, gen);
+  }
+};
+
+template<typename RNG>
+void random_kernel(TensorIterator& iter, RNG* generator) {
   std::lock_guard<std::mutex> lock(generator->mutex_);
   if (isFloatingType(iter.dtype())) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_cpu", [&] {
@@ -62,24 +95,12 @@ static void random_kernel(TensorIterator& iter, RNG* generator) {
   }
 }
 
-// This is the special kernel to handle single specific case:
-// from(inclusive) = std::numeric_limits<int64_t>::lowest()
-// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-static void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random64_cpu", [&] {
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    if (std::is_same<scalar_t, int64_t>::value ||
-        std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, float>::value) {
-      cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return generator->random64(); // use all 64 bits
-      });
-    } else {
-      TORCH_CHECK(false, "random_full_64_range_kernel handles only int64, double and float");
-    }
-  });
-}
+struct RandomKernel {
+  void operator()(TensorIterator& iter, RNG* gen) {
+    random_kernel(iter, gen);
+  }
+};
 
 template<typename RNG>
 void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG* generator) {
@@ -92,4 +113,4 @@ void cauchy_kernel(TensorIterator& iter, double median, double sigma, RNG* gener
   });
 }
 
-}}}
+}}}}

@@ -255,7 +255,7 @@ static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
 
 static void cauchy_kernel(TensorIterator& iter, double median, double sigma, Generator* gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::cauchy_kernel(iter, median, sigma, generator);
+  templates::cpu::cauchy_kernel(iter, median, sigma, generator);
 }
 
 #if !AT_MKL_ENABLED()
@@ -467,12 +467,12 @@ void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
 
 static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::random_from_to_kernel(iter, range, base, generator);
+  templates::cpu::random_from_to_kernel(iter, range, base, generator);
 }
 
 static void random_kernel(TensorIterator& iter, Generator* gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::random_kernel(iter, generator);
+  templates::cpu::random_kernel(iter, generator);
 }
 
 // This is the special kernel to handle single specific case:
@@ -480,7 +480,7 @@ static void random_kernel(TensorIterator& iter, Generator* gen) {
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 static void random_full_64_range_kernel(TensorIterator& iter, Generator* gen) {
   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::random_full_64_range_kernel(iter, generator);
+  templates::cpu::random_full_64_range_kernel(iter, generator);
 }
 
 static void rsqrt_kernel(TensorIterator& iter) {

@@ -1,45 +1,32 @@
 #include <gtest/gtest.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
-#include <ATen/native/cpu/DistributionTemplates.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/util/Optional.h>
 #include <torch/all.h>
 #include <stdexcept>
 
-using namespace at;
+namespace test {
 
-namespace {
-
-struct TestCPUGenerator : public Generator {
-  TestCPUGenerator(uint64_t value) : Generator{Device(DeviceType::CPU), DispatchKeySet(DispatchKey::CustomRNGKeyId)}, value_(value) { }
-  ~TestCPUGenerator() = default;
-  uint32_t random() { return value_; }
-  uint64_t random64() { return value_; }
-  void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
-  uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
-  uint64_t seed() override { throw std::runtime_error("not implemented"); }
-  TestCPUGenerator* clone_impl() const override { throw std::runtime_error("not implemented"); }
-
-  uint64_t value_;
-};
-
-Tensor& random_(Tensor& self, Generator* generator) {
-  auto gen = (TestCPUGenerator*)generator;
-  auto iter = TensorIterator::nullary_op(self);
-  native::templates::random_kernel(iter, gen);
+template<template<typename> class random_kernel, typename RNG>
+at::Tensor& random_(at::Tensor& self, at::Generator* generator) {
+  auto gen = (RNG*)generator;
+  auto iter = at::TensorIterator::nullary_op(self);
+  random_kernel<RNG>()(iter, gen);
   return self;
 }
 
-Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator* generator) {
-  auto gen = (TestCPUGenerator*)generator;
+template<template<typename> class random_from_to_kernel, typename RNG>
+at::Tensor& random_from_to(at::Tensor& self, int64_t from, c10::optional<int64_t> to, at::Generator* generator) {
+  auto gen = (RNG*)generator;
   uint64_t range;
-  auto iter = TensorIterator::nullary_op(self);
+  auto iter = at::TensorIterator::nullary_op(self);
   if (to) {
     // [from, to)
     TORCH_CHECK(from < *to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", *to);
     range = *to - from;
-    native::templates::random_from_to_kernel(iter, range, from, gen);
+    random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
     // [from, std::numeric_limits<int64_t>::max()]
     AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
@@ -52,47 +39,17 @@ Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generat
         range = max_val - from + 1;
       }
     });
-    native::templates::random_from_to_kernel(iter, range, from, gen);
+    random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
     // range = 2^64
-    native::templates::random_full_64_range_kernel(iter, gen);
+    random_from_to_kernel<RNG>()(iter, gen);
   }
   return self;
 }
 
-Tensor& random_to(Tensor& self, int64_t to, Generator* generator) {
-  return random_from_to(self, 0, to, generator);
-}
-
-Tensor& custom_rng_cauchy_(Tensor& self, double median, double sigma, Generator * generator) {
-  auto gen = (TestCPUGenerator*)generator;
-  auto iter = TensorIterator::nullary_op(self);
-  native::templates::cauchy_kernel(iter, median, sigma, gen);
-  return self;
-}
-
-class RNGTest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    static auto registry = torch::RegisterOperators()
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_from_to), &random_from_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_.to(Tensor(a!) self, int to, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_to), &random_to>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::random_(Tensor(a!) self, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(random_), &random_>(DispatchKey::CustomRNGKeyId))
-      .op(torch::RegisterOperators::options()
-        .schema("aten::cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)")
-        .impl_unboxedOnlyKernel<decltype(custom_rng_cauchy_), &custom_rng_cauchy_>(DispatchKey::CustomRNGKeyId));
-  }
-};
-
-template<c10::ScalarType S, typename T>
-void test_random_from_to() {
+template<typename RNG, c10::ScalarType S, typename T>
+void test_random_from_to(const at::Device& device) {
   const auto t_min_val = std::numeric_limits<T>::lowest();
   const auto int64_min_val = std::numeric_limits<int64_t>::lowest();
   const int64_t min_val = std::is_floating_point<T>::value ? int64_min_val : static_cast<int64_t>(t_min_val);
@@ -154,9 +111,9 @@ void test_random_from_to() {
     for (const c10::optional<int64_t> to : tos) {
       if (!to.has_value() || from < *to) {
         for (const uint64_t val : vals) {
-          auto gen = new TestCPUGenerator(val);
+          auto gen = new RNG(val);
 
-          auto actual = torch::empty({3, 3}, S);
+          auto actual = torch::empty({3, 3}, torch::TensorOptions().dtype(S).device(device));
           actual.random_(from, to, gen);
 
           T exp;
@@ -183,6 +140,8 @@ void test_random_from_to() {
             ASSERT_TRUE(static_cast<int64_t>(exp) < *to);
           }
           const auto expected = torch::full_like(actual, exp);
+          std::cout << "actual = " << actual << std::endl;
+          std::cout << "expected = " << expected << std::endl;
           if (std::is_same<T, bool>::value) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
@@ -199,19 +158,8 @@ void test_random_from_to() {
   ASSERT_TRUE(from_case_covered);
 }
 
-TEST_F(RNGTest, RandomFromTo) {
-  test_random_from_to<torch::kBool, bool>();
-  test_random_from_to<torch::kUInt8, uint8_t>();
-  test_random_from_to<torch::kInt8, int8_t>();
-  test_random_from_to<torch::kInt16, int16_t>();
-  test_random_from_to<torch::kInt32, int32_t>();
-  test_random_from_to<torch::kInt64, int64_t>();
-  test_random_from_to<torch::kFloat32, float>();
-  test_random_from_to<torch::kFloat64, double>();
-}
-
-template<c10::ScalarType S, typename T>
-void test_random() {
+template<typename RNG, c10::ScalarType S, typename T>
+void test_random(const at::Device& device) {
   const auto min_val = std::numeric_limits<T>::lowest();
   const auto max_val = std::numeric_limits<T>::max();
   const auto uint64_max_val = std::numeric_limits<uint64_t>::max();
@@ -225,9 +173,9 @@ void test_random() {
   };
 
   for (const uint64_t val : vals) {
-    auto gen = new TestCPUGenerator(val);
+    auto gen = new RNG(val);
 
-    auto actual = torch::empty({3, 3}, S);
+    auto actual = torch::empty({3, 3}, torch::TensorOptions().dtype(S).device(device));
     actual.random_(gen);
 
     uint64_t range;
@@ -255,32 +203,6 @@ void test_random() {
       ASSERT_TRUE(torch::allclose(actual, expected));
     }
   }
-}
-
-TEST_F(RNGTest, Random) {
-  test_random<torch::kBool, bool>();
-  test_random<torch::kUInt8, uint8_t>();
-  test_random<torch::kInt8, int8_t>();
-  test_random<torch::kInt16, int16_t>();
-  test_random<torch::kInt32, int32_t>();
-  test_random<torch::kInt64, int64_t>();
-  test_random<torch::kFloat32, float>();
-  test_random<torch::kFloat64, double>();
-}
-
-TEST_F(RNGTest, Cauchy) {
-  const auto median = 123.45;
-  const auto sigma = 67.89;
-  auto gen = new TestCPUGenerator(42.0);
-
-  auto actual = torch::empty({3, 3});
-  actual.cauchy_(median, sigma, gen);
-
-  auto expected = torch::empty_like(actual);
-  auto iter = TensorIterator::nullary_op(expected);
-  native::templates::cauchy_kernel(iter, median, sigma, gen);
-
-  ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
 }
