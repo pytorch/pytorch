@@ -18,6 +18,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/DefaultTensorOptions.h>
 
 #include <algorithm>
 #include <cctype>
@@ -35,7 +36,7 @@ void window_function_checks(
     c10::optional<c10::Layout> layout,
     int64_t window_length) {
   TORCH_CHECK(
-      layout.has_value() && layout.value() != kSparse,
+      layout.value_or(getDefaultTensorOptions().layout()) != kSparse,
       function_name,
       " is not implemented for sparse types, got: ",
       layout.value());
@@ -108,7 +109,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<c10::ScalarType> dtype, c10::op
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
-  if (pin_memory.has_value() && pin_memory.value()) {
+  if (pin_memory.value_or(getDefaultTensorOptions().pin_memory())) {
     allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
   } else {
     allocator = at::getCPUAllocator();
@@ -145,9 +146,10 @@ Tensor empty(
   if (!names.has_value()) {
     return at::_empty(size, dtype, layout, device, pin_memory, optional_memory_format);
   }
-  TORCH_CHECK(layout.has_value() && layout.value() == Layout::Strided,
+  TORCH_CHECK(layout.value_or(getDefaultTensorOptions().layout()) == Layout::Strided,
       "NYI: named tensors only support strided layout");
-  TORCH_CHECK((device.has_value() && device.value().type() == DeviceType::CPU) || device.value().type() == DeviceType::CUDA,
+  TORCH_CHECK(device.value_or(getDefaultTensorOptions().device()).type() == DeviceType::CPU ||
+              device.value_or(getDefaultTensorOptions().device()).type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
   auto result = at::_empty(size, dtype, layout, device, pin_memory, optional_memory_format);
   internal_set_names_inplace(result, names);
@@ -330,7 +332,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor full(IntArrayRef size, Scalar fill_value, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  if (layout.value() == kSparse) {
+  if (layout.value_or(getDefaultTensorOptions().layout()) == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
   auto result = at::_empty(size, dtype, layout, device, pin_memory);
@@ -456,7 +458,7 @@ Tensor ones_like(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
-  if (device.has_value() && device.value() == at::kCPU) {
+  if (device.value_or(getDefaultTensorOptions().device()) == at::kCPU) {
     // This is a fast track to skip device dispatch for making scalar tensor on CPU.
     // See https://github.com/pytorch/pytorch/pull/29915 for more detailed perf
     // difference.
@@ -1012,11 +1014,7 @@ Tensor tensor_cpu(ArrayRef<T> values, c10::optional<ScalarType> dtype, c10::opti
 template <typename T>
 Tensor tensor_backend(ArrayRef<T> values, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device, c10::optional<bool> pin_memory) {
   auto cpu_tensor = tensor_cpu(values, dtype, layout, at::Device(DeviceType::CPU), pin_memory);
-  if (device.has_value()) {
-    return cpu_tensor._to(c10::nullopt, c10::nullopt, device);
-  } else {
-    return cpu_tensor._to(c10::nullopt, c10::nullopt, at::Device(DeviceType::CPU));
-  }
+  return cpu_tensor._to(c10::nullopt, c10::nullopt, device.value_or(getDefaultTensorOptions().device()));
 }
 
 #define TENSOR(T, _1)                                                                                                                      \

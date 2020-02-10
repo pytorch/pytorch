@@ -19,7 +19,6 @@ import yaml
 from itertools import groupby
 from ..autograd.utils import CodeTemplate, YamlLoader, write
 from ..autograd.gen_autograd import load_aten_declarations
-from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
 
 from tools.shared.module_loader import import_module
 TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')

@@ -508,6 +508,11 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     dispatch_callee = get_dispatch_callee(declaration)
     dispatch_args = get_op_args(declaration, {name: name for name, _ in argmap.items()})
 
+    # This is a hack.
+    # Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object]
+    # In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
+    #
+    # Adding requires_grad to formals and args.
     if check_is_factory_or_like_or_new_function(declaration) and not is_tensor_method(declaration):
         if 'c10::optional<bool> pin_memory' in lambda_formals:
             lambda_formals.insert(lambda_formals.index('c10::optional<bool> pin_memory') + 1, 'c10::optional<bool> requires_grad')
@@ -1324,7 +1329,8 @@ def make_python_arglists(declaration, is_python_method):
     if TOUtils.check_if_factory_method(declaration['arguments']):
         input_kwargs = [a for a in input_kwargs if not a['name'] in TOUtils.tensor_options_args]
 
-    input_kwargs = [arg for arg in input_kwargs if not (arg['name'] in TOUtils.tensor_options_args and TOUtils.check_if_factory_method(declaration['arguments']))]
+    input_kwargs = [arg for arg in input_kwargs if not (arg['name'] in TOUtils.tensor_options_args and
+                                                        TOUtils.check_if_factory_method(declaration['arguments']))]
     # outputs:
     # - coalesce multiple output args into a single 'out' arg w/type TensorList.
     # - force a default. This is so we can use this sig for both out and non-out variants

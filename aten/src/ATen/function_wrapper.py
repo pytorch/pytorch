@@ -88,10 +88,6 @@ NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals});
 """)
 
-NATIVE_DISPATCH_DECLARATION_CONST = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) const;
-""")
-
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
 ${return_type} ${api_name}(${type_method_formals}) {
     ${named_guard_declaration}
@@ -143,13 +139,18 @@ TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name_prefix}${api_name}(${method_formals_with_defaults}) const;
 """)
 
+TENSOR_METHOD_DECLARATION_CONST = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}) const;
+""")
+
 # add non-virtual declaration to Tensor.cpp
 C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name_prefix}${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+    static c10::OperatorHandle op =
+        c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
     return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
@@ -197,7 +198,8 @@ ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set}, c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
+switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
+                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
@@ -636,10 +638,7 @@ def device_guard(option, dispatch_options, dispatch_tensor):
     # For factory methods the `DeviceGuard` is already in the template.
     if option.get('device_guard', True):
         if dispatch_options:
-            if any(arg['type'] == 'c10::optional<Device>' for arg in option['arguments']):
-                return 'auto dev = device.has_value() ? device.value() : Device(kCPU);\nconst DeviceGuard device_guard(dev);'
-            else:
-                return 'const DeviceGuard device_guard(device); '
+            return 'const OptionalDeviceGuard device_guard(device); '
         if dispatch_tensor:
             return 'const OptionalDeviceGuard device_guard(device_of({}));'.format(dispatch_tensor)
     return '// DeviceGuard omitted'
@@ -1240,11 +1239,12 @@ def create_generic(top_env, declarations):
                                                                     expanded_native_actuals=expanded_native_actuals)
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
-        def gen_native_dispatch_declaration(option):
-            declaration = NATIVE_DISPATCH_DECLARATION_CONST
+        def gen_tensor_method_declaration_definition(option):
+            declaration = TENSOR_METHOD_DECLARATION
             type_method_formals = TOUtils.collapse_formals(option['method_formals_with_defaults'])
-            fn_declaration = declaration.substitute(option, type_method_formals=type_method_formals)
-
+            fn_declaration = declaration.substitute(option,
+                                                    api_name_prefix='',
+                                                    method_formals_with_defaults=type_method_formals)
             expanded_native_actuals = option['collapsed_method_actuals'][:]
             expanded_native_actuals.remove('const_cast<Tensor&>(*this)')
             index = expanded_native_actuals.index('options')
@@ -1351,7 +1351,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
             if is_factory_method:
-                code = gen_native_dispatch_declaration(option)
+                code = gen_tensor_method_declaration_definition(option)
                 top_env['tensor_method_declarations'].append(code.declaration)
                 top_env['tensor_method_definitions'].append(code.definition)
 

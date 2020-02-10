@@ -340,43 +340,43 @@ Tensor tril_indices_cuda(
     c10::optional<c10::Layout> layout,
     c10::optional<c10::Device> device,
     c10::optional<bool> pin_memory) {
-    check_args(row, col, layout);
+  check_args(row, col, layout);
 
-    auto tril_size = get_tril_size(row, col, offset);
-    auto tensor = empty_cuda({2, tril_size}, dtype, layout, device, pin_memory);
+  auto tril_size = get_tril_size(row, col, offset);
+  auto tensor = empty_cuda({2, tril_size}, dtype, layout, device, pin_memory);
 
-    if (tril_size > 0) {
-      auto m_first_row = offset > 0 ?
-        std::min<int64_t>(col, 1 + offset) : // upper bounded by col
-        row + offset > 0; // either 0 or 1
-      auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
-      auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
-      int64_t rectangle_size = 0;
-      if (rectangle_row_offset < row) {
-        rectangle_size = (row - rectangle_row_offset) * col;
-      }
-
-      dim3 dim_block = cuda::getApplyBlock();
-      dim3 dim_grid;
-      // using tril_size instead of tensor.numel(), as each thread takes care of
-      // two elements in the tensor.
-      TORCH_CHECK(
-        cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
-        "unable to get dim grid");
-
-      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
-        tril_indices_kernel<<<
-            dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-          tensor.data_ptr<scalar_t>(),
-          trapezoid_row_offset,
-          m_first_row,
-          col,
-          tril_size - rectangle_size,
-          tril_size);
-      });
+  if (tril_size > 0) {
+    auto m_first_row = offset > 0 ?
+      std::min<int64_t>(col, 1 + offset) : // upper bounded by col
+      row + offset > 0; // either 0 or 1
+    auto trapezoid_row_offset = std::max<int64_t>(0, -offset);
+    auto rectangle_row_offset = trapezoid_row_offset + col - m_first_row + 1;
+    int64_t rectangle_size = 0;
+    if (rectangle_row_offset < row) {
+      rectangle_size = (row - rectangle_row_offset) * col;
     }
 
-    return tensor;
+    dim3 dim_block = cuda::getApplyBlock();
+    dim3 dim_grid;
+    // using tril_size instead of tensor.numel(), as each thread takes care of
+    // two elements in the tensor.
+    TORCH_CHECK(
+      cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
+      "unable to get dim grid");
+
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
+      tril_indices_kernel<<<
+          dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+        tensor.data_ptr<scalar_t>(),
+        trapezoid_row_offset,
+        m_first_row,
+        col,
+        tril_size - rectangle_size,
+        tril_size);
+    });
+  }
+
+  return tensor;
 }
 
 template <typename scalar_t>
