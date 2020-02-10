@@ -15,12 +15,7 @@ import torch.testing._internal.dist_utils
 from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
-from torch.distributed.rpc.internal import (
-    PythonUDF,
-    RPCExecMode,
-    _internal_rpc_pickler,
-    set_process_group_timeout_for_testing,
-)
+from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -1715,49 +1710,3 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
-
-    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
-    def test_listenloop_error(self):
-        # test that if a callee node has gone down, we raise an appropriate
-        # exception instead of just crashing.
-
-        # Set a small process group timeout on node 1.
-        rank_1_pg_timeout = 15
-        pg_sleep_interval = rank_1_pg_timeout * 2
-        if self.rank == 1:
-            set_process_group_timeout_for_testing(timeout_seconds=rank_1_pg_timeout)
-        rpc.init_rpc(
-            name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=self.rpc_backend_options,
-        )
-
-        if self.rank != 0 and self.rank != 1:
-            rpc.shutdown(graceful=False)
-        else:
-            # Let rank 1 time out. Note that all existing workers should wait
-            # for 1 to timeout since any actions against the process group will
-            # reset the timer.
-            if self.rank == 1:
-                # Hack: Can't call wait_until_node_failure() on self rank.
-                time.sleep(pg_sleep_interval)
-                # 1 should not be able to send RPCs.
-                with self.assertRaisesRegex(
-                    RuntimeError, "Timed out waiting"
-                ):
-                    rpc.rpc_sync("worker0", torch.add, args=(1, 1))
-            else:
-                wait_until_node_failure(
-                    rank=1, sleep_duration=pg_sleep_interval, backoff=1.5
-                )
-                # Node 1 should not be accessible.
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Encountered exception in ProcessGroupAgent::enqueueSend",
-                ):
-                    rpc.rpc_sync("worker1", torch.add, args=(1, 1))
-            rpc.shutdown(graceful=False)

@@ -101,11 +101,7 @@ def _process_group_init_backend_handler(
             "Default process group must not be initialized before init_rpc."
         )
 
-    process_group_timeout = (
-        rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
-        if not dist.rpc.internal.TEST_PG_TIMEOUT
-        else dist.rpc.internal.TEST_PG_TIMEOUT
-    )
+    process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
 
     dist.init_process_group(
         backend=dist.Backend.GLOO,

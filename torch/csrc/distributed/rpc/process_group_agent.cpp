@@ -575,6 +575,7 @@ void ProcessGroupAgent::listenLoopInternal() {
   while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
+    std::cout << "PG agent, calling into recvAnysource" << std::endl;
     auto work = pg_->recvAnysource(preamble, pg_->getRank());
     {
       std::lock_guard<std::mutex> guard(recvWorkMutex_);
