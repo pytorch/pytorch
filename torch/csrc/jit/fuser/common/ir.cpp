@@ -159,11 +159,6 @@ const Statement* Statement::dispatch_mutator(T mutator) const{
 
 
 // Handler template instantiations
-template int Statement::dispatch(SimpleHandler) const;
-template int Statement::dispatch(SimpleHandler*) const;
-template int Statement::dispatch(IRPrinter) const;
-template int Statement::dispatch(IRPrinter*) const;
-
 template const Statement* Statement::dispatch_mutator(BaseMutator) const;
 template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
 
