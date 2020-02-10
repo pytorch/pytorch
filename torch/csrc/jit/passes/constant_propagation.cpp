@@ -253,20 +253,11 @@ struct ConstantPropagator {
     }
   }
 
-  // An Op has runnable inputs if:
-  // - All inputs are constants.
-  // - It is an op that forwards tuples, and all inputs are constants
-  // or tuples that we know the ivalue for. We can't use known tuple ivalues
-  // for non-forwarding ops because that Tuple could contain an ivalue that is
-  // not allowed as a constant, for instance, a Tensor with a gradient.
   bool runnableInputs(Node* n) {
-    if (std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-          return v->node()->kind() == prim::Constant;
-        })) {
-      return true;
-    }
-    return false;
-  };
+    return std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
+      return v->node()->kind() == prim::Constant;
+    });
+  }
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
@@ -278,10 +269,13 @@ struct ConstantPropagator {
     bool no_mutation;
     if (aliasDb_) {
       no_mutation = !aliasDb_->hasWriters(n);
+      // outputs may be written to if they escape scope
+      no_mutation = no_mutation && !aliasDb_->escapesScope(n->outputs())
     } else {
       no_mutation =
           noMutableValues(n->inputs()) && noMutableValues(n->outputs());
     }
+
     return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
         !n->hasSideEffects() && n->blocks().size() == 0;

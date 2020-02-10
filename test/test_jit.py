@@ -3144,6 +3144,17 @@ graph(%Ra, %Rb):
 
         FileCheck().check_not("prim::If").run(fn.graph)
 
+    def test_constant_prop_escapes_scope(self):
+        @torch.jit.script
+        def foo():
+            return torch.tensor([2])
+
+        self.run_pass('constant_propagation', foo.graph)
+        FileCheck().check("aten::tensor").run(foo.graph)
+        out = foo()
+        out[0] = 4
+        self.assertEqual(foo(), torch.tensor([2]))
+
     def test_short_circuit_optimization(self):
         @torch.jit.script
         def const_expressions(x):

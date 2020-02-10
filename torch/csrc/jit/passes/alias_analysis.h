@@ -90,6 +90,9 @@ class AliasDb {
       const at::ArrayRef<Value*>& a,
       const at::ArrayRef<Value*>& b) const;
 
+  // does any value in `vs` potentially escape the current graph scope
+  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
+
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
@@ -145,8 +148,6 @@ class AliasDb {
 
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
-
-  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
 
   /**
    * Special analysis methods
