@@ -25,7 +25,7 @@ void reset_buffers() {
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.
-  using namespace namespace at::native::modern::detail;
+  using namespace at::native::modern::detail;
   using func1_t = int (*)(float, float);
   using func2_t = int (*)(bool, float, float);
   using func3_t = int (*)(float);
