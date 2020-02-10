@@ -4,6 +4,7 @@ import sys
 import random
 import string
 import unittest
+import io
 try:
     import unittest.mock as mock
 except ImportError:
@@ -5741,13 +5742,23 @@ class TestNN(NNTestCase):
         hidden_size = 6
         num_layers = 2
 
-        # creates an RNN (LSTM) and deletes an attribute
         m = nn.LSTM(input_size, hidden_size, num_layers)
+        inp = torch.randn(3, 2, 10)
+        out_expected = m(inp)
+        # deletes an attribute of original LSTM
+        weight_orig = m.weight_hh_l0
         del m.weight_hh_l0
-
+        self.assertFalse(hasattr(m, "weight_hh_l0"))
         # verifies that moving to CUDA with only some attributes defined
         # does not throw an error
         m.cuda()
+        # recompute the weight and make sure that module can be used
+        m.weight_hh_l0 = weight_orig.cuda()
+        inp = inp.cuda()
+        # otherwise, subsequent warnings will be hidden, and further tests rely on them
+        warnings.simplefilter("always")
+        self.assertEqual(m(inp)[0].cpu(), out_expected[0])
+
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout(self):
@@ -5794,11 +5805,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
-        import sys
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
         for p in (0, 0.1234):
             for train in (True, False):
                 for cuda in (True, False):
@@ -5819,8 +5825,10 @@ class TestNN(NNTestCase):
                     output1, hy1 = rnn(input, hx)
                     output2, hy2 = rnn(input, hx)
 
-                    rnn_pickle = pickle.dumps(rnn)
-                    rnn2 = pickle.loads(rnn_pickle)
+                    buf = io.BytesIO()
+                    rnn_pickle = torch.save(rnn, buf)
+                    buf.seek(0)
+                    rnn2 = torch.load(buf)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
@@ -9124,6 +9132,11 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_module_empty_input(mod, inp)
 
+        self.assertEqual(mod.running_mean, torch.tensor([0., 0, 0], device=device))
+        self.assertEqual(mod.running_var, torch.tensor([1., 1, 1], device=device))
+        self.assertEqual(mod.weight.grad, torch.tensor([0., 0, 0], device=device))
+        self.assertEqual(mod.bias.grad, torch.tensor([0., 0, 0], device=device))
+
     def test_group_conv_empty(self, device):
         mod = torch.nn.Conv2d(4, 4, stride=2, kernel_size=3, padding=1, groups=4).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
@@ -10693,10 +10706,18 @@ class TestNNDeviceType(NNTestCase):
         for w_f in [torch.contiguous_format, torch.channels_last]:
             for g_f in [torch.contiguous_format, torch.channels_last]:
                 for input_format in [torch.contiguous_format, torch.channels_last]:
-                    output_format = input_format
+                    output_format = torch.contiguous_format
                     # Older versions of CudNN have Channels Last support disabled
-                    if torch.backends.cudnn.version() < 7603:
-                        output_format = torch.contiguous_format
+                    if torch.backends.cudnn.version() >= 7603:
+                        if input_format == torch.channels_last:
+                            output_format = torch.channels_last
+                        # This is because we have N111 weight that cannot handle
+                        # the ambiguous memory_format
+                        if w_f == torch.channels_last:
+                            if layer == nn.Conv2d and filter_size * c != 1:
+                                output_format = torch.channels_last
+                            if layer == nn.ConvTranspose2d and filter_size * k != 1:
+                                output_format = torch.channels_last
                     self._run_conv(layer, device, data, grad, ref_conv, ref_input,
                                    ref_out, input_format, w_f, g_f, output_format)
 
@@ -10716,6 +10737,27 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfCudnnVersionLessThan(7603)
+    def test_convert_conv2d_weight_memory_format(self, device):
+        input = torch.randint(1, 10, (2, 8, 4, 4), dtype=torch.float32, device=device)
+        model = nn.Sequential(
+            nn.Conv2d(8, 4, 3),
+            nn.BatchNorm2d(4)).to(device).float()
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
+            out = model(input)
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+
+        model = nn.Sequential(
+            nn.ConvTranspose2d(8, 4, 3),
+            nn.BatchNorm2d(4)).to(device).float()
+        for memory_format in [torch.channels_last, torch.contiguous_format]:
+            model = nn.utils.convert_conv2d_weight_memory_format(model, memory_format)
+            out = model(input)
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
 
     def test_nll_loss_mismatched_batch(self, device):
         x = torch.randn((10, 3), requires_grad=True, device=device)

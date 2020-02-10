@@ -54,8 +54,10 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type())
 
-  auto actual_error = (self - other).abs();
-  auto max_error = atol + rtol * other.abs();
+  // The original formula `atol + rtol * other.abs()` works incorrectly when
+  // `other` has integral dtype and `other == min_value` and `abs(min_value)` is negative:
+  // std::abs(std::numeric_limits<int64_t>::lowest()) == std::numeric_limits<int64_t>::lowest() < 0
+  auto max_error = atol + (rtol * other).abs();
 
   // `max_error` could be a float or double depending on the type of the input
   // tensors.
@@ -63,8 +65,12 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // float tensor.
   // It is also possible for parameters to be 'wrapped_number's, in which case
   // max_error could be promoted to double when actual error is still a float.
+  Tensor actual_error;
   if (actual_error.scalar_type() != max_error.scalar_type()) {
-    actual_error = actual_error.to(max_error.scalar_type());
+    // To silence ASAN that does not like (x - std::numeric_limits<int64_t>::lowest())
+    actual_error = (self - other.to(max_error.scalar_type())).abs();
+  } else {
+    actual_error = (self - other).abs();
   }
 
   auto close = actual_error <= max_error;
@@ -213,6 +219,12 @@ static std::tuple<Tensor &,Tensor &> max_out_impl(Tensor& max, Tensor& max_indic
               "max only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "max only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device() == max.device(),
+              "expected device ", self.device(), " but got ",
+              max.device(), " for max values output");
+  TORCH_CHECK(self.device() == max_indices.device(),
+              "expected device ", self.device(), " but got ",
+              max_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
     AT_ASSERT(max.dim() == 0);
@@ -271,6 +283,12 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
               "min only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "min only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device() == min.device(),
+              "expected device ", self.device(), " but got ",
+              min.device(), " for min values output");
+  TORCH_CHECK(self.device() == min_indices.device(),
+              "expected device ", self.device(), " but got ",
+              min_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
     AT_ASSERT(min.dim() == 0);
