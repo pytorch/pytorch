@@ -108,7 +108,6 @@ void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state) {
 
 bool tls_is_dispatch_key_included(DispatchKey x) {
   return raw_local_dispatch_key_set.included().has(x);
-
 }
 
 void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {

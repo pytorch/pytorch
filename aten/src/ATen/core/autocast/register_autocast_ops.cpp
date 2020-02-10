@@ -1,8 +1,8 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-// TODO:  Remove this dependency once callBoxed is possible for all ops
-#include <torch/csrc/jit/operator.h>
+
+#include <c10/util/intrusive_ptr.h>
 
 #include <iostream>
 #include <exception>
@@ -15,27 +15,31 @@ namespace {
 // Our heuristic is to cache fp16 casts of fp32 model weights (see cached_cast below).
 //
 // After discussion with @ezyang, the cache uses the following structure:
-// The key is the source tensor's TensorImpl*, a proxy for a Tensor uuid that's unchanged across shallow copies.
-// The value is a tuple of two Tensors:  the source tensor and the casted tensor.  Both are stored as full
-// Tensors to ensure their TensorImpls stay alive if other references to them die.
+// The key is the source tensor's TensorImpl*, a proxy for a Tensor uuid that's unchanged
+// across shallow copies.  The value is a tuple with a weakref to the source tensor's
+// TensorImpl as the first element and the casted tensor as the second element.
 //
-// We must keep the source tensor alive because if the source tensor were deallocated, another random Tensor
-// could be allocated whose TensorImpl* happened to have the same value.  This TensorImpl* would then mistakenly
-// hit in cache, which would be a nasty bug (rare, intermittent, unpredictable).
+// The weakref keeps the source's TensorImpl from being deleted.  We need to because we're
+// using the source TensorImpl* as the key.  If it were deleted, another random Tensor could
+// be allocated whose TensorImpl* happened to have the same value.  This TensorImpl* would
+// then mistakenly hit in cache:  a rare, intermittent, unpredictable bug.
 //
-// Since our heuristic caches casts for model weights only, the source Tensors should always stay alive anyway,
-// because the model stores them explicitly.  So in the common case, storing a live reference to the
-// source tensor in cached_casts is unnecessary but also does no harm (does not increase memory use).
+// I'm not using the weak_intrusive_ptr as the key because it's more difficult to compare
+// directly against incoming TensorImpl*s.
 //
-// When the autocast context manager exits, which should occur at the end of each forward pass, it calls
-// clear_cache to ensure cached Tensors don't leak outside the autocasting region.
-thread_local std::unordered_map<TensorImpl*, std::tuple<Tensor, Tensor>> cached_casts;
+// When the autocast context manager exits, which should occur at the end of each forward pass,
+// it calls clear_cache to ensure cached Tensors don't leak outside the autocasting region.
+using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
+using val_type = std::tuple<weakref_type, Tensor>;
+thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
 }
 
 void clear_cache() {
   cached_casts.clear();
 }
 
+// Policies correspond to op categories that need code-divergent handling.
+// Wrapper templates below are specialized based on a policy template parameter.
 enum class CastPolicy : uint8_t {
   fp16 = 0, // Cast all inputs to at::kHalf before running the op.
   fp32, // Cast all inputs to at::kFloat before running the op.
@@ -127,7 +131,7 @@ cached_cast(at::ScalarType to_type, const Tensor& arg) {
         return std::get<1>(it->second);
       } else {
         auto casted_arg = arg.to(to_type);
-        cached_casts.emplace(arg.unsafeGetTensorImpl(), std::tuple<Tensor, Tensor>{arg, casted_arg});
+        cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
       }
     } else {
