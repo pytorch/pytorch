@@ -35,8 +35,6 @@ enum class DispatchKey : uint8_t {
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
   // which actually implement the numerics of an operation in question.
-  // Alternately, it is placed in the "back" of the dispatch hierarchy,
-  // as it is handled last and is a terminal handler.
   //
   // Due to the nature of the enum, these backends are specified in
   // an ordered way, but for most backends this order is not semantically
@@ -51,8 +49,7 @@ enum class DispatchKey : uint8_t {
   CPUTensorId,    // registered at build/aten/src/ATen/CPUType.cpp
   CUDATensorId,   // registered at build/aten/src/ATen/CUDAType.cpp
   HIPTensorId,    // NB: I think this is not actually used, due to Note [Masquerading as CUDA]
-  MSNPUTensorId,  // tested at test/cpp_extensions/msnpu_extension.cpp
-                  // NB: we suspect that MSNPU is defunct
+  MSNPUTensorId,  // unused externally, but tested at test/cpp_extensions/msnpu_extension.cpp
   XLATensorId,    // lives out of tree at https://github.com/pytorch/xla
 
   // These are Caffe2 device types which we grandfathered into
