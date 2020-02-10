@@ -28,6 +28,8 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     inputs.emplace(var.unsafeGetTensorImpl());
   }
 
+  int num_outputs = raw_outputs.size();
+
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
@@ -52,6 +54,21 @@ variable_list _wrap_outputs(const variable_list &input_vars,
       if (var.is_leaf() && var.requires_grad()) {
         throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
       }
+      // No need to mark as modified Tensors that are not inputs.
+      if (!is_input) {
+        TORCH_WARN("Only input Tensors should be given to ctx.mark_dirty(). If a Tensor is not an input, there"
+                   " is no need to pass it to mark_dirty().");
+      }
+      // If the input is a view, the rebase will need to rewrite the graph and this only works if we have a single
+      // output to this Function.
+      TORCH_CHECK(!(var.is_view() && num_outputs > 1), "If your Function modifies inplace an input that is a view"
+                  " of another Tensor, your Function cannot return more than one Tensor. This is not supported"
+                  " by the current autograd engine. You should either make sure the input is not a view (using"
+                  " .clone() for example) or make your Function only return one Tensor (potentially splitting"
+                  " it into two Functions: one doing the inplace that returns a single Tensor and a second one"
+                  " that does the other operations). You can ask on the forum https://discuss.pytorch.org/ if"
+                  " you need help to do this change.");
+
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
       var.grad().reset();
@@ -73,10 +90,10 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     }
   };
 
-  int num_outputs = raw_outputs.size();
-
   std::vector<torch::autograd::Variable> outputs;
+  std::unordered_set<at::TensorImpl*> outputs_impl; // For dirty_inputs check
   outputs.reserve(num_outputs);
+
 
   for (auto i = 0; i < num_outputs; ++i) {
     auto out_tensor_impl = raw_outputs[i].unsafeGetTensorImpl();
@@ -92,7 +109,15 @@ variable_list _wrap_outputs(const variable_list &input_vars,
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
+    outputs_impl.insert(out_tensor_impl);
     outputs.emplace_back(var);
+  }
+
+  // All the modified Tensors must be returned as is for the rewrite to be valid.
+  for (auto& dirty_input : dirty_inputs) {
+    TORCH_CHECK(outputs_impl.count(dirty_input) > 0,
+                "Some elements marked as dirty during the forward method were not returned as output. The"
+                " inputs that are modified inplace must all be outputs of the Function.");
   }
 
   return outputs;
@@ -175,7 +200,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   }
 }
 
-const std::unordered_set<at::TensorImpl*>& AutogradContext::get_dirty() const {
+const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {
+  for (auto& var : dirty_inputs_) {
+    var->bump_version();
+  }
   return dirty_inputs_;
 }
 

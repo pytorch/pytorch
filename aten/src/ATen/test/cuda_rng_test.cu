@@ -2,6 +2,7 @@
 #include <ATen/test/rng_test.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
+#include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/util/Optional.h>
@@ -33,11 +34,11 @@ struct TestCUDAGenerator : public Generator {
 };
 
 Tensor& random_(Tensor& self, Generator* generator) {
-  return test::random_<native::templates::cuda::RandomKernel, TestCUDAGenerator>(self, generator);
+  return at::native::templates::random_impl<native::templates::cuda::RandomKernel, TestCUDAGenerator>(self, generator);
 }
   
 Tensor& random_from_to(Tensor& self, int64_t from, optional<int64_t> to, Generator* generator) {
-  return test::random_from_to<native::templates::cuda::RandomFromToKernel, TestCUDAGenerator>(self, from, to, generator);
+  return at::native::templates::random_from_to_impl<native::templates::cuda::RandomFromToKernel, TestCUDAGenerator>(self, from, to, generator);
 }
 
 Tensor& random_to(Tensor& self, int64_t to, Generator* generator) {
@@ -61,7 +62,6 @@ class RNGTest : public ::testing::Test {
 };
 
 TEST_F(RNGTest, RandomFromTo_CUDA) {
-  using test::test_random_from_to;
   const at::Device device("cuda");
   test_random_from_to<TestCUDAGenerator, torch::kBool, bool>(device);
   test_random_from_to<TestCUDAGenerator, torch::kUInt8, uint8_t>(device);
@@ -74,7 +74,6 @@ TEST_F(RNGTest, RandomFromTo_CUDA) {
 }
   
 TEST_F(RNGTest, Random_CUDA) {
-  using test::test_random;
   const at::Device device("cuda");
   test_random<TestCUDAGenerator, torch::kBool, bool>(device);
   test_random<TestCUDAGenerator, torch::kUInt8, uint8_t>(device);

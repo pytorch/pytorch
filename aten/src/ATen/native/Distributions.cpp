@@ -14,8 +14,9 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/DistributionTemplates.h>
+#include <ATen/NamedTensorUtils.h>
 
 #include <type_traits>
 #include <functional>
@@ -261,39 +262,29 @@ Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
   return ret;
 }
 
+template<typename RNG>
+struct RandomStub {
+  void operator()(TensorIterator& iter, RNG* gen) {
+    random_stub(iter.device_type(), iter, gen);
+  }
+};
+
 Tensor& random_(Tensor& self, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  random_stub(iter.device_type(), iter, gen);
-  return self;
+  return at::native::templates::random_impl<RandomStub, Generator>(self, gen);
 }
 
-Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen) {
-  uint64_t range;
-  auto iter = TensorIterator::nullary_op(self);
-  if (to) {
-    // [from, to)
-    TORCH_CHECK(from < *to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", *to);
-    range = *to - from;
+template<typename RNG>
+struct RandomFromToStub {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, RNG* gen) {
     random_from_to_stub(iter.device_type(), iter, range, from, gen);
-  } else if (from != std::numeric_limits<int64_t>::lowest()) {
-    // [from, std::numeric_limits<scalar_t>::max()]
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
-      if (std::is_same<scalar_t, bool>::value) {
-        range = 2;
-      } else {
-        const auto t_max_val = std::numeric_limits<scalar_t>::max();
-        const auto int64_max_val = std::numeric_limits<int64_t>::max();
-        const int64_t max_val = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
-        range = max_val - from + 1;
-      }
-    });
-    random_from_to_stub(iter.device_type(), iter, range, from, gen);
-  } else {
-    // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]
-    // range = 2^64
+  }
+  void operator()(TensorIterator& iter, RNG* gen) {
     random_full_64_range_stub(iter.device_type(), iter, gen);
   }
-  return self;
+};
+
+Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen) {
+  return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
 }
 
 Tensor& random_(Tensor& self, int64_t to, Generator* gen) {

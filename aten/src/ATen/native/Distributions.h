@@ -2,6 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
+#include <ATen/native/TensorIterator.h>
+#include <cmath>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__)
