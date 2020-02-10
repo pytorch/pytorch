@@ -35,30 +35,15 @@ void IterVisitor::handle(const Statement* const stmt) {
   else if (stmt->isExpr())
     handle(static_cast<const Expr*>(stmt));
   else
-    throw std::runtime_error("Unknown statment type in handle(Statment).");
+    throw std::runtime_error("Unknown statment type in IterVisitor::handle(Statment).");
 }
 
 void IterVisitor::handle(const Expr* const expr) {
-   switch (*(expr->getExprType())) {
-    case ExprType::Add:
-      return handle(static_cast<const Add*>(expr));
-    default:
-      throw std::runtime_error("Unknown ExprType in handle(Expr).");
-    }
+  expr->dispatch(this);
 }
 
 void IterVisitor::handle(const Val* const val) {
-  
-  switch (*(val->getValType())) {
-    case ValType::Tensor:
-      return handle(static_cast<const Tensor*>(val));
-    case ValType::Float:
-      return handle(static_cast<const Float*>(val));
-    case ValType::Int:
-      return handle(static_cast<const Int*>(val));
-    default:
-      throw std::runtime_error("Unknown ValType in handle(Val).");
-  }
+  val->dispatch(this);
 }
 
 void IterVisitor::handle(const Float* const f) {}

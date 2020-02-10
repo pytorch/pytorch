@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/visitor.h>
+#include <torch/csrc/jit/fuser/common/iter_visitor.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
 
 #include <c10/util/Exception.h>
@@ -88,15 +88,18 @@ T* ptr(T* obj) { return obj; }
  
 
 template <typename T>
-int Statement::dispatch(T handler) const{
+void Statement::dispatch(T handler) const{
   if (isVal()) {
     switch (*getValType()) {
       case ValType::Tensor:
-        return ptr(handler)->handle(static_cast<const Tensor*>(this));
+        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        return;
       case ValType::Float:
-        return ptr(handler)->handle(static_cast<const Float*>(this));
+        ptr(handler)->handle(static_cast<const Float*>(this));
+        return;
       case ValType::Int:
-        return ptr(handler)->handle(static_cast<const Int*>(this));
+        ptr(handler)->handle(static_cast<const Int*>(this));
+        return;
       default:
         throw std::runtime_error("Unknown valtype in dispatch!");
     }
@@ -105,7 +108,8 @@ int Statement::dispatch(T handler) const{
   if(isExpr()){
     switch (*getExprType()) {
       case ExprType::Add:
-        return ptr(handler)->handle(static_cast<const Add*>(this));
+        ptr(handler)->handle(static_cast<const Add*>(this));
+        return;
       default:
         throw std::runtime_error("Unknown exprtype in dispatch!");
     }
@@ -159,6 +163,9 @@ const Statement* Statement::dispatch_mutator(T mutator) const{
 
 
 // Handler template instantiations
+template void Statement::dispatch(IterVisitor) const;
+template void Statement::dispatch(IterVisitor*) const;
+
 template const Statement* Statement::dispatch_mutator(BaseMutator) const;
 template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
 
