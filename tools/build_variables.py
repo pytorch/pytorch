@@ -77,6 +77,7 @@ libtorch_sources = [
     "torch/csrc/distributed/rpc/script_resp.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
+    "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
     "torch/csrc/jit/argument_spec.cpp",
