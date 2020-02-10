@@ -89,7 +89,7 @@ struct TORCH_API Statement {
 
   //dispatch is used to take a handler, and call 
   template <typename T>
-  int dispatch(T handler) const;
+  void dispatch(T handler) const;
 
   template <typename T>
   const Statement* dispatch_mutator(T mutator) const;
