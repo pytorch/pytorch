@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/script/iremitter.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>

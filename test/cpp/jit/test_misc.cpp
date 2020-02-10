@@ -47,7 +47,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
 #include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/iremitter.h"
+#include "torch/csrc/jit/script/ir_emitter.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
 
