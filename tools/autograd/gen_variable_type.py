@@ -183,7 +183,8 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}), &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
+  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}),
+      &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
