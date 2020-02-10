@@ -149,9 +149,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             as part of the export, to ensure the exported model is a valid ONNX model.
         use_large_model_format (bool, default False): If True, then the model is exported
             in ONNX large model format, in which case some of the model parameters are stored
-            in separate binary files and not in the ONNX model file itself. If False, then the
-            model is stored in regular format, i.e. model and parameters are all in one file. 
-            This argument is ignored for all export types other than ONNX. 
+            in separate binary files and not in the ONNX model file itself. Also, in this case,
+            argument 'f' must be a string specifying the location of the model. The separate
+            binary files will be stored in the same location specified by the model location 'f'.
+            If False, then the model is stored in regular format, i.e. model and parameters 
+            are all in one file. This argument is ignored for all export types other than ONNX. 
     """
 
     from torch.onnx import utils
