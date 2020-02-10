@@ -99,6 +99,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
+  dim  = at::maybe_wrap_dim(dim, dst);
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
@@ -285,8 +286,10 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
 
 void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongTensor *indices, scalar_t val)
 {
+  at::NoNamesGuard guard;
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, dst));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
+  dim = at::maybe_wrap_dim(dim, dst);
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
@@ -396,6 +399,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, dst, src, indices));
 
+  dim = at::maybe_wrap_dim(dim, src);
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
@@ -413,8 +417,10 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
-  std::vector<int64_t> newSize = THTensor_sizesLegacyNoScalars(src);
-  newSize[dim] = numIndices;
+  std::vector<int64_t> newSize = src->sizes().vec();
+  if (src->dim() > 0) {
+    newSize[dim] = numIndices;
+  }
   THCTensor_(resize)(state, dst, newSize, {});
 
   ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
@@ -536,6 +542,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
 
+  dim = at::maybe_wrap_dim(dim, dst);
   int dims = THCTensor_(nDimensionLegacyNoScalars)(state, dst);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, src);

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/jit/script/module.h>
 
@@ -9,7 +10,7 @@ namespace prim {
 using namespace ::c10::prim;
 }
 
-void inlineCalls(Block* block, bool recurse) {
+void inlineCalls(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
     Node* cur = *it++;
@@ -20,32 +21,34 @@ void inlineCalls(Block* block, bool recurse) {
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         cur->removeInput(0);
-        if (recurse) {
-          Inline(*fun_type->function()->graph(), recurse);
-        }
-        inlineCallTo(cur, *fun_type->function()->graph());
+        GRAPH_UPDATE(
+            "Inlining function '", fun_type->function()->name(), "' to ", *cur);
+        GRAPH_UPDATE(
+            "Function body: ", *fun_type->function()->optimized_graph());
+        inlineCallTo(cur, fun_type->function());
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           auto function = class_type->getMethod(name);
-          if (recurse) {
-            Inline(*function->graph(), recurse);
-          }
-          inlineCallTo(cur, *function->graph());
+          GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
+          GRAPH_UPDATE("Function body: ", *function->optimized_graph());
+          inlineCallTo(cur, function);
         }
       } break;
       default: {
         for (auto b : cur->blocks()) {
-          inlineCalls(b, recurse);
+          inlineCalls(b);
         }
       } break;
     }
   }
 }
 
-void Inline(Graph& graph, bool recurse) {
-  inlineCalls(graph.block(), recurse);
+void Inline(Graph& graph) {
+  GRAPH_DUMP("Before Inlining: ", &graph);
+  inlineCalls(graph.block());
+  GRAPH_DUMP("After Inlining: ", &graph);
 }
 
 } // namespace jit

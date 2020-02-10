@@ -3,6 +3,7 @@ import argparse
 import os
 
 import yaml
+from collections import defaultdict
 from collections import OrderedDict
 
 import sys
@@ -16,7 +17,6 @@ import preprocess_declarations
 import function_wrapper
 
 from code_template import CodeTemplate
-from env import BUILD_NAMEDTENSOR
 
 
 # This file is the top-level entry point for code generation in ATen.
@@ -44,13 +44,34 @@ parser.add_argument(
     '--rocm',
     action='store_true',
     help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
+parser.add_argument(
+    '--op_registration_whitelist',
+    nargs='*',
+    help='filter op registrations by the whitelist (if set); '
+         'each item is `namespace`::`operator name` without overload name; '
+         'e.g.: aten::empty aten::conv2d ...')
+parser.add_argument(
+    '--backend_whitelist',
+    nargs='*',
+    help='filter dispatch backend by the whitelist (if set), '
+         'e.g.: CPU CUDA QuantizedCPU ...')
+parser.add_argument(
+    '--per_op_registration',
+    action='store_true',
+    help='group function registrations by op name and write to separate files; '
+         'must also set --op_registration_whitelist param')
 options = parser.parse_args()
-gen_to_source = os.environ.get('GEN_TO_SOURCE')  # update source directly as part of gen
-if not gen_to_source:
-    core_install_dir = os.path.join(options.install_dir, 'core_tmp') if options.install_dir is not None else None
-else:
-    core_install_dir = os.path.join(options.source_path, 'core')
-
+# NB: It is mandatory to NOT use os.path.join here, as the install directory
+# will eventually be ingested by cmake, which does not respect Windows style
+# path slashes.  If you switch this to use os.path.join, you'll get an error
+# like:
+#
+#   Syntax error in cmake code when parsing string
+#
+#     C:/Jenkins/workspace/pytorch-builds/pytorch-win-ws2016-cuda9-cudnn7-py3-build/build/aten/src/ATen\core/TensorMethods.h
+#
+#   Invalid character escape '\c'.
+core_install_dir = options.install_dir + '/core' if options.install_dir is not None else None
 if options.install_dir is not None and not os.path.exists(options.install_dir):
     os.makedirs(options.install_dir)
 if core_install_dir is not None and not os.path.exists(core_install_dir):
@@ -119,7 +140,6 @@ SPARSE_TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SparseTypeDer
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
-REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/RegistrationDeclarations.h")
 OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
 
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
@@ -131,6 +151,8 @@ LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctio
 LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.cpp")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
+
+PER_OP_REGISTRATION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/PerOpRegistration.cpp")
 
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
@@ -153,14 +175,18 @@ quantized_scalar_types = [
     ('QInt32', 'qint32', 'QInt32AccrealNotDefined', 'Qint32IsFloatingTypeNotDefined'),
 ]
 
+# whitelist used to filter op registrations for custom build
+if options.op_registration_whitelist is not None:
+    op_registration_whitelist = set(options.op_registration_whitelist)
+else:
+    op_registration_whitelist = None
 
 # shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'c10_ops_already_moved_from_aten_to_c10': [],
-    'c10_ops_not_moved_from_aten_to_c10_yet': [],
+    'list_of_aten_ops': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -169,8 +195,11 @@ top_env = {
     'function_definitions': [],
     'type_ids': [],
     'native_function_declarations': [],
-    'registration_declarations': [],
 }
+
+
+def is_whitelisted_backend(backend):
+    return options.backend_whitelist is None or backend in options.backend_whitelist
 
 
 def dict_representer(dumper, data):
@@ -216,13 +245,30 @@ def format_yaml(data):
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))
 
 
-def generate_storage_type_and_tensor(backend, density, declarations):
+def add_op_registrations(per_type_registrations, per_op_registrations, op_registrations):
+    for op_registration in op_registrations:
+        opname = op_registration.operator_name
+        registration = op_registration.registration_code
+        # apply whitelist
+        if op_registration_whitelist is not None and opname not in op_registration_whitelist:
+            continue
+        if not options.per_op_registration:
+            # per type registration
+            per_type_registrations.append(registration)
+        else:
+            # per op registration
+            per_op_registrations[opname].append(registration)
+
+
+def generate_storage_type_and_tensor(backend, density, declarations, per_op_registrations):
     env = {}
     density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['Type'] = "{}{}Type".format(density_tag, backend)
     env['DeviceType'] = backend_to_devicetype(backend)
     env['Backend'] = density_tag + backend
+    if not is_whitelisted_backend(env['Backend']):
+        return
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
         env['storage_tensor_headers'] = ['#include <c10/core/TensorImpl.h>']
@@ -277,13 +323,14 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGenerator'
         env['allocator'] = 'getCPUAllocator()'
 
-    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, op_registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
-    env['function_registrations'] = registrations
     env['legacy_th_declarations'] = th_declarations
     env['legacy_th_definitions'] = th_definitions
+    env['function_registrations'] = []
+    add_op_registrations(env['function_registrations'], per_op_registrations, op_registrations)
 
     fm = file_manager
     if env['DeviceType'] == 'CUDA':
@@ -322,20 +369,26 @@ def iterate_types():
         yield (backend, 'Dense')
 
 
+def gen_per_op_registration_filename(opname):
+    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
+
+
 ###################
 # declare what files will be output _before_ we do any work
 # so that the script runs quickly when we are just querying the
 # outputs
 def declare_outputs():
-    core_files = ['TensorBody.h', 'TensorMethods.h']
+    core_files = ['TensorBody.h', 'TensorMethods.h', 'OpsAlreadyMovedToC10.cpp']
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'NativeFunctions.h', 'RegistrationDeclarations.h']
+             'Functions.h', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
+        if not is_whitelisted_backend(full_backend):
+            continue
         fm = file_manager
         if backend == 'CUDA':
             fm = cuda_file_manager
@@ -349,6 +402,13 @@ def declare_outputs():
             fm.will_write("LegacyTHFunctions{}.h".format(backend))
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
 
+    if options.per_op_registration:
+        if op_registration_whitelist is None:
+            raise Exception("Must set --op_registration_whitelist for per-op registration.")
+        for whitelisted_op in op_registration_whitelist:
+            fname = gen_per_op_registration_filename(whitelisted_op)
+            file_manager.will_write(fname)
+
 
 def filter_by_extension(files, *extensions):
     filtered_files = []
@@ -359,42 +419,29 @@ def filter_by_extension(files, *extensions):
     return filtered_files
 
 
-# because EOL may not be LF(\n) on some environment (e.g. Windows),
-# normalize EOL from CRLF/CR to LF and compare both files.
-def cmpfiles_with_eol_normalization(a, b, names):
-    results = ([], [], [])    # match, mismatch, error
-    for x in names:
-        try:
-            with open(os.path.join(a, x)) as f:
-                ax = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            with open(os.path.join(b, x)) as f:
-                bx = f.read().replace('\r\n', '\n').replace('\r', '\n')
-            if ax == bx:
-                results[0].append(x)
-            else:
-                results[1].append(x)
-                import difflib
-                import sys
-                d = difflib.Differ()
-                sys.stdout.write('-' * 80 + '\n')
-                sys.stdout.write('x={}, a={}, b={}\n'.format(x, a, b))
-                for i, line in enumerate(list(d.compare(ax.splitlines(), bx.splitlines()))):
-                    if line[:2] != '  ':
-                        sys.stdout.write('{:5d}: {}\n'.format(i, line))
-                sys.stdout.write('-' * 80 + '\n')
-                sys.stdout.write(ax)
-                sys.stdout.write('-' * 80 + '\n')
-        except OSError:
-            results[2].append(x)
-    return results
+def generate_per_op_registration(per_op_registrations):
+    if not options.per_op_registration:
+        return
 
+    # Ensure all whitelisted operators have a corresponding registration file.
+    # Generate an empty placeholder file for nonexistent operators, which might
+    # be registered manually instead of via codegen.
+    # This can simplify the custom BUCK build which consumes the output of this
+    # script, since it can uniformly create per-op build targets and dependencies
+    # without having to know the subtle difference about op registration.
+    # Manually registered operators might call codegen registered operators thus
+    # we cannot simply ignore them when calculating transitive dependencies for
+    # custom build.
+    for whitelisted_op in op_registration_whitelist:
+        if whitelisted_op not in per_op_registrations:
+            per_op_registrations[whitelisted_op] = []
 
-def is_namedtensor_only_decl(decl):
-    if 'Dimname' in decl['schema_string']:
-        return True
-    if decl['name'] == 'align_tensors' or decl['name'] == 'align_as':
-        return True
-    return False
+    for opname, function_registrations in per_op_registrations.items():
+        fname = gen_per_op_registration_filename(opname)
+        file_manager.write(fname, PER_OP_REGISTRATION_CPP, {
+            'extra_headers': top_env['cpu_type_headers'] + top_env['cuda_type_headers'],
+            'function_registrations': function_registrations,
+        })
 
 
 def generate_outputs():
@@ -410,23 +457,22 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
 
+    per_op_registrations = defaultdict(list) if options.per_op_registration else None
+
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
     # be used by function_wrapper.create_derived
-    output_declarations = function_wrapper.create_generic(top_env, declarations)
+    output_declarations, op_registrations = function_wrapper.create_generic(
+        top_env, declarations)
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
-    # Filter out named-tensor only declarations.
-    # They are necessary in create_generic because that generates Type.h, TensorBody.h,
-    # and TensorMethods.h, all of which are checked in to the codebase and therefore
-    # need to be consistent whether or not BUILD_NAMEDTENSOR is on/off.
-    if not BUILD_NAMEDTENSOR:
-        declarations = [decl for decl in declarations
-                        if not is_namedtensor_only_decl(decl)]
+    add_op_registrations(
+        top_env['function_registrations'], per_op_registrations, op_registrations)
 
     for backend, density in iterate_types():
-        generate_storage_type_and_tensor(backend, density, declarations)
+        generate_storage_type_and_tensor(
+            backend, density, declarations, per_op_registrations)
 
     core_files = {
         'TensorBody.h': TENSOR_H,
@@ -439,29 +485,15 @@ def generate_outputs():
 
     file_manager.write('TypeDefault.h', TYPE_DEFAULT_H, top_env)
     file_manager.write('TypeDefault.cpp', TYPE_DEFAULT_CPP, top_env)
-    file_manager.write('RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, top_env)
 
     file_manager.write('Functions.h', FUNCTIONS_H, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
 
+    generate_per_op_registration(per_op_registrations)
+
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()
-
-    # check that generated files match source files
-    core_source_path = os.path.join(options.source_path, 'core')
-    match, mismatch, errors = cmpfiles_with_eol_normalization(core_install_dir, core_source_path, core_files.keys())
-    if errors:
-        raise RuntimeError("Error while trying to compare source and generated files for {}. "
-                           "Source directory: {}.  Generated directory: {}."
-                           .format(errors, core_source_path, core_install_dir))
-    if mismatch:
-        file_component = '{}'.format(','.join(mismatch))
-        if len(mismatch) > 1:
-            file_component = '{' + file_component + '}'
-        update_cmd = "cp {}/{} {}".format(core_install_dir, file_component, core_source_path)
-        raise RuntimeError("Source files: {} did not match generated files.  To update the source files, "
-                           "set environment variable GEN_TO_SOURCE or run \"{}\"".format(mismatch, update_cmd))
 
 declare_outputs()
 if options.output_dependencies is not None:

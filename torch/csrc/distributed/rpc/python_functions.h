@@ -1,15 +1,8 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/future_message.h>
-#include <torch/csrc/distributed/rpc/message.h>
-#include <torch/csrc/distributed/rpc/python_rpc_handler.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/distributed/rpc/py_rref.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref.h>
-#include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/distributed/rpc/script_call.h>
-#include <torch/csrc/distributed/rpc/script_remote_call.h>
-#include <torch/csrc/distributed/rpc/script_ret.h>
-#include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -19,23 +12,30 @@ namespace rpc {
 py::object toPyObj(const Message& message);
 
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
-    RpcAgent& agent,
-    const WorkerId& dst,
+    const WorkerInfo& dst,
     const std::string& opName,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs);
 
 std::shared_ptr<FutureMessage> pyRpcPythonUdf(
-    RpcAgent& agent,
-    const WorkerId& dst,
-    const std::string& pickledPythonUDF);
+    const WorkerInfo& dst,
+    std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
-std::shared_ptr<RRef> pyRemoteBuiltin(
-    RpcAgent& agent,
-    const WorkerId& dst,
+PyRRef pyRemoteBuiltin(
+    const WorkerInfo& dst,
     const std::string& opName,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
     const py::args& args,
     const py::kwargs& kwargs);
+
+PyRRef pyRemotePythonUdf(
+    const WorkerInfo& dst,
+    std::string& pickledPythonUDF,
+    std::vector<torch::Tensor>& tensors,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf);
 
 } // namespace rpc
 } // namespace distributed

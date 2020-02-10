@@ -128,7 +128,7 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3* ]] || \
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch_macos* ]]; then
   BUILD_TEST_LIBTORCH=1
@@ -140,7 +140,7 @@ fi
 # min version 3.5, so we only do it in two builds that we know should use conda.
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py2* ]] || \
-     [[ "$BUILD_ENVIRONMENT" == *cuda9-cudnn7-py3* ]]; then
+     [[ "$BUILD_ENVIRONMENT" == *cuda10.1-cudnn7-py3* ]]; then
     if ! which conda; then
       echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
       exit 1
@@ -158,7 +158,18 @@ fi
 
 function pip_install() {
   # retry 3 times
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@"
+  # old versions of pip don't have the "--progress-bar" flag
+  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
+  pip install "$@" || pip install "$@" || pip install "$@"
+}
+
+function pip_uninstall() {
+  # uninstall 2 times
+  pip uninstall -y "$@" || pip uninstall -y "$@"
+}
+
+retry () {
+  $*  || (sleep 1 && $*) || (sleep 2 && $*)
 }
 
 function get_exit_code() {

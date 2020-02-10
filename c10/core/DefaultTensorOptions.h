@@ -17,7 +17,6 @@ struct DefaultTensorOptions {
   Device device()          const noexcept { return device_; }
   Layout layout()          const noexcept { return layout_; }
   bool requires_grad()     const noexcept { return requires_grad_; }
-  bool is_variable()       const noexcept { return is_variable_; }
 
   // Defined in TensorOptions.h
   inline DefaultTensorOptions& merge(const TensorOptions& options);
@@ -27,7 +26,6 @@ struct DefaultTensorOptions {
   Device device_          = at::kCPU;                        // 32-bit
   Layout layout_          = at::kStrided;                    // 8-bit
   bool requires_grad_     = false;                           // 8-bit
-  bool is_variable_       = false;                           // 8-bit
 };
 
 inline const DefaultTensorOptions& getDefaultTensorOptions() {

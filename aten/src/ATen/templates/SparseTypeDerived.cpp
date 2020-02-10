@@ -18,7 +18,6 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstddef>
 #include <functional>
@@ -30,10 +29,17 @@ $extra_cuda_headers
 
 namespace at {
 
+namespace ${Type} {
+
 ${type_derived_method_definitions}
 
+}  // namespace ${Type}
+
 #ifndef USE_STATIC_DISPATCH
+namespace {
 static auto registerer = torch::RegisterOperators()
   ${function_registrations};
+}
 #endif
+
 }

@@ -6,7 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
-#include <THC/THCAtomics.cuh>  // for atomicAdd
+#include <THC/THCAtomics.cuh>  // for gpuAtomicAdd
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -287,7 +287,7 @@ __global__ void atomicadaptiveaveragegradinput(
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            atomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
+            gpuAtomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
           }
         }
         ptr_gradInput += isizeH*isizeW; // next input frame
@@ -508,7 +508,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
 Tensor adaptive_avg_pool3d_backward_cuda(
     const Tensor& gradOutput_,
     const Tensor& input) {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }

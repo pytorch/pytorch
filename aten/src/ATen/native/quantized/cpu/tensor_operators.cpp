@@ -1,6 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/Resize.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/core/op_registration/op_registration.h>
+#include <c10/core/QScheme.h>
 
 namespace at {
 namespace native {
@@ -56,4 +60,30 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
+namespace {
+Tensor& quantized_resize_cpu_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "Unsupported memory format for quantized tensor resize ",
+      optional_memory_format.value());
+  auto qscheme = self.quantizer()->qscheme();
+  TORCH_CHECK(
+      qscheme == QScheme::PER_TENSOR_AFFINE ||
+          qscheme == QScheme::PER_TENSOR_SYMMETRIC,
+      "Can only resize quantized tensors with per-tensor schemes!");
+  auto* self_ = self.unsafeGetTensorImpl();
+  resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
+  return self;
+}
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(quantized_resize_cpu_), &quantized_resize_cpu_>(DispatchKey::QuantizedCPUTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
+
+}  // namespcae
 }}  // at::native

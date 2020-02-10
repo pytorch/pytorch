@@ -3,21 +3,24 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/python_custom_class.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -43,8 +46,6 @@ namespace jit {
 // not use AT_ERROR macros, since these macros add stack trace information
 // that is confusing to display to the end user since it always reports
 // locations in libtorch code rather than user code.
-
-using tracer::TypedStack;
 
 inline std::shared_ptr<script::CompilationUnit> get_python_cu() {
   return py::module::import("torch.jit")
@@ -123,7 +124,12 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   if (input.is(py::none())) {
-    return InferredType("Cannot infer type of a None value");
+    return InferredType(NoneType::get());
+  }
+
+  if (py::isinstance<StrongFunctionPtr>(input)) {
+    auto fn = py::cast<StrongFunctionPtr>(input).function_;
+    return InferredType(FunctionType::create(fn));
   }
 
   // Try basic types first
@@ -143,6 +149,30 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPQScheme_Check(input.ptr())) {
     return InferredType(IntType::get());
+  } else if (THPLayout_Check(input.ptr())) {
+    return InferredType(IntType::get());
+  }
+
+  py::bool_ isClass =
+      py::module::import("inspect").attr("isclass")(input.get_type());
+  if (py::cast<bool>(isClass)) {
+    py::str qualifiedName = py::module::import("torch.jit")
+                                .attr("_qualified_name")(input.get_type());
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(qualifiedName);
+    if (!pyClass.is_none()) {
+      auto cu = get_python_cu();
+      const auto classname =
+          c10::QualifiedName(py::cast<std::string>(qualifiedName));
+      auto class_type = cu->get_class(classname);
+      TORCH_INTERNAL_ASSERT(class_type);
+      return InferredType(class_type);
+    }
+  }
+
+  if (py::isinstance<script::Object>(input)) {
+    auto object = py::cast<script::Object>(input);
+    return InferredType(object.type());
   }
 
   // Try container types
@@ -239,15 +269,16 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
+    // TODO: this message is not correct anymore, since this InferredType is
+    // used from a bunch of circumstances unrelated to tracing. We can re-use
+    // this instead of the attribute_failure stuff in concreteType
     return InferredType(c10::str(
         "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
         "are supported ",
         "as inputs or outputs of traced functions",
         ", but instead got value of type ",
         py::str(input.get_type().attr("__name__")),
-        ".",
-        "\nValue: ",
-        py::repr(input)));
+        "."));
   }
 }
 
@@ -279,37 +310,24 @@ inline bool isTraceableType(TypePtr type) {
   return false;
 }
 
-inline TypedIValue toTraceableIValue(py::handle input) {
+inline IValue toTypeInferredIValue(py::handle input) {
   auto match = tryToInferType(input);
   if (!match.success()) {
     AT_ERROR(
         "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
   }
-  auto type = match.type();
+  return toIValue(input, match.type());
+}
 
-  if (isTraceableType(type)) {
-    return TypedIValue(toIValue(input, type), type);
-  }
-
-  AT_ERROR(
+inline Stack toTraceableStack(const py::tuple& inputs) {
+  auto info = toTypeInferredIValue(inputs);
+  AT_CHECK(
+      isTraceableType(info.type()),
       "Type '",
-      type->python_str(),
+      info.type()->python_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
-}
-
-inline IValue toIValue(py::handle input) {
-  return toTraceableIValue(input).ivalue();
-}
-
-inline Stack toStack(const py::tuple& inputs) {
-  return toIValue(inputs).toTuple()->elements();
-}
-
-inline TypedStack toTypedStack(const py::tuple& inputs) {
-  auto info = toTraceableIValue(inputs);
-  return TypedStack(
-      info.ivalue().toTuple()->elements(), info.type()->expect<TupleType>());
+  return info.toTuple()->elements();
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
@@ -321,24 +339,23 @@ inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
 }
 
 inline IValue createGenericDict(
-    py::handle obj,
+    py::dict obj,
     const TypePtr& key_type,
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto key : obj) {
+  for (auto entry : obj) {
     elems.insert(
-        toIValue(key, key_type), toIValue(obj[key], value_type));
+        toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
   return IValue(std::move(elems));
 }
 
 template <class T>
 inline void guardAgainstNamedTensor(const T& var) {
-#ifdef BUILD_NAMEDTENSOR
   TORCH_CHECK(!var.has_names(),
-      "NYI: Named tensors are currently unsupported in TorchScript.");
-#endif
+      "NYI: Named tensors are currently unsupported in TorchScript. As a  "
+      "workaround please drop names via `tensor = tensor.rename(None)`.");
 }
 
 inline IValue toIValue(
@@ -349,7 +366,7 @@ inline IValue toIValue(
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
-        AT_WARN(
+        TORCH_WARN_ONCE(
             "Using sparse tensors in TorchScript is experimental. Many optimization "
             "pathways have not been thoroughly tested with sparse tensors. Please "
             "include the fact that the network is running sparse tensors in any bug "
@@ -361,6 +378,9 @@ inline IValue toIValue(
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::IntType:
+    // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
+    case TypeKind::LayoutType:
+    case TypeKind::ScalarTypeType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -368,6 +388,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
@@ -411,7 +435,7 @@ inline IValue toIValue(
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
           if (!N || !py::isinstance<py::int_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<int64_t>>(obj));
+            return IValue(py::cast<std::vector<int64_t>>(obj));
           } else {
             double value = py::cast<int64_t>(obj);
             c10::List<double> repeated;
@@ -423,7 +447,7 @@ inline IValue toIValue(
           }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
-            return c10::impl::toList(py::cast<std::vector<double>>(obj));
+            return IValue(py::cast<std::vector<double>>(obj));
           } else {
             double value = py::cast<double>(obj);
             c10::List<double> repeated;
@@ -434,9 +458,9 @@ inline IValue toIValue(
             return repeated;
           }
         case TypeKind::BoolType:
-          return c10::impl::toList(py::cast<std::vector<bool>>(obj));
+          return IValue(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
-          return c10::impl::toList(py::cast<std::vector<at::Tensor>>(obj));
+          return IValue(py::cast<std::vector<at::Tensor>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
@@ -444,7 +468,7 @@ inline IValue toIValue(
     case TypeKind::DictType: {
       const auto& dict_type = type->expect<DictType>();
       return createGenericDict(
-          obj, dict_type->getKeyType(), dict_type->getValueType());
+          py::cast<py::dict>(obj), dict_type->getKeyType(), dict_type->getValueType());
     }
     case TypeKind::OptionalType: {
       // check if it's a none obj since optional accepts NoneType
@@ -457,6 +481,12 @@ inline IValue toIValue(
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
+      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+        // if obj is already a ScriptModule, just return its ivalue
+        return mod.value()._ivalue();
+      }
+      // otherwise is a normal class object, we create a fresh
+      // ivalue::Object to use from the py object.
       // 1. create a bare ivalue
       const size_t numAttrs = classType->numAttributes();
       auto cu = classType->compilation_unit();
@@ -473,6 +503,46 @@ inline IValue toIValue(
       }
       return userObj;
     }
+    case TypeKind::InterfaceType: {
+      auto interfaceType = type->expect<InterfaceType>();
+      // When converting an pyobj to an interface, we check if rhs
+      // is module or normal torchscript class, get the type and ivalue
+      // from them correspondingly.
+      c10::ClassTypePtr classType = nullptr;
+      IValue res;
+      if (auto mod = script::as_module(py::cast<py::object>(obj))) {
+        classType = mod.value().type();
+        res = mod.value()._ivalue();
+      } else {
+        // We inspect the value to found the compiled TorchScript class
+        // and then create a ivalue::Object from that class type.
+        py::str qualified_name = py::module::import("torch.jit")
+                                     .attr("_qualified_name")(obj.get_type());
+        auto pyCu = get_python_cu();
+        classType = pyCu->get_class(c10::QualifiedName(qualified_name));
+        if (!classType) {
+          throw std::runtime_error(c10::str(
+              "Assigning the object ",
+              py::str(obj),
+              " to an interface fails because the value is not "
+              "a TorchScript compatible type, did you forget to",
+              "turn it into a user defined TorchScript class?"));
+        }
+        res = toIValue(std::move(obj), classType);
+      }
+      // check if the classType conform with the interface or not
+      std::stringstream why_not;
+      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+        throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " is not compatible with interface ",
+            interfaceType->python_str(),
+            "\n",
+            why_not.str()));
+      }
+      return res;
+    }
     case TypeKind::NumberType: {
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
@@ -481,6 +551,10 @@ inline IValue toIValue(
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
         return static_cast<uint8_t>(qscheme->qscheme);
+      }
+      if (THPLayout_Check(obj.ptr())) {
+        auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+        return static_cast<int8_t>(layout->layout);
       }
       if (py::isinstance<py::int_>(obj)) {
         return py::cast<int64_t>(obj);
@@ -491,14 +565,18 @@ inline IValue toIValue(
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
-    case TypeKind::InterfaceType:
+    case TypeKind::QSchemeType:
       break;
+    case TypeKind::PyObjectType:
+      // convert a py::handle to the IValue that holds the py::object
+      return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
     case TypeKind::FunctionType:
       AT_ERROR("Function Values aren't yet supported");
-    case TypeKind::CapsuleType:
-      AT_ERROR("Capsule Values aren't supported");
+    case TypeKind::CapsuleType: {
+      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
+    } break;
     case TypeKind::AnyType:
-      AT_ERROR("AnyType Values aren't supported");
+      return toTypeInferredIValue(obj);
   }
   AT_ERROR(
       "Missing cases in toIValue for type: ",
@@ -538,11 +616,14 @@ inline IValue argumentToIValue(
   try {
     return toIValue(object, argument.type(), argument.N());
   } catch (const py::cast_error& error) {
-    throw std::runtime_error(schema.formatTypeMismatchMsg(
+    throw std::runtime_error(c10::str(
+      schema.formatTypeMismatchMsg(
         argument,
         friendlyTypeName(object),
         argumentPosition,
-        py::repr(object)));
+        py::repr(object)),
+      "\nCast error details: ",
+      error.what()));
   }
 }
 
@@ -557,28 +638,19 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
         py::str(object.get_type().attr("__name__")),
         ".",
         "\nValue: ",
-        py::repr(object)));
+        py::repr(object),
+        "\nCast error details: ",
+        error.what()));
   }
 }
 
-inline c10::optional<py::object> tryToConvertToCustomClass(
-    const c10::intrusive_ptr<c10::ivalue::Object>& obj) {
-  if (obj->name().find("__torch__.torch.classes") == 0) {
-    auto objPtr = (void*)obj->getSlot(0).toCapsule().release();
-    auto classConverter = c10::getClassConverter()[obj->name()];
-    py::handle rawPyObj = classConverter(objPtr);
-    auto o = py::reinterpret_steal<py::object>(rawPyObj);
-    return o;
-  }
-  return c10::nullopt;
-}
-inline py::object toPyObject(IValue&& ivalue) {
+inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.is_sparse()) {
-      AT_WARN(
+      TORCH_WARN_ONCE(
           "Using sparse tensors in TorchScript is experimental. Many optimization "
           "pathways have not been thoroughly tested with sparse tensors. Please "
           "include the fact that the network is running sparse tensors in any bug "
@@ -594,16 +666,8 @@ inline py::object toPyObject(IValue&& ivalue) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
     return py::cast(std::move(ivalue).toStringRef());
-  } else if (ivalue.isIntList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toIntList()));
-  } else if (ivalue.isDoubleList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toDoubleList()));
-  } else if (ivalue.isBoolList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toBoolList()));
-  } else if (ivalue.isTensorList()) {
-    return py::cast(c10::impl::toVector(std::move(ivalue).toTensorList()));
-  } else if (ivalue.isGenericList()) {
-    auto list = std::move(ivalue).toGenericList();
+  } else if (ivalue.isList()) {
+    auto list = std::move(ivalue).toList();
     py::list t{list.size()};
     for (size_t i = 0; i < list.size(); ++i) {
       t[i] = toPyObject(IValue{list.get(i)});
@@ -639,15 +703,25 @@ inline py::object toPyObject(IValue&& ivalue) {
     return std::move(py_dict);
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
+    if (obj->type()->is_module()) {
+      return py::cast(script::Module(obj));
+    }
+
     auto pyCu = get_python_cu();
-    auto res = tryToConvertToCustomClass(obj);
-    if (res.has_value()) {
-      return res.value();
+    if (obj->name().find("__torch__.torch.classes") == 0) {
+      return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    if (pyClass.is_none()) {
+      std::stringstream err;
+      err << "Unknown reference to ScriptClass ";
+      err << obj->name();
+      err << ". Did you forget to import it?)";
+      throw std::runtime_error(err.str());
+    }
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -658,6 +732,11 @@ inline py::object toPyObject(IValue&& ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isPyObject()) {
+    // return borrowed reference to ensure it correctly incref the underlying PyObject
+    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
+  } else if (ivalue.isCapsule()) {
+    return py::cast(ivalue.toCapsule());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -805,7 +884,7 @@ inline py::object runAndInsertCall(
       callee.getSchema(), std::move(args), std::move(kwargs), std::move(self));
   auto tracing_state = tracer::getTracingState();
   if (!tracing_state) {
-    AutoNoGIL no_gil_guard;
+    pybind11::gil_scoped_release no_gil_guard;
     // If we're not tracing, just run the callee as normal.
     callee.run(stack);
   } else {
@@ -836,7 +915,7 @@ inline py::object runAndInsertCall(
     // Actually run the callee. Pause the tracer so that we don't double-add the
     // callee nodes.
     {
-      AutoNoGIL no_gil_guard;
+      pybind11::gil_scoped_release no_gil_guard;
       ResourceGuard guard(tracer::pauseTracing());
       callee.run(stack);
     }
@@ -869,7 +948,7 @@ inline py::object invokeScriptMethodFromPython(
     script::Method& callee,
     tuple_slice args,
     py::kwargs kwargs) {
-  auto self = callee.owner().module_object();
+  auto self = callee.owner()._ivalue();
   return runAndInsertCall(
       callee.function(),
       args,
@@ -878,6 +957,17 @@ inline py::object invokeScriptMethodFromPython(
       [&](Graph& graph, const script::MatchedSchema& match) {
         return graph.insertMethodCall(callee.name(), match);
       });
+}
+
+inline py::object invokeScriptMethodFromPython(
+    script::Object& object,
+    const std::string& method_name,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  auto type = object.type();
+  script::Method init_method(object._ivalue(), type->getMethod(method_name));
+  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
+  return py::cast(script::Object(object));
 }
 
 inline py::object invokeOperatorFromPython(

@@ -48,7 +48,7 @@ Tensor _s_where_cuda(
     const Tensor& self,
     const Tensor& other) {
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ret.scalar_type(), "where_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool, ret.scalar_type(), "where_cuda", [&] {
     where_cuda<scalar_t>(ret, condition, self, other);
   });
   return ret;

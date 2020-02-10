@@ -2,11 +2,14 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/utils/memory.h>
+#include <mutex>
 
 namespace torch {
 namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
+
+TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information, and the executor that manages the
@@ -21,22 +24,26 @@ struct TORCH_API Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
-  void run(Stack &stack) { get_executor().run(stack); }
+  void run(Stack& stack);
 
-  void run(Stack&& stack) {
-    run(stack);
-  }
+  void run(Stack&& stack);
 
   IValue operator()(
       std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) {
-    getSchema().checkAndNormalizeInputs(stack, kwargs);
-    run(stack);
-    return stack.front();
-  }
+      const Kwargs& kwargs = Kwargs());
 
   std::shared_ptr<Graph> graph() const {
     return graph_;
+  }
+
+  std::shared_ptr<Graph> optimized_graph() const {
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
+    if (optimized_graph_) {
+      return *optimized_graph_;
+    }
+    optimized_graph_ = graph_->copy();
+    preoptimizeGraph(*optimized_graph_);
+    return *optimized_graph_;
   }
 
   const c10::QualifiedName& qualname() const {
@@ -87,20 +94,34 @@ struct TORCH_API Function {
 
   GraphExecutor& get_executor() {
     ensure_defined();
-    std::call_once(executor_init_, [&] {
-      check_single_output();
-      executor_ = GraphExecutor(graph());
-    });
+    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
+    if (executor_) {
+      return executor_;
+    }
+    check_single_output();
+    executor_ = GraphExecutor(optimized_graph());
     return executor_;
   }
 
  private:
   c10::QualifiedName name_;
+  // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
 
-  GraphExecutor executor_; // for execution
+  // Optimized graph, computed lazily. Used for inlining.
+  // Note: this graph is not specialized, only generic optimizations are applied
+  // here.
+  mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
 
-  std::once_flag executor_init_;
+  // Functions are invokable from multiple threads, so this lock needs to be
+  // held when we're initializing graph executor for the first time or computing
+  // the optimized graph.
+  // We're using reentrant mutex so that we don't need to worry about causing a
+  // deadlock by calling one method from another (e.g. optimized_graph() from
+  // get_executor()).
+  mutable std::recursive_mutex compile_mutex;
+
+  GraphExecutor executor_; // for execution
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so

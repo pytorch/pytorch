@@ -7,6 +7,7 @@ ENDIF(MSVC)
 list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/scalar_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/apply_utils_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/backend_fallback_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/basic.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/atest.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/Dimname_test.cpp
@@ -28,8 +29,13 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/extension_backend_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory_overlapping_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/rng_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
@@ -40,8 +46,9 @@ list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_packedtensoraccessor_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_vectorized_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_generator_test.cu)
-if (CUDNN_FOUND)
+if (CAFFE2_USE_CUDNN)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cudnn_test.cpp)
 endif()

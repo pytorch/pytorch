@@ -27,17 +27,15 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/QEngine.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
-#include <torch/csrc/autograd/generated/python_nn_functions.h>
+#include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/qengines.h>
 #include <torch/csrc/utils/tensor_layouts.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
@@ -48,7 +46,6 @@
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifdef USE_CUDNN
 #include <cudnn.h>
@@ -83,7 +80,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
 
   int num_classes = PySequence_Fast_GET_SIZE(types.get());
   names.reserve(names.size() + num_classes);
-  for (int i = 0; i < num_classes; i++) {
+  for (size_t i = 0; i < num_classes; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(types.get(), i);
     THPUtils_assert(PyType_Check(obj), "expected a PyTypeObject");
     PyTypeObject* type = (PyTypeObject*)obj;
@@ -110,7 +107,6 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   torch::utils::initializeLayouts();
   torch::utils::initializeMemoryFormats();
   torch::utils::initializeQSchemes();
-  torch::utils::initializeQEngines();
   torch::utils::initializeDtypes();
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
@@ -145,6 +141,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
 static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
+  //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
   volatile char x[3];
   x[static_cast<int>(THPUtils_unpackLong(arg))] = 0;
   return PyLong_FromLong(x[0]);
@@ -390,7 +387,7 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // atensor steals the ownership of the underlying storage. It also passes a
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
-  auto atensor = make_variable(at::fromDLPack(dlMTensor), false);
+  auto atensor = at::fromDLPack(dlMTensor);
 
   // It is possible that the call to at::fromDLPack is the very first
   // call to create a Tensor in PyTorch. If so, then _lazy_init has
@@ -484,31 +481,47 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 PyObject *THPModule_getDefaultDevice(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   return THPUtils_packString(
-          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_tensor_type_id()),
+          c10::DeviceTypeName(computeDeviceType(torch::tensors::get_default_dispatch_key()),
                               /*lower_case=*/true));
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_setPreferredQuantizedEngine(PyObject *_unused, PyObject *arg)
+PyObject *THPModule_setQEngine(PyObject */* unused */, PyObject *arg)
 {
-  TORCH_CHECK(THPQEngine_Check(arg), "qengine arg must be an instance of the torch.qengine");
-  const auto qengine = reinterpret_cast<THPQEngine*>(arg);
-  at::globalContext().setPreferredQuantizedEngine(qengine->qengine);
+  THPUtils_assert(THPUtils_checkLong(arg), "set_qengine expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  auto qengine = static_cast<int>(THPUtils_unpackLong(arg));
+  at::globalContext().setQEngine(static_cast<at::QEngine>(qengine));
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_preferredQuantizedEngine(PyObject *_unused)
+PyObject *THPModule_qEngine(PyObject */* unused */)
 {
-  return THPQEngine_New(at::globalContext().preferredQuantizedEngine(), toString(at::globalContext().preferredQuantizedEngine()));
+  return THPUtils_packInt64(static_cast<int>(at::globalContext().qEngine()));
 }
 
+PyObject *THPModule_supportedQEngines(PyObject */* unused */)
+{
+  auto qengines = at::globalContext().supportedQEngines();
+  auto list = THPObjectPtr(PyList_New(qengines.size()));
+  for (size_t i = 0; i < qengines.size(); ++i) {
+    PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
+    if (!i64) {
+      throw python_error();
+    }
+    PyList_SET_ITEM(list.get(), i, i64);
+  }
+  return list.release();
+}
+
+//NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       nullptr},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  nullptr},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, nullptr},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       nullptr},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  nullptr},
-  {"_safe_call",      (PyCFunction)(void(*)(void))THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {"_safe_call",      (PyCFunction)(void(*)())THPModule_safeCall, METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, nullptr},
@@ -538,8 +551,9 @@ static PyMethodDef TorchMethods[] = {
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     nullptr},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  nullptr},
   {"_get_default_device", (PyCFunction)THPModule_getDefaultDevice, METH_NOARGS,   nullptr},
-  {"_get_preferred_engine", (PyCFunction)THPModule_preferredQuantizedEngine, METH_NOARGS, nullptr},
-  {"_set_preferred_engine", (PyCFunction)THPModule_setPreferredQuantizedEngine, METH_O, nullptr},
+  {"_get_qengine", (PyCFunction)THPModule_qEngine, METH_NOARGS, nullptr},
+  {"_set_qengine", (PyCFunction)THPModule_setQEngine, METH_O, nullptr},
+  {"_supported_qengines", (PyCFunction)THPModule_supportedQEngines, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
@@ -597,28 +611,6 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
-// ATen warning handler for Python
-static void warning_handler(
-    const c10::SourceLocation& source_location,
-    const char* msg) {
-  AutoGIL gil;
-  auto result = -1;
-  if (source_location.file == nullptr) {
-    result = PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1);
-  } else {
-    result = PyErr_WarnExplicit(
-        /*category=*/PyExc_UserWarning,
-        /*message=*/msg,
-        /*filename=*/source_location.file,
-        /*lineno=*/source_location.line,
-        /*module=*/nullptr,
-        /*registry=*/nullptr);
-  }
-  if (result < 0) {
-    throw python_error();
-  }
-}
-
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
@@ -629,7 +621,6 @@ static void LogAPIUsageOnceFromPython(const std::string& event) {
   }
 }
 
-
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -639,6 +630,7 @@ PyObject* initModule() {
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
 
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define ASSERT_TRUE(cmd) if (!(cmd)) return nullptr
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
@@ -680,7 +672,6 @@ PyObject* initModule() {
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
-  THPQEngine_init(module);
   THPQScheme_init(module);
   THPDevice_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
@@ -755,9 +746,6 @@ PyObject* initModule() {
   py_module.def("_demangle", &c10::demangle);
   py_module.def("_log_api_usage_once", &LogAPIUsageOnceFromPython);
 
-  // Set ATen warnings to issue Python warnings
-  ::c10::Warning::set_warning_handler(&warning_handler);
-
   ASSERT_TRUE(set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
@@ -775,12 +763,6 @@ PyObject* initModule() {
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", _GLIBCXX_USE_CXX11_ABI ? Py_True : Py_False));
 #else
   ASSERT_TRUE(set_module_attr("_GLIBCXX_USE_CXX11_ABI", Py_False));
-#endif
-
-#ifdef BUILD_NAMEDTENSOR
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_True));
-#else
-  ASSERT_TRUE(set_module_attr("_BUILD_NAMEDTENSOR", Py_False));
 #endif
 
   auto defaultGenerator = at::detail::getDefaultCPUGenerator();

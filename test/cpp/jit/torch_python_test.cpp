@@ -6,7 +6,7 @@ namespace jit {
 
 #if defined(_WIN32)
 void runJITCPPTests(bool runCuda) {
-  TORCH_INTERNAL_ASSERT("JIT tests not yet supported on Windows");
+  TORCH_INTERNAL_ASSERT(false, "JIT tests not yet supported on Windows");
 }
 #else
 #define JIT_TEST(name) test##name();
@@ -21,6 +21,7 @@ TORCH_API void runJITCPPTests(bool runCuda) {
   // and python test runners), but is instead invoked manually by the
   // torch_python_test.cpp
   testEvalModeForLoadedModule();
+  testTorchSaveError();
 }
 #undef JIT_TEST
 #endif

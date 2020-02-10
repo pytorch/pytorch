@@ -206,7 +206,7 @@ struct Vec256<c10::qint8> {
   float_vec_return_type dequantize(
       Vec256<float> scale,
       Vec256<float> zero_point,
-      Vec256<float> scale_zp_premul) const {
+      Vec256<float> scale_neg_zp_premul) const {
     __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
     __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
     __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
@@ -219,13 +219,13 @@ struct Vec256<c10::qint8> {
 
 #if defined(__AVX2__) && defined(__FMA__)
     auto val0 =
-        vec256::fmadd(scale, Vec256<float>(float_val0), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val0), scale_neg_zp_premul);
     auto val1 =
-        vec256::fmadd(scale, Vec256<float>(float_val1), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val1), scale_neg_zp_premul);
     auto val2 =
-        vec256::fmadd(scale, Vec256<float>(float_val2), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val2), scale_neg_zp_premul);
     auto val3 =
-        vec256::fmadd(scale, Vec256<float>(float_val3), scale_zp_premul);
+        vec256::fmadd(scale, Vec256<float>(float_val3), scale_neg_zp_premul);
 #else
     auto val0 = scale * (Vec256<float>(float_val0) - zero_point);
     auto val1 = scale * (Vec256<float>(float_val1) - zero_point);
@@ -260,6 +260,24 @@ struct Vec256<c10::qint8> {
       int8_t result_vals[size()];
       for (size_t i = 0; i < size(); ++i) {
         result_vals[i] = std::max<int8_t>(int_vals[i], b_vals[i]);
+      }
+      return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
+#endif
+    }
+
+  Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
+#ifdef __AVX2__
+      return _mm256_min_epi8(vals, b.vals);
+#else
+      // Pray the compiler can autovectorize this
+      int8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      int8_t b_vals[size()];
+      _mm256_storeu_si256(
+          reinterpret_cast<__m256i*>(&b_vals), b.vals);
+      int8_t result_vals[size()];
+      for (size_t i = 0; i < size(); ++i) {
+        result_vals[i] = std::min<int8_t>(int_vals[i], b_vals[i]);
       }
       return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
 #endif
@@ -330,7 +348,7 @@ struct Vec256<c10::quint8> {
 
  private:
     __m256i vals __attribute__((aligned(64)));
- 
+
  public:
     // Broadcast constructor
     Vec256(const c10::quint8& val) {
@@ -430,6 +448,24 @@ struct Vec256<c10::quint8> {
       uint8_t result_vals[size()];
       for (size_t i = 0; i < size(); ++i) {
         result_vals[i] = std::max<uint8_t>(int_vals[i], b_vals[i]);
+      }
+      return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
+#endif
+    }
+
+  Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
+#ifdef __AVX2__
+      return _mm256_min_epu8(vals, b.vals);
+#else
+      // Pray the compiler can autovectorize this
+      uint8_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      uint8_t b_vals[size()];
+      _mm256_storeu_si256(
+          reinterpret_cast<__m256i*>(&b_vals), b.vals);
+      uint8_t result_vals[size()];
+      for (size_t i = 0; i < size(); ++i) {
+        result_vals[i] = std::min<uint8_t>(int_vals[i], b_vals[i]);
       }
       return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
 #endif
@@ -557,6 +593,24 @@ struct Vec256<c10::qint32> {
       int32_t result_vals[size()];
       for (size_t i = 0; i < size(); ++i) {
         result_vals[i] = std::max<int32_t>(int_vals[i], b_vals[i]);
+      }
+      return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
+#endif
+    }
+
+    Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
+#ifdef __AVX2__
+      return _mm256_min_epi32(vals, b.vals);
+#else
+      // Pray the compiler can autovectorize this
+      int32_t int_vals[size()];
+      _mm256_storeu_si256(reinterpret_cast<__m256i*>(&int_vals), vals);
+      int32_t b_vals[size()];
+      _mm256_storeu_si256(
+          reinterpret_cast<__m256i*>(&b_vals), b.vals);
+      int32_t result_vals[size()];
+      for (size_t i = 0; i < size(); ++i) {
+        result_vals[i] = std::min<int32_t>(int_vals[i], b_vals[i]);
       }
       return _mm256_loadu_si256(reinterpret_cast<__m256i*>(&result_vals));
 #endif
@@ -722,6 +776,14 @@ struct Vec256<c10::qint8> : public Vec256QuantizedConverter<
     return retval;
   }
 
+  Vec256<c10::qint8> minimum(Vec256<c10::qint8> b) const {
+    Vec256<c10::qint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
   Vec256<c10::qint8> relu(Vec256<c10::qint8> zero_point) const {
     return maximum(zero_point);
   }
@@ -788,6 +850,14 @@ struct Vec256<c10::quint8> : public Vec256QuantizedConverter<
     Vec256<c10::quint8> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vec256<c10::quint8> minimum(Vec256<c10::quint8> b) const {
+    Vec256<c10::quint8> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
   }
@@ -859,6 +929,14 @@ struct Vec256<c10::qint32> : public Vec256QuantizedConverter<
     Vec256<c10::qint32> retval;
     for (size_t i = 0; i < size(); ++i) {
       retval.vals[i] = std::max<value_type>(vals[i], b.vals[i]);
+    }
+    return retval;
+  }
+
+  Vec256<c10::qint32> minimum(Vec256<c10::qint32> b) const {
+    Vec256<c10::qint32> retval;
+    for (size_t i = 0; i < size(); ++i) {
+      retval.vals[i] = std::min<value_type>(vals[i], b.vals[i]);
     }
     return retval;
   }

@@ -126,6 +126,7 @@ _(aten, _sparse_mul_scalar) \
 _(aten, _sparse_mul_zerodim) \
 _(aten, _sparse_sum) \
 _(aten, _sqrt) \
+_(aten, _square) \
 _(aten, _standard_gamma) \
 _(aten, _standard_gamma_grad) \
 _(aten, _sum) \
@@ -278,6 +279,8 @@ _(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_grid_sampler) \
 _(aten, cudnn_grid_sampler_backward) \
 _(aten, cudnn_is_acceptable) \
+_(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
@@ -337,6 +340,7 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, ge) \
+_(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, ger) \
@@ -500,7 +504,10 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, bitwise_and) \
 _(aten, bitwise_not) \
+_(aten, bitwise_or) \
+_(aten, bitwise_xor) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
 _(aten, nll_loss2d_backward) \
@@ -579,7 +586,6 @@ _(aten, rrelu_with_noise) \
 _(aten, rrelu_with_noise_backward) \
 _(aten, rrelu_with_noise_forward) \
 _(aten, rsqrt) \
-_(aten, s_native_addmm) \
 _(aten, scatter) \
 _(aten, scatter_add) \
 _(aten, select) \
@@ -618,6 +624,7 @@ _(aten, sparse_resize_and_clear) \
 _(aten, split) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
+_(aten, square) \
 _(aten, squeeze) \
 _(aten, sspaddmm) \
 _(aten, stack) \
@@ -649,9 +656,9 @@ _(aten, th_zero) \
 _(aten, thnn_conv2d) \
 _(aten, thnn_conv2d_backward) \
 _(aten, thnn_conv2d_forward) \
-_(aten, thnn_conv3d) \
-_(aten, thnn_conv3d_backward) \
-_(aten, thnn_conv3d_forward) \
+_(aten, slow_conv3d) \
+_(aten, slow_conv3d_backward) \
+_(aten, slow_conv3d_forward) \
 _(aten, thnn_conv_depthwise2d) \
 _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \

@@ -13,6 +13,10 @@ using unary_fn = void(*)(TensorIterator&);
 using unary_fn_with_scalar = void(*)(TensorIterator&, Scalar a);
 
 DECLARE_DISPATCH(unary_fn, abs_stub);
+DECLARE_DISPATCH(unary_fn, angle_stub);
+DECLARE_DISPATCH(unary_fn, real_stub);
+DECLARE_DISPATCH(unary_fn, imag_stub);
+DECLARE_DISPATCH(unary_fn, conj_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, asin_stub);
 DECLARE_DISPATCH(unary_fn, atan_stub);
@@ -48,8 +52,14 @@ DECLARE_DISPATCH(unary_fn, tan_stub);
 DECLARE_DISPATCH(unary_fn, tanh_stub);
 DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
+DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
 DECLARE_DISPATCH(void(*)(Tensor&, const double, Generator *), bernoulli_mkl_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), cauchy_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), exponential_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, Generator *), geometric_stub);
+DECLARE_DISPATCH(void(*)(TensorIterator&, const double, const double, Generator *), log_normal_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, Generator *), normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, Generator *), multinomial_stub);

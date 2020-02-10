@@ -18,7 +18,10 @@ namespace caffe2 {
 namespace testing {
 
 // Asserts that the values of two tensors are the same.
-CAFFE2_API void assertTensorEquals(const TensorCPU& tensor1, const TensorCPU& tensor2);
+CAFFE2_API void assertTensorEquals(
+    const TensorCPU& tensor1,
+    const TensorCPU& tensor2,
+    float eps = 1e-6);
 
 // Asserts that two float values are close within epsilon.
 CAFFE2_API void assertNear(float value1, float value2, float epsilon);
@@ -73,6 +76,22 @@ CAFFE2_API caffe2::OperatorDef* createOperator(
     const std::vector<std::string>& inputs,
     const std::vector<std::string>& outputs,
     caffe2::NetDef* net);
+
+// Fill a buffer with randomly generated numbers given range [min, max)
+// T can only be float, double or long double
+template <typename RealType = float>
+void randomFill(
+    RealType* data,
+    size_t size,
+    const double min = 0.0,
+    const double max = 1.0) {
+  std::mt19937 gen(42);
+  std::uniform_real_distribution<RealType> dis(
+      static_cast<RealType>(min), static_cast<RealType>(max));
+  for (size_t i = 0; i < size; i++) {
+    data[i] = dis(gen);
+  }
+}
 
 // Fill data from a vector to a tensor.
 template <typename T>

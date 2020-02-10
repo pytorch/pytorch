@@ -1,15 +1,21 @@
 import torch
 
+# TODO: remove this global setting
+# Sparse tests use double as the default dtype
+torch.set_default_dtype(torch.double)
+
 import itertools
 import functools
 import random
+import sys
 import unittest
-from common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, do_test_empty_full, load_tests
-from common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
+    do_test_empty_full, load_tests
+from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
@@ -1854,6 +1860,28 @@ class TestSparse(TestCase):
             self.assertRaises(RuntimeError, lambda: x.new(i, v, size, device='cpu'))
             self.assertRaises(RuntimeError, lambda: x.new(torch.Size([2, 3, 4]), device='cpu'))
 
+    def test_legacy_constructor(self):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor(v.storage()))
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor(v))
+        self.assertEqual(torch.sparse_coo, torch.sparse.FloatTensor(torch.Size([2, 3])).layout)
+        self.assertRaises(TypeError, lambda: torch.sparse.FloatTensor([6]))
+
+    def test_legacy_new(self):
+        i = torch.tensor([[0, 1, 1], [2, 0, 2]])
+        v = torch.tensor([3., 4., 5.])
+        size = torch.Size([2, 3])
+        s = torch.sparse_coo_tensor(i, v, size)
+
+        self.assertEqual(torch.sparse_coo, s.new(device='cpu').layout)
+        self.assertRaises(TypeError, lambda: s.new(v.storage()))
+        self.assertRaises(TypeError, lambda: s.new(v))
+        self.assertEqual(torch.sparse_coo, s.new(torch.Size([2, 3])).layout)
+        self.assertRaises(TypeError, lambda: s.new([6]))
+
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
@@ -2054,6 +2082,60 @@ class TestSparse(TestCase):
         self.assertEqual(list(t.coalesce().indices().size()), [2, 1])
         self.assertEqual(list(t.coalesce().values().size()), [1, 3])
 
+    def test_pickle(self):
+        if sys.version_info[0] == 2:
+            import cPickle as pickle
+        else:
+            import pickle
+
+        shape_sparse_dim_nnz = [
+            ((), 0, 2),
+            ((0,), 0, 10),
+            ((2,), 0, 3),
+            ((100, 3), 1, 3),
+            ((100, 20, 3), 2, 0),
+            ((10, 0, 3), 0, 3),
+            ((10, 0, 3), 0, 0),
+        ]
+
+        for shape, sparse_dim, nnz in shape_sparse_dim_nnz:
+            indices_shape = torch.Size((sparse_dim, nnz))
+            values_shape = torch.Size((nnz,) + shape[sparse_dim:])
+            indices = torch.arange(indices_shape.numel(), dtype=self.index_tensor(0).dtype,
+                                   device=self.device).view(indices_shape)
+            for d in range(sparse_dim):
+                indices[d].clamp_(max=(shape[d] - 1))  # make it valid index
+            if self.is_uncoalesced and indices.numel() > 0:
+                indices[:, -1] = indices[:, 0]  # make it uncoalesced
+            values_numel = values_shape.numel()
+            values = torch.arange(values_numel, dtype=self.value_dtype,
+                                  device=self.device).view(values_shape).div_(values_numel / 2.)
+            sp_tensor = self.sparse_tensor(indices, values, shape)
+            serialized = pickle.dumps(sp_tensor)
+            sp_tensor_loaded = pickle.loads(serialized)
+            self.assertEqual(sp_tensor, sp_tensor_loaded)
+
+    def test_any(self):
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]))
+        t_any = torch.tensor(False)
+        self.assertEqual(torch.any(t), t_any)
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([True, False]))
+        t_any = torch.tensor(True)
+        self.assertEqual(torch.any(t), t_any)
+
+    def test_isnan(self):
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
+        t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, False]))
+        self.assertEqual(torch.isnan(t).int(), t_nan.int())
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, float("nan")]))
+        t_nan = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([False, True]))
+        self.assertEqual(torch.isnan(t).int(), t_nan.int())
+
+    def test_div_by_sparse_error(self):
+        self.assertRaisesRegex(RuntimeError, 'A Sparse Tensor can only be divided',
+                               lambda: torch.tensor(1., device=self.device).to_sparse()
+                               / torch.tensor(1., device=self.device).to_sparse())
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
@@ -2107,21 +2189,21 @@ class TestSparseOneOff(TestCase):
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                                  torch.randn(4, 4, 4).cuda(),
                                                  [3, 4, 4])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(3, 4, 4, 0)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
                                                  torch.randn(4, 4, 4, 0).cuda(),
                                                  [3, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
         x = torch.zeros(0, 4, 4, 0)
         sparse_y = torch.cuda.sparse.FloatTensor(torch.LongTensor(1, 0).cuda(),
                                                  torch.randn(0, 4, 4, 0).cuda(),
                                                  [0, 4, 4, 0])
-        with self.assertRaisesRegex(RuntimeError, "add: expected 'other' to be a CPU tensor\\, but got a CUDA tensor"):
+        with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
 

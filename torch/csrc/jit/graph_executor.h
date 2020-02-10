@@ -1,10 +1,13 @@
 #pragma once
 
+#include <atomic>
+#include <memory>
+
 #include <torch/csrc/jit/argument_spec.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/variable_tensor_list.h>
-#include <memory>
+#include <torch/csrc/jit/update_graph_executor_opt.h>
 
 namespace torch {
 namespace jit {
@@ -13,8 +16,10 @@ struct Code;
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-      : code(graph), graph(std::move(graph)) {}
+  ExecutionPlan(
+      std::shared_ptr<Graph> graph,
+      size_t remaining_bailout_depth = 0)
+      : code(graph, remaining_bailout_depth), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -39,12 +44,23 @@ struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph);
   void run(Stack& inputs);
-  ExecutionPlan getPlanFor(Stack& inputs);
+  // `remaining_bailout_depth` stands for the maximum number of profiled and
+  // specialized recompilations allowed for the current `GraphExecutor`. if
+  // remaining_bailout_depth is equal to 0, `GraphExecutor` won't perform any
+  // profiling and specialization. This is also equivalent to the
+  // SIMPLE_EXECUTOR mode. if remaining_bailout_depth is greater than 0,
+  // `GraphExecutor` will profile and specialize its input graph based on the
+  // profiled information whenever a bailout check is failed/triggered, a new
+  // `GraphExecutor` will be created. This new `GraphExecutor`'s
+  // remaining_bailout_depth will be reduced by 1.
+  ExecutionPlan getPlanFor(Stack& inputs, size_t remaining_bailout_depth);
   explicit operator bool() const {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
+
+  static size_t getDefaultNumBailOuts();
 
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
@@ -57,10 +73,10 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
-TORCH_API bool& getProfilingMode();
-
-TORCH_API void setGraphExecutorOptimize(bool o);
-TORCH_API bool getGraphExecutorOptimize();
+TORCH_API std::atomic<bool> &getProfilingMode();
+TORCH_API std::atomic<bool>& getExecutorMode();
+TORCH_API std::atomic<size_t>& getNumProfiledRuns();
+TORCH_API std::atomic<size_t>& getBailoutDepth();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

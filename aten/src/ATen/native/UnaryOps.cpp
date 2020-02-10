@@ -17,7 +17,6 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -34,7 +33,7 @@ namespace native {
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
 // macro that implements everything, because the former allows some simple preprocessing that are unique to some
-// operators (more is forseeable) and is more flexible and elegant than the latter.
+// operators (more is foreseeable) and is more flexible and elegant than the latter.
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self,
@@ -57,6 +56,30 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
   return out_impl(self, self);
 }
 
+Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
+Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+
+Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
+Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+
+Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
+Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
+Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+
+Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
+Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
+
+Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
+Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
+
+Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, imag_stub); }
+Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
+
+Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
+Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
@@ -65,9 +88,33 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
-Tensor& erfinv_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, erfinv_stub); }
-Tensor erfinv(const Tensor& self) { return unary_op_impl(self, at::erfinv_out); }
-Tensor& erfinv_(Tensor& self) { return unary_op_impl_(self, at::erfinv_out); }
+Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
+Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
+Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
+
+Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
+Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
+Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
+
+Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
+Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
+Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
+
+Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
+Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
+Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
+
+Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log10_stub); }
+Tensor log10(const Tensor& self) { return unary_op_impl(self, at::log10_out); }
+Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
+
+Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
+Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
+
+Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log2_stub); }
+Tensor log2(const Tensor& self) { return unary_op_impl(self, at::log2_out); }
+Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
 
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
 Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
@@ -77,9 +124,40 @@ Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
+Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
+Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciprocal_out); }
+Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
+
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
 Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
+
+Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
+Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
+
+Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
+Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
+
+Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
+Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
+
+Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
+Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
+
+Tensor square(const Tensor& self) { return at::pow(self, 2); }
+Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
+
+Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
+Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
+Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
+
+Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
+Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
+Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
@@ -151,7 +229,10 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    checkBackend("clamp", result, Backend::CPU);
+    TORCH_CHECK(self.device().type() == DeviceType::CPU,
+                "clamp only supports CPU device type, got: ", self.device().type());
+    TORCH_CHECK(self.layout() == Layout::Strided,
+                "clamp only supports strided layout, got: ", self.layout());
     auto iter = TensorIterator::unary_op(result, self,
         /*check_mem_overlap=*/true);
     clamp_stub(iter.device_type(), iter, *min, *max);
@@ -170,7 +251,10 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  checkBackend("clamp_max", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_max only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_max_stub(iter.device_type(), iter, max);
@@ -182,33 +266,19 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  checkBackend("clamp_min", result, Backend::CPU);
+  TORCH_CHECK(self.device().type() == DeviceType::CPU,
+              "clamp_min only supports CPU device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
       /*check_mem_overlap=*/true);
   clamp_min_stub(iter.device_type(), iter, min);
   return result;
 }
 
-Tensor sign(const Tensor& self) {
-    Tensor result = at::empty({0}, self.options());
-    return at::sign_out(result, self);
-}
-
-Tensor& sign_(Tensor& self) {
-    return at::sign_out(self, self);
-}
-
-Tensor& sign_out(Tensor& result, const Tensor& self) {
-    checkBackend("sign", result, self.type().backend());
-    auto iter = TensorIterator::unary_op(result, self,
-      /*check_internal_overlap=*/true);
-    sign_stub(iter.device_type(), iter);
-    return result;
-}
-
 Tensor mvlgamma(const Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
@@ -219,19 +289,13 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   TORCH_CHECK(at::isFloatingType(self.scalar_type()),
-           "mvlgamma is not implemented for ", self.type());
+           "mvlgamma is not implemented for ", self.scalar_type());
   TORCH_CHECK((self > 0.5 * (p - 1.)).all().item<uint8_t>(),
            "Condition for computing multivariate log-gamma not met");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
-}
-
-inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor& src) {
-#ifdef BUILD_NAMEDTENSOR
-  at::namedinference::propagate_names(result, src);
-#endif
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
@@ -249,7 +313,8 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
     return at::op##_out(self, self);                                   \
   }                                                                    \
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkBackend(#op, result, Backend::device);                        \
+    checkDeviceType(#op, result, DeviceType::device);                  \
+    checkLayout(#op, result, Layout::Strided);                         \
     auto iter = TensorIterator::unary_op(result, self,                 \
       /*check_mem_overlap=*/true);                                     \
     op##_stub(iter.device_type(), iter);                               \
@@ -262,34 +327,25 @@ inline void propagate_names_if_namedtensor_enabled(Tensor& result, const Tensor&
 
 #define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
   IMPLEMENT_UNARY_OP_CORE(op)                                          \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC(abs)
-IMPLEMENT_UNARY_OP_VEC(acos)
-IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(expm1)
-IMPLEMENT_UNARY_OP_VEC(floor)
-IMPLEMENT_UNARY_OP_VEC(frac)
-IMPLEMENT_UNARY_OP_VEC(log)
-IMPLEMENT_UNARY_OP_VEC(log10)
-IMPLEMENT_UNARY_OP_VEC(log1p)
-IMPLEMENT_UNARY_OP_VEC(log2)
-IMPLEMENT_UNARY_OP_VEC(reciprocal)
-IMPLEMENT_UNARY_OP_VEC(sigmoid)
-IMPLEMENT_UNARY_OP_VEC(sin)
-IMPLEMENT_UNARY_OP_VEC(sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
-IMPLEMENT_UNARY_OP_VEC(trunc)
+IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
+DEFINE_DISPATCH(angle_stub);
+DEFINE_DISPATCH(real_stub);
+DEFINE_DISPATCH(imag_stub);
+DEFINE_DISPATCH(conj_stub);
 DEFINE_DISPATCH(acos_stub);
 DEFINE_DISPATCH(asin_stub);
 DEFINE_DISPATCH(atan_stub);
@@ -325,6 +381,8 @@ DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
 DEFINE_DISPATCH(tan_stub);
 DEFINE_DISPATCH(tanh_stub);
+DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
+DEFINE_DISPATCH(lgamma_stub);
 }
 } // namespace at

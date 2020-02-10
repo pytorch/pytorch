@@ -1,6 +1,7 @@
 #pragma once
 #include <typeinfo>
 #include <stdint.h>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -18,6 +19,7 @@ namespace jit {
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
+  _(OPN, "OI") /* invoke vararg operator X with N arguments */              \
   _(LOAD, "R") /* push a value from a register X */                         \
   _(MOVE, "R") /* push a value from register X, clearing the register */    \
   _(STOREN, "RI") /* store N values to registers [X, X+N) */                \
@@ -31,7 +33,8 @@ namespace jit {
   _(RET, "") /* exit execution */                                           \
   _(WAIT, "") /* wait for a future to be complete */                        \
   _(CALL, "F") /* call function X */                                        \
-  _(GUARD, "T") /* check guard against type_table, true if passes */        \
+  _(GUARD, "T") /* check a guard against type_table, true if passes */      \
+  _(FAIL_GUARD, "T") /* fail a guard, patch back to GUARD */                \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
   _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
@@ -52,5 +55,8 @@ struct Instruction {
   Instruction(OpCode op, int32_t X, uint16_t N)
       : op(op), padding(0), N(N), X(X) {}
 };
+
+bool isOpSupportedInMobile(OpCode op);
+
 }
 }

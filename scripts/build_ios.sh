@@ -19,9 +19,19 @@ CMAKE_ARGS=()
 
 if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
   CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+  # custom build with selected ops
+  if [ -n "${SELECTED_OP_LIST}" ]; then
+    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+  fi
+  # bitcode
+  if [ "${ENABLE_BITCODE:-}" == '1' ]; then
+    CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+    CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+  fi
 else
   # Build protobuf from third_party so we have a host protoc binary.
   echo "Building protoc"
@@ -30,6 +40,9 @@ else
   # Use locally built protoc because we'll build libprotobuf for the
   # target architecture and need an exact version match.
   CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+  # Bitcode is enabled by default for caffe2
+  CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+  CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
 fi
 
 # Use ios-cmake to build iOS project from CMake.
@@ -37,7 +50,9 @@ fi
 # CMAKE_CXX_COMPILER to /usr/bin/g++. In order to use ccache (if it is available) we
 # must override these variables via CMake arguments.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/cmake/iOS.cmake")
-CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+if [ -n "${CCACHE_WRAPPER_PATH:-}"]; then
+  CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+fi
 if [ -d "$CCACHE_WRAPPER_PATH" ]; then
   CMAKE_ARGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
   CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
@@ -83,8 +98,6 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
-CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
-CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=MinSizeRel \

@@ -19,22 +19,21 @@ import warnings
 import threading
 from torch._six import raise_from
 from subprocess import Popen, PIPE
-from multiprocessing.util import register_after_fork as _register_after_fork
 from ._utils import _get_device_index
+import torch._C
 
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
-_in_bad_fork = False  # this global is also used in torch.manual_seed
-_original_pid = False
+_is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _cudart = None
 
 
 def find_cuda_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
+    # The library selection will be done in these directories one by one
     # 1. [Package Root]\Lib
     #    That's where our libraries are in, which should be loaded first.
     # 2. [Python Root]\Library\bin
@@ -54,9 +53,7 @@ def find_cuda_windows_lib():
     if len(out) > 0:
         if out.find('\r\n') != -1:
             out = out.split('\r\n')[0]
-        cuda_lib_name = os.path.basename(out)
-        cuda_lib = os.path.splitext(cuda_lib_name)[0]
-        cuda_lib = str(cuda_lib)
+        cuda_lib = str(out)
         return ctypes.cdll.LoadLibrary(cuda_lib)
     else:
         return None
@@ -137,8 +134,13 @@ def _check_capability():
             warnings.warn(incorrect_binary_warn % (d, name, 10000, CUDA_VERSION))
 
 
+def is_initialized():
+    r"""Returns whether PyTorch's CUDA state has been initialized."""
+    return _initialized and not _is_in_bad_fork()
+
+
 def _lazy_call(callable):
-    if _initialized:
+    if is_initialized():
         callable()
     else:
         # Don't store the actual traceback to avoid memory cycle
@@ -165,8 +167,8 @@ def init():
 
 
 def _lazy_init():
-    global _initialized, _cudart, _original_pid, _queued_calls
-    if _initialized or hasattr(_tls, 'is_initializing'):
+    global _initialized, _cudart, _queued_calls
+    if is_initialized() or hasattr(_tls, 'is_initializing'):
         return
     with _initialization_lock:
         # We be double-checked locking, boys!  This is OK because
@@ -174,12 +176,12 @@ def _lazy_init():
         # is for when a thread blocked on some other thread which was
         # doing the initialization; when they get the lock, they will
         # find there is nothing left to do.
-        if _initialized:
+        if is_initialized():
             return
         # It is important to prevent other threads from entering _lazy_init
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
-        if _in_bad_fork:
+        if _is_in_bad_fork():
             from sys import version_info
             if version_info < (3, 4):
                 msg = ("To use CUDA with multiprocessing, you must use Python "
@@ -194,7 +196,6 @@ def _lazy_init():
         _cudart = _load_cudart()
         _cudart.cudaGetErrorName.restype = ctypes.c_char_p
         _cudart.cudaGetErrorString.restype = ctypes.c_char_p
-        _original_pid = os.getpid()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
@@ -210,17 +211,6 @@ def _lazy_init():
         finally:
             delattr(_tls, 'is_initializing')
         _initialized = True
-
-
-def _after_fork(arg):
-    global _initialized, _in_bad_fork
-    if _initialized and _original_pid != os.getpid():
-        _initialized = False
-        _in_bad_fork = True
-        _CudaBase.__new__ = _lazy_new
-        torch._C._cuda_set_run_yet_variable_to_false()
-
-_register_after_fork(_after_fork, _after_fork)
 
 
 def cudart():
@@ -330,8 +320,7 @@ def get_device_capability(device=None):
 
 
 def get_device_properties(device):
-    if not _initialized:
-        init()  # will define _get_device_properties and _CudaDeviceProperties
+    _lazy_init()  # will define _get_device_properties and _CudaDeviceProperties
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
@@ -447,152 +436,7 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-def empty_cache():
-    r"""Releases all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other GPU application and visible in
-    `nvidia-smi`.
-
-    .. note::
-        :func:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
-        memory available for PyTorch. See :ref:`cuda-memory-management` for
-        more details about GPU memory management.
-    """
-    if _initialized:
-        torch._C._cuda_emptyCache()
-
-
-def memory_allocated(device=None):
-    r"""Returns the current GPU memory occupied by tensors in bytes for a given
-    device.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        This is likely less than the amount shown in `nvidia-smi` since some
-        unused memory can be held by the caching allocator and some context
-        needs to be created on GPU. See :ref:`cuda-memory-management` for more
-        details about GPU memory management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_memoryAllocated(device)
-
-
-def max_memory_allocated(device=None):
-    r"""Returns the maximum GPU memory occupied by tensors in bytes for a given
-    device.
-
-    By default, this returns the peak allocated memory since the beginning of
-    this program. :func:`~torch.cuda.reset_max_memory_allocated` can be used to
-    reset the starting point in tracking this metric. For example, these two
-    functions can measure the peak allocated memory usage of each iteration in a
-    training loop.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_maxMemoryAllocated(device)
-
-
-def reset_max_memory_allocated(device=None):
-    r"""Resets the starting point in tracking maximum GPU memory occupied by
-    tensors for a given device.
-
-    See :func:`~torch.cuda.max_memory_allocated` for details.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_resetMaxMemoryAllocated(device)
-
-
-def memory_cached(device=None):
-    r"""Returns the current GPU memory managed by the caching allocator in bytes
-    for a given device.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_memoryCached(device)
-
-
-def max_memory_cached(device=None):
-    r"""Returns the maximum GPU memory managed by the caching allocator in bytes
-    for a given device.
-
-    By default, this returns the peak cached memory since the beginning of this
-    program. :func:`~torch.cuda.reset_max_memory_cached` can be used to reset
-    the starting point in tracking this metric. For example, these two functions
-    can measure the peak cached memory amount of each iteration in a training
-    loop.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_maxMemoryCached(device)
-
-
-def reset_max_memory_cached(device=None):
-    r"""Resets the starting point in tracking maximum GPU memory managed by the
-    caching allocator for a given device.
-
-    See :func:`~torch.cuda.max_memory_cached` for details.
-
-    Arguments:
-        device (torch.device or int, optional): selected device. Returns
-            statistic for the current device, given by :func:`~torch.cuda.current_device`,
-            if :attr:`device` is ``None`` (default).
-
-    .. note::
-        See :ref:`cuda-memory-management` for more details about GPU memory
-        management.
-    """
-    device = _get_device_index(device, optional=True)
-    return torch._C._cuda_resetMaxMemoryCached(device)
-
-
-def _host_allocator():
-    _lazy_init()
-    return torch._C._cuda_cudaHostAllocator()
-
-
-@contextlib.contextmanager
-def _free_mutex():
-    torch._C._cuda_lock_mutex()
-    try:
-        yield
-    finally:
-        torch._C._cuda_unlock_mutex()
+from .memory import *
 
 
 from .random import *
@@ -629,8 +473,8 @@ if not hasattr(torch._C, 'CudaDoubleStorageBase'):
 @staticmethod
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
-    # We need this method only for lazy init, so we can remove it
-    del _CudaBase.__new__
+    # We may need to call lazy init again if we are a forked child
+    # del _CudaBase.__new__
     return super(_CudaBase, cls).__new__(cls, *args, **kwargs)
 
 
@@ -695,7 +539,7 @@ torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(BoolStorage)
 torch._storage_classes.add(BFloat16Storage)
 
-from . import sparse  # noqa: F401
-from . import profiler  # noqa: F401
-from . import nvtx  # noqa: F401
-from .streams import Stream, Event  # noqa: F401
+from . import sparse
+from . import profiler
+from . import nvtx
+from .streams import Stream, Event

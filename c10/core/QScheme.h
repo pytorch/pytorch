@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/core/TensorTypeId.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 
@@ -30,13 +29,13 @@ constexpr int COMPILE_TIME_NUM_QSCHEMES =
 inline std::string toString(QScheme qscheme) {
   switch(qscheme) {
     case kPerTensorAffine:
-      return "PerTensorAffine";
+      return "per_tensor_affine";
     case kPerChannelAffine:
-      return "PerChannelAffine";
+      return "per_channel_affine";
     case kPerTensorSymmetric:
-      return "PerTensorSymmetric";
+      return "per_tensor_symmetric";
     case kPerChannelSymmetric:
-      return "PerChannelSymmetric";
+      return "per_channel_symmetric";
     default:
       TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
   }

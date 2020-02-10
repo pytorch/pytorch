@@ -1,6 +1,7 @@
 #pragma once
-#include <cmath>
 #include <array>
+#include <cinttypes>
+#include <cmath>
 #include <string>
 
 #include <pytorch_qnnpack.h>

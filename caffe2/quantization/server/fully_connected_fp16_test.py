@@ -15,7 +15,7 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 def mse(x, xh):
     d = (x - xh).reshape(-1)
-    return np.sqrt(np.matmul(d, d.transpose())) / len(d)
+    return 0 if len(d) == 0 else np.sqrt(np.matmul(d, d.transpose())) / len(d)
 
 
 class FullyConnectedFP16Test(hu.HypothesisTestCase):
@@ -23,9 +23,12 @@ class FullyConnectedFP16Test(hu.HypothesisTestCase):
         input_channels=st.integers(128, 256),
         output_channels=st.integers(128, 256),
         batch_size=st.integers(128, 256),
+        empty_batch=st.booleans(),
         **hu.gcs_cpu_only
     )
-    def test_fully_connected(self, input_channels, output_channels, batch_size, gc, dc):
+    def test_fully_connected(self, input_channels, output_channels, batch_size, empty_batch, gc, dc):
+        if empty_batch:
+            batch_size = 0
         W = np.random.randn(output_channels, input_channels).astype(np.float32)
         X = np.random.randn(batch_size, input_channels).astype(np.float32)
         b = np.random.randn(output_channels).astype(np.float32)

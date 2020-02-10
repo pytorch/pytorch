@@ -15,9 +15,9 @@ from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, Da
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
-                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests, TEST_WITH_TSAN)
+from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
+                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                                                  load_tests, TEST_WITH_TSAN)
 
 try:
     import psutil
@@ -44,12 +44,12 @@ except ImportError:
         warnings.warn(err_msg)
 
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA from common_cuda here, because if we do that,
-# the TEST_CUDNN line from common_cuda will be executed multiple times
+# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
+# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
@@ -283,11 +283,11 @@ class TestConcatDataset(TestCase):
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
     if HAS_FAULTHANDLER:
-        faulthandler.enable()
+        faulthandler.enable(sys.__stderr__)
         if not IS_WINDOWS:
             # windows does not have faulthandler.register
             # chain=False prevents the default behavior of killing the process
-            faulthandler.register(signal.SIGUSR1, chain=False)
+            faulthandler.register(signal.SIGUSR1, file=sys.__stderr__, chain=False)
 
 
 set_faulthander_if_available()
@@ -421,6 +421,9 @@ class WorkerSpecificIterableDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
         assert worker_info is not None
         return iter(range(self.sizes_for_all_workers[worker_info.id]))
+
+    def __len__(self):
+        return sum(self.sizes_for_all_workers)
 
 
 # Inspired by https://stackoverflow.com/a/26703365
@@ -961,8 +964,8 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(d, torch._six.int_classes)
             self.assertEqual(d, i)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
 
         # [no auto-batching] multiprocessing loading
         num_workers = 3
@@ -978,8 +981,26 @@ class TestDataLoader(TestCase):
             # non-batched should not convert ints into tensors
             self.assertIsInstance(a, torch._six.int_classes)
             self.assertEqual(a, b)
-        with self.assertRaisesRegex(TypeError, "Cannot determine the DataLoader length of a IterableDataset"):
-            len(dataloader)  # DataLoader with iterable-style dataset should error in __len__
+        # DataLoader should match len of the iterable-style dataset (if implemented)
+        self.assertEqual(len(dataloader), len(dataset))
+        # When loading more than len(dataset) data, after accessing len(dataloader),
+        # we should get a warning. See NOTE [ IterableDataset and __len__ ].
+        dataset = CountingIterableDataset(20)
+        dataloader = DataLoader(dataset, num_workers=num_workers,
+                                worker_init_fn=set_faulthander_if_available)
+        it = iter(dataloader)
+        for _ in range(40):
+            self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
+        self.assertEqual(len(dataloader), len(dataset))
+        self.assertEqual(len(dataloader), 20)
+        it = iter(dataloader)
+        for _ in range(20):
+            self.assertNotWarn(lambda: next(it), "Should not warn before exceeding length")
+        for _ in range(3):
+            self.assertWarnsRegex(
+                lambda: next(it),
+                r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
+                "Should always warn after exceeding length")
 
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
@@ -1806,6 +1827,31 @@ class TestIndividualWorkerQueue(TestCase):
         for batch_size in (8, 16, 32, 64):
             for num_workers in range(1, 6):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+
+
+class SetAffinityDataset(torch.utils.data.IterableDataset):
+
+    def __iter__(self):
+        torch.randperm(1)
+        after = os.sched_getaffinity(0)
+        return iter(after)
+
+
+def worker_set_affinity(_):
+    os.sched_setaffinity(0, [2])
+
+
+@unittest.skipIf(
+    not hasattr(os, 'sched_setaffinity'),
+    "os.sched_setaffinity is not available")
+class TestSetAffinity(TestCase):
+    def test_set_affinity_in_worker_init(self):
+        dataset = SetAffinityDataset()
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset, num_workers=2, worker_init_fn=worker_set_affinity)
+        for sample in dataloader:
+            self.assertEqual(sample, [2])
 
 
 if __name__ == '__main__':

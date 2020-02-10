@@ -29,7 +29,7 @@ class IRParser {
         type_parser(L, /*parse_complete_tensor_types*/ true) {}
 
   std::string parseVar();
-  VarWithType parseVarWithType();
+  VarWithType parseVarWithType(bool allow_optional = false);
   ParsedLiteral parseScalarLiteral(Node* n);
 
   void parse();
@@ -54,6 +54,8 @@ class IRParser {
       int sep,
       int end,
       const std::function<void()>& callback);
+
+  Value* findValueInVMap(const std::string& name);
 
   torch::jit::script::Lexer L;
   torch::jit::Graph* g = nullptr;
@@ -93,10 +95,14 @@ void parseIR(const std::string& str, torch::jit::Graph* graph) {
   parseIR(str, graph, vmap);
 }
 
-VarWithType IRParser::parseVarWithType() {
+VarWithType IRParser::parseVarWithType(bool allow_optional) {
   VarWithType r;
   r.name = parseVar();
-  r.type = TensorType::get();
+  if (allow_optional) {
+    r.type = nullptr;
+  } else {
+    r.type = TensorType::get();
+  }
   if (L.nextIf(':')) {
     auto type_alias = type_parser.parseType();
     AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
@@ -125,7 +131,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
     return;
   }
   parseList(TK_NOTHING, ',', TK_NOTHING, [&] {
-    outs->push_back(parseVarWithType());
+    outs->push_back(parseVarWithType(true));
   });
   L.expect('=');
 }
@@ -152,10 +158,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       if (str.find('.') != std::string::npos ||
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
-        r.f = std::stod(str);
+        r.f = c10::stod(str);
       } else {
         r.k = AttributeKind::i;
-        r.i = std::stoll(str);
+        r.i = c10::stoll(str);
       }
       L.next();
       return r;
@@ -255,8 +261,7 @@ void IRParser::parseOperatorInputs(Node* n) {
   }
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    AT_ASSERT(vmap.count(var_name));
-    n->addInput(vmap[var_name]);
+    n->addInput(findValueInVMap(var_name));
   });
 }
 
@@ -282,8 +287,7 @@ void IRParser::parseBlockOutputs(Block* b) {
   L.expect(TK_ARROW);
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    AT_ASSERT(vmap.count(var_name));
-    b->registerOutput(vmap[var_name]);
+    b->registerOutput(findValueInVMap(var_name));
   });
   L.expect(TK_NEWLINE);
   L.expect(TK_DEDENT);
@@ -341,17 +345,41 @@ void IRParser::parseOperator(Block* b) {
   parseOperatorOutputs(&outs);
 
   // Parse the name and create the corresponding node in the graph.
+  auto source_range = L.cur().range;
   std::string name = parseOperatorName();
-  Node* n = g->create(Symbol::fromQualString(name), {}, outs.size());
+  Node* n = g->create(Symbol::fromQualString(name), {}, outs.size())
+                ->setSourceRange(source_range);
 
   // Parse attributes and inputs.
   parseOperatorInputs(n);
 
+  const FunctionSchema* schema = n->maybeSchema();
+
   // Register outputs.
   int idx = 0;
   for (const VarWithType& v : outs) {
-    vmap[v.name] = n->outputs()[idx++];
-    vmap[v.name]->setType(v.type);
+    vmap[v.name] = n->outputs()[idx];
+    if (schema && !schema->is_varret()) {
+      auto schema_return_type = schema->returns().at(idx).type();
+      if (!v.type) {
+        vmap[v.name]->setType(schema_return_type);
+      } else {
+        // Don't currently support checking against type variables
+        // TODO: support?
+        if (!schema_return_type->hasFreeVariables() &&
+            !v.type->isSubtypeOf(schema_return_type)) {
+          throw ErrorReport(source_range)
+              << "Annotated type " << v.type->python_str()
+              << " does not match schema type "
+              << schema_return_type->python_str() << " for operator "
+              << *schema;
+        }
+        vmap[v.name]->setType(v.type);
+      }
+    } else {
+      vmap[v.name]->setType(v.type ? v.type : TensorType::get());
+    }
+    idx++;
   }
 
   // Insert the new node into block B.
@@ -385,10 +413,7 @@ void IRParser::parseReturnOperator() {
   // Parse output names and types
   parseList('(', ',', ')', [&] {
     std::string var_name = parseVar();
-    // Outputs should already be in VMAP, otherwise we're trying to return
-    // undefined value.
-    AT_ASSERT(vmap.count(var_name));
-    g->registerOutput(vmap.at(var_name));
+    g->registerOutput(findValueInVMap(var_name));
   });
 
   // Consume ending tokens
@@ -439,6 +464,15 @@ void IRParser::parseList(
     L.expect(end);
   }
 }
+
+Value* IRParser::findValueInVMap(const std::string& name) {
+  if (!vmap.count(name)) {
+    throw ErrorReport(L.cur().range)
+        << "Cannot find a variable with name '" << name << "'";
+  }
+  return vmap.at(name);
+}
+
 } // namespace script
 } // namespace jit
 } // namespace torch

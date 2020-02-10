@@ -55,7 +55,7 @@ void inlineForkedClosure(Node* fork_closure) {
   fork_closure->output()->replaceAllUsesWith(fork_node->output());
   fork_closure->destroy();
   fork_node->g_(attr::Subgraph, fork_graph);
-  runCleanupPasses(fork_graph, /*convert_to_ssa */ false);
+  runCleanupPasses(fork_graph);
 }
 
 void inlineForkedClosures(Block* block) {

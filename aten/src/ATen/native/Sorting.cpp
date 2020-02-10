@@ -6,7 +6,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -93,7 +93,7 @@ void quick_select_template(
 
 } // namespace
 
-std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
+static std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
@@ -119,7 +119,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
-  auto tmp_values = self.clone();
+  auto tmp_values = self.clone(at::MemoryFormat::Contiguous);
   auto tmp_indices = at::empty(self.sizes(), self.options().dtype(kLong));
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "kthvalue_cpu", [&] {
     dim_apply(
@@ -154,6 +154,22 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
     indices.squeeze_(dim);
   }
   return std::forward_as_tuple(values, indices);
+}
+
+std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    int64_t dim,
+    bool keepdim) {
+  auto result = [&]() {
+    NoNamesGuard guard;
+    return kthvalue_out_impl_cpu(values, indices, self, k, dim, keepdim);
+  }();
+  namedinference::propagate_names_for_reduction(values, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(indices, self, dim, keepdim);
+  return result;
 }
 
 std::tuple<Tensor, Tensor> kthvalue(
@@ -226,14 +242,12 @@ std::tuple<Tensor, Tensor> median(
   return std::make_tuple(values, indices);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 std::tuple<Tensor&, Tensor&> median_out(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
     Dimname dim,
     bool keepdim) {
-  TORCH_CHECK(false, "NYI: median with names");
   return at::median_out(values, indices, self, dimname_to_position(self, dim), keepdim);
 }
 
@@ -241,18 +255,35 @@ std::tuple<Tensor, Tensor> median(
     const Tensor& self,
     Dimname dim,
     bool keepdim) {
-  TORCH_CHECK(false, "NYI: median with names");
   return at::median(self, dimname_to_position(self, dim), keepdim);
 }
-#endif
 
-// this does not reduce to median with dim beause we don't want to copy twice
+std::tuple<Tensor&, Tensor&> kthvalue_out(
+    Tensor& values,
+    Tensor& indices,
+    const Tensor& self,
+    int64_t k,
+    Dimname dim,
+    bool keepdim) {
+  return at::kthvalue_out(values, indices, self, k, dimname_to_position(self, dim), keepdim);
+}
+
+std::tuple<Tensor, Tensor> kthvalue(
+    const Tensor& self,
+    int64_t k,
+    Dimname dim,
+    bool keepdim) {
+  return at::kthvalue(self, k, dimname_to_position(self, dim), keepdim);
+}
+
+// this does not reduce to median with dim because we don't want to copy twice
 Tensor median_cpu(const Tensor& self) {
+  NoNamesGuard guard;
   TORCH_CHECK(self.numel() > 0, "median cannot be called with empty tensor");
   if (self.dim() == 0 && self.numel() == 1) {
-    return self.clone();
+    return self.clone(at::MemoryFormat::Contiguous);
   }
-  auto tmp_values = self.clone().view(-1);
+  auto tmp_values = self.clone(at::MemoryFormat::Contiguous).view(-1);
   auto result = at::empty({1}, self.options());
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "median", [&] {
     // note, quick_select is 0 based while kthvalue is not

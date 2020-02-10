@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
@@ -117,6 +118,24 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   // TODO: remove once the bug is fixed.
   static type t;
 };
+
+// These are used to map C++ types to ScalarTypes.
+
+template <typename>
+struct CPPTypeToScalarType {
+  constexpr static c10::ScalarType value = c10::ScalarType::Undefined;
+};
+
+#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
+  template <>                                                                  \
+  struct CPPTypeToScalarType<cpp_type> {                                       \
+    constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;     \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
+
+#undef SPECIALIZE_CPPTypeToScalarType
+
 }
 
 #define AT_FORALL_SCALAR_TYPES(_) \
@@ -165,6 +184,10 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   _(c10::qint8, QInt8)           \
   _(c10::quint8, QUInt8)         \
   _(c10::qint32, QInt32)
+
+#define AT_FORALL_COMPLEX_TYPES(_)             \
+  _(std::complex<float>, ComplexFloat)         \
+  _(std::complex<double>, ComplexDouble)
 
 static inline caffe2::TypeMeta scalarTypeToTypeMeta(ScalarType scalar_type) {
 #define DEFINE_CASE(ctype, name) \
@@ -308,20 +331,32 @@ static inline ScalarType toUnderlying(ScalarType t) {
 }
 
 static inline bool isSignedType(ScalarType t) {
+  TORCH_CHECK(!isQIntType(t), "isSignedType not supported for quantized types");
   #define CASE_SIGNED(ctype, name) \
     case ScalarType::name:                       \
       return std::numeric_limits<ctype>::is_signed;
 
-    switch (t) {
-      AT_FORALL_SCALAR_TYPES_AND(Half, CASE_SIGNED)
-      default:
-        AT_ERROR("Unknown ScalarType");
-    }
+  switch (t) {
+    AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
   #undef CASE_SIGNED
 }
 
 static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
+}
+
+static inline ScalarType toValueType(ScalarType t) {
+  switch (t) {
+    case ScalarType::ComplexFloat:
+      return ScalarType::Float;
+    case ScalarType::ComplexDouble:
+      return ScalarType::Double;
+    default:
+      return t;
+  }
 }
 
 // see tensor_attributes.rst for detailed explanation and examples
@@ -357,6 +392,7 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto f2 = ScalarType::Half;
   constexpr auto f4 = ScalarType::Float;
   constexpr auto f8 = ScalarType::Double;
+  constexpr auto c2 = ScalarType::ComplexHalf;
   constexpr auto c4 = ScalarType::ComplexFloat;
   constexpr auto c8 = ScalarType::ComplexDouble;
   constexpr auto b1 = ScalarType::Bool;
@@ -364,10 +400,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
   constexpr auto ud = ScalarType::Undefined;
   if (a == ud || b == ud) {
     return ScalarType::Undefined;
-  }
-  if (isComplexType(a) || isComplexType(b)) {
-    AT_ERROR(
-        "promoteTypes with complex numbers is not handled yet; figure out what the correct rules should be for ", toString(a), " and ", toString(b));
   }
 
   // For QInt types, we only allow exact match
@@ -377,7 +409,10 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 
   if (isQIntType(a) || isQIntType(b)) {
     AT_ERROR(
-        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be");
+        "promoteTypes with quantized numbers is not handled yet; figure out what the correct rules should be, offending types: ",
+        toString(a),
+        " ",
+        toString(b));
   }
 
   // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
@@ -394,13 +429,13 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, ud},
         /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, ud},
         /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, ud},
-        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, c4, c8, ud, ud, ud, ud, ud},
+        /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
         /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, ud, ud, ud, ud, ud},
         /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, ud, ud},
         /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, ud, ud, b1, ud, ud, ud, ud},
         /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-        /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
+        /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
         /* bf */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];

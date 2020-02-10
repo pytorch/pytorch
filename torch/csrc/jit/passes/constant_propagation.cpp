@@ -5,13 +5,34 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/node_hashing.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
+
+c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
+  Stack stack;
+  for (const Value* input : node->inputs()) {
+    if (auto ival = toIValue(input)) {
+      stack.push_back(ival);
+    } else {
+      return c10::nullopt;
+    }
+  }
+  try {
+    auto op = getOperation(node);
+    op(stack);
+    TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
+  } catch (...) {
+    return c10::nullopt;
+  }
+  return stack;
+}
 
 namespace {
 
@@ -27,28 +48,30 @@ std::unordered_set<Symbol> skip_list = {
     // where the constant tensor would be large but cheap to create.
 };
 
-std::unordered_set<Symbol> tuple_ops = {
-    prim::TupleSlice,
-    prim::TupleIndex,
-    prim::TupleUnpack,
-    prim::TupleConstruct,
-};
-
 struct ConstantPropagator {
-  ConstantPropagator(std::shared_ptr<Graph> graph)
-      : graph_(std::move(graph)), aliasDb(graph_){};
+  // Runs constant propagation with an aliasing db and checks if inputs or
+  // outputs might be mutated in the graph
+  static ConstantPropagator WithAliasDb(std::shared_ptr<Graph> graph) {
+    return ConstantPropagator(graph, true);
+  }
+
+  // Runs constant propagation only on ops that clearly do not have aliased
+  // inputs or outputs without computing aliasing information
+  static ConstantPropagator NoAliasDb(std::shared_ptr<Graph> graph) {
+    return ConstantPropagator(graph, false);
+  }
 
   void run() {
     ConstantPropagation(graph_->block());
   }
 
  private:
-  void pushIValue(Value* v, Stack& stack) {
-    if (tuples.count(v)) {
-      const auto& ival = tuples[v];
-      stack.push_back(ival);
+  ConstantPropagator(std::shared_ptr<Graph> graph, bool aliasing_types)
+      : graph_(std::move(graph)) {
+    if (aliasing_types) {
+      aliasDb_ = torch::make_unique<AliasDb>(graph_);
     } else {
-      stack.push_back(*toIValue(v));
+      aliasDb_ = nullptr;
     }
   }
 
@@ -56,7 +79,7 @@ struct ConstantPropagator {
     auto op = getOperation(n);
     Stack stack;
     for (auto input : n->inputs()) {
-      pushIValue(input, stack);
+      stack.push_back(*toIValue(input));
     }
     op(stack);
     auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
@@ -78,34 +101,6 @@ struct ConstantPropagator {
     return var_outputs;
   }
 
-  // Tuples are not representable as constants, however
-  // we can try to insert each tuple element and then create a TupleConstruct
-  // from the elements
-  Value* tryInsertTuple(const IValue& tuple, Value* tuple_to_replace) {
-    auto type = tuple_to_replace->type();
-    TupleTypePtr tup_type;
-    if (auto opt = type->cast<OptionalType>()) {
-      tup_type = opt->getElementType()->expect<TupleType>();
-    } else {
-      tup_type = type->expect<TupleType>();
-    }
-    auto type_elements = tup_type->elements();
-    const auto& tuple_elements = tuple.toTuple()->elements();
-    std::vector<Value*> inputs;
-    for (size_t i = 0; i < type_elements.size(); ++i) {
-      auto inp = tryInsertConstant(*graph_, tuple_elements[i]);
-      if (inp) {
-        inputs.push_back(*inp);
-      } else {
-        return nullptr;
-      }
-    }
-    auto new_tuple = graph_->insertNode(graph_->createTuple(inputs));
-    tuple_to_replace->replaceAllUsesWith(new_tuple->output());
-    new_tuple->output()->copyMetadata(tuple_to_replace);
-    return new_tuple->output();
-  }
-
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
     try {
@@ -120,18 +115,15 @@ struct ConstantPropagator {
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto new_output = tryInsertConstant(*graph, outputs[i]);
       if (new_output) {
+        GRAPH_UPDATE(
+            "Folding %",
+            n->outputs()[i]->debugName(),
+            " with ",
+            getHeader((*new_output)->node()));
         if (outputs[i].isNone()) {
           (*new_output)->setType(n->outputs()[i]->type());
         }
         n->outputs()[i]->replaceAllUsesWith(*new_output);
-      } else if (outputs[i].isTuple()) {
-        // we save the new Tuple ivalue in case it is used in an op that
-        // forwards tuples later in the graph, such as a Tuple index
-        auto tuple_val = n->outputs()[i];
-        if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
-          tuple_val = new_tup;
-        }
-        tuples[tuple_val] = std::move(outputs[i]);
       }
       // If we cannot insert the IValue as a constant, give up replacing the
       // node and let DCE remove it
@@ -155,6 +147,15 @@ struct ConstantPropagator {
     bool cond_val = constant_as<bool>(start_cond).value_or(true);
 
     bool loop_might_run = cond_val && iter_len > 0;
+    if (!loop_might_run) {
+      GRAPH_UPDATE(
+          "Removing unexecuted loop: ",
+          *node,
+          "\ntripcount: ",
+          trip_count,
+          " and start_cond: ",
+          getHeader(start_cond->node()));
+    }
     return !loop_might_run;
   }
 
@@ -178,6 +179,11 @@ struct ConstantPropagator {
   void inlineIf(Node* n) {
     auto input_bool = constant_as<bool>(n->input());
     AT_ASSERT(input_bool);
+    GRAPH_UPDATE(
+        "Folding if ",
+        getHeader(n->input()->node()),
+        " where condition = ",
+        *input_bool);
     size_t block_index = *input_bool ? 0 : 1;
     ConstantPropagation(n->blocks().at(block_index));
     inlineIfBody(n->blocks().at(block_index));
@@ -259,44 +265,55 @@ struct ConstantPropagator {
         })) {
       return true;
     }
-    if (tuple_ops.count(n->kind())) {
-      return (
-          std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-            return v->node()->kind() == prim::Constant || tuples.count(v);
-          }));
-    }
     return false;
   };
 
+  bool noMutableValues(at::ArrayRef<Value*> values) {
+    return std::none_of(values.begin(), values.end(), [](Value* v) {
+      return AliasDb::mutableType(v);
+    });
+  }
+
+  bool supportedNode(Node* n) {
+    bool no_mutation;
+    if (aliasDb_) {
+      no_mutation = !aliasDb_->hasWriters(n);
+    } else {
+      no_mutation =
+          noMutableValues(n->inputs()) && noMutableValues(n->outputs());
+    }
+    return no_mutation && !n->kind().is_onnx() &&
+        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
+        !n->hasSideEffects() && n->blocks().size() == 0;
+  }
+
+  void ConstantPropagation(at::ArrayRef<Block*> blocks) {
+    for (Block* block : blocks) {
+      ConstantPropagation(block);
+    }
+  }
+
   void ConstantPropagation(Node* n) {
     bool runnable_inputs = runnableInputs(n);
-    bool supported_node = !n->kind().is_onnx() &&
-        skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && !aliasDb.hasWriters(n);
-    auto run_blocks = [&]() {
-      for (Block* block : n->blocks()) {
-        ConstantPropagation(block);
-      }
-    };
     if (n->kind() == prim::If) {
       // inline node if we can, otherwise check for simplified outputs
       if (runnable_inputs) {
         inlineIf(n);
       } else {
-        run_blocks();
+        ConstantPropagation(n->blocks());
         removeExtraIfOutputs(n);
       }
     } else if (n->kind() == prim::Loop) {
       if (loopWillNotRun(n)) {
         removeLoopNode(n);
       } else {
-        run_blocks();
+        ConstantPropagation(n->blocks());
         removeExtraLoopOutputs(n);
       }
-    } else if (runnable_inputs && supported_node) {
+    } else if (runnable_inputs && supportedNode(n)) {
       propagateNode(n);
     } else {
-      run_blocks();
+      ConstantPropagation(n->blocks());
     }
   }
 
@@ -309,16 +326,23 @@ struct ConstantPropagator {
   }
 
   std::shared_ptr<Graph> graph_;
-  AliasDb aliasDb;
-  // these are tuples which we know the computed IValue for
-  std::unordered_map<Value*, IValue> tuples;
+  std::unique_ptr<AliasDb> aliasDb_;
 };
 } // anonymous namespace
 
 void ConstantPropagation(std::shared_ptr<Graph>& graph) {
-  ConstantPropagator cp(graph);
+  ConstantPropagator cp = ConstantPropagator::WithAliasDb(graph);
   cp.run();
   EliminateDeadCode(graph);
+  GRAPH_DUMP("After ConstantPropagation: ", graph);
 }
+
+void ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph) {
+  ConstantPropagator cp = ConstantPropagator::NoAliasDb(graph);
+  cp.run();
+  EliminateDeadCode(graph);
+  GRAPH_DUMP("After ConstantPropagation: ", graph);
+}
+
 } // namespace jit
 } // namespace torch

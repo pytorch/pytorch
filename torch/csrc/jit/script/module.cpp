@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -14,7 +13,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-static ModulePtr create_module_object(
+static ObjectPtr create_module_object(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle = false) {
@@ -33,35 +32,32 @@ static ModulePtr create_module_object(
 }
 
 Module::Module(c10::QualifiedName class_name)
-    : module_value_(create_module_object(
+    : Object(create_module_object(
           std::move(class_name),
           std::make_shared<CompilationUnit>())) {}
+
+Module::Module(
+    std::shared_ptr<CompilationUnit> cu,
+    const c10::ClassTypePtr& type)
+    : Object(c10::ivalue::Object::create(
+          c10::StrongTypePtr(std::move(cu), type),
+          type->numAttributes())) {}
 
 Module::Module(
     c10::QualifiedName class_name,
     std::shared_ptr<CompilationUnit> cu,
     bool shouldMangle)
-    : module_value_(create_module_object(
+    : Object(create_module_object(
           std::move(class_name),
           std::move(cu),
           shouldMangle)) {}
-
-ModulePtr Module::module_object() const {
-  if (!module_value_) {
-    // User has created a Model without assigning it to something already
-    // loaded. This is done in tests, and when using the .define method.
-    module_value_ =
-        create_module_object("Module", std::make_shared<CompilationUnit>());
-  }
-  return module_value_;
-}
 
 // first class mode runs models as first class objects,
 // and does not force inlining everywhere. This is experimental
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = true;
+thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -78,30 +74,12 @@ void Module::to(at::Device device, bool non_blocking) {
   to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
 }
 
-void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
-#ifndef C10_MOBILE
-  ExportModule(*this, out, extra_files);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
-}
-
-void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
-    const {
-#ifndef C10_MOBILE
-  ExportModule(*this, filename, extra_files);
-#else
-  AT_ERROR("Saving module is not supported on mobile.");
-#endif
-}
-
 void module_state_to(
-    const Slot& s,
+    autograd::Variable variable,
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
   // Need to access the `at::Tensor` as a `Variable` here.
-  autograd::Variable variable = s.value().toTensor();
   // Use the data's original device or dtype if not supplied here.
   auto new_data = variable.to(
       device.value_or(variable.device()),
@@ -114,107 +92,12 @@ void Module::to_impl(
     const c10::optional<at::Device>& device,
     const c10::optional<at::ScalarType>& dtype,
     bool non_blocking) {
-  // First call `to()` on every child module.
-  for (Module child : get_modules()) {
-    child.to_impl(device, dtype, non_blocking);
+  for (at::Tensor e : parameters()) {
+    module_state_to(e, device, dtype, non_blocking);
   }
-  // Then convert every of our parameters.
-  for (Slot parameter : get_parameters()) {
-    module_state_to(parameter, device, dtype, non_blocking);
+  for (at::Tensor e : buffers()) {
+    module_state_to(e, device, dtype, non_blocking);
   }
-  // Then convert every tensor attributes (buffers).
-  for (Slot attr : get_attributes()) {
-    if (attr.type()->isSubtypeOf(TensorType::get())) {
-      module_state_to(attr, device, dtype, non_blocking);
-    }
-  }
-}
-
-// remove the first module argument, replacing any access of its
-// parameters/attributes with extra_ivalue input Slots that hold what value to
-// pass into the graph. Used for ONNX export to remove first-class modules
-// so it can deal purely with parameters and inputs
-std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
-    const ModulePtr& self,
-    Graph& g_,
-    size_t self_offset = 0) {
-  std::shared_ptr<Graph> g = g_.copy();
-  // Inline to remove method/function calls
-  Inline(*g);
-  std::vector<Slot> extra_ivalues;
-  std::unordered_map<Slot, size_t> slot_to_offset;
-  struct ToScan {
-    ModulePtr mod;
-    Node* n;
-    size_t offset;
-  };
-  std::vector<ToScan> to_scan;
-  std::vector<Node*> to_clean; // nodes that should be dead at the end
-
-  auto getOrAddSlot = [&](const Slot& slot) -> Value* {
-    auto it = slot_to_offset.find(slot);
-    if (it != slot_to_offset.end()) {
-      size_t ivalues_start = g->inputs().size() - extra_ivalues.size();
-      return g->inputs().at(ivalues_start + it->second);
-    }
-    extra_ivalues.emplace_back(slot);
-    slot_to_offset[slot] = extra_ivalues.size() - 1;
-    return g->addInput()->setType(slot.type());
-  };
-
-  auto self_value = g->inputs().at(self_offset);
-
-  for (Use use : self_value->uses()) {
-    to_scan.emplace_back(ToScan{self, use.user, use.offset});
-  }
-  while (to_scan.size() > 0) {
-    auto e = to_scan.back();
-    to_scan.pop_back();
-
-    // when we lambda lift forks, first-class modules may be passed across
-    // forks. This code recursively lowers the module in the fork call.
-    if (e.n->kind() == prim::fork) {
-      auto subgraph = e.n->g(attr::Subgraph);
-      std::vector<Slot> new_slots;
-      std::tie(subgraph, new_slots) = lower_graph(e.mod, *subgraph, e.offset);
-      e.n->g_(attr::Subgraph, subgraph);
-      for (const Slot& slot : new_slots) {
-        e.n->addInput(getOrAddSlot(slot));
-      }
-      e.n->removeInput(e.offset);
-      continue;
-    }
-    if (e.n->kind() != prim::GetAttr) {
-      throw ErrorReport(e.n->sourceRange())
-          << "temporary: the only valid use of a module is looking up an "
-             "attribute but found "
-          << *e.n;
-    }
-    Slot slot(e.mod, e.mod->type()->getAttributeSlot(e.n->s(attr::name)));
-    if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
-      if (c->is_module()) {
-        auto obj = slot.value().toObject();
-        for (Use use : e.n->output()->uses()) {
-          to_scan.emplace_back(ToScan{obj, use.user, use.offset});
-        }
-        to_clean.emplace_back(e.n);
-        continue;
-      }
-    }
-    e.n->output()->replaceAllUsesWith(getOrAddSlot(slot));
-    e.n->destroy();
-  }
-
-  while (to_clean.size() > 0) {
-    Node* n = to_clean.back();
-    AT_ASSERT(!n->hasUses());
-    n->destroy();
-    to_clean.pop_back();
-  }
-  AT_ASSERT(!self_value->hasUses());
-  g->eraseInput(self_offset);
-
-  return std::make_pair(std::move(g), std::move(extra_ivalues));
 }
 
 Method::Method(ModulePtr owner, Function* function)
@@ -224,33 +107,13 @@ Module Method::owner() const {
   return Module(owner_);
 }
 void Method::run(Stack& stack) {
-  stack.insert(stack.begin(), owner().module_object());
+  stack.insert(stack.begin(), owner()._ivalue());
   function_->run(stack);
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
-  stack.insert(stack.begin(), owner().module_object());
+  stack.insert(stack.begin(), owner()._ivalue());
   return (*function_)(std::move(stack), kwargs);
-}
-
-static std::vector<at::Tensor> loadTensors(const std::vector<Slot>& slots) {
-  std::vector<at::Tensor> result;
-  result.reserve(slots.size());
-  for(const Slot& slot : slots) {
-    result.emplace_back(slot.value().toTensor());
-  }
-  return result;
-}
-
-std::pair<std::shared_ptr<Graph>, std::vector<at::Tensor>> Method::_lowered_graph() {
-  auto result = lower_graph(owner().module_object(), *graph());
-  return std::make_pair(result.first, loadTensors(result.second));
-}
-
-void Module::define(const std::string& src, const ResolverPtr& resolver) {
-  const auto self = SimpleSelf(type());
-  class_compilation_unit()->define(
-      name(), src, resolver ? resolver : script::nativeResolver(), &self);
 }
 
 void Module::clone_method(
@@ -278,7 +141,7 @@ void Module::clone_method(
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
   auto copied =
-      class_compilation_unit()->create_function(this_method_name, graph);
+      _ivalue()->compilation_unit()->create_function(this_method_name, graph);
   type()->addMethod(copied);
   copied->setSchema(std::move(schema));
 }
@@ -289,10 +152,10 @@ void Module::clone_method(const Module& orig, const std::string& name) {
   while (!to_scan.empty()) {
     auto entry = to_scan.back();
     to_scan.pop_back();
-    type_remap[entry.first.module_object()->type()] =
-        entry.second.module_object()->type();
-    for (Slot s : entry.first.get_module_slots()) {
-      to_scan.emplace_back(s.to_module(), entry.second.get_module(s.name()));
+    type_remap[entry.first._ivalue()->type()] = entry.second._ivalue()->type();
+    for (const NameModule& s : entry.first.named_children()) {
+      to_scan.emplace_back(
+          s.value, Module(entry.second.attr(s.name).toObject()));
     }
   }
   return clone_method(orig, orig.get_method(name).function(), type_remap);
@@ -305,50 +168,91 @@ Module Module::clone() const {
 
 Module Module::clone_impl(
     std::unordered_map<TypePtr, TypePtr>& type_remap) const {
-  // Create a new module_object in the same compilation unit.
-  // The name is the same as for the original module, but it'll be mangled.
-  // The class type is also created from scratch.
-  Module r(name(), class_compilation_unit(), true);
-  type_remap[type()] = r.type();
+  // Create a new _ivalue in the same compilation unit.
+  // Since now we have shared ClassType, we need to preserve the shared
+  // ClassType during cloning, so we first need to check if the type
+  // is already cloned, if so, we'll create a new module with the cloned
+  // ClassType, if not, we'll create a new module and a new ClassType.
+  bool type_already_cloned = type_remap.find(type()) != type_remap.end();
+  Module r;
+  if (type_already_cloned) {
+    // if we cloned the class type before, we'll reuse it
+    Module new_module(_ivalue()->compilation_unit(), type_remap[type()]->cast<ClassType>());
+    r = new_module;
+  } else {
+    Module new_module(*type()->name(), _ivalue()->compilation_unit(), true);
+    r = new_module;
+    type_remap[type()] = r.type();
+  }
 
   // Copy slots. If a slot is a module - recursively clone it.
-  for (Slot s : get_slots()) {
-    if (s.is_module()) {
-      const Module& orig = s.to_module();
+  size_t N = type()->numAttributes();
+  for (size_t i = 0; i < N; ++i) {
+    IValue s = _ivalue()->getSlot(i);
+    if (type()->getAttribute(i)->is_module()) {
+      const Module& orig = Module(s.toObject());
       Module cloned = orig.clone_impl(type_remap);
       type_remap[orig.type()] = cloned.type();
-      r.set_or_add_slot(
-          s.name(),
-          type_remap.at(s.type()),
-          cloned.module_object(),
-          s.entity_type());
+      r.register_module(type()->getAttributeName(i), cloned);
     } else {
-      r.set_or_add_slot(s.name(), s.type(), s.value(), s.entity_type());
+      // this adds new slot and creates a new attribute for the underlying type if
+      // the type is not already cloned, otherwise it will only
+      // add a new slot and typecheck
+      r.register_attribute(
+          type()->getAttributeName(i),
+          type()->getAttribute(i),
+          s,
+          type()->is_parameter(i));
     }
   }
 
-  // Clone methods remapping the types to the cloned ones.
-  for (auto& fn : type()->methods()) {
-    r.clone_method(*this, *fn, type_remap);
+  // only clone the methods if the ClassType is not cloned before
+  if (!type_already_cloned) {
+    // clone constants
+    for (size_t i = 0; i < type()->numConstants(); ++i) {
+      r.type()->addConstant(type()->getConstantName(i), type()->getConstant(i));
+    }
+    // clone methods, remapping the types to the cloned ones.
+    for (auto& fn : type()->methods()) {
+      r.clone_method(*this, *fn, type_remap);
+    }
   }
   return r;
 }
 
-void Module::train(bool on) {
-  for (auto submod : get_modules()) {
-    submod.train(on);
+Module Module::clone_instance() const {
+  Module r(_ivalue()->compilation_unit(), type());
+
+  // Copy slots. If a slot is a module - recursively clone it.
+  size_t N = type()->numAttributes();
+  for (size_t i = 0; i < N; ++i) {
+    IValue s = _ivalue()->getSlot(i);
+    if (type()->getAttribute(i)->is_module()) {
+      const Module& orig = Module(s.toObject());
+      Module cloned = orig.clone_instance();
+      r._ivalue()->setAttr(type()->getAttributeName(i), cloned._ivalue());
+    } else {
+      r._ivalue()->setAttr(type()->getAttributeName(i), s);
+    }
   }
-  if (auto slot = find_attribute("training")) {
-    slot->setValue(on);
-  } else {
-    register_attribute("training", BoolType::get(), on);
+
+  return r;
+}
+
+void Module::train(bool on) {
+  for (Module m : modules()) {
+    if (auto slot = m._ivalue()->type()->findAttributeSlot("training")) {
+      m._ivalue()->setSlot(*slot, on);
+    } else {
+      TORCH_INTERNAL_ASSERT("'training' attribute not found");
+    }
   }
 }
 
 IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Look up the class
   const auto classType =
-      class_compilation_unit()->get_class(c10::QualifiedName(name));
+      _ivalue()->compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
     AT_ERROR(
         "Could not find class with name: '",
@@ -359,7 +263,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   // Create a bare object with correct number of slots
   const size_t numAttrs = classType->numAttributes();
   auto obj = c10::ivalue::Object::create(
-      c10::StrongTypePtr(class_compilation_unit(), classType), numAttrs);
+      c10::StrongTypePtr(_ivalue()->compilation_unit(), classType), numAttrs);
 
   // Invoke the `__init__()` of the class with the arguments provided.
   Stack stackWithSelf = {obj};
@@ -373,61 +277,70 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   return obj;
 }
 
-slot_list Module::get_parameters() const {
-  return slot_list(*this, EntityType::PARAMETER);
+buffer_list Module::buffers(bool recurse) const {
+  return buffer_list(*this, recurse, /*return_module=*/false);
+}
+named_buffer_list Module::named_buffers(bool recurse) const {
+  return named_buffer_list(*this, recurse, /*return_module=*/false);
 }
 
-slot_list Module::get_attributes() const {
-  return slot_list(*this, EntityType::ATTRIBUTE);
+module_list Module::children() const {
+  return module_list(*this, /*recurse=*/false, /*return_module=*/false);
+}
+named_module_list Module::named_children() const {
+  return named_module_list(*this, /*recurse=*/false, /*return_module=*/false);
+}
+module_list Module::modules() const {
+  return module_list(*this, /*recurse=*/true, /*return_module=*/true);
+}
+named_module_list Module::named_modules() const {
+  return named_module_list(*this, /*recurse=*/true, /*return_module=*/true);
 }
 
-slot_list Module::get_module_slots() const {
-  return slot_list(*this, EntityType::MODULE);
+parameter_list Module::parameters(bool recurse) const {
+  return parameter_list(*this, recurse, /*return_module=*/false);
+}
+named_parameter_list Module::named_parameters(bool recurse) const {
+  return named_parameter_list(*this, recurse, /*return_module=*/false);
 }
 
-slot_list Module::get_slots() const {
-  return slot_list(*this, c10::nullopt);
+attribute_list Module::attributes(bool recurse) const {
+  return attribute_list(*this, recurse, /*return_module=*/false);
 }
-
-Module Slot::to_module() const {
-  return Module(value().toObject());
-}
-
-module_list Module::get_modules() const {
-  return module_list(*this, EntityType::MODULE);
+named_attribute_list Module::named_attributes(bool recurse) const {
+  return named_attribute_list(*this, recurse, /*return_module=*/false);
 }
 
 void Module::apply(const std::function<void(Module&)>& fn) {
-  for (auto submod : get_modules()) {
-    submod.apply(fn);
+  for (Module s : modules()) {
+    fn(s);
   }
-  fn(*this);
 }
 
-std::string Module::_dump_to_string(
+std::string Module::dump_to_str(
     bool print_method_bodies,
     bool print_attr_values,
     bool print_param_values,
-    int level) const {
+    int level = 0) const {
   std::stringstream ss;
   std::stringstream parameters_ss;
   std::stringstream attributes_ss;
   std::stringstream methods_ss;
   std::stringstream submodules_ss;
 
-  for (Slot param : get_parameters()) {
-    parameters_ss << param.name() << " = ";
+  for (const NameTensor& p : named_parameters(/*recurse=*/false)) {
+    parameters_ss << p.name << " = ";
     if (print_param_values) {
-      parameters_ss << param.value().toTensor() << std::endl;
+      parameters_ss << p.value << std::endl;
     } else {
       parameters_ss << "..." << std::endl;
     }
   }
 
-  for (Slot attr : get_attributes()) {
-    attributes_ss << attr.name() << " = ";
-    if (!attr.value().isTensor() || print_attr_values) {
-      attributes_ss << attr.value() << std::endl;
+  for (const NameValue& p : named_attributes(/*recurse=*/false)) {
+    attributes_ss << p.name << " = ";
+    if (!p.value.isTensor() || print_attr_values) {
+      attributes_ss << p.value << std::endl;
     } else {
       attributes_ss << "..." << std::endl;
     }
@@ -443,7 +356,7 @@ std::string Module::_dump_to_string(
     methods_ss << "  }" << std::endl;
   }
 
-  ss << "module " << name().qualifiedName() << " {" << std::endl;
+  ss << "module " << type()->name()->qualifiedName() << " {" << std::endl;
   ss << "  parameters {" << std::endl;
   ss << torch::jit::jit_log_prefix("    ", parameters_ss.str());
   ss << "  }" << std::endl;
@@ -454,10 +367,10 @@ std::string Module::_dump_to_string(
   ss << torch::jit::jit_log_prefix("  ", methods_ss.str());
   ss << "  }" << std::endl;
   ss << "  submodules {" << std::endl;
-  for (const Module& submodule : get_modules()) {
+  for (const NameModule& s : named_children()) {
     // We do level + 2, because one level of indentation comes from 'submodules'
     // scope and the other one goes from a specific submodule we're printing.
-    ss << submodule._dump_to_string(
+    ss << s.value.dump_to_str(
         print_method_bodies, print_attr_values, print_param_values, level + 2);
   }
   ss << "  }" << std::endl;
@@ -471,14 +384,22 @@ void Module::dump(
     bool print_method_bodies = true,
     bool print_attr_values = true,
     bool print_param_values = true) const {
-  std::cout << _dump_to_string(
-                   print_method_bodies,
-                   print_attr_values,
-                   print_param_values,
-                   0)
+  std::cout << dump_to_str(
+                   print_method_bodies, print_attr_values, print_param_values)
             << std::endl;
 }
 
 } // namespace script
 } // namespace jit
 } // namespace torch
+
+namespace c10 {
+
+torch::jit::script::Module IValue::toModule() const {
+  return torch::jit::script::Module(toObject());
+}
+bool IValue::isModule() const {
+  return isObject() && toObjectRef().type()->is_module();
+}
+
+} // namespace c10

@@ -2,8 +2,8 @@
 
 #include <ATen/core/DimVector.h>
 #include <c10/core/TensorImpl.h>
-#include <ATen/core/context_base.h>
-#include <ATen/core/context_base.h>
+#include <caffe2/core/context_base.h>
+#include <caffe2/core/context_base.h>
 
 namespace caffe2 {
   using at::ToVectorint64_t;

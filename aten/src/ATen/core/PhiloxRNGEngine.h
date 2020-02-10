@@ -122,10 +122,10 @@ public:
     uint32_t nlo = static_cast<uint32_t>(n);
     uint32_t nhi = static_cast<uint32_t>(n >> 32);
     counter[0] += nlo;
-    // if overflow in x has occured, carry over to nhi
+    // if overflow in x has occurred, carry over to nhi
     if (counter[0] < nlo) {
       nhi++;
-      // if overflow in nhi has occured during carry over,
+      // if overflow in nhi has occurred during carry over,
       // propagate that overflow to y and exit to increment z
       // otherwise return
       counter[1] += nhi;
@@ -135,7 +135,7 @@ public:
         }
       }
     } else {
-      // if overflow in y has occured during addition,
+      // if overflow in y has occurred during addition,
       // exit to increment z
       // otherwise return
       counter[1] += nhi;
@@ -180,15 +180,15 @@ private:
     #endif
   }
 
-  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 key) {
+  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
     uint32_t hi0;
     uint32_t hi1;
     uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
     uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
     detail::UINT4 ret;
-    ret[0] = hi1 ^ ctr[1] ^ key[0];
+    ret[0] = hi1 ^ ctr[1] ^ in_key[0];
     ret[1] = lo1;
-    ret[2] = hi0 ^ ctr[3] ^ key[1];
+    ret[2] = hi0 ^ ctr[3] ^ in_key[1];
     ret[3] = lo0;
     return ret;
   }

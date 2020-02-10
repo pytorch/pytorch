@@ -5,7 +5,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
-#include <ATen/core/EnableNamedTensor.h>
+#include <c10/util/math_compat.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -14,14 +14,13 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorIterator.h>
 
 #include <type_traits>
 #include <functional>
 #include <assert.h>
 #include <cpuinfo.h>
 #include <float.h>
-
-#include <TH/THMath.h>
 
 namespace {
 /*
@@ -57,6 +56,7 @@ namespace {
 
 
 int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
+  TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
   at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
   if (lambda >= 10) {
     // transformed rejection method, (Hoermann, 1993)
@@ -112,12 +112,20 @@ int64_t sample_poisson(double lambda, at::CPUGenerator* generator) {
 namespace at {
 namespace native {
 
+DEFINE_DISPATCH(bernoulli_mkl_stub);
+DEFINE_DISPATCH(cauchy_stub);
+DEFINE_DISPATCH(exponential_stub);
+DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(geometric_stub);
+DEFINE_DISPATCH(log_normal_stub);
+DEFINE_DISPATCH(normal_stub);
+
 Tensor bernoulli(const Tensor& self, Generator* gen) {
-  return at::empty_like(self).bernoulli_(self, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
 }
 
 Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
-  return at::empty_like(self).bernoulli_(p, gen);
+  return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(p, gen);
 }
 
 Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
@@ -125,13 +133,12 @@ Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
   // use resize_ instead.
   // TODO: Fix resize_as_. See pytorch/pytorch#11665.
   result.resize_(self.sizes()).bernoulli_(self, gen);
-#ifdef BUILD_NAMEDTENSOR
   namedinference::propagate_names(result, self);
-#endif
   return result;
 }
 
 Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
+  NoNamesGuard guard;
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
@@ -159,8 +166,6 @@ Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
   return self;
 }
 
-DEFINE_DISPATCH(bernoulli_mkl_stub);
-
 Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   TORCH_CHECK(0 <= p && p <= 1, "bernoulli_ expects p to be in [0, 1], but got p=", p);
 #if AT_MKL_ENABLED()
@@ -182,6 +187,75 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
   return self;
 }
 
+Tensor& log_normal_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
+  auto iter = TensorIterator::nullary_op(self);
+  log_normal_stub(iter.device_type(), iter, mean, std, gen);
+  return self;
+}
+
+Tensor& cauchy_(Tensor& self, double median, double sigma, Generator* gen) {
+  auto iter = TensorIterator::nullary_op(self);
+  cauchy_stub(iter.device_type(), iter, median, sigma, gen);
+  return self;
+}
+
+Tensor& exponential_(Tensor& self, double lambda, Generator* gen) {
+  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  auto iter = TensorIterator::nullary_op(self);
+  exponential_stub(iter.device_type(), iter, lambda, gen);
+  return self;
+}
+
+Tensor& geometric_(Tensor& self, double p, Generator* gen) {
+  TORCH_CHECK(0 < p && p < 1, "geometric_ expects p to be in (0, 1), but got p=", p);
+  auto iter = TensorIterator::nullary_op(self);
+  geometric_stub(iter.device_type(), iter, p, gen);
+  return self;
+}
+
+Tensor& normal_cpu_(Tensor& self, double mean, double std, Generator* gen) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  normal_stub(kCPU, self, mean, std, gen);
+  return self;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, double std, Generator* gen) {
+  normal_cpu_(output, 0, std, gen);
+  output.add_(mean);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  auto mean_tensor = at::full({}, mean, output.options());
+  output.mul_(std).add_(mean_tensor);
+  return output;
+}
+
+Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  normal_cpu_(output, 0, 1, gen);
+  output.mul_(std).add_(mean);
+  return output;
+}
+
+Tensor normal_cpu(const Tensor& mean, double std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
+
+Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
+  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  normal_out_cpu(ret, mean, std, gen);
+  return ret;
+}
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
@@ -319,7 +393,7 @@ Tensor& multinomial_out(Tensor& result, const Tensor& self, int64_t n_sample, bo
   } else {
     result.resize_({n_sample});
   }
-  multinomial_stub(result.type().device_type(), result, self, n_sample, with_replacement, gen);
+  multinomial_stub(result.device().type(), result, self, n_sample, with_replacement, gen);
   return result;
 }
 
@@ -328,7 +402,5 @@ Tensor multinomial(const Tensor& self, int64_t n_sample, bool with_replacement, 
   native::multinomial_out(result, self, n_sample, with_replacement, gen);
   return result;
 }
-
-DEFINE_DISPATCH(multinomial_stub);
 
 }} // namespace at::native

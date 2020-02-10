@@ -15,6 +15,10 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.15.0)
   cmake_policy(SET CMP0092 NEW)
 endif()
 
+if(NOT CMAKE_VERSION VERSION_LESS 3.10)
+  set(FIND_CUDA_MODULE_DEPRECATED ON)
+endif()
+
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
 
@@ -26,7 +30,7 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if (NOT MSVC)
   set(CMAKE_C_STANDARD 11)
 endif()
@@ -77,11 +81,23 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
-if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
-  set(CPU_INTEL ON)
+if (WIN32)
+  # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
+  # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
+  # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
+  if ($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 else ()
-  set(CPU_INTEL OFF)
+  if (${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+    set(CPU_INTEL ON)
+  else ()
+    set(CPU_INTEL OFF)
+  endif ()
 endif ()
+
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
@@ -106,7 +122,6 @@ option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" ON)
-option(BUILD_NAMEDTENSOR "Experimental: compile with namedtensor support" OFF)
 option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
@@ -115,6 +130,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
@@ -140,7 +156,7 @@ option(USE_METAL "Use Metal for iOS build" ON)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
-    "USE_CUDA;UNIX;NOT APPLE" OFF)
+    "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
@@ -199,6 +215,8 @@ cmake_dependent_option(
   "MSVC" OFF)
 
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
+set(SELECTED_OP_LIST "" CACHE STRING
+    "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -252,7 +270,7 @@ if (MSVC)
     endif()
 
     # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
+    # against libraries in Python 2.7 under Windows
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
 
@@ -275,10 +293,17 @@ if (MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+IF(NOT MSVC)
+  SET(CUDA_NVCC_FLAGS_DEBUG "${CUDA_NVCC_FLAGS_DEBUG} -g -G --source-in-ptx")
+  SET(CUDA_NVCC_FLAGS_RELWITHDEBINFO "${CUDA_NVCC_FLAGS_RELWITHDEBINFO} -g -lineinfo --source-in-ptx")
+ENDIF(NOT MSVC)
+
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
+  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
@@ -310,9 +335,11 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_STATIC_DISPATCH ON)
+  set(USE_PYTORCH_QNNPACK ON)
+  set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
+  set(INTERN_USE_EIGEN_BLAS ON)
 endif()
 
 # ---[ Utils
@@ -373,20 +400,12 @@ if(USE_FBGEMM)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_FBGEMM")
 endif()
 
-if(BUILD_NAMEDTENSOR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DBUILD_NAMEDTENSOR")
-endif()
-
 if(USE_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_QNNPACK")
 endif()
 
 if(USE_PYTORCH_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
-endif()
-
-if(USE_STATIC_DISPATCH)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_STATIC_DISPATCH")
 endif()
 
 # ---[ Whitelist file if whitelist is specified
@@ -399,8 +418,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
-set(CMAKE_C_STANDARD 99)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -fPIC")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-narrowing")
@@ -491,7 +510,7 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-stringop-overflow")
 endif()
 
-if(ANDROID)
+if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s")
   else()
@@ -641,6 +660,13 @@ add_subdirectory(modules)
 # built in the previous Modules section above).
 if (BUILD_BINARY)
   add_subdirectory(binaries)
+endif()
+
+# ---[ JNI
+if (BUILD_JNI)
+  set(BUILD_LIBTORCH_WITH_JNI 1)
+  set(FBJNI_SKIP_TESTS 1)
+  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)

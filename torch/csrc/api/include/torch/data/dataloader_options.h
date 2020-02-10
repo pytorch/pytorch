@@ -47,12 +47,12 @@ struct DataLoaderOptions {
 /// instance, which will do any necessary coalescing.
 struct FullDataLoaderOptions {
   explicit FullDataLoaderOptions(DataLoaderOptions options)
-      : batch_size(options.batch_size_),
-        workers(options.workers_),
-        max_jobs(options.max_jobs_.value_or(2 * workers)),
-        timeout(options.timeout_),
-        enforce_ordering(options.enforce_ordering_),
-        drop_last(options.drop_last_) {}
+      : batch_size(options.batch_size()),
+        workers(options.workers()),
+        max_jobs(options.max_jobs().value_or(2 * workers)),
+        timeout(options.timeout()),
+        enforce_ordering(options.enforce_ordering()),
+        drop_last(options.drop_last()) {}
 
   size_t batch_size;
   size_t workers;
