@@ -13,3 +13,7 @@ from torch.onnx.symbolic_helper import parse_args
 def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
+
+@parse_args('s', 'v', 'v')
+def mse(g, reduction, input, target):
+    return g.op("MeanSquaredDistance", input, target, reduction=reduction)
