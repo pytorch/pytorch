@@ -1872,6 +1872,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))
