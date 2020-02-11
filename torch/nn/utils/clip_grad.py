@@ -23,7 +23,7 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2):
         parameters = [parameters]
     parameters = list(filter(lambda p: p.grad is not None, parameters))
     if max_norm < 0: 
-      raise ValueError(f"expected max_norm to be non-negative, got {max_norm}")
+        raise ValueError(f"expected max_norm to be non-negative, got {max_norm}")
     max_norm = float(max_norm)
     norm_type = float(norm_type)
     if norm_type == inf:
