@@ -800,20 +800,6 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args, PyObject* kwargs)
 
   ParsedArgs<${max_args}> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
-  if (_r.signature.deprecated) {
-    auto msg = c10::str(
-        "This overload of ", _r.signature.name, " is deprecated:\n",
-        "${name}", _r.signature.toString());
-    auto signatures = parser.get_signatures();
-    if (!signatures.empty()) {
-      msg += "\nConsider using one of the following signatures instead:";
-      for (const auto & sig : signatures) {
-        msg += "\n${name}";
-        msg += sig;
-      }
-    }
-    TORCH_WARN_ONCE(msg);
-  }
   ${check_has_torch_function}
   switch (_r.idx) {
     ${dispatch}
@@ -1055,7 +1041,9 @@ def group_overloads(declarations, is_python_method):
     result = []
     for x, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError("'base' not in dictionary for " + str(x), dictionary)
+            raise RuntimeError(
+                "'base' not in dictionary for {}. keys are {}".format(
+                    x, list(dictionary.keys())))
         result.append(dictionary)
     return sort_declarations(result)
 
