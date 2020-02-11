@@ -425,15 +425,16 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/arith.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fusion.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iriostream.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iter_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/mutator.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fusion.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/type.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp

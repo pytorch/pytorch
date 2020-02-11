@@ -24,9 +24,7 @@ void testGPU_FusionDispatch(){
   FusionGuard fg(&fusion);
   
   Float* f = new Float{2.f};
-  
-  const auto val_type = f->type();
-  
+    
   std::cout << "Dispatch 2.f by Float reference: " << f << std::endl;
 
   std::cout << "Dispatch 2.f by Val reference: " << static_cast<Val*>(f) << std::endl;
@@ -79,22 +77,21 @@ void testGPU_FusionSimpleTypePromote(){
   Int* i1 = new Int{3};
   auto f5 = binary_op(BinaryOpType::Add, f4, i1);
 
-  TORCH_CHECK(f5->getValType() == ValType::Float);
+  TORCH_CHECK(f5->getDataType() == DataType::Float);
 }
 
 void testGPU_FusionMutator(){
-  /*BROKEN
   Fusion fusion;
   FusionGuard fg(&fusion);
   
   Float* f4 = new Float{1.f};
   Int* i1 = new Int{3};
-  Val* f5 = add(f4, i1);
+  Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
   std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
   BaseMutator mutator;
   mutator.mutate(&fusion);
   std::cout<<"Replaced: "<<fusion<<std::endl;
-  */
+  
 }
 
 void testGPU_FusionRegister() {
@@ -186,6 +183,26 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(fusion.origin(v4)->name() == 1);
   TORCH_CHECK(fusion.origin(v5)->name() == 2);
 
+}
+
+void testGPU_FuserTensor() {
+  auto tensor = at::randn({20, 20}, at::kCUDA);
+  auto tensor_type = TensorType::create(tensor);
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  /*
+  auto fuser_tensor  = new Tensor(tensor_type);
+  //std::cout << fuser_tensor << std::endl;
+  TORCH_CHECK(fuser_tensor->scalarType().has_value() &&
+      fuser_tensor->scalarType() == at::ScalarType::Float);
+  TORCH_CHECK(fuser_tensor->sizes().has_value() &&
+      fuser_tensor->sizes().value()[0] == 20 &&
+      fuser_tensor->sizes().value()[1] == 20);
+  TORCH_CHECK(fuser_tensor->strides().has_value() &&
+      fuser_tensor->strides().value()[0] == 20 &&
+      fuser_tensor->strides().value()[1] == 1);
+  */
 }
 
 void testGPU_Fusion() {}

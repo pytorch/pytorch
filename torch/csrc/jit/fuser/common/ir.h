@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Exception.h>
+#include <c10/core/ScalarType.h>
 
 #include <torch/csrc/jit/fuser/common/type.h>
 #include <torch/csrc/jit/fuser/common/visitor.h>
@@ -14,9 +15,17 @@
 #include <limits>
 #include <deque>
 #include <iostream>
+#include <memory>
+
+namespace c10 {
+struct TensorType;
+} // namespace c10
 
 namespace torch {
 namespace jit {
+
+struct Value; 
+
 namespace fuser {
 
 // TODO: add comment explaining structure
@@ -90,12 +99,13 @@ struct TORCH_API Statement {
 
   //dispatch is used to take a handler, and call 
   template <typename T>
-  int dispatch(T handler) const;
+  void dispatch(T handler) const;
 
   template <typename T>
   const Statement* dispatch_mutator(T mutator) const;
 
   virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
+  virtual c10::optional<DataType> getDataType() const noexcept { return c10::nullopt; }
   virtual c10::optional<ExprType> getExprType() const noexcept { return c10::nullopt; }
 
   bool isVal() const noexcept { return getValType() != c10::nullopt; }
@@ -124,7 +134,7 @@ public:
   virtual ~Val() = 0;
 
   Val() = delete;
-  Val(const ValType _type);
+  Val(const ValType _vtype, const DataType _dtype = DataType::Null);
 
   //TODO: Values are unique and not copyable
   Val(const Val& other) = delete;
@@ -133,18 +143,20 @@ public:
   Val(Val&& other) = delete;
   Val& operator=(Val&& other) = delete;
 
-  c10::optional<ValType> getValType() const noexcept override { return type_; }
-  ValType type() const noexcept { return type_; }
-
-  bool isScalar(){
-    static_assert(((int)ValType::Float) == 1); //Depend on ordering to know if Val is a scalar.
-    return type() >= ValType::Float;
+  c10::optional<ValType> getValType() const noexcept override { return vtype_; }
+  c10::optional<DataType> getDataType() const noexcept override {
+    if(dtype_ == DataType::Null)
+      return c10::nullopt;
+    return dtype_;
   }
+
+  bool isScalar(){ return vtype_ == ValType::Scalar; }
 
   const Expr* getOrigin(){return origin_;}
 
 protected:
-  const ValType type_;
+  const ValType vtype_;
+  const DataType dtype_;
   Expr *volatile origin_ = nullptr;
 };
 
@@ -191,6 +203,7 @@ struct TORCH_API IRInputOutput {
   void addInputAt(const std::deque<const Val*>::size_type pos, const Val* input) {
     inputs_.insert(inputs_.begin() + pos, input);
   }
+
   void addOutputAt(const std::deque<const Val*>::size_type pos, Val* output) {
     outputs_.insert(outputs_.begin() + pos, output);
   }
@@ -203,7 +216,6 @@ struct TORCH_API IRInputOutput {
     }
     assert(it!=outputs_.end());
     outputs_.erase(it);    
-      
   }
 
   std::deque<const Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
@@ -215,26 +227,17 @@ protected:
 
 };
 
-
-struct TORCH_API Tensor : public Val {
-  ~Tensor() = default;
-
-  Tensor()
-  : Val(ValType::Tensor){}
-
-};
-
 // TODO: do we want this to be a separate class (FloatImm?)
 struct TORCH_API Float : public Val {
   ~Float() = default;
 
   Float()
-  : Val(ValType::Float)
+  : Val(ValType::Scalar, DataType::Float)
   , maybe_value_{c10::nullopt} { }
 
   Float(
     const float _value)
-  : Val(ValType::Float)
+  : Val(ValType::Scalar, DataType::Float)
   , maybe_value_{_value} { }
 
   Float(const Float& other) = delete;
@@ -255,12 +258,12 @@ struct TORCH_API Int : public Val {
   ~Int() = default;
 
   Int()
-  : Val(ValType::Int)
+  : Val(ValType::Scalar, DataType::Int)
   , maybe_value_{c10::nullopt} { }
 
   Int(
     const float _value)
-  : Val(ValType::Int)
+  : Val(ValType::Scalar, DataType::Int)
   , maybe_value_{_value} { }
 
   Int(const Int& other) = delete;

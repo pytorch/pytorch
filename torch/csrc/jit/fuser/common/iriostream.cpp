@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
 
 #include <iostream>
@@ -7,6 +8,24 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+namespace {
+
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const c10::optional<std::vector<T>>& data) {
+  os << "(";
+  if (data.has_value()) {
+    for (auto i = data.value().begin(); i != data.value().end(); i++) {
+      os << (*i);
+      os << " ";
+    }
+  } else {
+    os << "?";
+  }
+  return os << ")";
+}
+
+}
 
 std::ostream& operator<<(std::ostream& os, const Fusion* const fusion) {
   std::cout<<"Fusion has "<< fusion->exprs().size() << "exprs" << std::endl;
@@ -26,12 +45,22 @@ std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
 
 std::ostream& operator<<(std::ostream& os, const Val* const val) {
   switch (*(val->getValType())) {
+
     case ValType::Tensor:
-      return os << static_cast<const Tensor*>(val);
-    case ValType::Float:
-      return os << static_cast<const Float*>(val);
-    case ValType::Int:
-      return os << static_cast<const Int*>(val);
+      return os << static_cast<const Tensor* const>(val);
+
+    case ValType::Scalar:
+      switch (*(val->getDataType())){
+        case DataType::Float:
+          return os << static_cast<const Float* const>(val);
+        case DataType::Int:
+          return os << static_cast<const Int* const>(val);
+        default:
+          break;
+      }
+
+    default:
+      break;
   }
   throw std::runtime_error("Unknown ValType in os << Val.");
 }
@@ -46,9 +75,14 @@ std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
 
+/*
 std::ostream& operator<<(std::ostream& os, const Tensor* const tensor) {
-  return os << "%T" << tensor->name();
+  return os << "%T" << tensor->name() <<
+      " type: " << tensor->scalarType().value() <<
+      ", sizes: " << tensor->sizes() <<
+      ", strides: " << tensor->strides();
 }
+*/
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {
   os << "%f";

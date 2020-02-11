@@ -24,31 +24,31 @@ const Statement* BaseMutator::mutate(const Int* const i){
 }
 
 const Statement* BaseMutator::mutate(const UnaryOp* const uop){
-    const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
-    const Val* in  = static_cast<const Val*>(uop->in()->dispatch_mutator(this)); 
-    //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-    if(out!=uop->out()
-    || in!=uop->in())
-        return new UnaryOp(uop->type(), out, in);
-    return uop;
+  const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
+  const Val* in  = static_cast<const Val*>(uop->in()->dispatch_mutator(this)); 
+  //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
+  if(out!=uop->out()
+  || in!=uop->in())
+      return new UnaryOp(uop->type(), out, in);
+  return uop;
 }
 
 const Statement* BaseMutator::mutate(const BinaryOp* const bop){
-    const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
-    const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this)); 
-    const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
-    //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-    if(out!=bop->out()
-    || lhs!=bop->lhs()
-    || rhs!=bop->rhs())
-        return new BinaryOp(bop->type(), out, lhs, rhs);
-    return bop;
+  const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
+  const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this)); 
+  const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
+  //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
+  if(out!=bop->out()
+  || lhs!=bop->lhs()
+  || rhs!=bop->rhs())
+      return new BinaryOp(bop->type(), out, lhs, rhs);
+  return bop;
 }
 
 void BaseMutator::mutate(Fusion* fusion){
 
   std::vector<const Expr*> new_exprs;
-  std::vector<const Expr*> orig_exprs(fusion->exprs().begin(), fusion->exprs().end());
+  std::vector<const Expr*> orig_exprs = fusion->exprs();
 
   for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
       const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);
@@ -56,7 +56,7 @@ void BaseMutator::mutate(Fusion* fusion){
       new_exprs.push_back(static_cast<const Expr*>(new_stmt));  
   }
 
-  for(std::vector<const Expr*>::size_type i = 0; i < fusion->exprs().size(); i++){
+  for(std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++){
     if(orig_exprs[i] != new_exprs[i]){
         fusion->removeExpr(orig_exprs[i]);
     }
