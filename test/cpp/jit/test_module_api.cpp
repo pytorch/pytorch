@@ -103,10 +103,12 @@ void testModuleParameter() {
   m.register_parameter("tensor_param", at::empty({3}, at::kFloat), /* is_buffer */ false);
   // None parameter
   m.register_attribute("none_param", NoneType::get(), IValue(), /* is_param */ true);
+  m.register_attribute("none_param2", NoneType::get(), IValue(), /* is_param */ true);
   auto param_list = m.parameters();
   ASSERT_EQ(param_list.size(), 1);
   ASSERT_TRUE(m.hasattr("tensor_param"));
   ASSERT_TRUE(m.hasattr("none_param"));
+  ASSERT_TRUE(m.hasattr("none_param2"));
 }
 
 } // namespace jit
