@@ -101,7 +101,7 @@ def _maybe_get_scalar(value):
 
 
 def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() != 'onnx::Constant':
+    if _is_value(value) and value.node().kind() not in ('onnx::Constant', 'prim::Constant'):
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
@@ -299,13 +299,8 @@ def _get_interpolate_attributes(g, mode, args):
 
 def _interpolate_get_scales(g, scale_factor, dim):
     offsets = g.op("Constant", value_t=torch.ones(2, dtype=torch.float32))
-    if _is_packed_list(scale_factor):
-        scale_factor = _unpack_list(scale_factor)
-        scales = []
-        for dim_scale_factor in scale_factor:
-            dim_scale_factor = _unsqueeze_helper(g, dim_scale_factor, 0)
-            dim_scale_factor = g.op("Cast", dim_scale_factor, to_i=cast_pytorch_to_onnx["Float"])
-            scales.append(dim_scale_factor)
+    if isinstance(scale_factor.type(), torch._C.ListType):
+        return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
         scale_factor = _unsqueeze_helper(g, scale_factor, 0)
         scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
