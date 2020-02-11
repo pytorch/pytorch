@@ -1220,6 +1220,21 @@ graph(%x : Tensor,
         assert conv1_observers == conv2_observers, \
             'Expect conv1 and conv2 to have same observers since the class type is shared'
 
+    def test_insert_observers_skip_observed(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc1 = torch.nn.Linear(5, 5).float()
+                self.fc2 = torch.nn.Linear(5, 8).float()
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
+        m = torch.jit.script(M())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m._c = torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
+        m = wrap_cpp_module(m._c)
+        m._c.dump(True, False, False)
+
     def test_insert_quant_dequant(self):
         class M(torch.nn.Module):
             def __init__(self):

@@ -383,6 +383,13 @@ class InsertObserversHelper {
       script::Module& module,
       const c10::optional<QConfig>& qconfig);
 
+  void insertObservedValues(Value* v);
+
+  void updateObservedValues(
+      script::Module &module,
+      Graph* g,
+      Value* v);
+
   void skipValuesInFirstModule(
       const script::Module& module,
       Graph& graph,
@@ -424,6 +431,16 @@ class InsertObserversHelper {
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
+
+  // Map from return Value of a graph to the return value of the
+  // CallMethod
+  std::unordered_map<Value*, std::unordered_set<Value*>> same_value_map_;
+  // Values that are already observed, this includes values that
+  // crosses the CallMethod boundary, e.g. if we have observed %x in
+  // CallMethod(%self, %x) then we'll find the graph and add the
+  // 1st argument of the graph to the set as well
+  std::unordered_set<Value*> observed_values_;
+
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -633,6 +650,47 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   return invoked_methods;
 }
 
+size_t getArgIndex(Node* call, Value* v) {
+  TORCH_INTERNAL_ASSERT(call->kind() == prim::CallMethod || call->kind() == prim::CallFunction,
+                       "getArgIndex is expecting CallMethod or CallFunction nodes");
+  size_t arg_index = 0;
+  while (arg_index < call->inputs().size() &&
+         call->inputs()[arg_index] != v) {
+    arg_index++;
+  }
+  return arg_index;
+}
+
+void InsertObserversHelper::insertObservedValues(Value* v) {
+  observed_values_.insert(v);
+  if (same_value_map_.count(v)) {
+    for (auto* r : same_value_map_.at(v)) {
+      insertObservedValues(r);
+    }
+  }
+}
+
+void InsertObserversHelper::updateObservedValues(
+      script::Module &module,
+      Graph* graph,
+      Value* v) {
+  insertObservedValues(v);
+  Value* self = graph->inputs()[0];
+  for (const Use& u : v->uses()) {
+    if (u.user->kind() == prim::CallMethod) {
+      Node* call = u.user;
+      Value* instance = call->inputs()[0];
+      auto path = getModuleAccessPath(instance, self);
+      auto m = findChildModule(module, path);
+      auto g = m.get_method(call->s(attr::name)).graph();
+      size_t arg_index = getArgIndex(call, v);
+      TORCH_INTERNAL_ASSERT(arg_index < call->inputs().size());
+      updateObservedValues(m, g.get(), g->inputs()[arg_index]);
+    }
+  }
+}
+
+
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
@@ -640,9 +698,13 @@ void InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const c10::optional<QConfig>& qconfig_opt) {
-  if (!qconfig_opt) {
+  if (!qconfig_opt || observed_values_.count(v)) {
+    if (observed_values_.count(v)) {
+      GRAPH_DEBUG("I found a value that's observed before:", v->debugName());
+    }
     return;
   }
+  updateObservedValues(module, g, v);
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
     TORCH_CHECK(
@@ -859,6 +921,30 @@ void InsertObserversHelper::preprocess(
   // We need to call this before calling insertObservers for
   // invoked methods
   addIntermediateValuesToSkipObserver(module, method_name);
+
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  auto* self = graph->inputs()[0];
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::CallMethod) {
+        auto* instance = n->inputs()[0];
+        auto path = getModuleAccessPath(instance, self);
+        auto m = findChildModule(module, path);
+        auto g = m.get_method(n->s(attr::name)).graph();
+        for (auto i = 0; i < g->outputs().size(); ++i) {
+          auto* return_val = g->outputs()[i];
+          same_value_map_[return_val].insert(n->outputs()[i]);
+        }
+        for (auto i = 0; i < g->inputs().size(); ++i) {
+          auto* input_val = g->inputs()[i];
+          same_value_map_[n->inputs()[i]].insert(input_val);
+        }
+      }
+    }
+  }
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_method);
     const auto& invoked_method_name = std::get<1>(invoked_method);
