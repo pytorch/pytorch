@@ -2079,14 +2079,14 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
-     - pytorch_ios_build:
-         name: pytorch_ios_11_2_1_x86_64_build
-         context: org-member
-         build_environment: "pytorch-ios-11.2.1-x86_64_build"
-         ios_arch: "x86_64"
-         ios_platform: "SIMULATOR"
-         requires:
-           - setup
+      - pytorch_ios_build:
+            name: pytorch_ios_11_2_1_x86_64_build
+            context: org-member
+            build_environment: "pytorch-ios-11.2.1-x86_64_build"
+            ios_arch: "x86_64"
+            ios_platform: "SIMULATOR"
+            requires:
+            - setup
       - pytorch_ios_build:
           name: pytorch_ios_11_2_1_arm64_build
           context: org-member
