@@ -57,6 +57,7 @@ enum class DispatchKey : uint8_t {
   //     (templatized kernels specialized for user-defined PRNG class)
   CustomRNGKeyId,
 
+  BackendSelect,
   VariableTensorId,
 
   // Pre-autograd backend keys allow backends to override the autograd behavior

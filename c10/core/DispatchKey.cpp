@@ -40,6 +40,8 @@ const char* toString(DispatchKey t) {
       return "ComplexCUDATensorId";
     case DispatchKey::VariableTensorId:
       return "VariableTensorId";
+    case DispatchKey::BackendSelect:
+      return "BackendSelect";
     case DispatchKey::TESTING_ONLY_GenericModeTensorId:
       return "TESTING_ONLY_GenericModeTensorId";
     case DispatchKey::TESTING_ONLY_GenericWrapperTensorId:
