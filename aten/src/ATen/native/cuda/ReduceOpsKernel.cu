@@ -373,18 +373,17 @@ __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Te
   int ndim = self.dim();
   // Treat all outer dimensions (i.e. dim_ < dim) as one.
   int num_orows = 1;
-  for (int dim_ = 0; dim_ < dim; dim_++) {
-    num_orows *= self.size(dim_);
-  }
+  auto sizes = self.sizes();
+  std::accumulate(sizes, sizes + dim, num_orows, std::multiplies<int>);
+
   int row_size = self.size(dim);
+
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   int num_irows = 1;
-  for (int dim_ = dim + 1; dim_ < ndim; dim_++) {
-    num_irows *= self.size(dim_);
-  }
+  std::accumulate(sizes + dim, sizes + ndim, num_irows, std::multiplies<int>);
 
   dim3 threads(std::min(512, num_irows));
-  int maxGridDim = 1024;
+  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize;
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, cuda::ATenCeilDiv(num_irows, int(threads.x))));
 
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -401,7 +400,7 @@ __host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values
   int num_rows = self.numel() / row_size;
 
   dim3 threads(16, 32);
-  dim3 grid(std::min(1024, cuda::ATenCeilDiv(num_rows, int(threads.y))));
+  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize, cuda::ATenCeilDiv(num_rows, int(threads.y))));
 
   tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),

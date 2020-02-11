@@ -3,7 +3,7 @@
 namespace at {
   namespace native {
     //input tensors are non-zero dim and non-empty
-    template<typename T1, typename T2, typename Function, typename Operation>
+    template<typename T1, typename T2, typename Operation, typename Function>
     void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Operation op, Function func) {
       int ndims = self.dim();
       int tensor_dim_apply_has_finished = 0;
