@@ -8,6 +8,24 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+namespace {
+
+template<typename T>
+std::ostream& operator<<(std::ostream& os, const c10::optional<std::vector<T>>& data) {
+  os << "(";
+  if (data.has_value()) {
+    for (auto i = data.value().begin(); i != data.value().end(); i++) {
+      os << (*i);
+      os << " ";
+    }
+  } else {
+    os << "?";
+  }
+  return os << ")";
+}
+
+}
+
 std::ostream& operator<<(std::ostream& os, const Fusion* const fusion) {
   std::cout<<"Fusion has "<< fusion->exprs().size() << "exprs" << std::endl;
   for (const Expr* expr : fusion->exprs()){
@@ -45,7 +63,10 @@ std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Tensor* const tensor) {
-  return os << "%T" << tensor->name();
+  return os << "%T" << tensor->name() <<
+      " type: " << tensor->scalarType().value() <<
+      ", sizes: " << tensor->sizes() <<
+      ", strides: " << tensor->strides();
 }
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {

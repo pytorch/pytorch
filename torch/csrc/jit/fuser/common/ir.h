@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Exception.h>
+#include <c10/core/ScalarType.h>
 
 #include <torch/csrc/jit/fuser/common/type.h>
 #include <torch/csrc/jit/fuser/common/visitor.h>
@@ -14,9 +15,17 @@
 #include <limits>
 #include <deque>
 #include <iostream>
+#include <memory>
+
+namespace c10 {
+struct TensorType;
+} // namespace c10
 
 namespace torch {
 namespace jit {
+
+struct Value; 
+
 namespace fuser {
 
 // TODO: add comment explaining structure
@@ -216,11 +225,33 @@ protected:
 
 
 struct TORCH_API Tensor : public Val {
+  using VectorInts = std::vector<int64_t>;
   ~Tensor() = default;
 
   Tensor()
-  : Val(ValType::Tensor){}
+  : Val(ValType::Tensor)
+  , scalar_type_(c10::nullopt)
+  , sizes_(c10::nullopt)
+  , strides_(c10::nullopt) {}
 
+  Tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+
+  Tensor(const std::shared_ptr<Value>& jit_value);
+  
+  c10::optional<c10::ScalarType> scalarType() const {
+    return scalar_type_;
+  };
+  c10::optional<VectorInts> sizes() const {
+    return sizes_;
+  };
+  c10::optional<VectorInts> strides() const {
+    return strides_;
+  };
+
+protected:
+  c10::optional<c10::ScalarType> scalar_type_;
+  c10::optional<VectorInts> sizes_;
+  c10::optional<VectorInts> strides_;
 };
 
 // TODO: do we want this to be a separate class (FloatImm?)
