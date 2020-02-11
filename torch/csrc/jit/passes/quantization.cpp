@@ -1988,6 +1988,68 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
+// If the op doesn't require observation, return
+// the number of Tensor inputs, otherwise
+// return null
+c10::optional<int> getGeneralOpNumTensorInputs(Node* n) {
+  std::vector<std::string> single_input_ops = {
+    "relu_",
+    "relu",
+    "adaptive_avg_pool2d",
+    "max_pool2d"
+  };
+  if (isFunctionNode(
+          n,
+      // We don't have call functions
+      // after inline
+      /* call_funcs = */ {},
+      /* aten_funcs = */ single_input_ops)) {
+    return 1;
+  }
+  return c10::nullopt;
+}
+
+// This is the pass to handle ops that does not require observation
+// for example: flatten, average_pool, upsample
+// This is called after inline and before graph execution
+void SwapDeQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (auto num_inputs = getGeneralOpNumTensorInputs(n)) {
+        bool is_dequantized = false;
+        for (auto i = 0; i < *num_inputs; ++i) {
+          is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
+        }
+        if (!is_dequantized) {
+          continue;
+        }
+        // Delete dequantize node, we have one dequantize
+        // for each use of the value
+        for (auto i = 0; i < *num_inputs; ++i) {
+          auto* dequantized_val = n->inputs()[i];
+          auto* dequantize_node = dequantized_val->node();
+          TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
+                                "Expect to have one dequantize node for each use");
+          // Replace useses of dequantized_val with the input of
+          // dequantize node
+          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+          dequantize_node->removeAllInputs();
+          dequantize_node->destroy();
+        }
+        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
+                    " with one output right now");
+        auto* output = n->output();
+        // Insert new dequantize node for each use of the output
+        insertDeQuantCall(graph.get(), output, output, output->uses());
+      }
+    }
+  }
+}
+
 void QuantFusion(std::shared_ptr<Graph>& graph) {
   for (const auto& item : quant_fusion_pattern_and_replacements()) {
     SubgraphRewriter rewriter;
