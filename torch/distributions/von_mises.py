@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 import math
 
 import torch
+import torch.jit
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
@@ -52,6 +53,22 @@ def _log_modified_bessel_fn(x, order=0):
     return result
 
 
+@torch.jit.script
+def _rejection_sample(loc, concentration, proposal_r, shape):
+    x = torch.empty(shape, dtype=loc.dtype, device=loc.device)
+    done = torch.zeros(shape, dtype=torch.bool, device=loc.device)
+    while not done.all():
+        u = torch.rand((3,) + shape, dtype=loc.dtype, device=loc.device)
+        u1, u2, u3 = u.unbind()
+        z = torch.cos(math.pi * u1)
+        f = (1 + _proposal_r * z) / (_proposal_r + z)
+        c = concentration * (_proposal_r - f)
+        accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
+        if accept.any():
+            x[accept] = torch.sign(u3[accept] - 0.5) * torch.acos(f[accept])
+            done |= accept
+    return (x + math.pi + loc) % (2 * math.pi) - math.pi
+
 class VonMises(Distribution):
     """
     A circular von Mises distribution.
@@ -89,6 +106,7 @@ class VonMises(Distribution):
         log_prob = log_prob - math.log(2 * math.pi) - _log_modified_bessel_fn(self.concentration, order=0)
         return log_prob
 
+
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
         """
@@ -97,19 +115,7 @@ class VonMises(Distribution):
         "Efficient simulation of the von Mises distribution." Applied Statistics (1979): 152-157.
         """
         shape = self._extended_shape(sample_shape)
-        x = torch.empty(shape, dtype=self.loc.dtype, device=self.loc.device)
-        done = torch.zeros(shape, dtype=torch.bool, device=self.loc.device)
-        while not done.all():
-            u = torch.rand((3,) + shape, dtype=self.loc.dtype, device=self.loc.device)
-            u1, u2, u3 = u.unbind()
-            z = torch.cos(math.pi * u1)
-            f = (1 + self._proposal_r * z) / (self._proposal_r + z)
-            c = self.concentration * (self._proposal_r - f)
-            accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
-            if accept.any():
-                x[accept] = torch.sign(u3[accept] - 0.5) * torch.acos(f[accept])
-                done |= accept
-        return (x + math.pi + self.loc) % (2 * math.pi) - math.pi
+        return _rejection_sample(self.loc, self.concentration, self._proposal_r, shape)
 
     def expand(self, batch_shape):
         try:
