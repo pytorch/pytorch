@@ -147,7 +147,6 @@ def process_function(decl, has_tensor_options, disable_autograd):
         options_calls = turn_actuals_into_option_calls(actuals)
         collapsed_formals = TOUtils.collapse_formals(formals)
 
-
         if decl['name'] == 'arange':
             uncollapsed_actuals_nullptr = actuals[:]
             index = actuals.index('dtype')

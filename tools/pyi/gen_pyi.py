@@ -10,6 +10,9 @@ from ..autograd.utils import YamlLoader, CodeTemplate, write
 from ..autograd.gen_python_functions import get_py_torch_functions, get_py_variable_methods
 from ..autograd.gen_autograd import load_aten_declarations
 
+from tools.shared.module_loader import import_module
+TOUtils = import_module('tensor_options_utils', 'aten/src/ATen/tensor_options_utils.py')
+
 """
 This module implements generation of type stubs for PyTorch,
 enabling use of autocomplete in IDEs like PyCharm, which otherwise
@@ -40,7 +43,7 @@ read gen_pyi for the gory details.
 needed_modules = set()
 
 FACTORY_PARAMS = ("dtype: Optional[_dtype]=None, layout: Optional[_layout]=None, "
-                  "device: Union[_device, str, None]=None, requires_grad: _bool=False")
+                  "device: Union[_device, str, None]=None, pin_memory: _bool=None, requires_grad: _bool=False")
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
@@ -159,6 +162,8 @@ def arg_to_type_hint(arg):
             default = None
         elif default == 'c10::nullopt':
             default = None
+        elif default == 'at::kLong':
+            default = 'long'
         elif isinstance(default, str) and default.startswith('{') and default.endswith('}'):
             if arg['dynamic_type'] == 'Tensor' and default == '{}':
                 default = None
@@ -240,6 +245,9 @@ def generate_type_hints(fname, decls, is_tensor=False):
     dnames = ([d['name'] for d in decls])
     has_out = fname + '_out' in dnames
 
+    if fname == 'rand':
+        print("\n\n\n has_out: ", has_out)
+
     if has_out:
         decls = [d for d in decls if d['name'] != fname + '_out']
 
@@ -247,7 +255,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
         render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
         python_args = []
 
-        has_tensor_options = 'TensorOptions' in (a['dynamic_type'] for a in decl['arguments'])
+        has_tensor_options = TOUtils.check_if_factory_method(decl['arguments'])
 
         for a in decl['arguments']:
             if a['dynamic_type'] != 'TensorOptions':
@@ -273,7 +281,7 @@ def generate_type_hints(fname, decls, is_tensor=False):
                 render_kw_only_separator = False
             python_args.append('out: Optional[Tensor]=None')
 
-        if has_tensor_options:
+        if has_tensor_options and False:
             if render_kw_only_separator:
                 python_args.append('*')
                 render_kw_only_separator = False
@@ -319,6 +327,9 @@ def generate_type_hints(fname, decls, is_tensor=False):
             type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
             type_hints.append(type_hint)
 
+    if fname == 'rand':
+        print("\n\n\n RAND")
+        print(type_hints)
     return type_hints
 
 def gen_nn_modules(out):

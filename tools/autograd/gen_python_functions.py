@@ -513,7 +513,7 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
     # In the tracking issue: https://github.com/pytorch/pytorch/issues/30405
     #
     # Adding requires_grad to formals and args.
-    if check_is_factory_or_like_or_new_function(declaration) and not is_tensor_method(declaration):
+    if get_factory_info(declaration)[0] and not is_tensor_method(declaration):
         if 'c10::optional<bool> pin_memory' in lambda_formals:
             lambda_formals.insert(lambda_formals.index('c10::optional<bool> pin_memory') + 1, 'c10::optional<bool> requires_grad')
 
@@ -562,36 +562,6 @@ TENSOR_OPTIONS_FIELDS = {
     'pin_memory': 'bool',
     'requires_grad': 'bool',
 }
-
-def check_is_factory_or_like_or_new_function(declaration):
-    is_factory_or_like_or_new_function = False
-    has_tensor_input_arg = False
-
-    for arg in declaration['arguments']:
-        if arg.get('output', False):
-            continue
-
-        typename = arg['simple_type']
-        if typename in ['Tensor', 'TensorList']:
-            has_tensor_input_arg = True
-        if arg['name'] == 'requires_grad':
-            raise ValueError("argument named requires_grad not supported")
-
-    has_tensor_return = False
-    for ret in declaration['returns']:
-        if ret['dynamic_type'] in ['Tensor', 'TensorList']:
-            # this probably won't work if one of the returns is not a tensor, but it will
-            # produce a compile-time error that is obvious
-            has_tensor_return = True
-
-    name = declaration['name']
-    category_override = declaration['category_override']
-    is_like_function = name.endswith('_like') or category_override == 'like'
-    is_new_function = name.startswith('new_') or category_override == 'new'
-    is_factory_function = has_tensor_return and not has_tensor_input_arg or category_override == 'factory'
-    is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
-
-    return is_factory_or_like_or_new_function
 
 def handle_python_binding_args(declaration, output_gap):
     # map synthetic python binding args to op args and misc other stuff
@@ -1387,24 +1357,24 @@ def dtype_default_type_hack(name):
         return 'None'
 
 
-def make_python_binding_args(declaration):
-    """
-    Given various properties of a declaration, build a set of scattered python binding args.
-    """
-    name = declaration['name']
-    python_binding_arguments = []
+def get_factory_info(declaration):
+    is_factory_or_like_or_new_function = False
     has_tensor_input_arg = False
+
     has_options_arg = False
     for arg in declaration['arguments']:
         if is_output(arg):
             continue
+
+        if arg['name'] == 'requires_grad':
+            raise ValueError("argument named requires_grad not supported")
+
         typename = arg['simple_type']
         if typename in ['Tensor', 'TensorList']:
             has_tensor_input_arg = True
+
         if TOUtils.check_if_factory_method(declaration['arguments']):
             has_options_arg = True
-        if arg['name'] == 'requires_grad':
-            raise ValueError("argument named requires_grad not supported")
 
     has_tensor_return = False
     for ret in declaration['returns']:
@@ -1413,6 +1383,7 @@ def make_python_binding_args(declaration):
             # produce a compile-time error that is obvious
             has_tensor_return = True
 
+    name = declaration['name']
     category_override = declaration['category_override']
     is_like_function = name.endswith('_like') or category_override == 'like'
     is_like_function_with_options = is_like_function and has_options_arg
@@ -1422,8 +1393,20 @@ def make_python_binding_args(declaration):
     is_factory_or_like_or_new_function = has_tensor_return and (is_factory_function or is_like_function or is_new_function)
     is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
+    return is_factory_or_like_or_new_function, is_factory_function, is_like_or_new_function_with_options, has_options_arg
+
+
+# Given various properties of a declaration, build a set of scattered python binding args.
+def make_python_binding_args(declaration):
+    python_binding_arguments = []
+    python_biding_args = get_factory_info(declaration)
+    is_factory_or_like_or_new_function = python_biding_args[0]
+    is_factory_function = python_biding_args[1]
+    is_like_or_new_function_with_options = python_biding_args[2]
+    has_options_arg = python_biding_args[3]
+
     if is_factory_function or has_options_arg:
-        default_type = dtype_default_type_hack(name)
+        default_type = dtype_default_type_hack(declaration['name'])
         py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
         dtype_arg = {
             'default': default_type,

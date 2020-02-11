@@ -149,8 +149,8 @@ inline ${return_type} Tensor::${api_name_prefix}${api_name}(${method_formals}) c
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op =
-        c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
+    static c10::OperatorHandle op = \
+c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
     return op.callUnboxed<${formals_types_with_return}>(${method_actuals});
 #endif
 }
@@ -198,8 +198,8 @@ ${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
-                            c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
+switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set}, \
+c10::DispatchKeySet(c10::DispatchKeySet::FULL).remove(DispatchKey::BackendSelect)))) {
     ${static_dispatch_function_switches}
     default:
         AT_ERROR("${api_name} not implemented for ", at::toString(${key_set}));
@@ -678,6 +678,7 @@ def is_real_argument_to_wrapper(argument):
     return not argument.get('output', False) and\
         argument['type'] != 'CONSTANT' and\
         argument['type'] != 'argument'
+
 
 def is_mutable_formal_argument(argument, option):
     # type: (THFormal, FunctionOption) -> bool
@@ -1416,6 +1417,7 @@ def create_generic(top_env, declarations):
         output_declarations.extend(output_options)
 
     return output_declarations, op_registrations
+
 
 def create_derived(backend_type_env, declarations):
     # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[OpRegistration], List[str], List[str]]
