@@ -653,6 +653,8 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
+        if not stride:
+            stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
@@ -795,6 +797,12 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
+
+@parse_args('v')
+def bitwise_not(g, inp):
+    if inp.type().scalarType() != 'Bool':
+        return _unimplemented("bitwise_not", "non-bool tensor")
+    return g.op("Not", inp)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1753,7 +1761,7 @@ def rand(g, *shapes):
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
@@ -2207,3 +2215,9 @@ def dim(g, self):
 
 def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
+
+def take(g, self, index):
+    self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    out = index_select(g, self_flattened, 0, index)
+    out = reshape_as(g, out, index)
+    return out
