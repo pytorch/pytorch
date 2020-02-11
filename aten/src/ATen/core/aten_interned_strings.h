@@ -282,6 +282,7 @@ _(aten, cudnn_is_acceptable) \
 _(aten, conv_depthwise3d) \
 _(aten, conv_depthwise3d_backward) \
 _(aten, cummax) \
+_(aten, cummin) \
 _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \

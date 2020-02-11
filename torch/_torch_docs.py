@@ -904,7 +904,8 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks.
+Splits a tensor into a specific number of chunks. Each chunk is a view of
+the input tensor.
 
 Last chunk will be smaller if the tensor size along the given dimension
 :attr:`dim` is not divisible by :attr:`chunks`.
@@ -1402,6 +1403,30 @@ Example::
         indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
 """.format(**reduceops_common_args))
 
+add_docstr(torch.cummin,
+           r"""
+cummin(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.2284, -0.6628,  0.0975,  0.2680, -1.3298, -0.4220, -0.3885,  1.1762,
+         0.9165,  1.6684])
+    >>> torch.cummin(a, dim=0)
+    torch.return_types.cummin(
+        values=tensor([-0.2284, -0.6628, -0.6628, -0.6628, -1.3298, -1.3298, -1.3298, -1.3298,
+        -1.3298, -1.3298]),
+        indices=tensor([0, 1, 1, 1, 4, 4, 4, 4, 4, 4]))
+""".format(**reduceops_common_args))
+
 add_docstr(torch.cumprod,
            r"""
 cumprod(input, dim, out=None, dtype=None) -> Tensor
@@ -1881,8 +1906,8 @@ Returns:
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[ True, False],
+            [False, True]])
 """.format(**common_args))
 
 add_docstr(torch.equal,
@@ -3116,7 +3141,7 @@ to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    mask  (ByteTensor): the tensor containing the binary mask to index with
+    mask  (BoolTensor): the tensor containing the binary mask to index with
     {out}
 
 Example::
@@ -3820,15 +3845,16 @@ add_docstr(torch.mvlgamma,
            r"""
 mvlgamma(input, p) -> Tensor
 
-Computes the multivariate log-gamma function (`[reference]`_) with dimension :math:`p` element-wise, given by
+Computes the `multivariate log-gamma function
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
+:math:`p` element-wise, given by
 
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
 where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
-If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
-is thrown.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
 
 Args:
     input (Tensor): the tensor to compute the multivariate log-gamma function
@@ -3843,8 +3869,6 @@ Example::
     >>> torch.mvlgamma(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
-
-.. _`[reference]`: https://en.wikipedia.org/wiki/Multivariate_gamma_function
 """)
 
 add_docstr(torch.narrow,
@@ -5569,8 +5593,8 @@ t(input) -> Tensor
 Expects :attr:`input` to be <= 2-D tensor and transposes dimensions 0
 and 1.
 
-0-D and 1-D tensors are returned as it is and
-2-D tensor can be seen as a short-hand function for ``transpose(input, 0, 1)``.
+0-D and 1-D tensors are returned as is. When input is a 2-D tensor this
+is equivalent to ``transpose(input, 0, 1)``.
 
 Args:
     {input}

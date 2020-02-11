@@ -131,22 +131,22 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 test_python_nn() {
-  time python test/run_test.py --include nn --verbose
+  time python test/run_test.py --include test_nn --verbose
   assert_git_not_dirty
 }
 
 test_python_ge_config_simple() {
-  time python test/run_test.py --include jit_simple --verbose
+  time python test/run_test.py --include test_jit_simple --verbose
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include jit_legacy jit_fuser_legacy --verbose
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn jit_simple jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods
   assert_git_not_dirty
 }
 
@@ -213,7 +213,9 @@ test_custom_script_ops() {
 
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  export XRT_WORKERS="localservice:0;grpc://localhost:40934"
+  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
+  XLA_PORT=`shuf -i 40701-40999 -n 1`
+  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
   pushd xla
   echo "Running Python Tests"
   ./test/run_tests.sh
