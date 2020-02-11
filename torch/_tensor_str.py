@@ -72,8 +72,8 @@ def set_printoptions(
 
 class _Formatter(object):
     def __init__(self, tensor):
-        self.floating_dtype = tensor.dtype.is_floating_point
-        self.complex_mode = tensor.is_complex
+        self.floating_dtype = tensor.is_floating_point()
+        self.complex_dtype = tensor.is_complex()
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
@@ -81,7 +81,7 @@ class _Formatter(object):
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
-        if self.complex_mode or not self.floating_dtype:
+        if not self.floating_dtype:
             for value in tensor_view:
                 value_str = '{}'.format(value)
                 self.max_width = max(self.max_width, len(value_str))
@@ -137,10 +137,7 @@ class _Formatter(object):
 
     def format(self, value):
         if self.floating_dtype:
-            if self.complex_mode:
-                #TODO: single precision for float, double precision for double
-                ret = '({0:.2f} {1} {2:.2f}j)'.format(value.real, '+-'[value.imag < 0], abs(value.imag))
-            elif self.sci_mode:
+            if self.sci_mode:
                 ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
             elif self.int_mode:
                 ret = '{:.0f}'.format(value)
@@ -148,6 +145,9 @@ class _Formatter(object):
                     ret += '.'
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+        elif self.complex_dtype:
+            #TODO: single precision for float, double precision for double
+            ret = '({0:.2f} {1} {2:.2f}j)'.format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
