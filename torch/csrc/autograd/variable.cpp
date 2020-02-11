@@ -78,7 +78,7 @@ namespace impl {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
       // Do not use handle_view_on_rebase here as check_inplace should have been called before this
-      // and either throw and error or clear the warning
+      // and either throw an error or clear the warning
       TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history == OnRebase::ALLOW_REBASE);
       TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
       TORCH_INTERNAL_ASSERT(gradient_edge.function);
@@ -411,7 +411,7 @@ TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, boo
         TORCH_INTERNAL_ASSERT(false, "Invalid OnRebase state");
       }
 
-      if (!indirect and !grad_fn) {
+      if (!indirect && !grad_fn) {
         // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
         // requires grad is being used in an in-place operation." after the warning. So we make the warning an error directly.
         TORCH_CHECK(false, msg);
