@@ -216,6 +216,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -1653,9 +1655,9 @@ if _enabled:
             """
             return self._c.save(*args, **kwargs)
 
-        def save_for_mobile(self, *args, **kwargs):
+        def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""
-            _save_for_mobile(f)
+            _save_for_lite_interpreter(f)
 
             Add (or update) the bytecode session to the script model. The updated model is used
             in lite interpreter for mobile applications.
@@ -1870,6 +1872,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))

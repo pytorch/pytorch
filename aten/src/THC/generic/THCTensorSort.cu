@@ -279,6 +279,7 @@ void THCTensor_(sort)(THCState* state,
                       int dim, int order) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, sorted, input));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, indices));
+  dim = at::maybe_wrap_dim(dim, input);
   int64_t dims = THCTensor_(nDimensionLegacyNoScalars)(state, sorted);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCTensor_(nDimensionLegacyNoScalars)(state, input);
