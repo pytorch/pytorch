@@ -534,7 +534,7 @@ class JitTestCase(TestCase):
         runs the compiled module and the original ``nn_module`` to check that the
         results are equal.
 
-        ::
+        .. testcode::
 
             import unittest
             import torch
