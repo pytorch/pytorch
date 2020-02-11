@@ -309,8 +309,7 @@ __global__ void depthwiseConv3dUpdateGradWeight(
 }
 
 
-static void conv_depthwise3d_cuda_template(
-  Tensor& output,
+n  Tensor& output,
   const Tensor& input_,
   const Tensor& weight,
   const Tensor& bias,
