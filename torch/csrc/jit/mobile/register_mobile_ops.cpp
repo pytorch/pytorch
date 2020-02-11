@@ -116,6 +116,17 @@ void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
+void upsample_nearest2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = at::upsample_nearest2d(
+    (std::move(peek(*stack, 0, 4))).toTensor(),
+    (std::move(peek(*stack, 1, 4))).toIntVector(),
+    (std::move(peek(*stack, 2, 4))).toOptional<double>(),
+    (std::move(peek(*stack, 3, 4))).toOptional<double>()
+  );
+  drop(*stack, 4);
+  pack(*stack, std::move(result_));
+}
+
 void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   drop(*stack, 1);
   pop(*stack);
@@ -135,6 +146,12 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
     return at::add(a, b, c);
+  })
+).op(
+  "_aten::sub.Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
+    return at::sub(a, b, c);
   })
 ).op(
   "_aten::add.Scalar",
@@ -348,6 +365,9 @@ static auto registry = torch::RegisterOperators().op(
      return at::mul(self, other);
   })
 ).op(
+  "_aten::upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor",
+  torch::RegisterOperators::options().kernel<&upsample_nearest2d_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
   "_aten::tanh(Tensor self) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](const Tensor & self) {
@@ -371,6 +391,12 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&softmax_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
+  "_aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor& self, Scalar beta, Scalar threshold) {
+    return at::softplus(self, beta, threshold);
+  })
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel<&warn_kernel>()
