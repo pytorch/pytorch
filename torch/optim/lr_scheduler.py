@@ -134,7 +134,6 @@ class _LRScheduler(object):
 
             def __exit__(self, type, value, traceback):
                 self.o._get_lr_called_within_step = False
-                return self
 
         with _enable_get_lr_call(self):
             if epoch is None:
