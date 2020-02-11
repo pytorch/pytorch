@@ -642,13 +642,14 @@ void Unpickler::rebuildRRef() {
         ownerId, rrefId, forkId, parent, typeStr);
     auto& ctx = distributed::rpc::RRefContext::getInstance();
     c10::intrusive_ptr<distributed::rpc::RRef> rref;
-    // TODO get correct type by passing classResolver
-    TypePtr rrefType = PyObjectType::get();
+    TORCH_INTERNAL_ASSERT(
+        type_resolver_ != nullptr, "type_resolver_ is nullptr.");
+    TypePtr rrefType = type_resolver_(typeStr);
     rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
     ctx.notifyOwnerAndParentOfFork(
         rrefForkData.forkId_, rrefForkData.parent_, rref);
-    stack_.emplace_back(std::move(
-        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref)));
+    stack_.emplace_back(
+        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref));
   });
   stack_.emplace_back(int64_t(globals_.size() - 1));
   return;

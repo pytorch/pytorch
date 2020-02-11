@@ -165,10 +165,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
     auto ownerRRef = getOwnerRRef(rrefId);
-    //  Comment it to unblock test_remote_script_module,
-    //  TODO, Will uncomment it when we are able to pass class resolver to JIT
-    //  unplicker and parse correct RRef type during JIT unpickling
-    //  TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
     return ownerRRef;
   } else {
     return createUserRRef(ownerId, rrefId, forkId, type);

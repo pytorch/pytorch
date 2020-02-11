@@ -69,6 +69,8 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
+  TypeResolver getTypeResolver() override;
+
  protected:
   // This method wraps the destination information and the message into a
   // SendWork object, and put the SendWork into a queue. Another thread will

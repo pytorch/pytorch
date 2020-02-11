@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -114,8 +115,12 @@ Message ScriptCall::toMessage() && {
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      nullptr, /* class_resover */
+      &message.tensors(),
+      RpcAgent::getCurrentRpcAgent()->getTypeResolver());
 
   auto values = value.toTuple()->elements();
   return fromIValues(values);

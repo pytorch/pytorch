@@ -121,9 +121,13 @@ IValue pickle_load(const std::vector<char>& data) {
 IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     ClassResolver class_resolver,
-    const std::vector<at::Tensor>* tensor_table) {
+    const std::vector<at::Tensor>* tensor_table,
+    TypeResolver type_resolver) {
   Unpickler unpickler(
-      std::move(reader), std::move(class_resolver), tensor_table);
+      std::move(reader),
+      std::move(class_resolver),
+      tensor_table,
+      std::move(type_resolver));
   return unpickler.parse_ivalue();
 }
 
@@ -131,7 +135,8 @@ IValue unpickle(
     const char* data,
     size_t size,
     ClassResolver class_resolver,
-    const std::vector<at::Tensor>* tensor_table) {
+    const std::vector<at::Tensor>* tensor_table,
+    TypeResolver type_resolver) {
   size_t bytes_read = 0;
   return unpickle(
       [&](char* buffer, size_t len) -> size_t {
@@ -146,7 +151,8 @@ IValue unpickle(
         return len;
       },
       std::move(class_resolver),
-      tensor_table);
+      tensor_table,
+      std::move(type_resolver));
 }
 
 } // namespace jit

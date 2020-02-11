@@ -11,6 +11,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using TypeResolver = std::function<c10::TypePtr(const std::string&)>;
+
 struct RpcBackendOptions {
   RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
@@ -153,6 +155,10 @@ class TORCH_API RpcAgent {
 
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
+
+  // Class resolver can be passed to JIT pickler to resolve IValue type based
+  // on type str or qualified name
+  virtual TypeResolver getTypeResolver() = 0;
 
  protected:
   const WorkerInfo workerInfo_;

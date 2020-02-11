@@ -263,6 +263,7 @@ def clear_global_rref():
 
 @torch.jit.script
 def one_arg(value):
+    # type: (Tensor) -> Tensor
     return value + 1
 
 
@@ -1739,18 +1740,51 @@ class RpcTest(RpcAgentTestFixture):
 )
 class RpcJitTest(RpcAgentTestFixture):
     @dist_init
-    def test_rref_as_arg(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
-
+    def test_rref_as_arg_and_return(self):
         @torch.jit.script
         def rref_to_here(rref_var):
             # type: (RRef[Tensor]) -> Tensor
-            t = rref_var.to_here()
-            return t + 1
+            return rref_var.to_here()
 
-        local_ret = rref_to_here(rref_var)
+        @torch.jit.script
+        def return_rref(rref_var):
+            # type: (RRef[Tensor]) -> RRef[Tensor]
+            return rref_var
+
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        local_ret = one_arg(torch.ones(2, 2))
+
+        # create rref on current rank
+        rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+
+        # pass rref to another user in rpc call
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref,))
+        self.assertEqual(ret, local_ret)
+
+        # return rref in rpc call
+        rref1 = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            return_rref,
+            args=(rref,))
+        self.assertEqual(rref1.to_here(), local_ret)
+
+        # pass rref to another user in remote call
+        rref2 = rpc.remote(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref,))
+        self.assertEqual(rref2.to_here(), local_ret)
+
+        # return rref in remote call
+        rref3 = rpc.remote(
+            "worker{}".format(dst_rank),
+            return_rref,
+            args=(rref,))
+        self.assertEqual(rref3.to_here().to_here(), local_ret)
 
     @dist_init
     def test_remote_script_module(self):
@@ -1777,15 +1811,18 @@ class RpcJitTest(RpcAgentTestFixture):
         import torch.distributed.rpc.api as api
         api._ignore_rref_leak = True
 
+        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
+
         n = self.rank + 1
         dst_rank = n % self.world_size
         remote_ref = rpc.remote(
             "worker{}".format(dst_rank),
             construct_my_script_module,
             args=(self.rank, ))
+
+        # pass rref arg to owner
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             run_ref_script_module,
             args=(remote_ref, torch.ones(self.rank)))
-        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
         self.assertEqual(ret, local_ret)

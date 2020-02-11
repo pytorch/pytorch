@@ -6,6 +6,25 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+namespace {
+// If the type is subtype of named type, return its qualifiedname, otherwise
+// return its type str.
+std::string getTypeStr(const c10::TypePtr& type) {
+  switch (type->kind()) {
+    case c10::TypeKind::FunctionType:
+      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+    case c10::TypeKind::TupleType:
+      return type->cast<c10::TupleType>()->name()->qualifiedName();
+    case c10::TypeKind::ClassType:
+      return type->cast<c10::ClassType>()->name()->qualifiedName();
+    case c10::TypeKind::InterfaceType:
+      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+    default:
+      return type->str();
+  }
+}
+} // namespace
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -41,7 +60,7 @@ RRefForkData RRef::fork() const {
       rrefId_,
       ctx.genGloballyUniqueId(),
       ctx.getWorkerId(),
-      type_->str());
+      getTypeStr(type_));
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////

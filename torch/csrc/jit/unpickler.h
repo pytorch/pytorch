@@ -8,6 +8,9 @@ namespace jit {
 using ClassResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
+using TypeResolver =
+    std::function<c10::TypePtr(const std::string&)>;
+
 using ObjLoader =
     std::function<c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
 
@@ -23,10 +26,12 @@ class Unpickler {
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       ClassResolver class_resolver,
-      const std::vector<at::Tensor>* tensor_table)
+      const std::vector<at::Tensor>* tensor_table,
+      TypeResolver type_resolver = nullptr)
       : reader_(reader),
         tensor_table_(tensor_table),
-        class_resolver_(std::move(class_resolver)) {}
+        class_resolver_(std::move(class_resolver)),
+        type_resolver_(std::move(type_resolver)) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
@@ -108,6 +113,7 @@ class Unpickler {
   // optionally nullptr, needs to be present for creating classes
   ClassResolver class_resolver_;
   ObjLoader obj_loader_;
+  TypeResolver type_resolver_;
   IValue empty_tuple_;
 
   std::function<at::DataPtr(const std::string&)> read_record_;
