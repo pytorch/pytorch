@@ -894,20 +894,61 @@ int TensorIterator::get_dim_to_split() const {
   return dim_to_split;
 }
 
-void TensorIterator::fast_set_up() {
-  //this function is called if all the inputs are contiguous to avoid needless reordering of dimensions
-  //and tracking output strides
-  //TODO enable fast handling for reductions
-  //TODO enable fast handling for channels_last
+bool TensorIterator::fast_set_up() {
+  // This function trys to do a fast setup to avoid needless reordering of dimensions and tracking output strides
+  // Return true if it can do fast setup or false otherwise
+  // TODO enable fast handling for reductions
+  FastSetupType setup_type = compute_fast_setup_type();
+  if (setup_type == FastSetupType::NONE) {
+    return false;
+  }
 
-  //allocate contiguous tensor for output
-  for (int i = 0; i < num_outputs_; i++){
-      auto& op = operands_[i];
-      if (!op.tensor.defined()) {
-        TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-        op.tensor = at::empty(shape_, op.options());
+  // allocate memory for output, memory format depends on setup_type
+  switch (setup_type) {
+    case FastSetupType::CONTIGUOUS:
+      {
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
+            op.current_dtype = op.target_dtype;
+          }
+        }
+        break;
       }
-      op.current_dtype = op.target_dtype;
+    case FastSetupType::CHANNELS_LAST:
+      {
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+            op.current_dtype = op.target_dtype;
+          }
+        }
+        break;
+      }
+    case FastSetupType::NON_CONTIGUOUS:
+      {
+        // find the index of a defined tensor in operands_
+        int i_defined;
+        for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
+          if (operands_[i_defined].tensor.defined()) break;
+        }
+        TORCH_CHECK(i_defined >= 0, "Can not find a defined tensor when fast allocating memory to outputs");
+        for (int i = 0; i < num_outputs_; i++){
+          auto& op = operands_[i];
+          if (!op.tensor.defined()) {
+            TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
+            op.current_dtype = op.target_dtype;
+          }
+        }
+        break;
+      }
+    default:
+      TORCH_CHECK(false, "Unsupported fast setup type", std::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
@@ -924,21 +965,67 @@ void TensorIterator::fast_set_up() {
       op.stride_bytes[0] = element_size_in_bytes;
     }
   }
+  return true;
 }
 
-bool TensorIterator::can_use_fast_set_up() {
-  if (is_reduction_) return false;
-  if (!all_ops_same_shape_) {
-    return false;
+FastSetupType TensorIterator::compute_fast_setup_type() {
+  if (is_reduction_ || !all_ops_same_shape_) {
+    return FastSetupType::NONE;
   }
-  for (auto& op : operands_) {
+
+  bool is_contiguous = true;
+  bool is_channels_last = true;
+  bool is_non_overlapping_and_dense = true;
+  for (const auto& op : operands_) {
     if (op.tensor.defined()) {
-      if (!op.tensor.is_contiguous()) {
-        return false;
-      }
+      is_contiguous &= op.tensor.is_contiguous(at::MemoryFormat::Contiguous);
+      is_channels_last &= op.tensor.is_contiguous(at::MemoryFormat::ChannelsLast);
+      is_non_overlapping_and_dense &= op.tensor.is_non_overlapping_and_dense();
     }
   }
-  return true;
+
+  if (is_contiguous) {
+    return FastSetupType::CONTIGUOUS;
+  }
+  if (is_channels_last) {
+    if (requires_channels_last_output_) {
+      return FastSetupType::CHANNELS_LAST;
+    }
+    return FastSetupType::NONE;
+  }
+  if (is_non_overlapping_and_dense) {
+    int64_t prev = -1;
+    bool restride_output = false;
+    // iterate from back to favor input's strides since we will restride the output tensor
+    // if only output's stride is not the same as input and all inputs' stride are the same
+    for (int64_t i = ntensors() - 1; i >= 0; --i) {
+      const auto& op = operands_[i];
+      if (op.tensor.defined()) {
+        if (prev < 0) {
+          prev = i;
+          continue;
+        }
+        if (!operands_[prev].tensor.strides().equals(op.tensor.strides())) {
+          if (!resize_outputs_ || !op.is_output || op.is_read_write) {
+            return FastSetupType::NONE;
+          }
+          if (!restride_output) {
+            restride_output = true;
+          }
+        }
+      }
+    }
+    if (restride_output) {
+      const auto& op = operands_[prev];
+      for (int64_t i = 0; i < num_outputs_; ++i) {
+        if (prev != i) {
+          operands_[i].tensor.as_strided_(op.tensor.sizes(), op.tensor.strides());
+        }
+      }
+    }
+    return FastSetupType::NON_CONTIGUOUS;
+  }
+  return FastSetupType::NONE;
 }
 
 void TensorIterator::build() {
@@ -955,9 +1042,8 @@ void TensorIterator::build() {
   compute_shape();
   // compute the result dtype and device
   compute_types();
-  if (can_use_fast_set_up()) {
-    fast_set_up();
-  } else {
+  // try fast setup output tensor, if failed, fallback to normal setup
+  if (!fast_set_up()) {
     // compute each tensor's stride after broadcasting
     compute_strides();
     // re-order dimensions to improve coalescing
