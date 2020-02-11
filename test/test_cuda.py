@@ -982,10 +982,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # Operate on 10 MB tensor which should take some time
-        tensor1 = torch.ByteTensor(10000000).pin_memory()
+        tensor1 = torch.ByteTensor(5).pin_memory()
         tensor2 = tensor1.cuda(non_blocking=True) + 1
-        self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
