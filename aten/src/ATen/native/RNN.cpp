@@ -1182,6 +1182,10 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
+
+  std::cout << "_input:" << std::endl;
+  std::cout << _input << std::endl;
+
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;

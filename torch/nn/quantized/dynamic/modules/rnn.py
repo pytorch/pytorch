@@ -309,6 +309,9 @@ class LSTM(RNNBase):
         for mod in self._all_weight_values:
             weight_values.append(mod.param)
 
+        print("rnn.py input:")
+        print(input)
+
         if batch_sizes is None:
             result = _VF.quantized_lstm(input, hx, weight_values, self.bias, self.num_layers,
                                         float(self.dropout), self.training, self.bidirectional,
