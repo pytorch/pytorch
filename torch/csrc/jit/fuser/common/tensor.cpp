@@ -1,11 +1,19 @@
+#include <torch/csrc/jit/fuser/common/tensor.h>
+
+namespace torch {
+namespace jit {
+namespace fuser {
 
 /*
 * Tensor member definitions
 */
 
-/*
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
-: Val(ValType::Tensor) {
+: Val(ValType::Tensor, DataType::Null) {
+  std::runtime_error("Not implemented yet.");
+}
+
+/*
   // TODO: protocol between codegen and JIT is not set in stone yet.
   // Issue 1:
   //   Profiling executor promises static shape information, but the defaul executor cannot guaranttee this.
@@ -31,3 +39,5 @@ Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
 : Tensor(jit_value->type()->cast<c10::TensorType>()) {
 }
 */
+
+}}}
