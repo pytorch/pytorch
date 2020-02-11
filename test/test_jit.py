@@ -1469,7 +1469,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1507,7 +1506,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         x = torch.rand(1, 1, 6, 6)
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1547,7 +1545,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
         x = torch.rand(1, 1, 6, 6)
         self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):

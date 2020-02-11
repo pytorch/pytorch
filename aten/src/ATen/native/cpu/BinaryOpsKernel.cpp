@@ -479,7 +479,7 @@ void smooth_l1_kernel(TensorIterator& iter) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -492,7 +492,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -505,6 +505,11 @@ void tanh_backward_kernel(TensorIterator& iter) {
 }
 
 void mse_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Half) {
+    TORCH_WARN_ONCE("Applying the CPU mse kernel on half-type tensors. "
+                    "This may be slower than using float or double-type tensors.");
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
