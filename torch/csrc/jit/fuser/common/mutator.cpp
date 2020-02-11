@@ -27,7 +27,6 @@ const Statement* BaseMutator::mutate(const Add* const add){
     const Val* out = static_cast<const Val*>(add->out()->dispatch_mutator(this));
     const Val* lhs = static_cast<const Val*>(add->lhs()->dispatch_mutator(this)); 
     const Val* rhs = static_cast<const Val*>(add->rhs()->dispatch_mutator(this));
-    //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
     if(out!=add->out()
     || lhs!=add->lhs()
     || rhs!=add->rhs())
