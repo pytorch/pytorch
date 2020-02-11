@@ -10,5 +10,7 @@ TORCH_API void CreateFunctionalGraphs(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph);
 
+TORCH_API void RemoveMutation(const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
