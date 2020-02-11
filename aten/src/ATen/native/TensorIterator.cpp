@@ -681,7 +681,7 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
   iter.add_output(out);
   iter.add_input(a);
   iter.num_outputs_ = 1;
-  if(promoting == true) iter.promote_common_dtype();
+  if(promoting) iter.promote_common_dtype();
   iter.build();
   return iter;
 }
