@@ -98,6 +98,29 @@ class HistogramObserver final : public ObserverBase<OperatorBase> {
   bool warning_printed_ = false;
 }; // class HistogramObserver
 
+/**
+ * Given min/max, collect histogram of the max value of each column of tensor
+ */
+class OutputColumnMaxHistogramObserver final
+    : public ObserverBase<OperatorBase> {
+ public:
+  explicit OutputColumnMaxHistogramObserver(
+      OperatorBase* op,
+      const std::string& col_max_blob_name,
+      int nbins,
+      std::shared_ptr<HistogramObserver::Info> info);
+
+ private:
+  void Stop() override;
+
+  std::string col_max_blob_name_;
+  int nbins_;
+  std::shared_ptr<HistogramObserver::Info> info_;
+  bool warning_printed_ = false;
+  int col_max_blob_idx_ = -1;
+  int num_columns_ = -1;
+}; // class OutputColumnMaxHistogramObserver
+
 class HistogramNetObserver final : public NetObserver {
  public:
   /**
@@ -129,6 +152,34 @@ class HistogramNetObserver final : public NetObserver {
   bool mul_nets_;
   const std::string out_file_name_;
   std::vector<std::shared_ptr<HistogramObserver::Info>> hist_infos_;
+};
+
+class OutputColumnMaxHistogramNetObserver final : public NetObserver {
+ public:
+  explicit OutputColumnMaxHistogramNetObserver(
+      NetBase* subject,
+      const std::string& out_file_name,
+      const std::vector<std::string>& observe_column_max_for_blobs,
+      int nbins,
+      int dump_freq = -1,
+      bool mul_nets = false);
+  ~OutputColumnMaxHistogramNetObserver();
+
+ private:
+  void Stop() override;
+  void DumpAndReset_(
+      const std::string& out_file_name,
+      bool print_total_min_max = false);
+  int dump_freq_, cnt_;
+  bool mul_nets_;
+  const std::string out_file_name_;
+  std::unordered_set<std::string> col_max_blob_names_;
+
+  // {op_idx: {output_index: col_hists}}
+  std::unordered_map<
+      int,
+      std::unordered_map<int, std::shared_ptr<HistogramObserver::Info>>>
+      hist_infos_;
 };
 
 /**

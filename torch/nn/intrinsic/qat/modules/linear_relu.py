@@ -15,8 +15,7 @@ class LinearReLU(nnqat.Linear):
     default.
 
     Attributes:
-        observer: fake quant module for output activation, it's called observer
-            to align with post training flow, TODO: rename?
+        activation_post_process: fake quant module for output activation
         weight: fake quant module for weight
 
     Examples::
@@ -34,7 +33,8 @@ class LinearReLU(nnqat.Linear):
         super(LinearReLU, self).__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
-        return self.observer(F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias)))
+        return self.activation_post_process(F.relu(
+            F.linear(input, self.weight_fake_quant(self.weight), self.bias)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

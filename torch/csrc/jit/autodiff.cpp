@@ -739,7 +739,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value* tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     // Note that we check the contents of the grad_map instead of
-    // tmp->requires_grad(), becuase it's actually a more faithful source.
+    // tmp->requires_grad(), because it's actually a more faithful source.
     // tmp->requires_grad() is really an overapproximation (i.e. it can have
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real
@@ -788,12 +788,13 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   for (auto& offset : grad_desc.df_input_captured_outputs)
     add_capture(graph.outputs()[offset]);
 
-  GRAPH_DUMP(" forward graph: ", &graph);
-  GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   grad_desc.df = std::make_shared<Graph>();
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
+
+  GRAPH_DUMP(" forward graph: ", &graph);
+  GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   // reverse_node was just to hold onto reverse_block in a debuggable way
   // we can remove it now.
   reverse_block->owningNode()->destroy();
@@ -829,9 +830,6 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
-  // It's possible the we've cloned the same constants many times, so
-  // de-duplicate them
-  ConstantPooling(grad_desc.df);
   packReturnValuesIntoTuple(grad_desc.df);
   return grad_desc;
 }

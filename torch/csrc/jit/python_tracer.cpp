@@ -28,7 +28,7 @@ SourceRange getPythonInterpreterSourceRange() {
   size_t source_line = 0;
   std::stringstream stack_trace;
 
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
 
   while (nullptr != frame) {
@@ -49,46 +49,40 @@ SourceRange getPythonInterpreterSourceRange() {
   return SourceRange(source, 0, stack_trace_text.size());
 }
 
-std::shared_ptr<torch::jit::Graph> createGraphByTracing(
+std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
-    TypedStack trace_inputs,
+    Stack trace_inputs,
     const py::function& var_name_lookup_fn,
     bool force_outplace,
     script::Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
-  try {
-    auto enter_info = tracer::enter(std::move(trace_inputs), self);
-    auto graph = enter_info.first->graph;
+  auto lookup_fn_adapter =
+      [var_name_lookup_fn](const Variable& var) -> std::string {
+    pybind11::gil_scoped_acquire ag;
+    return py::cast<std::string>(var_name_lookup_fn(var));
+  };
 
-    getTracingState()->lookup_var_name_fn =
-        [var_name_lookup_fn](const Variable& var) -> std::string {
-      AutoGIL ag;
-      return py::cast<std::string>(var_name_lookup_fn(var));
-    };
-    getTracingState()->force_outplace = force_outplace;
-    size_t num_func_inputs = enter_info.second.size();
-    py::tuple py_inputs(num_func_inputs);
-    for (size_t i = 0; i < num_func_inputs; ++i) {
-      py_inputs[i] = py::cast(enter_info.second[i]);
-    }
-    auto out = func(*py_inputs);
-    if (out.ptr() == Py_None) {
-      AT_ERROR(
-          "The traced function didn't return any values! Side-effects are not "
-          "captured in traces, so it would be a no-op.");
-    }
-    tracer::exit({toIValue(out)});
-    if (script::getInlineEverythingMode()) {
-      Inline(*graph);
-    }
-    LowerSimpleTuples(graph);
-    EliminateDeadCode(graph);
-    return graph;
-  } catch (...) {
-    tracer::abandon();
-    throw;
-  }
+  auto outs = tracer::trace(
+      std::move(trace_inputs),
+      [&func](Stack inputs) -> Stack {
+        size_t num_func_inputs = inputs.size();
+        py::tuple py_inputs(num_func_inputs);
+        for (size_t i = 0; i < num_func_inputs; ++i) {
+          py_inputs[i] = py::cast(inputs[i]);
+        }
+        auto out = func(*py_inputs);
+        if (out.ptr() == Py_None) {
+          AT_ERROR(
+              "The traced function didn't return any values! Side-effects are not "
+              "captured in traces, so it would be a no-op.");
+        }
+        return {toTypeInferredIValue(out)};
+      },
+      lookup_fn_adapter,
+      force_outplace,
+      self);
+  return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
 }
 
 Node* preRecordPythonTrace(
@@ -111,8 +105,7 @@ Node* preRecordPythonTrace(
     n->addInput(getValueTrace(input));
   }
 
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
+  graph->insertNode(n);
 
   return n;
 }
@@ -122,7 +115,7 @@ void pythonRecordSourceLocation(Node* n) {
 }
 
 void pythonWarn(const std::string& reason) {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
 }
@@ -155,18 +148,19 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def("pop_scope", [](TracingState& s) { s.graph->pop_scope(); })
       .def(
+          "current_scope",
+          [](TracingState& s) {
+            return s.graph->current_scope()->name().toUnqualString();
+          })
+      .def(
           "set_graph",
           [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
-  m.def("_tracer_enter", [](py::args trace_inputs) {
-    return tracer::enter(toTypedStack(trace_inputs));
-  });
-  m.def("_tracer_exit", [](py::tuple var_outputs) {
-    tracer::exit(toStack(var_outputs));
-  });
-  m.def("_tracer_abandon", []() { tracer::abandon(); });
+  m.def("_create_graph_by_tracing", createGraphByTracing,
+    py::arg("func"), py::arg("inputs"), py::arg("var_name_lookup_fn"),
+    py::arg("force_outplace"), py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
     return setTracingState(state);
@@ -182,7 +176,7 @@ void initPythonTracerBindings(PyObject* module) {
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =
         [func](const Variable& var) -> std::string {
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return py::cast<std::string>(func(var));
     };
   });

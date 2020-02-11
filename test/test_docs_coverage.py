@@ -16,9 +16,13 @@ class TestDocCoverage(unittest.TestCase):
 
     @staticmethod
     def parse_rst(filename, regex):
-        filename = os.path.join(rstpath, filename)
+        path = os.path.join(os.getenv('DOCS_SRC_DIR', ''), filename)
+        if not os.path.exists(path):
+            # Try to find the file using a relative path.
+            path = os.path.join(rstpath, filename)
+
         ret = set()
-        with open(filename, 'r') as f:
+        with open(path, 'r') as f:
             lines = f.readlines()
             for l in lines:
                 l = l.strip()

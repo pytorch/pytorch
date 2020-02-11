@@ -14,13 +14,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # (2) build with NCCL and MPI
 # (3) build with only MPI
 # (4) build with neither
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
-  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+  sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]] || [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
   # TODO: move this to Docker
   sudo apt-get -qq update
   if [[ "$BUILD_ENVIRONMENT" == *-trusty-py2.7.9* ]]; then
@@ -36,6 +36,14 @@ if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-build* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
+fi
+
 echo "Python version:"
 python --version
 
@@ -45,6 +53,11 @@ gcc --version
 echo "CMake version:"
 cmake --version
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  echo "NVCC version:"
+  nvcc --version
+fi
+
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 
@@ -53,11 +66,29 @@ if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
   # intel cpu and later run tests on machines with amd cpu.
   # Also leave out two builds to make sure non-mkldnn builds still work.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda9-cudnn7-py3-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *-trusty-py3.5-* && "$BUILD_ENVIRONMENT" != *-xenial-cuda10.1-cudnn7-py3-* ]]; then
     pip_install mkl mkl-devel
     export USE_MKLDNN=1
   else
     export USE_MKLDNN=0
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      export JAVA_HOME="$JH"
+      export BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
   fi
 fi
 
@@ -112,9 +143,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  # OPENCV is needed to enable ImageInput operator in caffe2 resnet5_trainer
-  # LMDB is needed to read datasets from https://download.caffe2.ai/databases/resnet_trainer.zip
-  USE_ROCM=1 USE_LMDB=1 USE_OPENCV=1 python setup.py install --user
+  python setup.py install --user
 
   # runtime compilation of MIOpen kernels manages to crash sccache - hence undo the wrapping
   bash tools/amd_build/unwrap_clang.sh
@@ -135,10 +164,6 @@ export TORCH_CUDA_ARCH_LIST="5.2"
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *xenial-py3.6-gcc5.4* ]]; then
-  export DEBUG=1
 fi
 
 # Patch required to build xla
@@ -180,16 +205,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
   assert_git_not_dirty
 
-  # Test documentation build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
-    pushd docs
-    # TODO: Don't run this here
-    pip_install -r requirements.txt || true
-    LC_ALL=C make html
-    popd
-    assert_git_not_dirty
-  fi
-
   # Build custom operator tests.
   CUSTOM_OP_BUILD="$PWD/../custom-op-build"
   CUSTOM_OP_TEST="$PWD/test/custom_operator"
@@ -203,7 +218,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   assert_git_not_dirty
 else
   # Test standalone c10 build
-  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda9-cudnn7-py3* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda10.1-cudnn7-py3* ]]; then
     mkdir -p c10/build
     pushd c10/build
     cmake ..
@@ -240,7 +255,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Bazel dependencies
   sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
   # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/0.24.1/bazel-0.24.1-installer-linux-x86_64.sh
+  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
   chmod +x bazel-*.sh
   sudo ./bazel-*.sh
   BAZEL="$(which bazel)"
@@ -252,7 +267,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
-  curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
+  curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"

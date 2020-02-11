@@ -148,6 +148,13 @@ class QuantizationFactory {
     return weight_kind_;
   }
 
+  void SetWeightP99Threshold(float threshold) {
+    weight_p99_threshold_ = threshold;
+  }
+  void SetActivationP99Threshold(float threshold) {
+    activation_p99_threshold_ = threshold;
+  }
+
   explicit QuantizationFactory(
       int activation_precision = 8,
       // precision used for activations in main operations like matmul

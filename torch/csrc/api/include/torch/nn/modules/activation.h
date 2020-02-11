@@ -3,6 +3,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/activation.h>
 #include <torch/nn/functional/activation.h>
+#include <torch/nn/modules/linear.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -18,7 +19,7 @@ class TORCH_API ELUImpl : public torch::nn::Cloneable<ELUImpl> {
  public:
   explicit ELUImpl(const ELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -40,7 +41,7 @@ class TORCH_API SELUImpl : public torch::nn::Cloneable<SELUImpl> {
  public:
   explicit SELUImpl(const SELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -84,7 +85,7 @@ class TORCH_API HardtanhImpl : public torch::nn::Cloneable<HardtanhImpl> {
  public:
   explicit HardtanhImpl(const HardtanhOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -106,7 +107,7 @@ class TORCH_API LeakyReLUImpl : public torch::nn::Cloneable<LeakyReLUImpl> {
  public:
   explicit LeakyReLUImpl(const LeakyReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -253,7 +254,7 @@ class TORCH_API ReLUImpl : public torch::nn::Cloneable<ReLUImpl> {
  public:
   explicit ReLUImpl(const ReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -275,7 +276,7 @@ class TORCH_API ReLU6Impl : public torch::nn::Cloneable<ReLU6Impl> {
  public:
   explicit ReLU6Impl(const ReLU6Options& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -297,7 +298,7 @@ class TORCH_API RReLUImpl : public torch::nn::Cloneable<RReLUImpl> {
  public:
   explicit RReLUImpl(const RReLUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -319,7 +320,7 @@ class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
  public:
   explicit CELUImpl(const CELUOptions& options_ = {});
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -331,6 +332,45 @@ class TORCH_API CELUImpl : public torch::nn::Cloneable<CELUImpl> {
 };
 
 TORCH_MODULE(CELU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GLU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies glu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GLU to learn
+/// about the exact behavior of this module.
+class TORCH_API GLUImpl : public torch::nn::Cloneable<GLUImpl> {
+ public:
+  explicit GLUImpl(const GLUOptions& options_ = {});
+
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `GLU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// The options with which this `Module` was constructed.
+  GLUOptions options;
+};
+
+TORCH_MODULE(GLU);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies gelu over a given input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.GELU to learn
+/// about the exact behavior of this module.
+class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
+ public:
+  Tensor forward(const Tensor& input);
+
+  void reset() override;
+
+  /// Pretty prints the `GELU` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+};
+
+TORCH_MODULE(GELU);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Sigmoid ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -455,7 +495,7 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
     : ThresholdImpl(ThresholdOptions(threshold, value)) {}
   explicit ThresholdImpl(const ThresholdOptions& options_);
 
-  Tensor forward(Tensor& input);
+  Tensor forward(Tensor input);
 
   void reset() override;
 
@@ -467,6 +507,43 @@ class TORCH_API ThresholdImpl : public torch::nn::Cloneable<ThresholdImpl> {
 };
 
 TORCH_MODULE(Threshold);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiheadAttention ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the MultiheadAttention function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.MultiheadAttention
+/// to learn about the exact behavior of this module.
+class TORCH_API MultiheadAttentionImpl
+  : public torch::nn::Cloneable<MultiheadAttentionImpl> {
+ public:
+  MultiheadAttentionImpl(int64_t embed_dim, int64_t num_heads)
+    : MultiheadAttentionImpl(MultiheadAttentionOptions(embed_dim, num_heads)) {}
+  explicit MultiheadAttentionImpl(const MultiheadAttentionOptions& options_);
+
+  std::tuple<Tensor, Tensor> forward(const Tensor& query, const Tensor& key,
+                 const Tensor& value, const Tensor& key_padding_mask = {},
+                 bool need_weights = true, const Tensor& attn_mask = {});
+
+  void reset() override;
+
+  void _reset_parameters();
+
+  /// The options with which this `Module` was constructed.
+  MultiheadAttentionOptions options;
+
+  bool _qkv_same_embed_dim;
+  Tensor in_proj_weight;
+  Tensor in_proj_bias;
+  Tensor bias_k;
+  Tensor bias_v;
+  Linear out_proj = nullptr;
+  Tensor q_proj_weight;
+  Tensor k_proj_weight;
+  Tensor v_proj_weight;
+  int64_t head_dim;
+};
+
+TORCH_MODULE(MultiheadAttention);
 
 } // namespace nn
 } // namespace torch

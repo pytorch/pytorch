@@ -57,7 +57,7 @@ class Session(object):
 
 
     Global Workspace:
-        At the beggining of the session, a global workspace is created and kept
+        At the beginning of the session, a global workspace is created and kept
         alive for the duration of the session.
 
 

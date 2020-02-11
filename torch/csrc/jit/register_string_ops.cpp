@@ -170,7 +170,7 @@ auto reg_str_ops_2 =
                   bool is_upper = true;
                   for (size_t i = 0; i < string.size() && is_upper; ++i) {
                     char c = string[i];
-                    found_alpha |= ::isalpha(c);
+                    found_alpha |= static_cast<bool>(::isalpha(c));
                     is_upper &= (!::isalpha(c) || ::isupper(c));
                   }
                   return found_alpha && is_upper;
@@ -183,7 +183,7 @@ auto reg_str_ops_2 =
                   bool is_lower = true;
                   for (size_t i = 0; i < string.size() && is_lower; ++i) {
                     char c = string[i];
-                    found_alpha |= ::isalpha(c);
+                    found_alpha |= static_cast<bool>(::isalpha(c));
                     is_lower &= (!::isalpha(c) || ::islower(c));
                   }
                   return found_alpha && is_lower;
@@ -705,7 +705,22 @@ auto reg_str_ops_2 =
                       std::reverse(substr.begin(), substr.end());
                       splits.emplace(splits.begin(), substr);
                       return splits;
-                    }));
+                    }))
+
+        .op("aten::join(str self, str[] values) -> str",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+                .catchAllKernel([](const std::string& string,
+                                   const c10::List<std::string>& values) {
+                  std::stringstream ss;
+                  for (auto it = values.begin(); it != values.end(); ++it) {
+                    ss << static_cast<std::string>(*it);
+                    if (it != values.end() - 1) {
+                      ss << string;
+                    }
+                  }
+                  return ss.str();
+                }));
 } // namespace
 } // namespace jit
 } // namespace torch

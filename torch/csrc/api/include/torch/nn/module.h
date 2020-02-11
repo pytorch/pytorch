@@ -412,6 +412,9 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   /// implementation of your `Module`. Registering it makes it available to
   /// methods such as `parameters()`, `clone()` or `to().`
   ///
+  /// Note that registering an undefined Tensor (e.g. `module.register_parameter("param", Tensor())`)
+  /// is allowed, and is equivalent to `module.register_parameter("param", None)` in Python API.
+  ///
   /// \rst
   /// .. code-block:: cpp
   ///
@@ -645,11 +648,11 @@ void Module::to_impl(Ts&&... ts) {
     child.value()->to(ts...);
   }
   // Then move every parameter to the new dtype/device.
-  for (auto& parameter : parameters_) {
+  for (auto& parameter : named_parameters(/*recurse=*/false)) {
     parameter->set_data(autograd::Variable(*parameter).to(ts...));
   }
   // Then move every buffer to the new dtype/device.
-  for (auto& buffer : buffers_) {
+  for (auto& buffer : named_buffers(/*recurse=*/false)) {
     buffer->set_data(autograd::Variable(*buffer).to(ts...));
   }
 }

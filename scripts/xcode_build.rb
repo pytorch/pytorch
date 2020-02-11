@@ -16,7 +16,7 @@ option_parser = OptionParser.new do |opts|
  opts.on('-c', '--provisioning_profile ', 'provisioning profile for code signing') { |value|
     options[:profile] = value
  }
- opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+ opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
 end.parse!
@@ -40,7 +40,7 @@ other_linker_flags      = ['$(inherited)', "-all_load"]
 target.build_configurations.each do |config|
     config.build_settings['HEADER_SEARCH_PATHS']    = header_search_path
     config.build_settings['LIBRARY_SEARCH_PATHS']   = libraries_search_path
-    config.build_settings['OTHER_LINKER_FLAGS']     = other_linker_flags
+    config.build_settings['OTHER_LDFLAGS']          = other_linker_flags
     config.build_settings['ENABLE_BITCODE']         = 'No'
     dev_team_id = options[:team_id]
     if not dev_team_id
@@ -51,11 +51,13 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 for lib in libs do 
     path = "#{install_path}/lib/#{lib}"
-    libref = project.frameworks_group.new_file(path)
-    target.frameworks_build_phases.add_file_reference(libref)
+    if File.exist?(path)
+        libref = project.frameworks_group.new_file(path)
+        target.frameworks_build_phases.add_file_reference(libref)
+    end
 end
 project.save
 
