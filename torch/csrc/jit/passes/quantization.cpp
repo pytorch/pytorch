@@ -1440,9 +1440,10 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
-      !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
-      !hastensor(bn, "running_var") || !bn.hasattr("eps")) {
+  if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
+      !hastensor(bn, "weight") || !hastensor(bn, "bias") ||
+      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var") ||
+      !bn.hasattr("eps")) {
     return false;
   }
 
@@ -1454,8 +1455,6 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
 
   r.conv_w = conv.attr("weight").toTensor();
   r.conv_b = at::zeros_like(r.bn_rm);
-  // bias can be removed in the analyze step
-  TORCH_INTERNAL_ASSERT(conv.hasattr("bias"), "Expecting conv to have a bias attribute");
   auto bias_opt = conv.attr("bias").toOptional<at::Tensor>();
   if (bias_opt) {
     r.conv_b = *bias_opt;
