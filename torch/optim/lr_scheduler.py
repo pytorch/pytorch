@@ -219,7 +219,7 @@ class LambdaLR(_LRScheduler):
         warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
-        # Restore lr_lambdas state
+        # Restore state_dict keys in order to prevent side effects
         state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
@@ -295,6 +295,7 @@ class MultiplicativeLR(_LRScheduler):
         """
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
         state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
