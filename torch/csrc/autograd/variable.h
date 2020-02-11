@@ -313,9 +313,11 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     view.copy_(var)
 ///     torch.autograd.grad(base.sum(), var)  <- what should it return?
 ///
-/// Given that there is no consensus on what this particular code should return,
-/// we explicitely forbid it by setting allow_rebase_history=OnRebase::ERROR_REBASE
-/// for all differentiable views created in no_grad mode.
+/// Given that this particular code example is ambiguous and can easily be replace by
+/// either moving both inside the no_grad block or both outside, we explicitly forbid
+/// it. For now, it is deprecated by a warning. This is achieved by setting
+/// allow_rebase_history=OnRebase::WARN_REBASE for all differentiable views created
+/// in no_grad mode.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -336,6 +338,45 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///
 /// Relevant logic for both differentiable and non-differentiable views is implemented in
 /// make_variable_(non_)differentiable_view below, and wrap_output of gen_variable_type.py.
+
+
+/// NOTE [ View + Inplace detection ]
+///
+/// We want to detect views followed by inplace as they are often forbidden to ensure
+/// correctness of the computed gradients. But since we want to only notify the user
+/// when both happen, we tag the DifferentiableViewMeta when the view is created
+/// via the `make_vairable_*_view()` functions. This tag is then checked by the
+/// `check_inplace()` function from `VariableTypeUtils.h` that should be called before
+/// every inplace operation. To detect cases where other views are modified and this
+/// one is rebased by side effect, we also check in the `VariableHooks::grad_fn()`.
+
+
+/// Here are all the possible case for a DifferentiableViewMeta and how they are created.
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+/// |                      | grad_fn_ == nullptr                            | grad_fn_ != nullptr                            |
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+/// | WARN_REBASE          | view created by single-output in no_grad mode  | should not happen                              |
+/// |                      | (outside of custom Functions)                  |                                                |
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+/// | WARN_REBASE_FUNCTION | view created during forward of custom Function | view created during forward of custom Function |
+/// |                      | in no_grad mode (including multi-output ones)  | (including multi-output ones)                  |
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+/// | ERROR_REBASE         | view created by multi-output codegen or custom | view created by multi-output codegen or custom |
+/// |                      | function in no_grad mode                       | function                                       |
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+/// | ALLOW_REBASE         | view created in no_grad mode from a base that  | All other differentiable views                 |
+/// |                      | do not require gradients                       |                                                |
+/// +----------------------+------------------------------------------------+------------------------------------------------+
+
+/// Flag that control what happens when a Tensor's history is rebased
+enum class OnRebase: uint8_t { ALLOW_REBASE, WARN_REBASE, WARN_REBASE_FUNCTION,
+                               ERROR_REBASE };
+
+/// Unified function to handle error checking when rebase happens
+/// indirect=true means that the caller is not doing the inplace, but the inplace happened
+/// somewhere else.
+TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
+
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
@@ -345,8 +386,6 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  /// Flag that control what happens when a Tensor's history is rebased
-  enum class OnRebase: uint8_t { ALLOW_REBASE, WARN_REBASE, ERROR_REBASE };
   OnRebase allow_rebase_history;
 
   bool requires_grad() const override {
@@ -383,15 +422,14 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    bool allow_rebase_history) {
+    OnRebase allow_rebase_history) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(base),
-      allow_rebase_history? DifferentiableViewMeta::OnRebase::ALLOW_REBASE:
-                            DifferentiableViewMeta::OnRebase::ERROR_REBASE));
+      allow_rebase_history));
     return Variable(data_impl_copy);
     }
   return Variable();

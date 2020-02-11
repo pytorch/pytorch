@@ -26,7 +26,7 @@ namespace autograd {
 
 
 DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-  DifferentiableViewMeta::OnRebase allow_rebase_history)
+  OnRebase allow_rebase_history)
     : AutogradMeta(self_impl), allow_rebase_history(allow_rebase_history) {
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
@@ -77,7 +77,9 @@ namespace impl {
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
-      TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history != DifferentiableViewMeta::OnRebase::ERROR_REBASE);
+      // Do not use handle_view_on_rebase here as check_inplace should have been called before this
+      // and either throw and error or clear the warning
+      TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history == OnRebase::ALLOW_REBASE);
       TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
       TORCH_INTERNAL_ASSERT(gradient_edge.function);
       TORCH_CHECK(
@@ -325,6 +327,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
     }
     auto current_version = self._version();
     if (diff_view_meta->attr_version != current_version) {
+      // This is an indirect rebase_history due to another view or the base being modified inplace
+      handle_view_on_rebase(diff_view_meta, /* indirect */ true);
       TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
       auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
       fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
@@ -367,6 +371,58 @@ unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(
   unsigned idx = list->size();
   list->push_back(hook);
   return idx;
+}
+
+TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
+  /// See NOTE [ View + Inplace detection ] for justification of the logic below
+  if (diff_view_meta->allow_rebase_history != OnRebase::ALLOW_REBASE) {
+    auto grad_fn = diff_view_meta->grad_fn_.get();
+    std::string msg;
+    std::string modified_obj;
+    // Create the header for the error message.
+    if (indirect) {
+      modified_obj = "its base or another view of its base has been";
+    } else {
+      modified_obj = "is being";
+    }
+    if (grad_fn) {
+      msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
+                     modified_obj, " modified inplace.");
+    } else {
+      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enable.");
+    }
+
+    if (diff_view_meta->allow_rebase_history == OnRebase::ERROR_REBASE) {
+      TORCH_CHECK(false, msg, " This view is the output of a function that returns multiple views. Such functions do not"
+                         " allow the output views to be modified inplace.");
+    } else {
+      if (diff_view_meta->allow_rebase_history == OnRebase::WARN_REBASE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
+                       "  starting 1.6. You can clarify your code and remove this warning by moving both the view and the"
+                       " inplace either both inside the no_grad block (if you don't want the inplace to be tracked) or both"
+                       " outside (if you want the inplace to be tracked).");
+      } else if (diff_view_meta->allow_rebase_history == OnRebase::WARN_REBASE_FUNCTION) {
+        msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
+                       " autograd logic to handle view+inplace would override the custom backward associated with the custom"
+                       " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
+                       " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Invalid OnRebase state");
+      }
+
+      if (!indirect and !grad_fn) {
+        // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
+        // requires grad is being used in an in-place operation." after the warning. So we make the warning an error directly.
+        TORCH_CHECK(false, msg);
+      } else {
+        TORCH_WARN(msg);
+      }
+    }
+
+    // We warn only once per view
+    diff_view_meta->allow_rebase_history = OnRebase::ALLOW_REBASE;
+  }
 }
 
 }} // namespace torch::autograd

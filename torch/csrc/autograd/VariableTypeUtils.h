@@ -45,28 +45,8 @@ inline void check_inplace(const Tensor& tensor) {
     if (var.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
-      // Unsafe because we don't want to trigger the creation of the view's custom grad_fn
-      auto grad_fn = impl::grad_fn_unsafe(var);
-      if (diff_view_meta->allow_rebase_history != DifferentiableViewMeta::OnRebase::ALLOW_REBASE) {
-        std::string msg;
-        if (grad_fn) {
-          msg = c10::str("The ", diff_view_meta->output_nr_, "th output of ", grad_fn->name(),
-              " is being modified inplace but this is not allowed as it would prevent correct gradient computation."
-              " In particular if it is a custom Function, that will prevent the custom backward from being called"
-              ", so this is deprecated and will start raising an error after version 1.6.");
-        } else {
-          msg = c10::str("A view created in no_grad mode is being modified inplace but this is not allowed as the expected"
-              " behavior is unclear. You should have both the view and inplace inside the no_grad block if you"
-              " do NOT want the change to be tracked by the autograd. Or both outside the no_grad block if you"
-              " want the change to tracked.");
-        }
-        if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::WARN_REBASE) {
-          TORCH_WARN(msg);
-        } else {
-          TORCH_INTERNAL_ASSERT(diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR_REBASE);
-          TORCH_CHECK(false, msg);
-        }
-      }
+      // This can throw or warn
+      handle_view_on_rebase(diff_view_meta);
     }
     if (var.is_leaf()) {
       AT_ERROR(
@@ -125,7 +105,8 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 }
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable, bool allow_rebase_history=true) {
+inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable,
+                      OnRebase allow_rebase_history=OnRebase::ALLOW_REBASE) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
@@ -133,14 +114,15 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
   if (is_differentiable) {
     return make_variable_differentiable_view(std::move(base_var), std::move(tensor), allow_rebase_history);
   } else {
-    TORCH_CHECK(allow_rebase_history, "Non-differentiable views cannot set allow_rebase_history=false");
+    TORCH_CHECK(allow_rebase_history == OnRebase::ALLOW_REBASE,
+                "Non-differentiable views must have allow_rebase_history=OnRebase::ALLOW_REBASE");
     return make_variable_non_differentiable_view(std::move(base_var), std::move(tensor));
   }
 }
 
 // See NOTE [ Autograd View Variables ] for details.
 inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors, bool is_differentiable,
-                                   bool allow_rebase_history=true) {
+                                   OnRebase allow_rebase_history=OnRebase::ALLOW_REBASE) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
     base_var = base_var.base();
@@ -149,7 +131,8 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
     if (is_differentiable) {
       tensor = make_variable_differentiable_view(base_var, std::move(tensor), allow_rebase_history);
     } else {
-      TORCH_CHECK(allow_rebase_history, "Non-differentiable views cannot set allow_rebase_history=false");
+      TORCH_CHECK(allow_rebase_history == OnRebase::ALLOW_REBASE,
+                  "Non-differentiable views must have allow_rebase_history=OnRebase::ALLOW_REBASE");
       tensor = make_variable_non_differentiable_view(base_var, std::move(tensor));
     }
   }
