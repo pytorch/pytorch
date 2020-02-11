@@ -7,9 +7,9 @@ from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
 import torch.jit
-import torch.jit._logging
-import torch.jit.frontend
-import torch.jit.quantized
+# import torch.jit._logging
+# import torch.jit.frontend
+# import torch.jit.quantized
 import zipfile
 import functools
 
@@ -50,6 +50,9 @@ def clear_class_registry():
 
 
 class JitTestCase(TestCase):
+    """
+    Extends :any:`unittest.TestCase` with many TorchScript-specific helpers.
+    """
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
@@ -527,8 +530,35 @@ class JitTestCase(TestCase):
 
     def checkModule(self, nn_module, args):
         """
-        Check that a nn.Module's results in Script mode match eager and that it
-        can be exported
+        Checks that ``nn_module`` will compile with the TorchScript compiler and
+        runs the compiled module and the original ``nn_module`` to check that the
+        results are equal.
+
+        ::
+
+            import unittest
+            import torch
+            import torch.nn as nn
+
+
+            class Model(nn.Module):
+                def forward(self, a_tensor, an_int):
+                    # type: (Tensor, int) -> Tensor
+                    return a_tensor + an_int
+
+
+            class MyTestCase(torch.jit.JitTestCase):
+                def test_my_model(self):
+                    # Instantiate a normal nn.Module and some inputs
+                    my_model = Model()
+                    sample_inputs = [torch.randn(2, 2), 5]
+
+                    # Compile the model, then run the eager model and the scripted model
+                    # and compare the results
+                    self.checkModule(nn_module=my_model, args=sample_inputs)
+
+            if __name__ == '__main__':
+                unittest.main()
         """
         sm = torch.jit.script(nn_module)
 

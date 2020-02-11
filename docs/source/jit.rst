@@ -871,3 +871,17 @@ now supported.
         if flag:
             b = 2
         return x, b
+
+
+Testing
+~~~~~~~
+It is useful to have test cases to ensure that ``nn.Module``\s that are TorchScript
+compatible stay that way over time. The same testing utilities that are used
+to `verify the correctness <https://github.com/pytorch/pytorch/blob/master/test/test_jit.py>`_
+of the TorchScript compiler are exposed in ``torch.jit``.
+
+
+.. autoclass:: JitTestCase()
+    :members: checkModule
+
+

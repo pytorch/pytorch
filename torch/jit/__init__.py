@@ -31,6 +31,7 @@ import weakref
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import Final, _overload, _overload_method
 from torch._jit_internal import ignore, export, unused
+from torch.testing._internal.jit_utils import JitTestCase
 
 if sys.version_info[0] > 2:
     import pathlib
