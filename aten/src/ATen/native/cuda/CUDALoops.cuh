@@ -40,6 +40,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/C++17.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -144,56 +145,73 @@ namespace modern {
 
 namespace detail {
 
-template <typename func_t, typename array_t, std::size_t... I>
-__device__ inline constexpr decltype(auto) invoke_with_array_impl(func_t f, array_t t, std::index_sequence<I...>)
-{
-    return f(t[I]...);
-}
-template <typename func_t, typename array_t>
-__device__ inline constexpr decltype(auto) invoke_with_array(func_t f, array_t a) {
-  constexpr auto arity = function_traits<func_t>::arity;
-  return invoke_with_array_impl(f, a, std::make_index_sequence<arity>{});
-}
+// The `pointers` converts std::tuple<T1, T2, ....> to std::tuple<T1*, T2*, ....>
 
-namespace arg_type {
+template <typename T>
+struct pointers_helper {};
 
-// We need a way to compute the argument type of a function. But
-// for nullary function, it does not really have an argument type
-// in this case, we still need to return a valid type, but we don't
-// really care what type this is.
-
-struct dont_care {};
-
-template <typename func_t, std::size_t arity>
-struct arg_type_helper {
-  using type = typename function_traits<func_t>::template arg<0>::type;
+template <typename... types>
+struct pointers_helper<std::tuple<types...>> {
+  using type = std::tuple<types *...>;
 };
 
-template <typename func_t>
-struct arg_type_helper<func_t, 0> {
-  using type = dont_care;
+template <typename T>
+using pointers = typename pointers_helper<T>::type;
+
+template<template<int i> typename func, int end, int current=0>
+struct static_unroll {
+  template<typename... Args>
+  static inline __device__ __host__ void with_args(Args... args) {
+    func<current>::apply(args...);
+    static_unroll<func, end, current+1>::with_args(args...);
+  }
 };
 
-template <typename func_t>
-using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::type;
+template<template<int i> typename func, int end>
+struct static_unroll<func, end, end> {
+  template<typename... Args>
+  static inline __device__ __host__ void with_args(Args... args) {}
+};
 
-}  // namespace arg_type
+template<int i>
+struct can_vectorize_up_to_helper {
+  template <typename array_t, typename traits>
+  static __device__ __host__ void apply(int &result, array_t pointers, traits _) {
+    using arg_t = std::tuple_element_t<i, typename traits::ArgsTuple>;
+    result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
+  }
+};
 
 template<typename func_t, typename array_t>
 inline int can_vectorize_up_to(array_t pointers) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
-  using arg_t = detail::arg_type::type<func_t>;
   constexpr int arity = traits::arity;
+
   int result = memory::can_vectorize_up_to<return_t>(pointers[0]);
-  #pragma unroll
-  for (int i = 0; i < arity; i++) {
-    result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
-  }
+  static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
 
 }  // namespace detail
+
+template<int i>
+struct compute_base_ptrs {
+  template <typename arg_ptrs, typename array_t>
+  static __device__ void apply(arg_ptrs &args_base, array_t data, int idx) {
+    std::get<i>(args_base) = reinterpret_cast<std::tuple_element_t<i, arg_ptrs>>(data[i + 1]) + idx;
+  }
+};
+
+template<int i>
+struct load_with_policy {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
+    using arg_t = std::tuple_element_t<i, args_t>;
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    policy.load(args_accessor, std::get<i>(args_base));
+  }
+};
 
 template<typename func_t, typename array_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
@@ -202,37 +220,25 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
-  using arg_t = detail::arg_type::type<func_t>;
+  using args_t = typename traits::ArgsTuple;
   constexpr int arity = traits::arity;
-
-  // We need to create array to hold all the arguments, for nullary `f`, this means array of size 0.
-  // Unfortunately the compiler don't allow us to create array of 0 size, so for this case, we create
-  // an array of size 1 and just don't use it.
-  constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   // compute base pointers for this block
   int idx = policy_t::block_work_size * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  arg_t *args_base[nargs];
-  #pragma unroll
-  for (int i = 0; i < arity; i++) {
-    args_base[i] = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
-  }
+  detail::pointers<args_t> args_base;
+  detail::static_unroll<compute_base_ptrs, arity>::with_args(args_base, data, idx);
 
   return_t results[policy_t::thread_work_size];
-  arg_t args[policy_t::thread_work_size][nargs];
+  args_t args[policy_t::thread_work_size];
 
   // load
-  #pragma unroll
-  for (int i = 0; i < arity; i++) {
-    auto args_accessor = [&] __device__ (int index) -> arg_t & { return args[index][i]; };
-    policy.load(args_accessor, args_base[i]);
-  }
+  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
 
   // compute
   #pragma unroll
   for (int i = 0; i < policy_t::thread_work_size; i++) {
-    results[i] = detail::invoke_with_array(f, args[i]);
+    results[i] = c10::guts::apply(f, args[i]);
   }
 
   // store
@@ -255,7 +261,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
+template<int nt, int vt, typename func_t, typename array_t>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
@@ -280,9 +286,6 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   }
   AT_CUDA_CHECK(cudaGetLastError());
 }
-
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
-static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 } // namespace modern
 

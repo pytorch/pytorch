@@ -178,6 +178,25 @@ using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::t
 
 }  // namespace arg_type
 
+template<typename func_t, int remaining=function_traits<func_t>::arity-1>
+struct has_same_arg_types {
+  using traits = function_traits<func_t>;
+  static constexpr bool value = std::is_same<
+      typename traits::template arg<remaining>::type,
+      typename traits::template arg<remaining-1>::type
+    >::value && has_same_arg_types<func_t, remaining-1>::value;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, 0> {
+  static constexpr bool value = true;
+};
+
+template<typename func_t>
+struct has_same_arg_types<func_t, -1> {
+  static constexpr bool value = true;
+};
+
 }  // namespace detail
 
 template<int nt, int vt, typename func_t, typename array_t>

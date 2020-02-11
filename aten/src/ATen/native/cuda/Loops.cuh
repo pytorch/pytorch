@@ -3,29 +3,6 @@
 
 #include <ATen/detail/FunctionTraits.h>
 
-namespace at { namespace native { namespace modern { namespace detail {
-
-template<typename func_t, int remaining=function_traits<func_t>::arity-1>
-struct has_same_arg_types {
-  using traits = function_traits<func_t>;
-  static constexpr bool value = std::is_same<
-      typename traits::template arg<remaining>::type,
-      typename traits::template arg<remaining-1>::type
-    >::value && has_same_arg_types<func_t, remaining-1>::value;
-};
-
-template<typename func_t>
-struct has_same_arg_types<func_t, 0> {
-  static constexpr bool value = true;
-};
-
-template<typename func_t>
-struct has_same_arg_types<func_t, -1> {
-  static constexpr bool value = true;
-};
-
-}}}} // namespace at::native::modern::detail
-
 // Note:
 // CUDA and ROCm get diverged in this PR:
 //   https://github.com/pytorch/pytorch/pull/32383
@@ -95,7 +72,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
-    } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
+    } else if (iter.has_contiguous_first_dim()) {
       modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
