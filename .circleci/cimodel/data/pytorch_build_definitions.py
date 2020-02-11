@@ -13,7 +13,7 @@ DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/"
 
 # ARE YOU EDITING THIS NUMBER?  MAKE SURE YOU READ THE GUIDANCE AT THE
 # TOP OF .circleci/config.yml
-DOCKER_IMAGE_VERSION = 347
+DOCKER_IMAGE_VERSION = "07597f23-fa81-474c-8bef-5c8a91b50595"
 
 
 @dataclass
@@ -31,9 +31,9 @@ class Conf:
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
     parent_build: Optional['Conf'] = None
-    is_namedtensor: bool = False
     is_libtorch: bool = False
     is_important: bool = False
+    parallel_backend: Optional[str] = None
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -46,10 +46,10 @@ class Conf:
         leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
-        if self.is_namedtensor and not for_docker:
-            leading.append("namedtensor")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
+        if self.parallel_backend is not None and not for_docker:
+            leading.append(self.parallel_backend)
 
         cuda_parms = []
         if self.cuda_version:
@@ -160,6 +160,11 @@ def gen_dependent_configs(xenial_parent_config):
 
         configs.append(c)
 
+    return configs
+
+def gen_docs_configs(xenial_parent_config):
+    configs = []
+
     for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push"]:
         configs.append(HiddenConf(x, parent_build=xenial_parent_config))
 
@@ -225,9 +230,9 @@ def instantiate_configs():
             # TODO The gcc version is orthogonal to CUDA version?
             parms_list.append("gcc7")
 
-        is_namedtensor = fc.find_prop("is_namedtensor") or False
         is_libtorch = fc.find_prop("is_libtorch") or False
         is_important = fc.find_prop("is_important") or False
+        parallel_backend = fc.find_prop("parallel_backend") or None
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
@@ -242,24 +247,32 @@ def instantiate_configs():
             is_xla,
             restrict_phases,
             gpu_resource,
-            is_namedtensor=is_namedtensor,
             is_libtorch=is_libtorch,
             is_important=is_important,
+            parallel_backend=parallel_backend,
         )
 
-        if cuda_version == "9" and python_version == "3.6" and not is_libtorch:
+        # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
+        # should run on a CPU-only build that runs on all PRs.
+        if distro_name == 'xenial' and fc.find_prop("pyver") == '3.6' \
+                and cuda_version is None \
+                and parallel_backend is None \
+                and compiler_name == 'gcc' \
+                and fc.find_prop('compiler_version') == '5.4':
+            c.dependent_tests = gen_docs_configs(c)
+
+        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (compiler_name == "gcc"
                 and compiler_version == "5.4"
-                and not is_namedtensor
-                and not is_libtorch):
+                and not is_libtorch
+                and parallel_backend is None):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
                 is_xla=False,
                 restrict_phases=["test"],
-                is_namedtensor=False,
                 is_libtorch=False,
                 is_important=True,
                 parent_build=c,

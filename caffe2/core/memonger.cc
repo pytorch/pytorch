@@ -471,7 +471,7 @@ class ComputeBlobRecyclingForDag {
     }
   }
 
-  // Rturns true if the op that generates that blob acquires all tokens.
+  // Returns true if the op that generates that blob acquires all tokens.
   inline bool can_use_blob(
       const string& blob_name,
       std::unordered_set<int>* tokens,

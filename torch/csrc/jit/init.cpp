@@ -1,4 +1,3 @@
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/argument_spec.h>
@@ -24,14 +23,18 @@
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
+#include <torch/csrc/jit/passes/lower_graph.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
@@ -43,6 +46,7 @@
 #include <torch/csrc/jit/print_handler.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_arg_flatten.h>
+#include <torch/csrc/jit/python_custom_class.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/script/compiler.h>
@@ -51,7 +55,6 @@
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -91,7 +94,9 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
+#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+#endif
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -132,6 +137,9 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
+      .def(
+          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
+          PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -195,6 +203,7 @@ void initJITBindings(PyObject* module) {
             FoldQuantizeCallIntoBuffer(module, method_name);
           })
       .def("_jit_pass_fold_prepack", &FoldPrepackedWeightIntoModule)
+      .def("_jit_pass_dedup_module_uses", &DedupModuleUses)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })
@@ -243,7 +252,7 @@ void initJITBindings(PyObject* module) {
             Stack stack;
             stack.reserve(inputs.size()); // captures?
             for (auto& obj : inputs) {
-              stack.push_back(toIValue(obj));
+              stack.push_back(toTypeInferredIValue(obj));
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
             arg_spec_creator.specializeTypes(*graph, spec);
@@ -253,7 +262,7 @@ void initJITBindings(PyObject* module) {
             auto g_inputs = graph->inputs();
             for (size_t i = 0; i < inputs.size(); ++i) {
               if (stack[i].isTensor()) {
-                g_inputs[i]->setType(incompleteInferTypeFrom(stack[i]));
+                g_inputs[i]->setType(stack[i].type());
               }
             }
             PropagateInputShapes(graph);
@@ -263,6 +272,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
       .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
+      .def(
+          "_jit_pass_lower_graph",
+          [](std::shared_ptr<Graph>& graph, const script::Module& self) {
+            return LowerGraph(*graph, self._ivalue());
+          })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
           "_jit_pass_constant_propagation",
@@ -271,6 +285,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -278,10 +293,15 @@ void initJITBindings(PyObject* module) {
             // happen to initialize the autograd engine in these tests, the
             // newly spawned worker threads will try to initialize their
             // PyThreadState*, and they need the GIL for this.
-            AutoNoGIL _no_gil;
+            pybind11::gil_scoped_release _no_gil;
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() { return true; })
+#else
+      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def("_jit_has_cpp_tests", []() { return false; })
+#endif
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -296,6 +316,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -314,12 +335,37 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph> g,
              py::tuple args,
              const std::string& unqualified_op_name) {
-            auto stack = toStack(args);
+            auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
           "_jit_set_profiling_mode",
-          [](bool profiling_flag) { getProfilingMode() = profiling_flag; })
+          [](bool profiling_flag) {
+            bool oldState = getProfilingMode();
+            getProfilingMode() = profiling_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_profiling_executor",
+          [](bool profiling_flag) {
+            bool oldState = getExecutorMode();
+            getExecutorMode() = profiling_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_num_profiled_runs",
+          [](size_t num) {
+            size_t old_num = getNumProfiledRuns();
+            getNumProfiledRuns() = num;
+            return old_num;
+          })
+      .def(
+          "_jit_set_bailout_depth",
+          [](size_t depth) {
+            size_t old_depth = getBailoutDepth();
+            getBailoutDepth() = depth;
+            return old_depth;
+          })
       .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
@@ -339,7 +385,23 @@ void initJITBindings(PyObject* module) {
           "_jit_fuser_get_fused_kernel_code",
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
-          });
+          })
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_quantization_insert_permutes",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, at::Tensor>& paramsDict) {
+            insertPermutes(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -350,13 +412,20 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
-    std::vector<GraphExecutorState> states;
-    for (auto& e : c.grad_executors()) {
-      states.emplace_back(e->getDebugState());
-    }
-    return states;
-  });
+  py::class_<Code>(m, "Code")
+      .def(
+          "grad_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
+      .def("request_bailout", [](Code& c, size_t index) {
+        c.request_bailout(index);
+      });
 
   py::class_<ExecutionPlan>(m, "ExecutionPlan")
       .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
@@ -389,21 +458,108 @@ void initJITBindings(PyObject* module) {
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
       .def(py::init<std::string>())
-      .def(
-          "write_record",
-          [](PyTorchStreamWriter& self,
-             const std::string& name,
-             const char* data,
-             size_t size) { return self.writeRecord(name, data, size); })
-      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile);
+      .def(py::init([](const py::object &buffer) {
+        auto writer_func = [=](const void *data, size_t size) {
+          auto bytes = py::bytes(reinterpret_cast<const char *>(data), size);
+          buffer.attr("write")(std::move(bytes));
+          return size;
+        };
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+      }))
+      .def(py::init<const std::function<size_t(const void *, size_t)> &>())
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              const char *data,
+              size_t size) { return self.writeRecord(name, data, size); })
+      .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
+      .def("write_record",
+           [](PyTorchStreamWriter &self, const std::string &name,
+              uintptr_t data, size_t size) {
+             return self.writeRecord(name, reinterpret_cast<const char *>(data),
+                                     size);
+           });
+
+  // This allows PyTorchStreamReader to read from a Python buffer. It requires
+  // that the buffer implement `seek()`, `tell()`, and `read()`.
+  class BufferAdapter : public caffe2::serialize::ReadAdapterInterface {
+   public:
+    BufferAdapter(const py::object& buffer) : buffer_(buffer) {
+      // Jump to the end of the buffer to get its size
+      auto current = buffer.attr("tell")();
+      start_offset_ = py::cast<size_t>(current);
+      buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
+      size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
+      buffer.attr("seek")(current);
+
+      // If we can read directly into a buffer, do that instead of an extra copy
+      use_readinto_ = py::hasattr(buffer, "readinto");
+    }
+
+    size_t size() const override {
+      return size_;
+    }
+
+    THPObjectPtr getMemview(void* buf, size_t n) const {
+#if PY_MAJOR_VERSION >= 3
+      THPObjectPtr memview(PyMemoryView_FromMemory(
+          reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
+#else
+      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
+#endif
+      if (!memview) {
+        throw python_error();
+      }
+      return memview;
+    }
+
+    size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+        const override {
+      // Seek to desired position (NB: this has to be a Py_ssize_t or Python
+      // throws a weird error)
+      Py_ssize_t absolute_pos = start_offset_ + pos;
+      buffer_.attr("seek")(absolute_pos);
+
+      if (use_readinto_) {
+        auto memview = getMemview(buf, n);
+        auto res =
+            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
+        if (res) {
+          int i = PyInt_AsLong(res);
+          if (i > 0) {
+            return i;
+          }
+        }
+      }
+
+      // Read bytes into `buf` from the buffer
+      std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
+      std::copy(
+          bytes.data(),
+          bytes.data() + bytes.size(),
+          reinterpret_cast<char*>(buf));
+      return bytes.size();
+    }
+
+    py::object buffer_;
+    size_t size_;
+    size_t start_offset_;
+    bool use_readinto_;
+  };
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
       .def(py::init<std::string>())
+      .def(py::init([](const py::object& buffer) {
+        auto adapter = std::make_unique<BufferAdapter>(std::move(buffer));
+        return std::make_unique<PyTorchStreamReader>(std::move(adapter));
+      }))
       .def("get_record", [](PyTorchStreamReader& self, const std::string& key) {
         at::DataPtr data;
         size_t size;
         std::tie(data, size) = self.getRecord(key);
         return py::bytes(reinterpret_cast<const char*>(data.get()), size);
+      })
+      .def("get_all_records", [](PyTorchStreamReader& self) {
+        return self.getAllRecords();
       });
 
   m.def(
@@ -518,7 +674,7 @@ void initJITBindings(PyObject* module) {
 
     if (jit::tracer::isTracing()) {
       auto graph = jit::tracer::getTracingState()->graph;
-      auto fork_node = graph->insertNode(graph->create(prim::fork, 1));
+      auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
       Value* node_output;
@@ -532,17 +688,14 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
+        // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
-        output_ivalue = toIValue(py_func_output);
+        output_ivalue = toTypeInferredIValue(py_func_output);
         Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
         node_output =
             fork_node->output()->setType(FutureType::create(out_val->type()));
-
-        // Lambda lift into a Subgraph attribute
-        torch::jit::script::lambdaLiftFork(fork_node);
       }
 
       auto retval =
@@ -556,7 +709,7 @@ void initJITBindings(PyObject* module) {
 
       return PythonFutureWrapper(retval);
     } else {
-      auto result = toIValue(f(*args_tup));
+      auto result = toTypeInferredIValue(f(*args_tup));
       auto retval = c10::make_intrusive<c10::ivalue::Future>(result.type());
       retval->markCompleted(std::move(result));
       return PythonFutureWrapper(retval);
@@ -578,6 +731,7 @@ void initJITBindings(PyObject* module) {
     toIValue(obj, type);
   });
 
+  initPythonCustomClassBindings(module);
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

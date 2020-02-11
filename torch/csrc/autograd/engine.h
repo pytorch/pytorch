@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/utils/future.h>
 
 #include <deque>
 #include <exception>
@@ -26,6 +27,8 @@ struct ReadyQueue;
 
 namespace torch { namespace autograd {
 
+using FutureVariableList = torch::utils::Future<variable_list>;
+
 void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
@@ -36,7 +39,6 @@ static constexpr int NO_DEVICE = -2;
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
-  std::exception_ptr exception_;
   // Indicates if an error occurred while executing any task.  When this is
   // true, it signals all threads to stop executing.
   std::atomic_bool has_error_;
@@ -45,12 +47,9 @@ struct GraphTask {
   bool keep_graph_;
   bool grad_mode_;
 
-  // To protect reads/writes to no_ready_, dependencies_ , captured_vars_ and
-  // exception_
+  // To protect reads/writes to not_ready_, dependencies_, captured_vars_,
+  // has_error_, future_result_ and leaf_streams.
   std::mutex mutex_;
-  // Notified when a task finishes executing.  Check outstanding_tasks_ to see
-  // if all tasks are done.
-  std::condition_variable not_done_;
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
@@ -94,17 +93,36 @@ struct GraphTask {
     return exec_info_.empty();
   }
 
-  GraphTask(bool keep_graph, bool grad_mode, int reentrant_depth)
+  // Set an appropriate exception on this graph_task which was encountered while
+  // running the provided function.
+  void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
+
+  // Whether or not to stop execution for this GraphTask when an error is
+  // encountered. When set to true, this would cause Engine::execute() to throw
+  // an exception as soon as the autograd engine receives an exception.
+  bool exit_on_error_;
+
+  // Future representing the completion of the graph task. Notified when all
+  // tasks are done.
+  std::shared_ptr<FutureVariableList> future_result_;
+
+  GraphTask(
+      bool keep_graph,
+      bool grad_mode,
+      int reentrant_depth,
+      bool exit_on_error = false)
       : has_error_(false),
         outstanding_tasks_(0),
         keep_graph_(keep_graph),
         grad_mode_(grad_mode),
         owner_(NO_DEVICE),
-        reentrant_depth_(reentrant_depth) {}
+        reentrant_depth_(reentrant_depth),
+        exit_on_error_(exit_on_error),
+        future_result_(std::make_shared<FutureVariableList>()) {}
 };
 
 struct NodeTask {
-  GraphTask* base_;
+  std::weak_ptr<GraphTask> base_;
   std::shared_ptr<Node> fn_;
   // This buffer serves as an implicit "addition" node for all of the
   // gradients flowing here.  Once all the dependencies are finished, we
@@ -117,7 +135,7 @@ struct NodeTask {
   int getReentrantDepth() const;
 
   NodeTask(
-      GraphTask* base,
+      std::weak_ptr<GraphTask> base,
       std::shared_ptr<Node> fn,
       InputBuffer inputs,
       bool isShutdownTask = false)
@@ -151,8 +169,8 @@ struct TORCH_API Engine {
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  variable_list execute_with_graph_task(
-      GraphTask& graph_task,
+  virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
+      const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root);
 
   // Enqueues a blocked task for execution on the CPU thread. A blocked task is
@@ -177,17 +195,27 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
-protected:
+  size_t ready_queue_size(at::Device device);
+
+ protected:
   void compute_dependencies(Node* root, GraphTask& task);
-  void evaluate_function(NodeTask& task);
+  void evaluate_function(
+      std::shared_ptr<GraphTask>& graph_task,
+      Node* func,
+      InputBuffer& inputs);
   ReadyQueue& ready_queue(at::Device device);
   ReadyQueue& ready_queue_by_index(int device_index);
   void start_threads();
   virtual void thread_init(int device);
-  virtual void thread_main(GraphTask *graph_task);
-  virtual void thread_on_exception(NodeTask& task, std::exception& e);
+  virtual void thread_on_exception(
+      std::shared_ptr<GraphTask>& graph_task,
+      const std::shared_ptr<Node>& fn,
+      std::exception& e);
+  virtual void thread_main(
+      const std::shared_ptr<GraphTask>& task,
+      bool reentrant_thread);
   void reentrant_thread_init();
-  void add_thread_pool_task(GraphTask *graph_task);
+  void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
 
   // Ensures ready_queues_ are initialized only once
@@ -212,7 +240,7 @@ protected:
     std::mutex mutex_;
     // Workers will process the GraphTasks added to this queue. A GraphTask is
     // allocated inside Engine::execute and lives for the duration of execute
-    std::queue<GraphTask*> graphtasks_queue_;
+    std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
     ThreadPoolShared() : num_workers_(0) {}
  };
@@ -222,6 +250,11 @@ protected:
  // when Engine shuts down, so there may be threads waiting on work_
  // for the graphtasks_queue_ to be nonempty.
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
+
+private:
+ variable_list graph_task_exec_post_processing(
+     const std::shared_ptr<GraphTask>& graph_task);
+ void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 };
 
 // allow python_engine to override the default engine when it loads

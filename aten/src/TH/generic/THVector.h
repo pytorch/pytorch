@@ -24,33 +24,18 @@ TH_API void THVector_(normal_fill)(scalar_t *data,
 
 #endif /* non bool only part */
 
-#if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
-TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-#endif
-
 /* floating point only now */
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
-TH_API void THVector_(log1p)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(log2)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(sigmoid)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(erfc)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(acos)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(cosh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(sin)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(asin)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(sinh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(tan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(atan)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(tanh)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 TH_API void THVector_(pow)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptrdiff_t n);
-TH_API void THVector_(sqrt)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(abs)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(frac)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
-TH_API void THVector_(cinv)(scalar_t *y, const scalar_t *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
 

@@ -29,6 +29,7 @@ def merge_dicts(*dicts):
 
 common_args = parse_kwargs("""
     input (Tensor): the input tensor.
+    generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
 """)
 
@@ -169,7 +170,7 @@ Example::
     >>> torch.add(a, 20)
     tensor([ 20.0202,  21.0985,  21.3506,  19.3944])
 
-.. function:: add(input, alpha=1, other, out=None)
+.. function:: add(input, other, *, alpha=1, out=None)
 
 Each element of the tensor :attr:`other` is multiplied by the scalar
 :attr:`alpha` and added to each element of the tensor :attr:`input`.
@@ -186,8 +187,8 @@ a real number, otherwise it should be an integer.
 
 Args:
     input (Tensor): the first input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
+    alpha (Number): the scalar multiplier for :attr:`other`
 
 Keyword arguments:
     {out}
@@ -212,7 +213,7 @@ Example::
 
 add_docstr(torch.addbmm,
            r"""
-addbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor
+addbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored
 in :attr:`batch1` and :attr:`batch2`,
@@ -235,11 +236,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :
 must be real numbers, otherwise they should be integers.
 
 Args:
+    batch1 (Tensor): the first batch of matrices to be multiplied
+    batch2 (Tensor): the second batch of matrices to be multiplied
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
-    batch1 (Tensor): the first batch of matrices to be multiplied
-    batch2 (Tensor): the second batch of matrices to be multiplied
     {out}
 
 Example::
@@ -255,7 +256,7 @@ Example::
 
 add_docstr(torch.addcdiv,
            r"""
-addcdiv(input, value=1, tensor1, tensor2, out=None) -> Tensor
+addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
 multiply the result by the scalar :attr:`value` and add it to :attr:`input`.
@@ -271,9 +272,9 @@ a real number, otherwise an integer.
 
 Args:
     input (Tensor): the tensor to be added
-    value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     tensor1 (Tensor): the numerator tensor
     tensor2 (Tensor): the denominator tensor
+    value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     {out}
 
 Example::
@@ -281,7 +282,7 @@ Example::
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
-    >>> torch.addcdiv(t, 0.1, t1, t2)
+    >>> torch.addcdiv(t, t1, t2, value=0.1)
     tensor([[-0.2312, -3.6496,  0.1312],
             [-1.0428,  3.4292, -0.1030],
             [-0.5369, -0.9829,  0.0430]])
@@ -289,7 +290,7 @@ Example::
 
 add_docstr(torch.addcmul,
            r"""
-addcmul(input, value=1, tensor1, tensor2, out=None) -> Tensor
+addcmul(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
 Performs the element-wise multiplication of :attr:`tensor1`
 by :attr:`tensor2`, multiply the result by the scalar :attr:`value`
@@ -306,9 +307,9 @@ a real number, otherwise an integer.
 
 Args:
     input (Tensor): the tensor to be added
-    value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     tensor1 (Tensor): the tensor to be multiplied
     tensor2 (Tensor): the tensor to be multiplied
+    value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     {out}
 
 Example::
@@ -316,7 +317,7 @@ Example::
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
     >>> t2 = torch.randn(1, 3)
-    >>> torch.addcmul(t, 0.1, t1, t2)
+    >>> torch.addcmul(t, t1, t2, value=0.1)
     tensor([[-0.8635, -0.6391,  1.6174],
             [-0.7617, -0.5879,  1.7388],
             [-0.8353, -0.6249,  1.6511]])
@@ -324,7 +325,7 @@ Example::
 
 add_docstr(torch.addmm,
            r"""
-addmm(beta=1, input, alpha=1, mat1, mat2, out=None) -> Tensor
+addmm(input, mat1, mat2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix multiplication of the matrices :attr:`mat1` and :attr:`mat2`.
 The matrix :attr:`input` is added to the final result.
@@ -344,11 +345,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     mat1 (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     {out}
 
 Example::
@@ -363,7 +364,7 @@ Example::
 
 add_docstr(torch.addmv,
            r"""
-addmv(beta=1, input, alpha=1, mat, vec, out=None) -> Tensor
+addmv(input, mat, vec, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a matrix-vector product of the matrix :attr:`mat` and
 the vector :attr:`vec`.
@@ -384,11 +385,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): vector to be added
-    alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     {out}
 
 Example::
@@ -402,7 +403,7 @@ Example::
 
 add_docstr(torch.addr,
            r"""
-addr(beta=1, input, alpha=1, vec1, vec2, out=None) -> Tensor
+addr(input, vec1, vec2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs the outer-product of vectors :attr:`vec1` and :attr:`vec2`
 and adds it to the matrix :attr:`input`.
@@ -424,11 +425,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     vec1 (Tensor): the first vector of the outer product
     vec2 (Tensor): the second vector of the outer product
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     {out}
 
 Example::
@@ -489,7 +490,7 @@ Args:
 Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
-    tensor([ 135.,  135,  325])
+    tensor([ 135.,  135,  -45])
 """.format(**common_args))
 
 add_docstr(torch.as_strided,
@@ -640,7 +641,7 @@ Example::
 
 add_docstr(torch.baddbmm,
            r"""
-baddbmm(beta=1, input, alpha=1, batch1, batch2, out=None) -> Tensor
+baddbmm(input, batch1, batch2, *, beta=1, alpha=1, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices in :attr:`batch1`
 and :attr:`batch2`.
@@ -663,11 +664,11 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): the tensor to be added
-    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+    beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
+    alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     {out}
 
 Example::
@@ -705,6 +706,7 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+    {generator}
     {out}
 
 Example::
@@ -823,6 +825,66 @@ Example::
     torch.Size([10, 3, 5])
 """.format(**common_args))
 
+add_docstr(torch.bitwise_and,
+           r"""
+bitwise_and(input, other, out=None) -> Tensor
+
+Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical AND.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([1, 0,  3], dtype=torch.int8)
+    >>> torch.bitwise_and(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ False, True, False])
+""".format(**common_args))
+
+add_docstr(torch.bitwise_or,
+           r"""
+bitwise_or(input, other, out=None) -> Tensor
+
+Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical OR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-1, -2,  3], dtype=torch.int8)
+    >>> torch.bitwise_or(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, True, False])
+""".format(**common_args))
+
+add_docstr(torch.bitwise_xor,
+           r"""
+bitwise_xor(input, other, out=None) -> Tensor
+
+Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
+integral or Boolean types. For bool tensors, it computes the logical XOR.
+
+Args:
+    input: the first input tensor
+    other: the second input tensor
+    {out}
+
+Example:
+
+    >>> torch.bitwise_xor(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
+    tensor([-2, -2,  0], dtype=torch.int8)
+    >>> torch.bitwise_xor(torch.tensor([True, True, False]), torch.tensor([False, True, False]))
+    tensor([ True, False, False])
+""".format(**common_args))
+
 add_docstr(torch.stack,
            r"""
 stack(tensors, dim=0, out=None) -> Tensor
@@ -842,7 +904,8 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks.
+Splits a tensor into a specific number of chunks. Each chunk is a view of
+the input tensor.
 
 Last chunk will be smaller if the tensor size along the given dimension
 :attr:`dim` is not divisible by :attr:`chunks`.
@@ -910,43 +973,6 @@ Example::
              -1.0969, -0.4614],
             [-0.1034, -0.5790,  0.1497, -0.1034, -0.5790,  0.1497, -0.1034,
              -0.5790,  0.1497]])
-""".format(**common_args))
-
-add_docstr(torch.cdist,
-           r"""
-cdist(x1, x2, p=2) -> Tensor
-
-Computes the p-norm distance between each pair of the two collections of row vectors.
-
-If x1 has shape :math:`P \times M` and x2 has shape :math:`R \times M` then the
-output will have shape :math:`P \times R`.
-
-This function is equivalent to `scipy.spatial.distance.cdist(input,'minkowski', p=p)`
-if :math:`p \in (0, \infty)`. When :math:`p = 0` it is equivalent to
-`scipy.spatial.distance.cdist(input, 'hamming') * M`. When :math:`p = \infty`, the closest
-scipy function is `scipy.spatial.distance.cdist(xn, lambda x, y: np.abs(x - y).max())`.
-
-Args:
-    x1 (Tensor): input tensor of shape :math:`P \times M`.
-    x2 (Tensor): input tensor of shape :math:`R \times M`.
-    p: p value for the p-norm distance to calculate between each vector pair
-        :math:`\in [0, \infty]`.
-
-Example::
-
-    >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
-    >>> a
-    tensor([[ 0.9041,  0.0196],
-            [-0.3108, -2.4423],
-            [-0.4821,  1.0590]])
-    >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
-    >>> b
-    tensor([[-2.1763, -0.4713],
-            [-0.6986,  1.3702]])
-    >>> torch.cdist(a, b, p=2)
-    tensor([[3.1193, 2.0959],
-            [2.7138, 3.8322],
-            [2.2830, 0.3791]])
 """.format(**common_args))
 
 add_docstr(torch.ceil,
@@ -1352,6 +1378,54 @@ Example::
             [-0.8304, -1.3037,  0.5650],
             [-1.2329,  1.9883,  1.0551]])
 """.format(**common_args))
+
+add_docstr(torch.cummax,
+           r"""
+cummax(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.3449, -1.5447,  0.0685, -1.5104, -1.1706,  0.2259,  1.4696, -1.3284,
+         1.9946, -0.8209])
+    >>> torch.cummax(a, dim=0)
+    torch.return_types.cummax(
+        values=tensor([-0.3449, -0.3449,  0.0685,  0.0685,  0.0685,  0.2259,  1.4696,  1.4696,
+         1.9946,  1.9946]),
+        indices=tensor([0, 0, 2, 2, 2, 5, 6, 6, 8, 8]))
+""".format(**reduceops_common_args))
+
+add_docstr(torch.cummin,
+           r"""
+cummin(input, dim, out=None) -> (Tensor, LongTensor)
+Returns a namedtuple ``(values, indices)`` where ``values``is the cumulative maximum of
+elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
+location of each maximum value found in the dimension :attr:`dim`.
+.. math::
+    y_i = max(x_1, x_2, x_3, \dots, x_i)
+Args:
+    {input}
+    dim  (int): the dimension to do the operation over
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
+Example::
+    >>> a = torch.randn(10)
+    >>> a
+    tensor([-0.2284, -0.6628,  0.0975,  0.2680, -1.3298, -0.4220, -0.3885,  1.1762,
+         0.9165,  1.6684])
+    >>> torch.cummin(a, dim=0)
+    torch.return_types.cummin(
+        values=tensor([-0.2284, -0.6628, -0.6628, -0.6628, -1.3298, -1.3298, -1.3298, -1.3298,
+        -1.3298, -1.3298]),
+        indices=tensor([0, 1, 1, 1, 4, 4, 4, 4, 4, 4]))
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumprod,
            r"""
@@ -1832,8 +1906,8 @@ Returns:
 Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
-    tensor([[ 1,  0],
-            [ 0,  1]], dtype=torch.uint8)
+    tensor([[ True, False],
+            [False, True]])
 """.format(**common_args))
 
 add_docstr(torch.equal,
@@ -1994,6 +2068,31 @@ Example::
     tensor([-0.8166,  1.5308, -0.2530, -0.2091])
     >>> torch.floor(a)
     tensor([-1.,  1., -1., -1.])
+""".format(**common_args))
+
+add_docstr(torch.floor_divide,
+           r"""
+floor_divide(input, other) -> Tensor
+
+Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
+for type promotion and broadcasting rules.
+
+.. math::
+    \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
+
+""" + r"""
+Args:
+    input (Tensor): the numerator tensor
+    other (Tensor or Scalar): the denominator
+
+Example::
+
+    >>> a = torch.tensor([4.0, 3.0])
+    >>> b = torch.tensor([2.0, 2.0])
+    >>> torch.floor_divide(a, b)
+    tensor([2.0, 1.0])
+    >>> torch.floor_divide(a, 1.4)
+    tensor([2.0, 2.0])
 """.format(**common_args))
 
 add_docstr(torch.fmod,
@@ -2427,6 +2526,38 @@ Example::
     tensor(1.9073e-06)
 """.format(**common_args))
 
+add_docstr(torch.isinf,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of `+/-INF` elements and False otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([False,  True,  False,  True,  False])
+""")
+
+add_docstr(torch.isfinite,
+           r"""
+Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: ``A torch.Tensor with dtype torch.bool`` containing a True at each location of finite elements and False otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([True,  False,  True,  False,  False])
+""")
+
 add_docstr(torch.isnan,
            r"""
 Returns a new tensor with boolean elements representing if each element is `NaN` or not.
@@ -2549,6 +2680,26 @@ Example::
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
     >>> torch.lerp(start, end, torch.full_like(start, 0.5))
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
+""".format(**common_args))
+
+add_docstr(torch.lgamma,
+           r"""
+lgamma(input, out=None) -> Tensor
+
+Computes the logarithm of the gamma function on :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \log \Gamma(\text{input}_{i})
+""" + """
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.arange(0.5, 2, 0.5)
+    >>> torch.lgamma(a)
+    tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
 add_docstr(torch.linspace,
@@ -2684,6 +2835,34 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.logical_and,
+           r"""
+logical_and(input, other, out=None) -> Tensor
+
+Computes the element-wise logical AND of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute AND with
+    {out}
+
+Example::
+
+    >>> torch.logical_and(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ True, False, False])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_and(a, b)
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a.double(), b.double())
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a.double(), b)
+    tensor([False, False,  True, False])
+    >>> torch.logical_and(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([False, False,  True, False])
+""".format(**common_args))
+
 add_docstr(torch.logical_not,
            r"""
 logical_not(input, out=None) -> Tensor
@@ -2698,7 +2877,7 @@ Args:
 Example::
 
     >>> torch.logical_not(torch.tensor([True, False]))
-    tensor([ False,  True])
+    tensor([False,  True])
     >>> torch.logical_not(torch.tensor([0, 1, -10], dtype=torch.int8))
     tensor([ True, False, False])
     >>> torch.logical_not(torch.tensor([0., 1.5, -10.], dtype=torch.double))
@@ -2707,11 +2886,40 @@ Example::
     tensor([1, 0, 0], dtype=torch.int16)
 """.format(**common_args))
 
+add_docstr(torch.logical_or,
+           r"""
+logical_or(input, other, out=None) -> Tensor
+
+Computes the element-wise logical OR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
+
+Args:
+    {input}
+    other (Tensor): the tensor to compute OR with
+    {out}
+
+Example::
+
+    >>> torch.logical_or(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
+    tensor([ True, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_or(a, b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a.double(), b.double())
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a.double(), b)
+    tensor([ True,  True,  True, False])
+    >>> torch.logical_or(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([ True,  True,  True, False])
+""".format(**common_args))
+
 add_docstr(torch.logical_xor,
            r"""
 logical_xor(input, other, out=None) -> Tensor
 
-Computes the element-wise logical XOR of the given input tensors. Both input tensors must have the bool dtype.
+Computes the element-wise logical XOR of the given input tensors. Zeros are treated as ``False`` and nonzeros are
+treated as ``True``.
 
 Args:
     {input}
@@ -2721,7 +2929,17 @@ Args:
 Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
-    tensor([ False, False,  True])
+    tensor([False, False,  True])
+    >>> a = torch.tensor([0, 1, 10, 0], dtype=torch.int8)
+    >>> b = torch.tensor([4, 0, 1, 0], dtype=torch.int8)
+    >>> torch.logical_xor(a, b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b.double())
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a.double(), b)
+    tensor([ True,  True, False, False])
+    >>> torch.logical_xor(a, b, out=torch.empty(4, dtype=torch.bool))
+    tensor([ True,  True, False, False])
 """.format(**common_args))
 
 add_docstr(torch.logspace,
@@ -2923,7 +3141,7 @@ to match, but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    mask  (ByteTensor): the tensor containing the binary mask to index with
+    mask  (BoolTensor): the tensor containing the binary mask to index with
     {out}
 
 Example::
@@ -2944,7 +3162,7 @@ Example::
 
 add_docstr(torch.matrix_rank,
            r"""
-matrix_rank(input, tol=None, bool symmetric=False) -> Tensor
+matrix_rank(input, tol=None, symmetric=False) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -3011,7 +3229,7 @@ add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
 
-Returns the maximum value of all elements in the :attr:`input` tensor.
+Returns the maximum value of all elements in the ``input`` tensor.
 
 Args:
     {input}
@@ -3031,10 +3249,16 @@ value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each maximum value found
 (argmax).
 
-If :attr:`keepdim` is ``True``, the output tensors are of the same size
-as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
-Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having 1 fewer dimension than :attr:`input`.
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    maximal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
+
+If ``keepdim`` is ``True``, the output tensors are of the same size
+as ``input`` except in the dimension ``dim`` where they are of size 1.
+Otherwise, ``dim`` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having 1 fewer dimension than ``input``.
 
 Args:
     {input}
@@ -3055,15 +3279,15 @@ Example::
 
 .. function:: max(input, other, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise maximum is taken.
+Each element of the tensor ``input`` is compared with the corresponding
+element of the tensor ``other`` and an element-wise maximum is taken.
 
-The shapes of :attr:`input` and :attr:`other` don't need to match,
+The shapes of ``input`` and ``other`` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
 
 .. math::
-    \text{out}_i = \max(\text{tensor}_i, \text{other}_i)
-""" + r"""
+    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
+
 .. note:: When the shapes do not match, the shape of the returned output tensor
           follows the :ref:`broadcasting rules <broadcasting-semantics>`.
 
@@ -3196,7 +3420,7 @@ Example::
     >>> torch.median(a)
     tensor(0.2202)
 
-.. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+.. function:: median(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the median
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3213,8 +3437,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
 Example::
 
@@ -3251,6 +3474,12 @@ Returns a namedtuple ``(values, indices)`` where ``values`` is the minimum
 value of each row of the :attr:`input` tensor in the given dimension
 :attr:`dim`. And ``indices`` is the index location of each minimum value found
 (argmin).
+
+.. warning::
+    ``indices`` does not necessarily contain the first occurrence of each
+    minimal value found, unless it is unique.
+    The exact implementation details are device-specific.
+    Do not expect the same result when run on CPU and GPU in general.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
@@ -3445,7 +3674,7 @@ Example::
 
 add_docstr(torch.mode,
            r"""
-mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
+mode(input, dim=-1, keepdim=False, out=None) -> (Tensor, LongTensor)
 
 Returns a namedtuple ``(values, indices)`` where ``values`` is the mode
 value of each row of the :attr:`input` tensor in the given dimension
@@ -3465,8 +3694,7 @@ Args:
     {input}
     {dim}
     {keepdim}
-    values (Tensor, optional): the output tensor
-    indices (Tensor, optional): the output index tensor
+    out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
 
@@ -3540,7 +3768,7 @@ Example::
 
 add_docstr(torch.multinomial,
            r"""
-multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
+multinomial(input, num_samples, replacement=False, *, generator=None, out=None) -> LongTensor
 
 Returns a tensor where each row contains :attr:`num_samples` indices sampled
 from the multinomial probability distribution located in the corresponding row
@@ -3573,6 +3801,7 @@ Args:
     input (Tensor): the input tensor containing probabilities
     num_samples (int): number of samples to draw
     replacement (bool, optional): whether to draw with replacement or not
+    {generator}
     {out}
 
 Example::
@@ -3616,15 +3845,16 @@ add_docstr(torch.mvlgamma,
            r"""
 mvlgamma(input, p) -> Tensor
 
-Computes the multivariate log-gamma function (`[reference]`_) with dimension :math:`p` element-wise, given by
+Computes the `multivariate log-gamma function
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
+:math:`p` element-wise, given by
 
 .. math::
     \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
 where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
-If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
-is thrown.
+All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
 
 Args:
     input (Tensor): the tensor to compute the multivariate log-gamma function
@@ -3639,8 +3869,6 @@ Example::
     >>> torch.mvlgamma(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
-
-.. _`[reference]`: https://en.wikipedia.org/wiki/Multivariate_gamma_function
 """)
 
 add_docstr(torch.narrow,
@@ -3718,25 +3946,37 @@ add_docstr(torch.nonzero,
            r"""
 nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
 
-**When** :attr:`as_tuple` **is false or unspecified:**
+.. note::
+    :func:`torch.nonzero(..., as_tuple=False) <torch.nonzero>` (default) returns a
+    2-D tensor where each row is the index for a nonzero value.
+
+    :func:`torch.nonzero(..., as_tuple=True) <torch.nonzero>` returns a tuple of 1-D
+    index tensors, allowing for advanced indexing, so ``x[x.nonzero(as_tuple=True)]``
+    gives all nonzero values of tensor ``x``. Of the returned tuple, each index tensor
+    contains nonzero indices for a certain dimension.
+
+    See below for more details on the two behaviors.
+
+
+**When** :attr:`as_tuple` **is ``False`` (default)**:
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
 element in :attr:`input`. The result is sorted lexicographically, with
 the last index changing the fastest (C-style).
 
-If :attr:`input` has `n` dimensions, then the resulting indices tensor
+If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
 :attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
-**When** :attr:`as_tuple` **is true:**
+**When** :attr:`as_tuple` **is ``True``**:
 
 Returns a tuple of 1-D tensors, one for each dimension in :attr:`input`,
 each containing the indices (in that dimension) of all non-zero elements of
 :attr:`input` .
 
-If :attr:`input` has `n` dimensions, then the resulting tuple contains `n` tensors
-of size `z`, where `z` is the total number of
+If :attr:`input` has :math:`n` dimensions, then the resulting tuple contains :math:`n`
+tensors of size :math:`z`, where :math:`z` is the total number of
 non-zero elements in the :attr:`input` tensor.
 
 As a special case, when :attr:`input` has zero dimensions and a nonzero scalar
@@ -3747,8 +3987,8 @@ Args:
     out (LongTensor, optional): the output tensor containing indices
 
 Returns:
-    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is false, the output
-    tensor containing indices. If :attr:`as_tuple` is true, one 1-D tensor for
+    LongTensor or tuple of LongTensor: If :attr:`as_tuple` is ``False``, the output
+    tensor containing indices. If :attr:`as_tuple` is ``True``, one 1-D tensor for
     each dimension, containing the indices of each nonzero element along that
     dimension.
 
@@ -3780,7 +4020,7 @@ Example::
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(mean, std, out=None) -> Tensor
+.. function:: normal(mean, std, *, generator=None, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
@@ -3800,6 +4040,7 @@ total number of elements in each tensor need to be the same.
 Args:
     mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
+    {generator}
     {out}
 
 Example::
@@ -3968,6 +4209,55 @@ Args:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)
+
+add_docstr(torch.poisson,
+           r"""
+poisson(input *, generator=None) -> Tensor
+
+Returns a tensor of the same size as :attr:`input` with each element
+sampled from a Poisson distribution with rate parameter given by the corresponding
+element in :attr:`input` i.e.,
+
+.. math::
+    \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
+
+Args:
+    input (Tensor): the input tensor containing the rates of the Poisson distribution
+    {generator}
+
+Example::
+
+    >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
+    >>> torch.poisson(rates)
+    tensor([[9., 1., 3., 5.],
+            [8., 6., 6., 0.],
+            [0., 4., 5., 3.],
+            [2., 1., 4., 2.]])
+""".format(**common_args))
+
+add_docstr(torch.polygamma,
+           r"""
+polygamma(n, input, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
+:math:`n \geq 0` is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is not implemented for :math:`n \geq 2`.
+""" + """
+Args:
+    n (int): the order of the polygamma function
+    {input}
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+""".format(**common_args))
 
 add_docstr(torch.pow,
            r"""
@@ -4206,7 +4496,8 @@ Args:
 
 add_docstr(torch.randint,
            r"""
-randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randint(low=0, high, size, *, generator=None, out=None, \
+        dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
@@ -4221,6 +4512,7 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+    {generator}
     {out}
     {dtype}
     {layout}
@@ -4808,7 +5100,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False, out=None) -> LongTensor
+argsort(input, dim=-1, descending=False) -> LongTensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -4937,6 +5229,25 @@ Example::
     tensor([    nan,  1.0112,  0.2883,  0.6933])
 """.format(**common_args))
 
+add_docstr(torch.square,
+           r"""
+square(input, out=None) -> Tensor
+
+Returns a new tensor with the square of the elements of :attr:`input`.
+
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4)
+    >>> a
+    tensor([-2.0755,  1.0226,  0.0831,  0.4806])
+    >>> torch.square(a)
+    tensor([ 4.3077,  1.0457,  0.0069,  0.2310])
+""".format(**common_args))
+
 add_docstr(torch.squeeze,
            r"""
 squeeze(input, dim=None, out=None) -> Tensor
@@ -4998,7 +5309,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5012,8 +5323,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
     {out}
 
 Example::
@@ -5049,7 +5360,7 @@ Example::
     >>> torch.std_mean(a)
     (tensor(0.3457), tensor(0.5472))
 
-.. function:: std(input, dim, keepdim=False, unbiased=True) -> (Tensor, Tensor)
+.. function:: std_mean(input, dim, unbiased=True, keepdim=False) -> (Tensor, Tensor)
 
 Returns the standard-deviation and mean of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -5063,8 +5374,8 @@ via the biased estimator. Otherwise, Bessel's correction will be used.
 Args:
     {input}
     {dim}
-    {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+    {keepdim}
 
 Example::
 
@@ -5139,6 +5450,9 @@ i.e., if the last two dimensions of :attr:`input` are ``m`` and ``n``, then the 
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
 of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+
+.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+          then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
@@ -5220,6 +5534,9 @@ only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
 
+.. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
+          then the eigenvalues of each matrix in the batch is returned in ascending order.
+
 .. note:: Irrespective of the original strides, the returned matrix `V` will
           be transposed, i.e. with strides `V.contiguous().transpose(-1, -2).stride()`.
 
@@ -5239,7 +5556,7 @@ Returns:
 
         - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`. The eigenvalues in ascending order.
         - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-          If ``eigenvectors=False``, it's a tensor filled with zeros.
+          If ``eigenvectors=False``, it's an empty tensor.
           Otherwise, this tensor contains the orthonormal eigenvectors of the ``input``.
 
 Examples::
@@ -5276,8 +5593,8 @@ t(input) -> Tensor
 Expects :attr:`input` to be <= 2-D tensor and transposes dimensions 0
 and 1.
 
-0-D and 1-D tensors are returned as it is and
-2-D tensor can be seen as a short-hand function for ``transpose(input, 0, 1)``.
+0-D and 1-D tensors are returned as is. When input is a 2-D tensor this
+is equivalent to ``transpose(input, 0, 1)``.
 
 Args:
     {input}
@@ -5682,8 +5999,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
@@ -5723,7 +6041,7 @@ The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
 The argument :attr:`diagonal` controls which diagonal to consider. If
-:attr:`diagonal` = 0, all elements on and below the main diagonal are
+:attr:`diagonal` = 0, all elements on and above the main diagonal are
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
 the main diagonal. The main diagonal are the set of indices
@@ -5795,8 +6113,9 @@ the main diagonal. The main diagonal are the set of indices
 :math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]`
 where :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
-NOTE: when running on 'cuda', row * col must be less than :math:`2^{59}` to
-prevent overflow during calculation.
+.. note::
+    When running on CUDA, ``row * col`` must be less than :math:`2^{59}` to
+    prevent overflow during calculation.
 """ + r"""
 Args:
     row (``int``): number of rows in the 2-D matrix.
@@ -6335,12 +6654,12 @@ Please look at `Moore-Penrose inverse`_ for more details
     See :meth:`~torch.svd` for more details.
 
 Arguments:
-    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
     rcond (float): A floating point value to determine the cutoff for small singular values.
                    Default: 1e-15
 
 Returns:
-    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+    The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
 
 Example::
 
@@ -6355,6 +6674,17 @@ Example::
             [-0.7124, -0.1631, -0.2272],
             [ 0.1356,  0.3933, -0.5023],
             [-0.0308, -0.1725, -0.5216]])
+    >>> # Batched pinverse example
+    >>> a = torch.randn(2,6,3)
+    >>> b = torch.pinverse(a)
+    >>> torch.matmul(b, a)
+    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
+            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
+            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
+
+            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
+            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
+            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
 
 .. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
 
@@ -6633,7 +6963,7 @@ this normalizes the result by multiplying it with
 
     Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
     :attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
-    and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
+    and preferably a :attr:`signal_sizes` is given to avoid size mismatch. See the
     example below for a case of size mismatch.
 
     See :func:`~torch.rfft` for details on conjugate symmetry.
@@ -6989,7 +7319,7 @@ Repeat elements of a tensor.
 
 .. warning::
 
-    This is different from :func:`torch.repeat` but similar to `numpy.repeat`.
+    This is different from :meth:`torch.Tensor.repeat` but similar to ``numpy.repeat``.
 
 Args:
     {input}
@@ -7029,7 +7359,7 @@ If the `repeats` is `tensor([n1, n2, n3, ...])`, then the output will be
 
 add_docstr(torch.quantize_per_tensor,
            r"""
-quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor
+quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
 Converts a float tensor to quantized tensor with given scale and zero point.
 
@@ -7054,7 +7384,7 @@ Example::
 
 add_docstr(torch.quantize_per_channel,
            r"""
-quantize_per_channel(Tensor self, Tensor scales, Tensor zero_points, int axis, ScalarType dtype) -> Tensor
+quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
 Converts a float tensor to per-channel quantized tensor with given scales and zero points.
 

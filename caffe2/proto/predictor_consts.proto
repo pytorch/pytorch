@@ -27,4 +27,9 @@ message PredictorConsts {
   optional string TRAIN_INIT_PLAN_TYPE = 11
       [ default = "TRAIN_INIT_PLAN_TYPE" ];
   optional string TRAIN_PLAN_TYPE = 12 [ default = "TRAIN_PLAN_TYPE" ];
+
+  // Shape info blob name
+  optional string SHAPE_INFO_BLOB = 13 [ default = "SHAPE_INFO_BLOB" ];
+  // Sequential blob reader name
+  optional string DEFERRED_BLOB_READER = 14 [ default = "__DEFERRED_BLOB_READER__" ];
 }

@@ -112,6 +112,7 @@ class DataWorkersTest(unittest.TestCase):
         # Let's now shutdown and see it succeeds.
         self.assertTrue(coordinator.stop())
 
+    @unittest.skip("Test is flaky: https://github.com/pytorch/pytorch/issues/9064")
     def testInputOrder(self):
         #
         # Create two models (train and validation) with same input blobs

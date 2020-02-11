@@ -20,6 +20,7 @@ void THNN_(GatedLinear_updateGradInput)(
            int dim)
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
+  dim = at::maybe_wrap_dim(dim, input);
   const int64_t nIn = THCTensor_(size)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim, nIn);

@@ -9,9 +9,9 @@ import re
 
 import torch
 from torch._six import PY2
-import common_utils as common
-import common_nn
-from common_cuda import TEST_CUDA
+import torch.testing._internal.common_utils as common
+import torch.testing._internal.common_nn as common_nn
+from torch.testing._internal.common_cuda import TEST_CUDA
 import torch.utils.cpp_extension
 from cpp_api_parity import sample_module, torch_nn_modules, TorchNNTestParams, CppArg, parse_parity_tracker_table
 
@@ -43,24 +43,24 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   // `IValue` constructor), and here we check that all elements in the `ExpandingArray`
   // are equal to the Python `int` attribute.
   if (ivalue_python.isInt() && ivalue_cpp.isIntList()) {
-    auto ivalue_cpp_list = ivalue_cpp.toIntListRef();
+    auto ivalue_cpp_list = ivalue_cpp.toIntVector();
     std::vector<int64_t> ivalue_python_vec(ivalue_cpp_list.size());
     std::fill(ivalue_python_vec.begin(), ivalue_python_vec.end(), ivalue_python.toInt());
     return ivalue_python_vec == ivalue_cpp_list;
   }
 
   // For Python modules, we allow the use of "none" / "mean" / "sum" to represent the reduction type.
-  // The corresponding data type for C++ modules is `Reduction::Reduction` enum, and here we map the
+  // The corresponding data type for C++ modules is `torch::Reduction::Reduction` enum, and here we map the
   // reduction types between Python version and C++ version.
   if (ivalue_python.isString() && ivalue_cpp.isInt()) {
     auto& ivalue_python_str = ivalue_python.toStringRef();
     auto ivalue_cpp_int = ivalue_cpp.toInt();
     if (ivalue_python_str == "none") {
-      return ivalue_cpp_int == Reduction::None;
+      return ivalue_cpp_int == torch::Reduction::None;
     } else if (ivalue_python_str == "mean") {
-      return ivalue_cpp_int == Reduction::Mean;
+      return ivalue_cpp_int == torch::Reduction::Mean;
     } else if (ivalue_python_str == "sum") {
-      return ivalue_cpp_int == Reduction::Sum;
+      return ivalue_cpp_int == torch::Reduction::Sum;
     }
   }
 
@@ -79,7 +79,7 @@ bool check_ivalue_equality(const c10::IValue& ivalue_python, const c10::IValue& 
   } else if (ivalue_python.isTensor()) {
     return check_tensor_equality(ivalue_python.toTensor(), ivalue_cpp.toTensor());
   } else if (ivalue_python.isIntList()) {
-    return ivalue_python.toIntListRef() == ivalue_cpp.toIntListRef();
+    return ivalue_python.toIntVector() == ivalue_cpp.toIntVector();
   } else if (ivalue_python.isNone()) {
     return ivalue_cpp.isNone();
   } else {
@@ -218,15 +218,15 @@ class TestCppApiParity(common.TestCase):
         elif type(python_arg) == bool:
             return CppArg(type='bool', value=str(python_arg).lower())
         elif type(python_arg) == str:
-            # if `python_arg` is one of the reduction types, we use the corresponding `Reduction::Reduction` enum.
+            # if `python_arg` is one of the reduction types, we use the corresponding `torch::Reduction::Reduction` enum.
             if python_arg in ['none', 'mean', 'sum']:
                 if python_arg == 'none':
-                    cpp_arg = 'Reduction::None'
+                    cpp_arg = 'torch::Reduction::None'
                 elif python_arg == 'mean':
-                    cpp_arg = 'Reduction::Mean'
+                    cpp_arg = 'torch::Reduction::Mean'
                 elif python_arg == 'sum':
-                    cpp_arg = 'Reduction::Sum'
-                return CppArg(type='Reduction::Reduction', value='{}'.format(cpp_arg))
+                    cpp_arg = 'torch::Reduction::Sum'
+                return CppArg(type='torch::Reduction::Reduction', value='{}'.format(cpp_arg))
             else:
                 return CppArg(type='std::string', value='"{}"'.format(python_arg))
         elif type(python_arg) == torch.Tensor:
@@ -273,7 +273,7 @@ class TestCppApiParity(common.TestCase):
         example_inputs = self._prepare_tensors_for_module_input_or_target(test_params, example_inputs)
 
         # We set all inputs to torch.nn module to requires grad, so that the backward test can always be run.
-        # However, we skip embedding layers for now, becuase they only accept LongTensor as inputs,
+        # However, we skip embedding layers for now, because they only accept LongTensor as inputs,
         # And LongTensor cannot require grad.
         if test_params.module_name not in ["Embedding", "Embedding_sparse", "EmbeddingBag", "EmbeddingBag_sparse"]:
             example_inputs = [x.requires_grad_() for x in example_inputs]

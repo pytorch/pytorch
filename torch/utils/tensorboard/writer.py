@@ -10,13 +10,17 @@ import six
 import time
 import torch
 
+from tensorboard.compat import tf
 from tensorboard.compat.proto.event_pb2 import SessionLog
 from tensorboard.compat.proto.event_pb2 import Event
 from tensorboard.compat.proto import event_pb2
+from tensorboard.plugins.projector.projector_config_pb2 import ProjectorConfig
 from tensorboard.summary.writer.event_file_writer import EventFileWriter
 
 from ._convert_np import make_np
-from ._embedding import make_mat, make_sprite, make_tsv, append_pbtxt
+from ._embedding import (
+    make_mat, make_sprite, make_tsv, write_pbtxt, get_embedding_info,
+)
 from ._onnx_graph import load_onnx_graph
 from ._pytorch_graph import graph
 from ._utils import figure_to_image
@@ -295,7 +299,11 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        with SummaryWriter(log_dir=os.path.join(self.file_writer.get_logdir(), str(time.time()))) as w_hp:
+        logdir = os.path.join(
+            self._get_file_writer().get_logdir(),
+            str(time.time())
+        )
+        with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
@@ -764,27 +772,47 @@ class SummaryWriter(object):
         if global_step is None:
             global_step = 0
             # clear pbtxt?
+
         # Maybe we should encode the tag so slashes don't trip us up?
         # I don't think this will mess us up, but better safe than sorry.
         subdir = "%s/%s" % (str(global_step).zfill(5), self._encode(tag))
         save_path = os.path.join(self._get_file_writer().get_logdir(), subdir)
-        try:
-            os.makedirs(save_path)
-        except OSError:
-            print(
-                'warning: Embedding dir exists, did you set global_step for add_embedding()?')
+
+        fs = tf.io.gfile.get_filesystem(save_path)
+        if fs.exists(save_path):
+            if fs.isdir(save_path):
+                print(
+                    'warning: Embedding dir exists, did you set global_step for add_embedding()?')
+            else:
+                raise Exception("Path: `%s` exists, but is a file. Cannot proceed." % save_path)
+        else:
+            fs.makedirs(save_path)
+
         if metadata is not None:
             assert mat.shape[0] == len(
                 metadata), '#labels should equal with #data points'
             make_tsv(metadata, save_path, metadata_header=metadata_header)
+
         if label_img is not None:
             assert mat.shape[0] == label_img.shape[0], '#images should equal with #data points'
             make_sprite(label_img, save_path)
+
         assert mat.ndim == 2, 'mat should be 2D, where mat.size(0) is the number of data points'
         make_mat(mat, save_path)
-        # new funcion to append to the config file a new embedding
-        append_pbtxt(metadata, label_img,
-                     self._get_file_writer().get_logdir(), subdir, global_step, tag)
+
+        # Filesystem doesn't necessarily have append semantics, so we store an
+        # internal buffer to append to and re-write whole file after each
+        # embedding is added
+        if not hasattr(self, "_projector_config"):
+            self._projector_config = ProjectorConfig()
+        embedding_info = get_embedding_info(
+            metadata, label_img, fs, subdir, global_step, tag)
+        self._projector_config.embeddings.extend([embedding_info])
+
+        from google.protobuf import text_format
+        config_pbtxt = text_format.MessageToString(self._projector_config)
+        write_pbtxt(self._get_file_writer().get_logdir(), config_pbtxt)
+
 
     def add_pr_curve(self, tag, labels, predictions, global_step=None,
                      num_thresholds=127, weights=None, walltime=None):

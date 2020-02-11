@@ -14,11 +14,6 @@ import static org.junit.Assert.assertArrayEquals;
 @RunWith(AndroidJUnit4.class)
 public class TorchVisionInstrumentedTests {
 
-  @Before
-  public void setUp() {
-    System.loadLibrary("pytorch");
-  }
-
   @Test
   public void smokeTest() {
     Bitmap bitmap = Bitmap.createBitmap(320, 240, Bitmap.Config.ARGB_8888);
@@ -27,6 +22,6 @@ public class TorchVisionInstrumentedTests {
             bitmap,
             TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
             TensorImageUtils.TORCHVISION_NORM_STD_RGB);
-    assertArrayEquals(new long[] {1l, 3l, 240l, 320l}, tensor.shape);
+    assertArrayEquals(new long[] {1l, 3l, 240l, 320l}, tensor.shape());
   }
 }

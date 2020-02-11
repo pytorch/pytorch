@@ -25,7 +25,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = at::empty(mask_values.sizes(), r._values().options());
-  alias_into_sparse(r, mask_indices.clone(), r_values);
+  alias_into_sparse(r, mask_indices.clone(at::MemoryFormat::Contiguous), r_values);
   r._coalesced_(mask.is_coalesced());
   if (t.numel() == 0) {  // if t is an empty tensor, there is no need to mask its elements
     return r;
@@ -46,7 +46,11 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
     view_size[d + 1] = mask.size(mask.sparse_dim() + d);
   }
 
-  Tensor t_view = t.view(view_size);
+  Tensor t_view;
+  if (t.is_contiguous())
+      t_view = t.view(view_size);
+  else
+      t_view = t.contiguous().view(view_size);
   // TODO: Re-audit this; it used to be an indexSelect directly into r_values
   at::index_select_out(r_values, t_view, 0, indices);
 

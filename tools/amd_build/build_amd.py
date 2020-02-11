@@ -70,6 +70,7 @@ includes = [
     "caffe2/db/*",
     "caffe2/utils/*",
     "caffe2/contrib/gloo/*",
+    "caffe2/contrib/nccl/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",

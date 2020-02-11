@@ -70,7 +70,7 @@ OpCode parseOpCode(const char *str) {
 
 bool isOpSupportedInMobile(OpCode op) {
   static constexpr OpCode supported_ops_in_mobile[] {
-      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, LOOP, RET, GET_ATTR, SET_ATTR
+      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR
   };
 
   for (auto sop : supported_ops_in_mobile) {
