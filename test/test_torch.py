@@ -5323,8 +5323,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                                 self.assertEqual(
                                     out[n][c][h][w],
                                     torch.ops.quantized.add(x[n][c][h][w], y[n][c][h][w], scale, zero_point))
-                        else:
-                            self.assertEqual(out[n][c][h][w], x[n][c][h][w] + y[n][c][h][w])
+                            else:
+                                self.assertEqual(out[n][c][h][w], x[n][c][h][w] + y[n][c][h][w])
 
         xraw = torch.rand(2, 3, 4, 4)
         yraw = torch.rand(2, 3, 4, 4)
