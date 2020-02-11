@@ -22,7 +22,6 @@ class PyRRef {
   std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
-  c10::IValue toIValue();
 
  private:
   c10::intrusive_ptr<RRef> rref_;
