@@ -4215,9 +4215,7 @@ class TestNN(NNTestCase):
         # get output value
         i = torch.randn(2, 2, 6, 6, 6, device="cuda", dtype=dtype).div_(2).requires_grad_()
         output = m(i)
-        print("Testing 3dCONV")
-        print(m)
-        print(output)
+
         # get gradient
         grad_output = torch.randn(2, 2, 4, 4, 4, device="cuda", dtype=dtype) / 2
         output.backward(grad_output)
