@@ -245,9 +245,6 @@ def generate_type_hints(fname, decls, is_tensor=False):
     dnames = ([d['name'] for d in decls])
     has_out = fname + '_out' in dnames
 
-    if fname == 'rand':
-        print("\n\n\n has_out: ", has_out)
-
     if has_out:
         decls = [d for d in decls if d['name'] != fname + '_out']
 
@@ -327,9 +324,6 @@ def generate_type_hints(fname, decls, is_tensor=False):
             type_hint = "def {}({}) -> {}: ...".format(fname, python_args_s, python_returns_s)
             type_hints.append(type_hint)
 
-    if fname == 'rand':
-        print("\n\n\n RAND")
-        print(type_hints)
     return type_hints
 
 def gen_nn_modules(out):
