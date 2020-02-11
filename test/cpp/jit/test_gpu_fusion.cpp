@@ -187,6 +187,24 @@ void testGPU_FusionTopoSort() {
 
 }
 
+void testGPU_FuserTensor() {
+  auto tensor = at::randn({20, 20}, at::kCUDA);
+  auto tensor_type = TensorType::create(tensor);
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  auto fuser_tensor  = new Tensor(tensor_type);
+  //std::cout << fuser_tensor << std::endl;
+  TORCH_CHECK(fuser_tensor->scalarType().has_value() &&
+      fuser_tensor->scalarType() == at::ScalarType::Float);
+  TORCH_CHECK(fuser_tensor->sizes().has_value() &&
+      fuser_tensor->sizes().value()[0] == 20 &&
+      fuser_tensor->sizes().value()[1] == 20);
+  TORCH_CHECK(fuser_tensor->strides().has_value() &&
+      fuser_tensor->strides().value()[0] == 20 &&
+      fuser_tensor->strides().value()[1] == 1);
+}
+
 void testGPU_Fusion() {}
 
 }} // torch::jit
