@@ -529,7 +529,6 @@ TEST(SerializeTest, Optim_SGD) {
     optimizer.step();
   };
   step(optim1, model1);
-  auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1));
 
   std::vector<at::Tensor> momentum_buffers;
   int64_t iteration_{0};
@@ -542,12 +541,14 @@ TEST(SerializeTest, Optim_SGD) {
       momentum_buffers.emplace_back(curr_state_.momentum_buffer());
     }
   }
+  ASSERT_TRUE(momentum_buffers.size() == (params_.size() - 1));
   // write momentum_buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
   write_int_value(output_archive, "iteration_", iteration_);
   output_archive.save_to(optim_tempfile_old_format.name);
+  auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
   OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }

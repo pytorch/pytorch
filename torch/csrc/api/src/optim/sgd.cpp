@@ -121,9 +121,7 @@ void SGD::load(serialize::InputArchive& archive) {
       "Your serialized SGD optimizer is still using the old serialization format. "
       "You should re-save your SGD optimizer to use the new serialization format.");
     std::vector<Tensor> momentum_buffers;
-    int64_t iteration_;
     torch::optim::serialize(archive, "momentum_buffers", momentum_buffers);
-    torch::optim::serialize(archive, "iteration_", iteration_);
     // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
     std::vector<Tensor> params = param_groups_.at(0).params();
     for (size_t idx = 0; idx < momentum_buffers.size(); idx++) {
