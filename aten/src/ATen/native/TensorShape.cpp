@@ -392,6 +392,75 @@ Tensor cat(TensorList tensors, int64_t dim) {
   return result;
 }
 
+Tensor block_diag_cpu(TensorList tensors) {
+  Tensor result = at::empty({}, tensors[0].options());
+  return block_diag_out_cpu(result, tensors);
+}
+
+Tensor& block_diag_out_cpu(Tensor& result, TensorList tensors) {
+  if (tensors.size() == 0) {
+    result.resize_({0});
+    return result;
+  }
+
+  int64_t result_dim0 = 0;
+  int64_t result_dim1 = 0;
+
+  std::vector<Tensor> tensors_2D(tensors.size());
+
+  // Sum the dimensions of the tensors, check tensor sizes,
+  // and expand all 0-D and 1-D tensors so that everything
+  // is 2-D
+  for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
+    Tensor tensor = tensors[tensor_idx];
+    int64_t ndims = tensor.dim();
+    TORCH_CHECK(ndims <= 2, "tensors must have 2 or fewer dimensions");
+
+    int64_t dim0 = 1;
+    int64_t dim1 = 1;
+
+    if (ndims == 2) {
+      dim0 = tensor.size(0);
+      dim1 = tensor.size(1);
+
+      TORCH_CHECK(dim0 > 0, "2-D must have size(0) > 0")
+      TORCH_CHECK(dim1 > 0, "2-D must have size(1) > 0")
+      tensors_2D[tensor_idx] = tensor;
+    } else if (ndims == 1) {
+      // Switching dim 0 to dim 1 is intentional
+      dim1 = tensor.size(0);
+      TORCH_CHECK(dim1 > 0, "1-D must have size(0) > 0")
+      tensors_2D[tensor_idx] = tensor.expand({dim0, dim1});
+    } else {
+      tensors_2D[tensor_idx] = tensor.expand({dim0, dim1});
+    }
+    result_dim0 += dim0;
+    result_dim1 += dim1;
+  }
+
+  result.resize_({result_dim0, result_dim1});
+  result.zero_();
+
+  // for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
+
+  // }
+
+  int64_t cur_dim0 = 0;
+  int64_t cur_dim1 = 0;
+  for (auto iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
+    Tensor tensor = *iter;
+
+    int64_t dim0 = tensor.size(0);
+    int64_t dim1 = tensor.size(1);
+    result.slice(0, cur_dim0, cur_dim0+dim0).slice(1, cur_dim1, cur_dim1+dim1).copy_(tensor);
+
+    cur_dim0 += dim0;
+    cur_dim1 += dim1;
+  }
+
+  return result;
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(self.dim() > 0,
            "chunk expects at least a 1-dimensional tensor");

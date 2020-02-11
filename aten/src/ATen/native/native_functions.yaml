@@ -686,6 +686,17 @@
 - func: cat.names_out(Tensor[] tensors, Dimname dim, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: block_diag(Tensor[] tensors) -> Tensor
+  supports_named_tensor: True
+  dispatch:
+    CPU: block_diag_cpu
+
+- func: block_diag.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+  dispatch:
+    CPU: block_diag_out_cpu
+
+
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
