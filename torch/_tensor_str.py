@@ -71,8 +71,8 @@ def set_printoptions(
 
 class _Formatter(object):
     def __init__(self, tensor):
-        self.floating_dtype = tensor.is_floating_point()
-        self.complex_dtype = tensor.is_complex
+        self.floating_dtype = tensor.dtype.is_floating_point
+        self.complex_dtype = tensor.dtype.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
