@@ -87,7 +87,7 @@ struct ControlFlowLoadStores {
       }
     }
 
-    // Following the same logic as emitIfElseBlocks in compiler.cpp,
+    // Following the same logic as emitIfElseBlocks in ir_emitter.cpp,
     // we emit a node output if the variable is defined in each block
     // and the types of each block can be unified
     for (const auto& x : mutated_variables) {
