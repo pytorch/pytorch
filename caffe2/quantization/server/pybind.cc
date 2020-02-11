@@ -1,9 +1,12 @@
+#include <fbgemm/FbgemmFP16.h>
+#include <fbgemm/Utils.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
+#include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2_dnnlowp_utils.h"
 #include "quantization_error_minimization.h"
-#include "caffe2/opt/custom/fakefp16_transform.h"
 
 namespace caffe2 {
 namespace python {
@@ -278,4 +281,96 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("quant_scheme") = "min_max",
       pybind11::arg("p99_threshold") = 0.99,
       pybind11::arg("is_weight") = false);
+  m.def(
+      "ObserveFp16FCPackedWeights",
+      [](const string& blob_name, const string& weights_out_file) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        const auto* blob = gWorkspace->GetBlob(blob_name);
+        CAFFE_ENFORCE(blob, "Can't find blob ", blob_name);
+        fbgemm::PackedGemmMatrixFP16* packedGemmMatrixPtr =
+            blob->template Get<unique_ptr<fbgemm::PackedGemmMatrixFP16>>()
+                .get();
+        uint64_t nrow = packedGemmMatrixPtr->numRows();
+        uint64_t ncol = packedGemmMatrixPtr->numCols();
+        uint64_t size = nrow * ncol;
+        fbgemm::float16* unpacked_mat_ptr = nullptr;
+        vector<fbgemm::float16> unpacked_mat;
+
+        if (!packedGemmMatrixPtr->packed()) {
+          unpacked_mat_ptr = packedGemmMatrixPtr->pmat();
+        } else {
+          unpacked_mat.resize(size);
+          packedGemmMatrixPtr->unpack(
+              unpacked_mat.data(), fbgemm::matrix_op_t::Transpose);
+          unpacked_mat_ptr = unpacked_mat.data();
+        }
+        ofstream fout;
+        fout.open(weights_out_file);
+        if (!fout) {
+          LOG(WARNING) << "Can't open output file to dump fp16 weights "
+                       << weights_out_file;
+          return;
+        }
+        for (int i = 0; i < nrow; ++i) {
+          for (int j = 0; j < ncol; ++j) {
+            if (j > 0) {
+              fout << " ";
+            }
+            fout << fbgemm::cpu_half2float(unpacked_mat_ptr[i + nrow * j]);
+          }
+          fout << endl;
+        }
+        LOG(INFO) << "Written unpacked blob " << blob_name << " to "
+                  << weights_out_file;
+      },
+      pybind11::arg("blob_name"),
+      pybind11::arg("weights_out_file"));
+  m.def(
+      "ObserveInt8FCPackedWeights",
+      [](const string& blob_name, const string& weights_out_file) {
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        const auto* blob = gWorkspace->GetBlob(blob_name);
+        if (blob == nullptr) {
+          LOG(WARNING) << "Can't find blob " << blob_name;
+          return;
+        }
+        const Int8FCDNNLowPPackedWeightBlob& packedInt8Blob =
+            blob->template Get<Int8FCDNNLowPPackedWeightBlob>();
+        auto& qparams = packedInt8Blob.qparams;
+        auto& int8_tensor = packedInt8Blob.original_tensor;
+
+        auto shape = int8_tensor.sizes();
+
+        ofstream fout;
+        fout.open(weights_out_file);
+        if (!fout) {
+          LOG(WARNING) << "Can't open output file to dump int8 weights "
+                       << weights_out_file;
+          return;
+        }
+        for (int i = 0; i < qparams.size(); ++i) {
+          if (i > 0) {
+            fout << " ";
+          }
+          fout << to_string(qparams[i].scale) << " "
+               << to_string(qparams[i].zero_point);
+        }
+        fout << endl;
+        int8_t* int8_data = int8_tensor.data<int8_t>();
+        for (int i = 0; i < shape[0]; ++i) {
+          for (int j = 0; j < shape[1]; ++j) {
+            if (j > 0) {
+              fout << " ";
+            }
+            fout << to_string(int8_data[i * shape[1] + j]);
+          }
+          fout << endl;
+        }
+        LOG(INFO) << "Written int8 qparams and weights for " << blob_name
+                  << " to " << weights_out_file;
+      },
+      pybind11::arg("blob_name"),
+      pybind11::arg("weights_out_file"));
 }
