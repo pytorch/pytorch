@@ -112,7 +112,9 @@ void Method::run(Stack& stack) {
 }
 
 IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+  std::cout << "Before inserting, data starts at " << (void*)stack.data() << "\n";
   stack.insert(stack.begin(), owner()._ivalue());
+  std::cout << "Before running, data starts at " << (void*)stack.data() << "\n";
   return (*function_)(std::move(stack), kwargs);
 }
 

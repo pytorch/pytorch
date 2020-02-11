@@ -351,6 +351,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/api.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
     ${TORCH_SRC_DIR}/csrc/jit/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp

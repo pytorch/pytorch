@@ -110,6 +110,7 @@ struct TORCH_API Module : public Object {
   }
 
   IValue forward(std::vector<IValue> inputs) {
+    std::cout << "Getting method for inputs at " << (void*)inputs.data() << "\n";
     return get_method("forward")(std::move(inputs));
   }
 

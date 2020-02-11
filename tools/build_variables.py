@@ -79,6 +79,7 @@ libtorch_sources = [
     "torch/csrc/distributed/rpc/utils.cpp",
     "torch/csrc/jit/autodiff.cpp",
     "torch/csrc/jit/attributes.cpp",
+    "torch/csrc/jit/api.cpp",
     "torch/csrc/jit/argument_spec.cpp",
     "torch/csrc/jit/constants.cpp",
     "torch/csrc/jit/custom_class.cpp",
