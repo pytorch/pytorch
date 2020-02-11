@@ -96,8 +96,7 @@ Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 Tensor& expm1_out(Tensor& result, const Tensor& self) { 
-  if (result.defined()) return unary_op_impl_out(result, self, expm1_stub, /*strategy_promote=*/ true);
-  else return unary_op_impl_out(result, self, expm1_stub);
+  return unary_op_impl_out(result, self, expm1_stub, /*strategy_promote=*/ true);
 }
 
 Tensor& expm1_out_promoting(Tensor& result, const Tensor& self, bool promoting=false) { return unary_op_impl_out(result, self, expm1_stub, promoting); }
