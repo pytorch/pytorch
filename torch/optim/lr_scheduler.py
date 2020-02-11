@@ -217,8 +217,10 @@ class LambdaLR(_LRScheduler):
         """
 
         warnings.warn(SAVE_STATE_WARNING, UserWarning)
-        lr_lambdas = state_dict['lr_lambdas']
+        lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore lr_lambdas state
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -291,8 +293,9 @@ class MultiplicativeLR(_LRScheduler):
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
-        lr_lambdas = state_dict['lr_lambdas']
+        lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
