@@ -188,6 +188,14 @@ def parse_args():
     parser.add_argument("--no_python", default=False, action="store_true",
                         help="Do not prepend the training script with \"python\" - just exec "
                              "it directly. Useful when the script is not a Python script.")
+    parser.add_argument(
+        "--logdir",
+        default=None,
+        type=str,
+        help="Relative path to write subprocess logs to. Passing in a relative "
+        "path will create a directory if needed, and write the stdout to a file
+        "given by logdir/process_\{rank\}.",
+    )
 
     # positional
     parser.add_argument("training_script", type=str,
@@ -223,6 +231,17 @@ def main():
               "your application as needed. \n"
               "*****************************************".format(current_env["OMP_NUM_THREADS"]))
 
+    if args.logdir:
+        # Possibly create the directory to write subprocess log output to.
+        if os.path.exists(args.logdir):
+            if not os.path.isdir(args.logdir):
+                print("passed in --logdir must be a relative path to a directory")
+        else:
+            # create the relative directory
+            os.mkdir(os.path.join(os.getcwd(), args.logdir))
+
+    subprocess_file_handles = []
+
     for local_rank in range(0, args.nproc_per_node):
         # each process's rank
         dist_rank = args.nproc_per_node * args.node_rank + local_rank
@@ -249,7 +268,15 @@ def main():
 
         cmd.extend(args.training_script_args)
 
-        process = subprocess.Popen(cmd, env=current_env)
+        subprocess_stdout = None
+        if args.logdir:
+            directory_path = os.path.join(os.getcwd(), args.logdir)
+            file_handle = open(os.path.join(directory_path, "process_{}".format(local_rank)), "w")
+            subprocess_stdout = file_handle
+            subprocess_file_handles.append(file_handle)
+
+
+        process = subprocess.Popen(cmd, env=current_env, stdout=subprocess_stdout)
         processes.append(process)
 
     for process in processes:
@@ -257,6 +284,9 @@ def main():
         if process.returncode != 0:
             raise subprocess.CalledProcessError(returncode=process.returncode,
                                                 cmd=cmd)
+    # close open file descriptors
+    for file_handle in subprocess_file_handles:
+        file_handle.close()
 
 
 if __name__ == "__main__":
