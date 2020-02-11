@@ -103,6 +103,17 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
     Variable var = raw_outputs[i];
 
+    // For deprecation cycle. Can be removed after 1.6.
+    // In the case where we detected a view in no grad mode during the forward, only
+    // warn the user
+    if (!is_input && var.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(var));
+      if (diff_view_meta->allow_rebase_history == DifferentiableViewMeta::OnRebase::ERROR_REBASE) {
+        diff_view_meta->allow_rebase_history = DifferentiableViewMeta::OnRebase::WARN_REBASE;
+      }
+    }
+
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
       AT_ASSERT(i == (int)output_nr);
