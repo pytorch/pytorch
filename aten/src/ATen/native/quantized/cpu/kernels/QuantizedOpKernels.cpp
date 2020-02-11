@@ -982,6 +982,7 @@ void q_batch_norm_kernel(
   auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
   auto out_zero_point_v = Vec(c10::quint8(out_zero_point));
 
+  // TODO replace with TensorIterator implementation once #33166 is fixed.
   for (int64_t i = 0; i < outer_size; ++i) {
     int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
     int64_t r = C % (Vec::float_num_vecs() * kVLen);
