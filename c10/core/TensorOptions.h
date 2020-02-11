@@ -348,18 +348,12 @@ struct C10_API TensorOptions {
         switch (device().type()) {
           case DeviceType::CPU: {
             auto dtype_tmp = typeMetaToScalarType(dtype());
-            // if (isComplexType(dtype_tmp)) {
-            //   return DispatchKey::ComplexCPUTensorId;
-            // }
             if (isQIntType(dtype_tmp)) {
               return DispatchKey::QuantizedCPUTensorId;
             }
             return DispatchKey::CPUTensorId;
             }
           case DeviceType::CUDA:
-            // if (isComplexType(typeMetaToScalarType(dtype()))) {
-            //   return DispatchKey::ComplexCUDATensorId;
-            // }
             return DispatchKey::CUDATensorId;
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNNTensorId;
@@ -595,10 +589,6 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::HIP;
   } else if (tid == DispatchKey::MkldnnCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCPUTensorId) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCUDATensorId) {
-    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }

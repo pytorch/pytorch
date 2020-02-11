@@ -379,12 +379,11 @@ _(aten, instance_norm) \
 _(aten, inverse) \
 _(aten, irfft) \
 _(aten, is_coalesced) \
-_(aten, iscomplex) \
+_(aten, is_complex) \
 _(aten, is_contiguous) \
 _(aten, is_cuda) \
 _(aten, is_distributed) \
 _(aten, is_floating_point) \
-_(aten, is_complex) \
 _(aten, is_nonzero) \
 _(aten, is_same_size) \
 _(aten, is_set_to) \
