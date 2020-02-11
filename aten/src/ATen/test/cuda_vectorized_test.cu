@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
 using namespace at::native::memory;
@@ -19,6 +20,21 @@ void reset_buffers() {
     buffer2[2].z = -(i + 0.2);
     buffer2[2].w = -(i + 0.3);
   }
+}
+
+TEST(TestLoops, HasSameArgTypes) {
+  // This is a compile-time unit test. If this file compiles without error,
+  // then the test passes and during runtime, we just need to return.
+  using namespace at::native::modern::detail;
+  using func1_t = int (*)(float, float);
+  using func2_t = int (*)(bool, float, float);
+  using func3_t = int (*)(float);
+  using func4_t = int (*)();
+  static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
+  static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
+  static_assert(has_same_arg_types<func3_t>::value, "func3_t has the same argument types");
+  static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
+  return;
 }
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
