@@ -94,6 +94,17 @@
 # used by our frontend.  You MUST check the frontend code; search for
 # OpName.apply to see if it's still using a legacy Python style API.
 #
+# Note: Returning views.
+# The following cases exist:
+#     - If a function returns no view, it can have arbitrary outputs.
+#     - If a function return at least one Tensor that is a differentiable view
+#       of one of its input:
+#         - If there is only one differentiable output, this Tensor is marked as a
+#           differentiable view. (alias or transpose for example)
+#         - If there are more than one differentiable output, by default all the views are
+#           marked as differentiable views and created with allow_rebase_history=false.
+#           Meaning that any inplace operation on it will raise an error. (unbind for example)
+#
 # NB: The parameter names here MUST be consistent with the parameter names
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
