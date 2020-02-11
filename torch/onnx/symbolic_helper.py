@@ -447,7 +447,7 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
 
 _default_onnx_opset_version = 9
 _onnx_master_opset = 10
-_onnx_stable_opsets = [7, 8, 9, 10, 11]
+_onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
 _export_onnx_opset_version = _default_onnx_opset_version
 
 
