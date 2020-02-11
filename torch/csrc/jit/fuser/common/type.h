@@ -27,6 +27,7 @@ enum class TORCH_API DataType {
 };
 
 enum class TORCH_API ExprType {
+<<<<<<< HEAD
   Add
   // Sub,
   // Mul,
@@ -37,6 +38,28 @@ enum class TORCH_API ExprType {
   // Merge,
   // Split,
   // Index,
+=======
+    UnaryOp
+  , BinaryOp
+// , Loop
+// , Swap
+// , Merge
+// , Split
+// , Index
+};
+
+enum class TORCH_API UnaryOpType {
+    Neg
+  , Cast
+};
+
+enum class TORCH_API BinaryOpType {
+    Add
+  , Sub
+  , Mul
+  , Div
+  , Mod
+>>>>>>> Create BinaryOp and UnaryOp Exprs.
 };
 
 ValType promote_type(const ValType& t1, const ValType& t2);
@@ -45,10 +68,14 @@ DataType promote_type(const DataType& t1, const DataType& t2);
 TORCH_API std::string stringify(const ValType);
 TORCH_API std::string stringify(const DataType);
 TORCH_API std::string stringify(const ExprType);
+TORCH_API std::string stringify(const UnaryOpType type);
+TORCH_API std::string stringify(const BinaryOpType type);
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const ValType valtype);
 TORCH_API std::ostream& operator<<(std::ostream& out, const DataType datatype);
 TORCH_API std::ostream& operator<<(std::ostream& out, const ExprType exprtype);
+TORCH_API std::ostream& operator<<(std::ostream& out, const UnaryOpType type);
+TORCH_API std::ostream& operator<<(std::ostream& out, const BinaryOpType type);
 
 } // namespace fuser
 } // namespace jit

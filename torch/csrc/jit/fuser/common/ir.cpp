@@ -41,12 +41,44 @@ Expr::Expr(const ExprType _type) : type_{_type} {
   this->fusion_ = fusion;
 }
 
+<<<<<<< HEAD
 Add::Add(const Val* _out, const Val* _lhs, const Val* _rhs)
     : Expr(ExprType::Add), out_{_out}, lhs_{_lhs}, rhs_{_rhs} {
   addOutput(_out);
   addInput(_lhs);
   addInput(_rhs);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+=======
+UnaryOp::UnaryOp(
+    const UnaryOpType _type
+  , const Val* _out
+  , const Val* _in)
+  : Expr(ExprType::UnaryOp)
+  , unary_op_type_{_type}
+  , out_{_out}
+  , in_{_in}
+{
+    addOutput(_out);
+    addInput(_in);
+    this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+BinaryOp::BinaryOp(
+    const BinaryOpType _type
+  , const Val* _out
+  , const Val* _lhs
+  , const Val* _rhs)
+  : Expr(ExprType::BinaryOp)
+  , binary_op_type_{_type}
+  , out_{_out}
+  , lhs_{_lhs}
+  , rhs_{_rhs} 
+{
+    addOutput(_out);
+    addInput(_lhs);
+    addInput(_rhs);
+    this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+>>>>>>> Create BinaryOp and UnaryOp Exprs.
 }
 
 Statement::~Statement() {}
@@ -108,9 +140,16 @@ void Statement::dispatch(T handler) const {
 
   if (isExpr()) {
     switch (*getExprType()) {
+<<<<<<< HEAD
       case ExprType::Add:
         ptr(handler)->handle(static_cast<const Add*>(this));
         return;
+=======
+      case ExprType::UnaryOp:
+        return ptr(handler)->handle(static_cast<const UnaryOp*>(this));
+      case ExprType::BinaryOp:
+        return ptr(handler)->handle(static_cast<const BinaryOp*>(this));
+>>>>>>> Create BinaryOp and UnaryOp Exprs.
       default:
         throw std::runtime_error("Unknown exprtype in dispatch!");
     }
@@ -157,8 +196,10 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
 
   if (isExpr()) {
     switch (*getExprType()) {
-      case ExprType::Add:
-        return ptr(mutator)->mutate(static_cast<const Add*>(this));
+      case ExprType::UnaryOp:
+        return ptr(mutator)->mutate(static_cast<const UnaryOp*>(this));
+      case ExprType::BinaryOp:
+        return ptr(mutator)->mutate(static_cast<const BinaryOp*>(this));
       default:
         throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
     }

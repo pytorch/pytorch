@@ -25,7 +25,8 @@ struct TORCH_API BaseMutator {
   const Statement* mutate(const Statement* const statement);
   const Statement* mutate(const Float* const f);
   const Statement* mutate(const Int* const i);
-  const Statement* mutate(const Add* const add);
+  const Statement* mutate(const UnaryOp* const uop);
+  const Statement* mutate(const BinaryOp* const bop);
 
 };
 
