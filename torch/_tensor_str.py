@@ -1,7 +1,6 @@
 
 import math
 import torch
-import types
 from torch._six import inf
 
 
@@ -78,7 +77,6 @@ class _Formatter(object):
         self.sci_mode = False
         self.max_width = 1
 
-        print(tensor.is_complex)
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
@@ -147,8 +145,8 @@ class _Formatter(object):
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         elif self.complex_dtype:
-            #TODO: single precision for float, double precision for double
-            ret = '({0:.2f} {1} {2:.2f}j)'.format(value.real, '+-'[value.imag < 0], abs(value.imag))
+            p = PRINT_OPTS.precision
+            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret
