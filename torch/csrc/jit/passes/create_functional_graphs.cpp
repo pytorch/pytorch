@@ -247,12 +247,12 @@ struct MutationRemover {
   }
 
  private:
-  bool freshAlias(Value* v) {
+  bool uniqueAlias(Value* v) {
     // if the output isn't contained or alias by the inputs to its node, it's
-    // fresh
-    bool fresh_alias = aliasDb_->mayContainAlias(v->node()->inputs(), v);
+    // unique
+    bool unique_alias = !aliasDb_->mayContainAlias(v->node()->inputs(), v);
     // bail on nodes with side effects like prim::If etc
-    return fresh_alias && !v->node()->hasSideEffects();
+    return unique_alias && !v->node()->hasSideEffects();
   }
 
   bool inplaceOpVariant(Node* n) {
@@ -284,10 +284,10 @@ struct MutationRemover {
 
       Value* mutated_value = node->inputs().at(0);
 
-      // We can only remove mutation to values that are fresh aliases in the
-      // graph if x = y[0] or y = self.y, then removing the mutation could
+      // We can only remove mutation to values that are unique aliases in the
+      // graph. if x = y[0] or y = self.y, then removing the mutation could
       // change observable semantics
-      if (freshAlias(mutated_value)) {
+      if (uniqueAlias(mutated_value)) {
         continue;
       }
 
