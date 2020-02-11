@@ -1,10 +1,12 @@
 import sys
 import torch.cuda
+import os
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME
 
 CXX_FLAGS = ['/sdl', '/permissive-'] if sys.platform == 'win32' else ['-g']
+USE_NINJA = os.getenv('USE_NINJA') == '1'
 
 ext_modules = [
     CppExtension(
@@ -30,4 +32,4 @@ setup(
     name='torch_test_cpp_extension',
     packages=['torch_test_cpp_extension'],
     ext_modules=ext_modules,
-    cmdclass={'build_ext': BuildExtension})
+    cmdclass={'build_ext': BuildExtension.with_options(use_ninja=USE_NINJA)})

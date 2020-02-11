@@ -43,9 +43,9 @@ std::string BackendTransformerBase::getModelId(const NetDef& net) {
   return model_id;
 }
 
-TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
+TensorProto wrapShapeInfoIntoTensorProto(
     const std::string& name,
-    const ShapeInfo& shape_info) const {
+    const ShapeInfo& shape_info) {
   TensorProto t;
   t.set_name(name);
   t.set_data_type(shape_info.shape.data_type());
@@ -58,9 +58,9 @@ TensorProto BackendTransformerBase::wrapShapeInfoIntoTensorProto(
   return t;
 }
 
-QTensorProto BackendTransformerBase::wrapShapeInfoIntoQTensorProto(
+QTensorProto wrapShapeInfoIntoQTensorProto(
     const std::string& name,
-    const ShapeInfo& shape_info) const {
+    const ShapeInfo& shape_info) {
   QTensorProto t;
   CAFFE_ENFORCE(
       shape_info.is_quantized == true,
