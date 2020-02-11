@@ -38,8 +38,10 @@ std::ostream& operator<<(std::ostream& os, const Val* const val) {
 
 std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
   switch (*(expr->getExprType())) {
-    case ExprType::Add:
-      return os << static_cast<const Add*>(expr);
+    case ExprType::UnaryOp:
+      return os << static_cast<const UnaryOp*>(expr);
+    case ExprType::BinaryOp:
+      return os << static_cast<const BinaryOp*>(expr);
   }
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
@@ -66,8 +68,12 @@ std::ostream& operator<<(std::ostream& os, const Int* const i) {
   }
 }
 
-std::ostream& operator<<(std::ostream& os, const Add* const add) {
-  return os << add->out() << " = " << add->lhs() << " + " << add->rhs();
+std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
+  return os << uop->out() << " = " << uop->type() << "(" << uop->in() << ")";
+}
+
+std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
+  return os << bop->out() << " = " << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
 }
 
 std::ostream& operator<<(std::ostream& os, const Fusion& f) {

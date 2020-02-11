@@ -40,8 +40,10 @@ void IterVisitor::handle(const Statement* const stmt) {
 
 void IterVisitor::handle(const Expr* const expr) {
    switch (*(expr->getExprType())) {
-    case ExprType::Add:
-      return handle(static_cast<const Add*>(expr));
+    case ExprType::UnaryOp:
+      return handle(static_cast<const UnaryOp*>(expr));
+    case ExprType::BinaryOp:
+      return handle(static_cast<const BinaryOp*>(expr));
     default:
       throw std::runtime_error("Unknown ExprType in handle(Expr).");
     }
@@ -67,7 +69,9 @@ void IterVisitor::handle(const Tensor* const t) {}
 
 void IterVisitor::handle(const Int* const i) {}
 
-void IterVisitor::handle(const Add* const add) {}
+void IterVisitor::handle(const UnaryOp* const uop) {}
+
+void IterVisitor::handle(const BinaryOp* const bop) {}
 
 void IterVisitor::traverse(const Fusion* const fusion, bool from_outputs_only, bool breadth_first) {
   if(breadth_first)

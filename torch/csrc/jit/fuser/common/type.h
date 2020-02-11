@@ -23,25 +23,38 @@ enum class TORCH_API ValType {
 };
 
 enum class TORCH_API ExprType {
-  Add
-// , Sub
-// , Mul
-// , Div
-// , Mod
+    UnaryOp
+  , BinaryOp
 // , Loop
 // , Swap
 // , Merge
 // , Split
 // , Index
-// , Add
+};
+
+enum class TORCH_API UnaryOpType {
+    Neg
+  , Cast
+};
+
+enum class TORCH_API BinaryOpType {
+    Add
+  , Sub
+  , Mul
+  , Div
+  , Mod
 };
 
 ValType promote_scalar(const ValType& t1, const ValType& t2);
 
 TORCH_API std::string stringify(const ValType);
 TORCH_API std::string stringify(const ExprType);
+TORCH_API std::string stringify(const UnaryOpType type);
+TORCH_API std::string stringify(const BinaryOpType type);
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const ValType valtype);
 TORCH_API std::ostream& operator<<(std::ostream& out, const ExprType exprtype);
+TORCH_API std::ostream& operator<<(std::ostream& out, const UnaryOpType type);
+TORCH_API std::ostream& operator<<(std::ostream& out, const BinaryOpType type);
 
 }}} // torch::jit::fuser

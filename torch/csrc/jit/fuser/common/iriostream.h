@@ -26,7 +26,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Expr* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const Tensor* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const Float* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const Int* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const Add* const );
+TORCH_API std::ostream& operator<<(std::ostream& os, const UnaryOp* const);
+TORCH_API std::ostream& operator<<(std::ostream& os, const BinaryOp* const);
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& f);
 

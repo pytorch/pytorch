@@ -23,16 +23,26 @@ const Statement* BaseMutator::mutate(const Int* const i){
     return i;
 }
 
-const Statement* BaseMutator::mutate(const Add* const add){
-    const Val* out = static_cast<const Val*>(add->out()->dispatch_mutator(this));
-    const Val* lhs = static_cast<const Val*>(add->lhs()->dispatch_mutator(this)); 
-    const Val* rhs = static_cast<const Val*>(add->rhs()->dispatch_mutator(this));
+const Statement* BaseMutator::mutate(const UnaryOp* const uop){
+    const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
+    const Val* in  = static_cast<const Val*>(uop->in()->dispatch_mutator(this)); 
     //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-    if(out!=add->out()
-    || lhs!=add->lhs()
-    || rhs!=add->rhs())
-        return new Add(out, lhs, rhs);
-    return add;
+    if(out!=uop->out()
+    || in!=uop->in())
+        return new UnaryOp(uop->type(), out, in);
+    return uop;
+}
+
+const Statement* BaseMutator::mutate(const BinaryOp* const bop){
+    const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
+    const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this)); 
+    const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
+    //TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
+    if(out!=bop->out()
+    || lhs!=bop->lhs()
+    || rhs!=bop->rhs())
+        return new BinaryOp(bop->type(), out, lhs, rhs);
+    return bop;
 }
 
 void BaseMutator::mutate(Fusion* fusion){

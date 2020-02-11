@@ -76,7 +76,8 @@ constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned
 
 struct Fusion;
 struct Expr;
-struct Add;
+struct UnaryOp;
+struct BinaryOp;
 
 
 /*
@@ -313,24 +314,53 @@ private:
 };
 
 // TODO: comment
-struct TORCH_API Add : public Expr {
-  ~Add() = default;
-  Add(
-    const Val* _out
+struct TORCH_API UnaryOp : public Expr {
+  ~UnaryOp() = default;
+  UnaryOp(
+	const UnaryOpType _type
+  , const Val* _out
+  , const Val* _in);
+
+  UnaryOp(const UnaryOp& other) = delete;
+  UnaryOp& operator=(const UnaryOp& other) = delete;
+
+  UnaryOp(UnaryOp&& other) = delete;
+  UnaryOp& operator=(UnaryOp&& other) = delete;
+
+  const Val* out() const noexcept { return out_; }
+  const Val* in()  const noexcept { return in_; }
+  
+  UnaryOpType type() const noexcept { return unary_op_type_; }
+
+private:
+  const UnaryOpType unary_op_type_;
+  const Val* out_;
+  const Val* in_;
+};
+
+// TODO: comment
+struct TORCH_API BinaryOp : public Expr {
+  ~BinaryOp() = default;
+  BinaryOp(
+	const BinaryOpType _type
+  , const Val* _out
   , const Val* _lhs
   , const Val* _rhs);
 
-  Add(const Add& other) = delete;
-  Add& operator=(const Add& other) = delete;
+  BinaryOp(const BinaryOp& other) = delete;
+  BinaryOp& operator=(const BinaryOp& other) = delete;
 
-  Add(Add&& other) = delete;
-  Add& operator=(Add&& other) = delete;
+  BinaryOp(BinaryOp&& other) = delete;
+  BinaryOp& operator=(BinaryOp&& other) = delete;
 
   const Val* out() const noexcept { return out_; }
   const Val* lhs() const noexcept { return lhs_; }
   const Val* rhs() const noexcept { return rhs_; }
+  
+  BinaryOpType type() const noexcept { return binary_op_type_; }
 
 private:
+  const BinaryOpType binary_op_type_;
   const Val* out_;
   const Val* lhs_;
   const Val* rhs_;

@@ -12,7 +12,8 @@ struct Statement;
 struct Tensor;
 struct Float;
 struct Int;
-struct Add;
+struct UnaryOp;
+struct BinaryOp;
 struct Val;
 struct Expr;
 
@@ -42,7 +43,8 @@ public:
   virtual void handle(const Float* const f);
   virtual void handle(const Tensor* const t);
   virtual void handle(const Int* const i);
-  virtual void handle(const Add* const add);
+  virtual void handle(const UnaryOp* const uop);
+  virtual void handle(const BinaryOp* const bop);
 
   void traverse(const Fusion* const _fusion,  bool from_outputs_only, bool breadth_first);
 

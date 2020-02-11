@@ -43,7 +43,7 @@ void testGPU_FusionSimpleArith(){
   Float* f2 = new Float{2.f};
   Float* f3 = new Float();
   
-  Add* an_add = new Add(f3, f1, f2);
+  BinaryOp* an_add = new BinaryOp(BinaryOpType::Add, f3, f1, f2);
   std::cout<<"Explicit add construction of 1.f + 2.f: "<<fusion<<std::endl;
 
 }
@@ -55,7 +55,7 @@ void testGPU_FusionContainer(){
   
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
-  auto f3 = add(f1, f2);
+  auto f3 = binary_op(BinaryOpType::Add, f1, f2);
   std::cout<<"Implicit add construction of 1.f + 2.f : "<<fusion1<<std::endl;
 
   Fusion fusion2;
@@ -63,7 +63,7 @@ void testGPU_FusionContainer(){
     FusionGuard fg2(&fusion2);
     Float* f3 = new Float(1.f);
     Float* f4 = new Float(2.f);
-    auto f5 = add(f3, f4);
+    auto f5 = binary_op(BinaryOpType::Add, f3, f4);
     TORCH_CHECK(FusionGuard::getCurFusion() == &fusion2);
   }
 
@@ -77,7 +77,7 @@ void testGPU_FusionSimpleTypePromote(){
   
   Float* f4 = new Float{4.f};
   Int* i1 = new Int{3};
-  auto f5 = add(f4, i1);
+  auto f5 = binary_op(BinaryOpType::Add, f4, i1);
 
   TORCH_CHECK(f5->getValType() == ValType::Float);
 }
@@ -102,8 +102,8 @@ void testGPU_FusionRegister() {
   FusionGuard fg(&fusion);
   Float* v1 = new Float{1.f};
   Float* v2 = new Float{2.f};
-  Val* v3 = add(v1, v2);
-  Val* v4 = add(v1, v2);
+  Val* v3 = binary_op(BinaryOpType::Add, v1, v2);
+  Val* v4 = binary_op(BinaryOpType::Add, v1, v2);
   TORCH_CHECK(v1->name()+1 == v2->name());
   TORCH_CHECK(v2->name()+1 == v3->name());
   TORCH_CHECK(v3->name()+1 == v4->name());
@@ -118,7 +118,7 @@ struct TORCH_API DummyExpr : public Expr {
     const Val* _outlhs
   , const Val* _outrhs
   , const Val* _lhs
-  , const Val* _rhs):Expr(ExprType::Add) //Not terribly safe...
+  , const Val* _rhs):Expr(ExprType::BinaryOp) //Not terribly safe...
   {
     addOutput(_outlhs);
     addOutput(_outrhs);
@@ -147,8 +147,8 @@ void testGPU_FusionTopoSort() {
   Float* v5 = new Float();
 
   Expr* e0 = new DummyExpr(v3, v2, v1, v0);
-  Expr* e1 = new Add(v4, v3, v2);
-  Expr* e2 = new Add(v5, v2, v4);
+  Expr* e1 = new BinaryOp(BinaryOpType::Add, v4, v3, v2);
+  Expr* e2 = new BinaryOp(BinaryOpType::Add, v5, v2, v4);
   
   std::vector<const Expr*> exprs = fusion.exprs();
 
