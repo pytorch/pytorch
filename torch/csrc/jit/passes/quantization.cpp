@@ -387,8 +387,6 @@ class InsertObserversHelper {
 
   void insertObservers(script::Module& module, const std::string& method_name);
 
-  void insertObserverForOutput(script::Module& module, const std::string& method_name);
-
  private:
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
@@ -399,13 +397,6 @@ class InsertObserversHelper {
       Graph* g,
       script::Module& module,
       const c10::optional<QConfig>& qconfig);
-
-  void insertObservedValues(Value* v);
-
-  void updateObservedValues(
-      script::Module &module,
-      Graph* g,
-      Value* v);
 
   void skipValuesInFirstModule(
       const script::Module& module,
@@ -448,16 +439,6 @@ class InsertObserversHelper {
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
-
-  // Map from return Value of a graph to the return value of the
-  // CallMethod
-  std::unordered_map<Value*, std::unordered_set<Value*>> same_value_map_;
-  // Values that are already observed, this includes values that
-  // crosses the CallMethod boundary, e.g. if we have observed %x in
-  // CallMethod(%self, %x) then we'll find the graph and add the
-  // 1st argument of the graph to the set as well
-  std::unordered_set<Value*> observed_values_;
-
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -667,50 +648,6 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-size_t getArgIndex(Node* call, Value* v) {
-  TORCH_INTERNAL_ASSERT(call->kind() == prim::CallMethod || call->kind() == prim::CallFunction,
-                       "getArgIndex is expecting CallMethod or CallFunction nodes");
-  size_t arg_index = 0;
-  while (arg_index < call->inputs().size() &&
-         call->inputs()[arg_index] != v) {
-    arg_index++;
-  }
-  return arg_index;
-}
-
-void InsertObserversHelper::insertObservedValues(Value* v) {
-  if (observed_values_.count(v)) {
-    return;
-  }
-  observed_values_.insert(v);
-  if (same_value_map_.count(v)) {
-    for (auto* r : same_value_map_.at(v)) {
-      insertObservedValues(r);
-    }
-  }
-}
-
-void InsertObserversHelper::updateObservedValues(
-      script::Module &module,
-      Graph* graph,
-      Value* v) {
-  insertObservedValues(v);
-  Value* self = graph->inputs()[0];
-  for (const Use& u : v->uses()) {
-    if (u.user->kind() == prim::CallMethod) {
-      Node* call = u.user;
-      Value* instance = call->inputs()[0];
-      auto path = getModuleAccessPath(instance, self);
-      auto m = findChildModule(module, path);
-      auto g = m.get_method(call->s(attr::name)).graph();
-      size_t arg_index = getArgIndex(call, v);
-      TORCH_INTERNAL_ASSERT(arg_index < call->inputs().size());
-      updateObservedValues(m, g.get(), g->inputs()[arg_index]);
-    }
-  }
-}
-
-
 // Clone observer module and add it to the original module,
 // and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
@@ -718,13 +655,9 @@ void InsertObserversHelper::insertObserverFor(
     Graph* g,
     script::Module& module,
     const c10::optional<QConfig>& qconfig_opt) {
-  if (!qconfig_opt || observed_values_.count(v)) {
-    if (observed_values_.count(v)) {
-      GRAPH_DEBUG("I found a value that's observed before:", v->debugName());
-    }
+  if (!qconfig_opt) {
     return;
   }
-  updateObservedValues(module, g, v);
   // Skip observing bias
   if (isBiasOfConvOrLinear(v)) {
     TORCH_CHECK(
@@ -941,30 +874,6 @@ void InsertObserversHelper::preprocess(
   // We need to call this before calling insertObservers for
   // invoked methods
   addIntermediateValuesToSkipObserver(module, method_name);
-
-  std::stack<Block*> blocks_to_visit;
-  blocks_to_visit.push(graph->block());
-  auto* self = graph->inputs()[0];
-  while (!blocks_to_visit.empty()) {
-    Block* b = blocks_to_visit.top();
-    blocks_to_visit.pop();
-    for (Node* n : b->nodes()) {
-      if (n->kind() == prim::CallMethod) {
-        auto* instance = n->inputs()[0];
-        auto path = getModuleAccessPath(instance, self);
-        auto m = findChildModule(module, path);
-        auto g = m.get_method(n->s(attr::name)).graph();
-        for (auto i = 0; i < g->outputs().size(); ++i) {
-          auto* return_val = g->outputs()[i];
-          same_value_map_[return_val].insert(n->outputs()[i]);
-        }
-        for (auto i = 0; i < g->inputs().size(); ++i) {
-          auto* input_val = g->inputs()[i];
-          same_value_map_[n->inputs()[i]].insert(input_val);
-        }
-      }
-    }
-  }
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_method);
     const auto& invoked_method_name = std::get<1>(invoked_method);
@@ -1008,6 +917,24 @@ void InsertObserversHelper::insertObservers(
   std::stack<Block*> blocks_to_visit;
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
 
+  // Add observer for external input nodes excluding parameters
+  // These are treated as activation as they vary across batches
+  // and need to be observed.
+
+  // prim::Param nodes do not belong to the graph. Hence the Insert
+  // point is the beginning of graph node. This also safe guards against
+  // observing a potentially mutated value due to some in-place operation
+  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
+    auto& v = graph->inputs()[idx];
+    if (values_to_skip_.count(v)) {
+      GRAPH_DEBUG("Skipping input:", v->debugName());
+    }
+    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+      GRAPH_DEBUG("inserting observer for input ", v->debugName());
+      insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
+    }
+  }
+
   blocks_to_visit.push(graph->block());
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
@@ -1017,9 +944,9 @@ void InsertObserversHelper::insertObservers(
       if (observer_nodes_.count(n)) {
         continue;
       }
-      // Record all inputs in the values_to_observe - we'll later add observers
+      // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
-      for (Value* v : n->inputs()) {
+      for (Value* v : n->outputs()) {
         if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
@@ -1034,30 +961,6 @@ void InsertObserversHelper::insertObservers(
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
     insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
-  }
-
-}
-
-void InsertObserversHelper::insertObserverForOutput(
-    script::Module& module,
-    const std::string& method_name) {
-  auto g = module.get_method(method_name).graph();
-  auto* return_val = g->outputs()[0];
-  c10::optional<QConfig> qconfig_opt;
-  if (module_qconfig_map_.count(module._ivalue())) {
-    qconfig_opt = module_qconfig_map_.at(module._ivalue());
-  }
-  if (valueNeedsToBeQuantized(return_val)) {
-    insertObserverFor(return_val, return_val->owningGraph(), module, qconfig_opt);
-    return;
-  }
-  auto* return_node = return_val->node();
-  auto* self = g->inputs()[0];
-  if (return_node->kind() == prim::CallMethod) {
-    auto* instance = return_node->inputs()[0];
-    auto path = getModuleAccessPath(instance, self);
-    auto m = findChildModule(module, path);
-    insertObserverForOutput(m, return_node->s(attr::name));
   }
 }
 
@@ -1962,7 +1865,6 @@ TORCH_API script::Module InsertObservers(
   InsertObserversHelper helper(module_qconfig_map);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name);
-  helper.insertObserverForOutput(module, method_name);
   return module;
 }
 
