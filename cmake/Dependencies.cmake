@@ -1442,6 +1442,8 @@ if (NOT INTERN_BUILD_MOBILE)
     ENDIF(HAVE_MALLOC_USABLE_SIZE)
   ENDIF(UNIX)
 
+  ADD_DEFINITIONS(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
+
   # Is __thread supported?
   IF(NOT MSVC)
     CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
