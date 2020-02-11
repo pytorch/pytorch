@@ -165,4 +165,42 @@ RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
+
+CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
+  : func_(std::move(func))
+  , schema_(std::move(schema))
+  {}
+
+Namespace::Namespace(const char* ns)
+  : ns_(ns)
+  {}
+
+// NB: lives here to reduce link time
+Namespace::Namespace(Namespace&&) = default;
+Namespace& Namespace::operator=(Namespace&&) = default;
+
+
+Namespace&& Namespace::def(const char* schema) && {
+  register_.op(c10::RegisterOperators::options().schema(schema));
+  return std::move(*this);
+}
+
+Namespace&& Namespace::def(const char* unqual_name, CppFunction&& f) && {
+  // TODO: slow!  Fix internal data structures so I don't have to paste the
+  // names together
+  std::string name;
+  if (ns_) {
+    std::ostringstream oss;
+    oss << ns_ << "::" << unqual_name;
+    name = oss.str();
+  } else {
+    name = unqual_name;
+  }
+  // To be destructively moved out of below
+  register_.op(c10::RegisterOperators::options()
+    .schema(name)
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
+
 }
