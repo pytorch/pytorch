@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/fuser/common/mutator.h>
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 
 #include <iostream>
 
@@ -191,18 +192,12 @@ void testGPU_FuserTensor() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
-  /*
   auto fuser_tensor  = new Tensor(tensor_type);
-  //std::cout << fuser_tensor << std::endl;
-  TORCH_CHECK(fuser_tensor->scalarType().has_value() &&
-      fuser_tensor->scalarType() == at::ScalarType::Float);
-  TORCH_CHECK(fuser_tensor->sizes().has_value() &&
-      fuser_tensor->sizes().value()[0] == 20 &&
-      fuser_tensor->sizes().value()[1] == 20);
-  TORCH_CHECK(fuser_tensor->strides().has_value() &&
-      fuser_tensor->strides().value()[0] == 20 &&
-      fuser_tensor->strides().value()[1] == 1);
-  */
+  TORCH_CHECK(fuser_tensor->hasContiguityInfo() == 1);
+  TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float); 
+  auto fuser_null_tensor  = new Tensor(DataType::Int);
+  TORCH_CHECK(fuser_null_tensor->hasContiguityInfo() == 0);
+  TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int); 
 }
 
 void testGPU_Fusion() {}

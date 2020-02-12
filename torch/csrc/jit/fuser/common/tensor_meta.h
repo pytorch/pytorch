@@ -13,6 +13,44 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+/*
+ Issues that we are not solving:
+   1. strides for trivial dimensions (size-1 dimension);
+   2. memory overlap / interleave;
+ */
+struct TensorContiguity {
+
+  TensorContiguity(
+      const std::vector<int64_t>& size, 
+      const std::vector<int64_t>& stride);
+
+  // gives broadcast information per axis;
+  bool isBroadcastDim(int axis);
+
+  // returns all axes that requires broadcast;
+  std::vector<int> getBroadcastDims();
+
+  // gives contiguity information per axis;
+  bool canCollapseLeft(int axis);
+
+  // returns all axes that can collapse to its immediate left axes;
+  std::vector<int> getCollapseLeftDims();
+
+  // return the rank of the tensor;
+  int rank();
+
+  // TODO: we probably won't need this until much later, but let's try solve
+  // the problem that doesn't exist yet;
+  bool canCollapseLowerToHigher(int lower_axis, int higher_axis);
+  int getAxisByStride(int order);
+  std::vector<int> getAxesOrderedByStride();
+
+protected:
+  // Implementation details:
+  //   contiguity flag: stores contiguity, memory permutation as well as
+  // broadcast;
+  std::vector<int> contiguity_;
+};
 
 struct TensorMeta {
 
