@@ -16,6 +16,7 @@ namespace jit {
 // F - index into function table
 // T - index into the type table, used for guard instructions
 // S - index into object slots
+// G - index into the custom guard table, used for CUSTOM_GUARD instructions
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -35,6 +36,7 @@ namespace jit {
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check a guard against type_table, true if passes */      \
   _(FAIL_GUARD, "T") /* fail a guard, patch back to GUARD */                \
+  _(CUSTOM_GUARD, "G") /* check a guard against custom_guard_table */       \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
   _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \

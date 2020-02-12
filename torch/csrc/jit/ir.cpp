@@ -1832,6 +1832,12 @@ std::vector<Value*> insertGraph(
   return insertGraph(g, callee, inputs, value_map);
 }
 
+void CustomBailOutOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<CustomBailOutOp>();
+  this->callback_ = other->getCallback();
+}
+
 void ProfileOp::cloneFrom(Node* other_) {
   Node::cloneFrom(other_);
   auto other = other_->cast<ProfileOp>();
@@ -1840,6 +1846,12 @@ void ProfileOp::cloneFrom(Node* other_) {
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
 }
+
+Node* CustomBailOutOp::allocNewInstance(Graph* g) {
+  return new CustomBailOutOp(g, {nullptr});
+}
+
+constexpr Symbol CustomBailOutOp::Kind;
 
 TypePtr NamedValue::type() const {
   if (value_) {

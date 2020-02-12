@@ -8,15 +8,26 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <list>
+#include <memory>
 #include <vector>
 
 namespace torch {
 namespace jit {
 
+struct BailOutNodeCreator {
+  virtual bool supportsGuardNode(Node* guard) = 0;
+  virtual Node* createBailOutNode(Node* guard) = 0;
+};
+
 // Replaces prim::Guard nodes with prim::BailOut nodes and
 // computes sets of inputs needed to resume execution at
 // bailout points
-TORCH_API void InsertBailOuts(std::shared_ptr<Graph> graph);
+TORCH_API void InsertCustomBailOuts(
+    std::shared_ptr<Graph> graph,
+    std::unique_ptr<BailOutNodeCreator> bnc);
+TORCH_API void InsertTensorTypeBailOuts(std::shared_ptr<Graph> graph);
+
+TORCH_API void NumberBailOuts(Block* b);
 
 // Builds a bailout graph into `target` (which is an empty graph)
 // for a given bailout point `bailout_index`

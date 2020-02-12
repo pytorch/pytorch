@@ -1313,6 +1313,22 @@ struct ProfileOp : public Node {
   std::function<void(std::vector<IValue>&)> callback_;
 };
 
+struct TORCH_API CustomBailOutOp : public Node {
+  static constexpr Symbol Kind = ::c10::prim::CustomBailOut;
+  CustomBailOutOp(Graph* graph, std::function<bool(IValue&)> callback)
+      : Node(graph, ::c10::prim::CustomBailOut), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  std::function<bool(IValue&)> getCallback() const {
+    return callback_;
+  }
+
+ private:
+  std::function<bool(IValue&)> callback_;
+};
+
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 //

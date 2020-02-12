@@ -67,6 +67,17 @@ static bool needsGradientInProfilingMode(Block* b) {
   return false;
 }
 
+// move to bailout_graph.h
+static Node* locateBailOutTemplate(std::shared_ptr<Graph> g) {
+  for (auto n : g->block()->nodes()) {
+    if (n->kind() == prim::BailoutTemplate) {
+      return n;
+    }
+  }
+
+  return nullptr;
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   if (!getGraphExecutorOptimize()) {
@@ -78,10 +89,14 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   InsertGuards(copy);
   LowerGradOf(*copy);
   EliminateRedundantGuards(copy);
-  InsertBailOuts(copy);
-  GRAPH_DUMP("After InsertBailOuts: ", copy);
+  InsertTensorTypeBailOuts(copy);
+  auto bailout_template = locateBailOutTemplate(copy);
+  TORCH_INTERNAL_ASSERT(
+      bailout_template && bailout_template->kind() == prim::BailoutTemplate);
+  NumberBailOuts(copy->block());
+  NumberBailOuts(bailout_template->g(attr::Subgraph)->block());
+  GRAPH_DUMP("After InsertTensorTypeBailOuts: ", copy);
   specializeAutogradZero(*copy);
-
   runRequiredPasses(copy);
   ConstantPropagation(copy);
   runOptimization(copy);

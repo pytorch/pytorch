@@ -353,6 +353,7 @@ struct CodeImpl {
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
+  std::vector<std::function<bool(IValue&)>> custom_guard_table_;
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -397,6 +398,7 @@ struct CodeImpl {
           fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
     }
     n_inputs = graph_->inputs().size();
+    GRAPH_DUMP("INTERPRETER: ", graph_);
     // std::cout << *graph_ << "\n";
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
@@ -625,17 +627,26 @@ struct CodeImpl {
     return instructions_.size() - 1;
   }
 
-  void emitBailOut(Node* node) {
-    auto jf_index = emitGuard(node);
+  size_t emitCustomGuard(Node* node) {
+    // unoptimized graph is at index 0
+    // guarded input is at index 1
+    // the rest of args follow
+    auto cbo = node->cast<CustomBailOutOp>();
+    emitLoadInputs(node->inputs().slice(1, 1));
+    insertInstruction(CUSTOM_GUARD, type_table_.size());
+    custom_guard_table_.emplace_back(cbo->getCallback());
+    insertInstruction(JF, 0 /* to be patched */);
+    return instructions_.size() - 1;
+  }
+
+  void emitBailOutCommon(Node* node, size_t jf_index) {
     auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
     // note, guaded input is already loaded onto the stack
     // for GUARD instruction
     emitLoadInputs(node->inputs().slice(2));
     insertInstruction(TAIL_CALL, function_table_.size());
-    TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
     auto bailout_index = node->i(attr::index);
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
-
     auto build_bailout_graph = [bailout_index,
                                 unoptimized_graph](Function &func) {
 
@@ -648,6 +659,18 @@ struct CodeImpl {
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
+  }
+
+  void emitCustomBailOut(Node* node) {
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::CustomBailOut);
+    auto jf_index = emitCustomGuard(node);
+    emitBailOutCommon(node, jf_index);
+  }
+
+  void emitBailOut(Node* node) {
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
+    auto jf_index = emitGuard(node);
+    emitBailOutCommon(node, jf_index);
   }
 
   void emitGetAttr(Node* node) {
@@ -725,6 +748,9 @@ struct CodeImpl {
         break;
       case prim::BailOut:
         emitBailOut(node);
+        break;
+      case prim::CustomBailOut:
+        emitCustomBailOut(node);
         break;
       case prim::GetAttr:
         emitGetAttr(node);
@@ -822,6 +848,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Operation* operators;
     Function** functions;
     TypePtr* types;
+    std::function<bool(IValue&)>* guards;
 
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
@@ -829,7 +856,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
           functions(frame.function->function_table_.data()),
-          types(frame.function->type_table_.data()) {}
+          types(frame.function->type_table_.data()),
+          guards(frame.function->custom_guard_table_.data()) {}
   };
 
   std::vector<Frame> frames;
@@ -881,8 +909,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-//         std::cout << "RUNNING ";
-//         frames.back().function->dump(std::cout, af.pc);
+        std::stringstream ss;
+        frames.back().function->dump(ss, af.pc);
+        GRAPH_DEBUG("RUNNING ", ss.str());
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -1080,6 +1109,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             bool comp = expected->cast<TensorType>()
                             ->isCompatibleWithInCurrentExecutionContext(t);
             push(stack, comp);
+            ++af.pc;
+          } break;
+          case CUSTOM_GUARD: {
+            auto guard_test = af.guards[inst.X];
+            push(stack, guard_test(stack.back()));
             ++af.pc;
           } break;
           case TAIL_CALL: {

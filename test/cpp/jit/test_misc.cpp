@@ -1142,7 +1142,7 @@ void testInsertBailOuts() {
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };
   auto num_guards = std::count_if(nodes.begin(), nodes.end(), is_guard);
   ASSERT_EQ(num_guards, 3);
-  InsertBailOuts(copy);
+  InsertTensorTypeBailOuts(copy);
   auto is_bailout = [](Node* n) { return n->kind() == prim::BailOut; };
   auto num_bailouts = std::count_if(nodes.begin(), nodes.end(), is_bailout);
   ASSERT_EQ(num_guards, num_bailouts);
