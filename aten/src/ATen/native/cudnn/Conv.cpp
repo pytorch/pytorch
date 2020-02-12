@@ -660,7 +660,9 @@ public:
         f(algoPerf);
         cache.insert(args.params, algoPerf);
         return;
-      } catch (const std::exception& e) {
+      } catch (c10::CUDAOutOfMemoryError &e) {
+        cudaGetLastError(); // clear CUDA error
+      } catch (c10::CuDNNError &e) {
         cudaGetLastError(); // clear CUDA error
       }
     }
