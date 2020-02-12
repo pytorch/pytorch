@@ -6,42 +6,12 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
 #include <ATen/native/cpu/TensorCompareKernel.h>
-#include <ATen/native/cpu/Loops.h>
 #include <ATen/NamedTensorUtils.h>
 
-namespace {
-template <typename scalar_t>
-void where_cpu(
-    at::Tensor& ret,
-    const at::Tensor& condition,
-    const at::Tensor& self,
-    const at::Tensor& other) {
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(ret);
-  iter.add_input(condition);
-  iter.add_input(self);
-  iter.add_input(other);
-  iter.dont_compute_common_dtype();
-  iter.build();
-  if (condition.scalar_type() == at::ScalarType::Byte) {
-    at::native::cpu_kernel(
-      iter,
-      [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
-        return cond_val ? self_val : other_val;
-      });
-  } else {
-    at::native::cpu_kernel(
-      iter,
-      [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
-        return cond_val ? self_val : other_val;
-      });
-  }
-}
-} // namespace
 
 namespace at { namespace native {
 
+DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_kernel);
 DEFINE_DISPATCH(min_kernel);
 
@@ -148,12 +118,18 @@ std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
 }
 
-Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
+Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(ret.scalar_type(), "where_cpu", [&] {
-    where_cpu<scalar_t>(ret, condition, self, other);
-  });
+  auto iter = at::TensorIterator();
+  iter.set_check_mem_overlap(true);
+  iter.add_output(ret);
+  iter.add_input(condition);
+  iter.add_input(self);
+  iter.add_input(other);
+  iter.dont_compute_common_dtype();
+  iter.build();
+  where_kernel(iter.device_type(), iter, condition.scalar_type());
   return ret;
 }
 
