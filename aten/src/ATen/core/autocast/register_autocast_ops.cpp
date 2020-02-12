@@ -26,16 +26,27 @@ namespace {
 //
 // I'm not using the weak_intrusive_ptr as the key because it's more difficult to compare
 // directly against incoming TensorImpl*s.
-//
-// When the autocast context manager exits, which should occur at the end of each forward pass,
-// it calls clear_cache to ensure cached Tensors don't leak outside the autocasting region.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
 thread_local std::unordered_map<TensorImpl*, val_type> cached_casts;
+
+// nesting tracks the nesting depth of the Python-side context manager.
+// When the autocast context manager exits to a nesting level that's outside
+// any instance of autocast (which should occur at the end of each forward pass)
+// it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
+thread_local int nesting = 0;
 }
 
 void clear_cache() {
   cached_casts.clear();
+}
+
+int increment_nesting() {
+  return ++nesting;
+}
+
+int decrement_nesting() {
+  return --nesting;
 }
 
 // Policies correspond to op categories that need code-divergent handling.

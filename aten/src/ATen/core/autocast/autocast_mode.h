@@ -9,6 +9,8 @@ struct CAFFE2_API AutocastMode {
   static bool is_enabled();
   static void set_enabled(bool enabled);
   static void clear_cache();
+  static int increment_nesting();
+  static int decrement_nesting();
 };
 
 }

@@ -4,32 +4,22 @@ import functools
 
 class autocast(object):
     r"""
-    Instances of autocast are intended to be used as context managers or decorators.  API still under discussion...
+    Instances of :class:`autocast` serve as context managers or decorators that
+    establish a region of your script where autocasting is enabled.
     """
-    # nesting_depth tracks how deeply nested the context manager invocations are.
-    # When we __exit__ out of the last nesting, we see that nesting_depth drops to zero
-    # and use that as a cue to clear the autocast cache.
-    # TODO:
-    # nesting_depth is a class variable so if different threads create instances of autocast
-    # and manipulate the value, it won't be thread safe.
-    # Currently, the cache is thread local, so maybe I should move nesting_depth to a thread local
-    # variable on the C++ side.
-    nesting_depth = 0
-
     def __init__(self, enabled=True):
         self._enabled = enabled
 
     def __enter__(self):
         self.prev = torch.is_autocast_enabled()
         torch.set_autocast_enabled(self._enabled)
-        self.nesting_depth += 1
+        torch.autocast_increment_nesting()
 
     def __exit__(self, *args):
-        torch.set_autocast_enabled(self.prev)
-        self.nesting_depth -= 1
-        # Drop the cache when we exit back to a level that's not guarded by any instance of autocast.
-        if self.nesting_depth == 0:
+        # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
+        if torch.autocast_decrement_nesting() == 0:
             torch.clear_autocast_cache()
+        torch.set_autocast_enabled(self.prev)
         return False
 
     def __call__(self, func):

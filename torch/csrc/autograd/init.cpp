@@ -92,6 +92,17 @@ static PyObject * clear_autocast_cache(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * autocast_increment_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::autocast::AutocastMode::increment_nesting());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * autocast_decrement_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::autocast::AutocastMode::decrement_nesting());
+  END_HANDLE_TH_ERRORS
+}
 
 static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
@@ -140,6 +151,8 @@ static PyMethodDef methods[] = {
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", (PyCFunction)clear_autocast_cache, METH_NOARGS, nullptr},
+  {"autocast_increment_nesting", (PyCFunction)autocast_increment_nesting, METH_NOARGS, nullptr},
+  {"autocast_decrement_nesting", (PyCFunction)autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
   {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}

@@ -22,9 +22,19 @@ void AutocastMode::set_enabled(bool new_enabled) {
 }
 
 void clear_cache();
+int increment_nesting();
+int decrement_nesting();
 
 void AutocastMode::clear_cache() {
   at::autocast::clear_cache();
+}
+
+int AutocastMode::increment_nesting() {
+  at::autocast::increment_nesting();
+}
+
+int AutocastMode::decrement_nesting() {
+  at::autocast::decrement_nesting();
 }
 
 #else
@@ -38,6 +48,14 @@ void AutocastMode::set_enabled(bool enabled) {
 }
 
 void AutocastMode::clear_cache() {
+  throw std::runtime_error("Autocast is not supported on mobile");
+}
+
+int AutocastMode::increment_nesting() {
+  throw std::runtime_error("Autocast is not supported on mobile");
+}
+
+int AutocastMode::decrement_nesting() {
   throw std::runtime_error("Autocast is not supported on mobile");
 }
 
