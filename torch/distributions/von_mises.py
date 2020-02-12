@@ -66,8 +66,9 @@ def _rejection_sample(loc, concentration, proposal_r, shape):
         accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
         if accept.any():
             x[accept] = torch.sign(u3[accept] - 0.5) * torch.acos(f[accept])
-            done |= accept
+            done = done | accept
     return (x + math.pi + loc) % (2 * math.pi) - math.pi
+
 
 class VonMises(Distribution):
     """
@@ -105,7 +106,6 @@ class VonMises(Distribution):
         log_prob = self.concentration * torch.cos(value - self.loc)
         log_prob = log_prob - math.log(2 * math.pi) - _log_modified_bessel_fn(self.concentration, order=0)
         return log_prob
-
 
     @torch.no_grad()
     def sample(self, sample_shape=torch.Size()):
