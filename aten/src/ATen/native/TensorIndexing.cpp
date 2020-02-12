@@ -60,15 +60,19 @@ int64_t count_specified_dimensions(ArrayRef<TensorIndex> indices) {
 }
 
 // This mirrors `applySlicing` in torch/csrc/autograd/python_variable_indexing.cpp
-Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vector<Tensor>& outIndices, const at::Device& self_device) {
-  int64_t size = indices.size();
+Tensor applySlicing(
+    const Tensor& self,
+    ArrayRef<TensorIndex> indices,
+    std::vector<Tensor>& outIndices,
+    const at::Device& self_device,
+    const IntArrayRef& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(indices);
 
-  TORCH_CHECK_INDEX(specified_dims <= self.dim(), "too many indices for tensor of dimension ", (int)self.dim());
+  TORCH_CHECK_INDEX(specified_dims <= self_sizes.size(), "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (int64_t i = 0; i < size; i++) {
+  for (int64_t i = 0; i < indices.size(); i++) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
@@ -79,7 +83,8 @@ Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vect
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
       /*is_tracing=*/false,
-      /*original_tensor_device=*/self_device);
+      /*original_tensor_device=*/self_device,
+      /*prev_dim_result_sizes=*/result.sizes());
   }
   return result;
 }
@@ -88,17 +93,18 @@ Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vect
 Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   OptionalDeviceGuard device_guard(device_of(self));
   const at::Device self_device = self.device();
+  const IntArrayRef& self_sizes = self.sizes();
 
   // handle simple types: integers, slices, ellipsis
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (!index.is_boolean() && !index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingGet(self, index, false, self_device);
+      return handleSimpleTypesInSingleDimIndexingGet(self, index, false, self_device, self_sizes);
     }
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device);
+  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device, self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
@@ -116,17 +122,18 @@ Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
 void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
   OptionalDeviceGuard device_guard(device_of(self));
   const at::Device self_device = self.device();
+  const IntArrayRef& self_sizes = self.sizes();
 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (!index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingSet(self, index, value, false, self_device);
+      return handleSimpleTypesInSingleDimIndexingSet(self, index, value, false, self_device, self_sizes);
     }
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device);
+  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device, self_sizes);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
