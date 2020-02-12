@@ -3850,6 +3850,23 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
+    def test_custom_function_error(self):
+        class BadFw(Function):
+            @staticmethod
+            def backward(ctx, foo):
+                return foo
+
+        class BadBw(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo.clone()
+
+        inp = torch.rand(1, requires_grad=True)
+        with self.assertRaisesRegex(NotImplementedError, "must implement the forward"):
+            BadFw.apply(inp)
+
+        with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
+            BadBw.apply(inp).sum().backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
