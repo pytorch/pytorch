@@ -20,9 +20,9 @@ using VarNameMap = std::unordered_map<const Variable*, std::string>;
 // hits a unique name.
 class TORCH_API UniqueNameManager {
  public:
-  TORCH_API const std::string& get_unique_name(const Var& v);
+  const std::string& get_unique_name(const Var& v);
 
-  TORCH_API const std::string& get_unique_name(const Variable* v);
+  const std::string& get_unique_name(const Variable* v);
 
  private:
   friend class ScopedVarName;
