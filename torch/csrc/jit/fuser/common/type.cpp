@@ -95,11 +95,6 @@ std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
   return out << binary_op_type_string_map[botype];
 }
 
-std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
-  TORCH_CHECK(binary_op_type_string_map.count(botype) != 0);
-  return out << binary_op_type_string_map[botype];
-}
-
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   TORCH_CHECK(parallel_type_string_map.count(ptype) != 0);
   return out << parallel_type_string_map[ptype];
