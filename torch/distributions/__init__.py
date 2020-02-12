@@ -58,7 +58,7 @@ The other way to implement these stochastic/policy gradients would be to use the
 reparameterization trick from the
 :meth:`~torch.distributions.Distribution.rsample` method, where the
 parameterized random variable can be constructed via a parameterized
-deterministic function of a parameter-free random variable. The reparameterized
+deterministic function and a parameter-free random variable. The reparameterized
 sample therefore becomes differentiable. The code for implementing the pathwise
 derivative would be as follows::
 
