@@ -20,10 +20,15 @@ ValType promote_type(const ValType& t1, const ValType& t2){
   return t1 < t2 ? t1 : t2;
 }
 
+bool is_cast_legal(const DataType& t1, const DataType& t2) {
+  if((DataType::Null == t1) || (DataType::Null == t2)) return false;
+  // In theory there could be stronger real check here in the future
+  return true;
+}
 
 static std::unordered_map<DataType, std::string> data_type_string_map {
   {DataType::Float, "Float"},
-  {DataType::Float, "Int"}
+  {DataType::Int,   "Int"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
   {ValType::Tensor, "Tensor"},
@@ -67,6 +72,10 @@ std::string stringify(const UnaryOpType type) {
 
 std::string stringify(const BinaryOpType type) {
   return binary_op_type_string_map[type];
+}
+
+std::ostream& operator<<(std::ostream& out, const DataType datatype) {
+  return out << stringify(datatype);
 }
 
 std::ostream& operator<<(std::ostream& out, const ValType valtype) {

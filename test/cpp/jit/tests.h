@@ -89,6 +89,7 @@ namespace jit {
   _(GPU_FusionMutator)           \
   _(GPU_FusionTopoSort)          \
   _(GPU_FusionRegister)          \
+  _(GPU_FusionCastOp)            \
   _(GPU_FuserTensor)             \
 
 

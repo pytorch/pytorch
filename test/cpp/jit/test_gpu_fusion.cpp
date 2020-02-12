@@ -69,6 +69,7 @@ void testGPU_FusionContainer(){
   
 }
 
+
 void testGPU_FusionSimpleTypePromote(){
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -78,6 +79,17 @@ void testGPU_FusionSimpleTypePromote(){
   auto f5 = binary_op(BinaryOpType::Add, f4, i1);
 
   TORCH_CHECK(f5->getDataType() == DataType::Float);
+}
+
+void testGPU_FusionCastOp(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  
+  Float* f3_test = new Float{3.f};
+  Int* i3 = new Int{3};
+  auto f3 = cast_op(DataType::Float, i3);
+
+  TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
 }
 
 void testGPU_FusionMutator(){
