@@ -17,6 +17,8 @@
 #include <numeric>
 #include <vector>
 #include <map>
+#include <cmath>
+#include <cfloat>
 
 namespace at {
 namespace native {

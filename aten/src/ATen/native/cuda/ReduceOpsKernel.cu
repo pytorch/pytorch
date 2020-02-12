@@ -224,6 +224,10 @@ void argmin_kernel_cuda(TensorIterator& iter) {
   }
 }
 
+template<typename scalar_t, typename BinaryOperation>
+__device__ scalar_t binary_op_checking_nan(scalar_t lhs, scalar_t rhs, BinaryOperation binary_op) {
+  return (std::isnan(rhs) || (!std::isnan(lhs) && binary_op(rhs, lhs))) ? rhs : lhs;
+}
 /* Perform an inclusive scan along the innermost dimension of a tensor.
  *
  * - num_rows is the size of the flattened outer dimensions;
@@ -277,7 +281,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
 
         // Add the total value of all previous blocks to the first value of this block.
         if (threadIdx.x == 0) {
-          auto out = binary_op(row_buf[0], block_total);
+          auto out = binary_op_checking_nan(block_total, row_buf[0], binary_op);
           if(out == block_total) {
             row_idx_buf[0] = block_idx_final;
           }
@@ -290,7 +294,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       for (int s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
         if (row < num_rows && threadIdx.x < s) {
           int offset = (2 * threadIdx.x + 1) * d - 1;
-          auto out = binary_op(row_buf[offset], row_buf[offset + d]);
+          auto out = binary_op_checking_nan(row_buf[offset], row_buf[offset + d], binary_op);
           if(out == row_buf[offset]) {
             row_idx_buf[offset + d] = row_idx_buf[offset];
           }
@@ -303,7 +307,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       for (int s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
         if (row < num_rows && threadIdx.x < s - 1) {
           int offset = 2 * (threadIdx.x + 1) * d - 1;
-          auto out = binary_op(row_buf[offset], row_buf[offset + d]);
+          auto out = binary_op_checking_nan(row_buf[offset], row_buf[offset + d], binary_op);
           if(out == row_buf[offset]) {
             row_idx_buf[offset + d] = row_idx_buf[offset];
           }
@@ -350,15 +354,15 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
       scalar_t *values = values_ + orow * row_size * num_irows + irow;
       int64_t *indices = indices_ + orow * row_size * num_irows + irow;
       scalar_t out = init;
-      int64_t idx = 0;
+      int64_t out_idx = 0;
 
-      for (int col = 0; col < row_size; ++col) {
-        out = binary_op(out, *self);
-        if(out == *self) {
-          idx = col;
+      for (int64_t col = 0; col < row_size; ++col) {
+        out = binary_op_checking_nan(out, *self, binary_op);
+        if(out == *self){
+          out_idx = col;
         }
         *values = out;
-        *indices = idx;
+        *indices = out_idx;
         self += num_irows;
         values += num_irows;
         indices += num_irows;
@@ -370,20 +374,17 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices,
                                        int dim, scalar_t init, BinaryFunction binary_op) {
-  int ndim = self.dim();
-  // Treat all outer dimensions (i.e. dim_ < dim) as one.
-  int num_orows = 1;
-  auto sizes = self.sizes();
-  std::accumulate(sizes, sizes + dim, num_orows, std::multiplies<int>);
-
   int row_size = self.size(dim);
+  auto sizes = self.sizes();
+
+  // Treat all outer dimensions (i.e. dim_ < dim) as one.
+  int num_orows = std::accumulate(sizes.begin(), sizes.begin() + dim, 1, std::multiplies<int>());
 
   // Treat all inner dimensions (i.e. dim > dimension) as one.
-  int num_irows = 1;
-  std::accumulate(sizes + dim, sizes + ndim, num_irows, std::multiplies<int>);
+  int num_irows = std::accumulate(sizes.begin() + dim + 1, sizes.end(), 1, std::multiplies<int>());
 
-  dim3 threads(std::min(512, num_irows));
-  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize;
+  dim3 threads(std::min(512, int(num_irows)));
+  int maxGridDim = at::cuda::getCurrentDeviceProperties()->maxGridSize[0];
   dim3 grid(std::min(maxGridDim, num_orows), std::min(maxGridDim, cuda::ATenCeilDiv(num_irows, int(threads.x))));
 
   tensor_kernel_scan_outer_dim_with_indices<scalar_t><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -400,7 +401,7 @@ __host__ void scan_innermost_dim_with_indices(const Tensor& self, Tensor& values
   int num_rows = self.numel() / row_size;
 
   dim3 threads(16, 32);
-  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize, cuda::ATenCeilDiv(num_rows, int(threads.y))));
+  dim3 grid(std::min(at::cuda::getCurrentDeviceProperties()->maxGridSize[0], cuda::ATenCeilDiv(num_rows, int(threads.y))));
 
   tensor_kernel_scan_innermost_dim_with_indices<scalar_t, 16, 32><<<grid, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     self.data_ptr<scalar_t>(), values.data_ptr<scalar_t>(), indices.data_ptr<int64_t>(),
@@ -429,7 +430,8 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   checkAllSameGPU("cummax", {output_arg, indices_arg, input_arg});
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
     self.scalar_type(), "cummax_cuda", [&]() {
-    scan_dim_with_indices<scalar_t>(self, values, indices, dim, std::numeric_limits<scalar_t>::lowest(), MaxOp<scalar_t>());
+    scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
+    scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::greater_equal<scalar_t>());
   });
 }
 
@@ -440,7 +442,8 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   checkAllSameGPU("cummin", {output_arg, indices_arg, input_arg});
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
     self.scalar_type(), "cummin_cuda", [&]() {
-    scan_dim_with_indices<scalar_t>(self, values, indices, dim, std::numeric_limits<scalar_t>::max(), MinOp<scalar_t>());
+    scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
+    scan_dim_with_indices<scalar_t>(self, values, indices, dim, init, std::less_equal<scalar_t>());
   });
 }
 

@@ -10049,7 +10049,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
     def test_cummax_cummin(self, device):
-        def test_ops(op, string_of_function_name, expected_output):
+        def test_ops(op, string_of_function_name, expected_output1, expected_output2):
             x = torch.rand(100, 100, device=device)
             out1 = op(x, 1)
             res2 = torch.empty(0, device=device)
@@ -10065,7 +10065,13 @@ class TestTorchDeviceType(TestCase):
             aRes = op(a, 0)
             bRes = op(b, 0)
             self.assertEqual(aRes[0], bRes[0])
-            self.assertEqual(aRes[0], expected_output)
+            self.assertEqual(aRes[0], expected_output1)
+
+            # test inf and nan
+            x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
+            xRes = op(x, 0)[0]
+            self.assertEqual(xRes.__repr__(), str(xRes))
+            self.assertExpectedInline(str(xRes), expected_output2)
 
             # op shouldn't support values, indices with a dtype, device type or layout
             # different from that of input tensor
@@ -10099,12 +10105,15 @@ class TestTorchDeviceType(TestCase):
             # Check that output maintained correct shape
             self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
+        expected_str_out = '''tensor([4., inf, inf, inf, inf, nan, nan])'''
         test_ops(torch.cummax, "cummax", torch.tensor([[1, 0, 1],
                                                        [1, 0, 1],
-                                                       [1, 1, 1]]))
+                                                       [1, 1, 1]]), expected_str_out)
+
+        expected_str_out = '''tensor([4.0000, 4.0000, 1.5000,   -inf,   -inf,    nan,    nan])'''
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
-                                                       [0, 0, 0]]))
+                                                       [0, 0, 0]]), expected_str_out)
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)
