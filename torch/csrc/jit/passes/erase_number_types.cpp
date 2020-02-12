@@ -39,7 +39,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case aten::Bool:
       case aten::Float:
       case aten::Int:
-      case prim::ImplicitTensorToNum:
+      case aten::FloatImplicit:
+      case aten::IntImplicit:
+      case aten::ScalarImplicit:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
         it.destroyCurrent();

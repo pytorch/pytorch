@@ -867,7 +867,9 @@ struct PythonPrintImpl {
           stmt << "None";
         }
       } break;
-      case prim::ImplicitTensorToNum: {
+      case aten::ScalarImplicit:
+      case aten::FloatImplicit:
+      case aten::IntImplicit: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;

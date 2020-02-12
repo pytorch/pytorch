@@ -294,25 +294,33 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::ImplicitTensorToNum(Tensor a) -> Scalar",
-         [](const Node* node) -> Operation {
-           if (node->output()->type() == IntType::get()) {
-             return [](Stack& stack) {
-               at::Tensor a;
-               pop(stack, a);
-               checkImplicitTensorToNum(a, /*to int*/ true);
-               push(stack, a.item<int64_t>());
-               return 0;
-             };
-           } else {
-             return [](Stack& stack) {
-               at::Tensor a;
-               pop(stack, a);
-               checkImplicitTensorToNum(a, /*to int*/ false);
-               push(stack, a.item<double>());
-               return 0;
-             };
-           }
+         "aten::IntImplicit(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ true);
+           push(stack, a.item<int64_t>());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::FloatImplicit(Tensor a) -> float",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ false);
+           push(stack, a.item<double>());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::ScalarImplicit(Tensor a) -> Scalar",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           checkImplicitTensorToNum(a, /*to int*/ false);
+           push(stack, a.item());
+           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
