@@ -68,7 +68,7 @@ def _find_rocm_home():
             rocm_home = '/opt/rocm'
             if not os.path.exists(rocm_home):
                 rocm_home = None
-    if rocm_home and not torch.cuda.is_available():
+    if rocm_home and torch.version.hip is None:
         print("No ROCm runtime is found, using ROCM_HOME='{}'".format(rocm_home))
     return rocm_home
 
