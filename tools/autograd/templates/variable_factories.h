@@ -15,9 +15,6 @@
 #include <initializer_list>
 #include <utility>
 
-using at::Device;
-using at::ScalarType;
-using at::Layout;
 using at::DimnameList;
 
 namespace torch {
