@@ -45,7 +45,7 @@ class KernelScope {
 class TORCH_API KernelScopedObject {
  public:
   TORCH_API KernelScopedObject();
-  TORCH_API virtual ~KernelScopedObject();
+  TORCH_API virtual ~KernelScopedObject() = default;
 
  private:
   KernelScopedObject(const KernelScopedObject&) = delete;
