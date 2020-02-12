@@ -47,7 +47,7 @@ bool isDecomposableNorm(Node* normalize_op) {
     return false;
   }
 
-  if (decomposable_normalization_ops.find(normalize_op)) {
+  if (normalize_op->isMemberOf(decomposable_normalization_ops)) {
     // If we can't determine if weight and bias is defined statically there's
     // really no point in decomposing normalization into simpler ops, since it
     // won't get fused into a single kernel.
