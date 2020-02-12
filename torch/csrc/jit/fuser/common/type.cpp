@@ -48,12 +48,21 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
   , {BinaryOpType::Mod, "Mod"}
 };
 
+static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
+    {ParallelType::BIDz, "BIDz"},
+    {ParallelType::BIDy, "BIDy"},
+    {ParallelType::BIDx, "BIDx"},
+    {ParallelType::TIDz, "TIDz"},
+    {ParallelType::TIDy, "TIDy"},
+    {ParallelType::TIDx, "TIDx"},
+    {ParallelType::Vectorize, "Vectorize"},
+    {ParallelType::Unroll, "Unroll"},
+    {ParallelType::Serial, "Serial"}
+};
+
 static std::unordered_map<at::ScalarType, DataType> at_type_map {
   {at::ScalarType::Float, DataType::Float},
   {at::ScalarType::Int, DataType::Int},
-//static std::unordered_map<ValType, DataType> at_type_map {
-  //{ValType::Tensor, DataType::Float},
-  //{ValType::Scalar, DataType::Int},
 };
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
@@ -61,40 +70,39 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
   return at_type_map[scalar_type];
 }
 
-std::string stringify(const DataType datatype) {
-  return data_type_string_map[datatype];
+std::ostream& operator<<(std::ostream& out, const ValType vtype) {
+  TORCH_CHECK(val_type_string_map.count(vtype) != 0);
+  return out << val_type_string_map[vtype];
 }
 
-std::string stringify(const ValType valtype) {
-  return val_type_string_map[valtype];
+std::ostream& operator<<(std::ostream& out, const DataType dtype) {
+  TORCH_CHECK(data_type_string_map.count(dtype) != 0);
+  return out << data_type_string_map[dtype];
 }
 
-std::string stringify(const ExprType exprtype) {
-  return expr_type_string_map[exprtype];
+std::ostream& operator<<(std::ostream& out, const ExprType etype) {
+  TORCH_CHECK(expr_type_string_map.count(etype) != 0);
+  return out << expr_type_string_map[etype];
 }
 
-std::string stringify(const UnaryOpType type) {
-  return unary_op_type_string_map[type];
+std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
+  TORCH_CHECK(unary_op_type_string_map.count(uotype) != 0);
+  return out << unary_op_type_string_map[uotype];
 }
 
-std::string stringify(const BinaryOpType type) {
-  return binary_op_type_string_map[type];
+std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
+  TORCH_CHECK(binary_op_type_string_map.count(botype) != 0);
+  return out << binary_op_type_string_map[botype];
 }
 
-std::ostream& operator<<(std::ostream& out, const ValType valtype) {
-  return out << stringify(valtype);
+std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
+  TORCH_CHECK(binary_op_type_string_map.count(botype) != 0);
+  return out << binary_op_type_string_map[botype];
 }
 
-std::ostream& operator<<(std::ostream& out, const ExprType exprtype) {
-  return out << stringify(exprtype);
-}
-
-std::ostream& operator<<(std::ostream& out, const UnaryOpType type) {
-  return out << stringify(type);
-}
-
-std::ostream& operator<<(std::ostream& out, const BinaryOpType type) {
-  return out << stringify(type);
+std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
+  TORCH_CHECK(parallel_type_string_map.count(ptype) != 0);
+  return out << parallel_type_string_map[ptype];
 }
 
 }}} // torch::jit::fuser
