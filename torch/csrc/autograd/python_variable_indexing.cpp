@@ -265,23 +265,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 
   // handle simple types: integers, slices, ellipsis, none
   if (index == Py_None) {
-    return THPVariable_Wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
-      self_,
-      at::indexing::TensorIndex(at::indexing::None),
-      /*is_tracing=*/is_tracing));
+    return THPVariable_Wrap(self_.unsqueeze(0));
   } else if (index == Py_Ellipsis) {
-    return THPVariable_Wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
-      self_,
-      at::indexing::TensorIndex(at::indexing::Ellipsis),
-      /*is_tracing=*/is_tracing));
+    return THPVariable_Wrap(at::alias(self_));
   } else if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_Wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
-      self_,
-      at::indexing::TensorIndex(THPUtils_unpackLong(index)),
-      /*is_tracing=*/is_tracing));
+    return THPVariable_Wrap(at::indexing::applySelect(self_, 0, THPUtils_unpackLong(index)));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     if (!THPUtils_unpackSlice(index, &start, &stop, &step)) {
@@ -292,9 +283,13 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       extractTensorsFromSlice(index, start_tensor, stop_tensor, step_tensor);
       recordSliceTrace(start_tensor, stop_tensor, step_tensor);
     }
-    return THPVariable_Wrap(at::indexing::handleSimpleTypesInSingleDimIndexingGet(
+    return THPVariable_Wrap(at::indexing::applySlice(
       self_,
-      at::indexing::TensorIndex({start, stop, step}),
+      0,
+      start,
+      stop,
+      step,
+      /*ensure_view=*/true,
       /*is_tracing=*/is_tracing));
   }
 
