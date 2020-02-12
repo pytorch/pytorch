@@ -618,7 +618,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
 
     # unsupported_calls statistics reporting is broken atm
     def pt_repl(m):
-            return PYTORCH_MAP[m.group(0)]
+        return PYTORCH_MAP[m.group(0)]
 
     if is_pytorch_extension:
         output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
