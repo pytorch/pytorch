@@ -20,10 +20,9 @@ ValType promote_type(const ValType& t1, const ValType& t2){
   return t1 < t2 ? t1 : t2;
 }
 
-
 static std::unordered_map<DataType, std::string> data_type_string_map {
   {DataType::Float, "Float"},
-  {DataType::Float, "Int"}
+  {DataType::Int, "Int"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
   {ValType::Tensor, "Tensor"},
@@ -48,6 +47,19 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
   , {BinaryOpType::Div, "Div"}
   , {BinaryOpType::Mod, "Mod"}
 };
+
+static std::unordered_map<at::ScalarType, DataType> at_type_map {
+  {at::ScalarType::Float, DataType::Float},
+  {at::ScalarType::Int, DataType::Int},
+//static std::unordered_map<ValType, DataType> at_type_map {
+  //{ValType::Tensor, DataType::Float},
+  //{ValType::Scalar, DataType::Int},
+};
+
+DataType aten_to_data_type(const at::ScalarType& scalar_type) {
+  TORCH_CHECK(at_type_map.count(scalar_type) != 0);
+  return at_type_map[scalar_type];
+}
 
 std::string stringify(const DataType datatype) {
   return data_type_string_map[datatype];

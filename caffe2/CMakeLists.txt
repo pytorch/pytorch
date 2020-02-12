@@ -433,6 +433,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor_meta.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp

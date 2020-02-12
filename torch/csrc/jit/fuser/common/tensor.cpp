@@ -4,40 +4,45 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+namespace {
+DataType aten_opt_type_map(
+    const c10::optional<at::ScalarType>& scalar_type) {
+  return scalar_type.has_value() ? 
+      aten_to_data_type(scalar_type.value()) : DataType::Null;
+}
+
+c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  if (!tensor_type->isComplete()) {
+    return c10::nullopt;
+  } else {
+    return TensorContiguity(
+        *(tensor_type->sizes().concrete_sizes()),
+        *(tensor_type->strides().concrete_sizes()));
+  }
+}
+
+} // namespace
+
 /*
 * Tensor member definitions
 */
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
-: Val(ValType::Tensor, DataType::Null) {
-  std::runtime_error("Not implemented yet.");
-}
-
-/*
-  // TODO: protocol between codegen and JIT is not set in stone yet.
-  // Issue 1:
-  //   Profiling executor promises static shape information, but the defaul executor cannot guaranttee this.
-  //   We inevitably would need to support dim only tensor.
-  // Issue 2:
-  //   Our codegen is trying to be flexible. We want to do codegen based on contiguity and broadcast information,
-  //   which requires corresponding support from profiling executor. This means requiring static sizes and strides
-  //   are too restricting for our need and should be updated.
-  assert(tensor_type && tensor_type->isComplete());
-
-  scalar_type_ = tensor_type->scalarType();
-
-  auto dim = tensor_type->dim().value();
-  sizes_ = VectorInts(dim);
-  strides_ = VectorInts(dim);
-  for (int i = 0; i < dim; i++) {
-    sizes_.value()[i] = *(tensor_type->sizes()[i]);
-    strides_.value()[i] = *(tensor_type->strides()[i]);
-  }
+  : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
+    contiguity_(infer_contiguity_from_tensor_type(tensor_type)) {
 }
 
 Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
 : Tensor(jit_value->type()->cast<c10::TensorType>()) {
 }
-*/
+
+bool Tensor::hasContiguityInfo() {
+  return contiguity_.has_value();
+}
+
+const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() {
+  return contiguity_;
+}
 
 }}}

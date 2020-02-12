@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Exception.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstdint>
@@ -51,6 +52,8 @@ enum class TORCH_API BinaryOpType {
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
+
+DataType aten_to_data_type(const at::ScalarType& scalar_type);
 
 TORCH_API std::string stringify(const ValType);
 TORCH_API std::string stringify(const DataType);
