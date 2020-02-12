@@ -266,16 +266,20 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  const at::Device& self_device = self_.device();
-  const at::IntArrayRef& self_sizes = self_.sizes();
-  bool is_tracing = torch::jit::tracer::isTracing();
 
-  // handle simple types: integers, slices, ellipsis, none
+  // handle simple types: none, ellipsis
   if (index == Py_None) {
     return THPVariable_Wrap(self_.unsqueeze(0));
   } else if (index == Py_Ellipsis) {
     return THPVariable_Wrap(at::alias(self_));
-  } else if (THPUtils_checkLong(index)) {
+  }
+
+  const at::Device& self_device = self_.device();
+  const at::IntArrayRef& self_sizes = self_.sizes();
+  bool is_tracing = torch::jit::tracer::isTracing();
+
+  // handle simple types: integers, slices
+  if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
