@@ -234,38 +234,9 @@ Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator
 }
 
 Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
-  bool expandable = are_expandable(mean.sizes(), std.sizes());
-  bool empty_output = output.numel() == 0;
-
-  if (expandable) {
-    auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(shape),
-        "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
-    if (empty_output) {
-      at::native::resize_(output, shape);
-    }
-  }
-  else {
-    TORCH_CHECK(
-        mean.numel() == std.numel(),
-        "inconsistent tensor, std and mean are not broadcastable and have different number of elements, "
-        "expected mean ", mean.sizes(), " and std ", std.sizes(), " to have same number of elements)");
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(mean.sizes()),
-        "inconsistent tensor, std and mean are not broadcastable, output size (", output.sizes(), ") is not the same as mean size (", mean.sizes(), ")");
-    TORCH_WARN_ONCE(
-        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
-        "supported mode of operation, but is now deprecated and the support will be removed in a later release. "
-        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
-        "Please ensure that std and mean are broadcastable to avoid these issues.");
-    if (empty_output) {
-      at::native::resize_(output, mean.sizes());
-    }
-  }
-
+  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_cpu_(output, 0, 1, gen);
-  if (!expandable) {
+  if (is_deprecated_th_impl) {
     output.mul_(std.reshape(mean.sizes())).add_(mean);
   }
   else {
