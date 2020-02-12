@@ -71,7 +71,7 @@ class FilelikeMock(object):
         return name in self.calls
 
 
-class TestSerialization(TestCase):
+class SerializationMixin(object):
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]  # 0-3
@@ -136,26 +136,6 @@ class TestSerialization(TestCase):
         with tempfile.NamedTemporaryFile() as f:
             test(f)
 
-        with tempfile.NamedTemporaryFile() as f:
-            test(f.name)
-
-        test(io.BytesIO())
-
-    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
-    def test_serialization_zipfile(self):
-        data = self._test_serialization_data()
-
-        def test(name_or_buffer):
-            torch.save(data, name_or_buffer, _use_new_zipfile_serialization=True)
-
-            if hasattr(name_or_buffer, 'seek'):
-                name_or_buffer.seek(0)
-
-            result = torch.load(name_or_buffer)
-            self.assertEqual(result, data)
-
-        with tempfile.NamedTemporaryFile() as f:
-            test(f)
         with tempfile.NamedTemporaryFile() as f:
             test(f.name)
 
@@ -235,6 +215,7 @@ class TestSerialization(TestCase):
             self.assertFalse(torch.serialization._is_zipfile(f))
             self.assertEqual(torch.load(f.name), t)
 
+    @unittest.skipIf(not PY3, "gzip doesn't support os.seek(0, os.SEEK_END) on Python 2")
     def test_serialization_gzip(self):
         # Test serialization with gzip file
         b = self._test_serialization_data()
@@ -247,30 +228,6 @@ class TestSerialization(TestCase):
         with gzip.open(f2.name, 'rb') as f:
             c = torch.load(f)
         self._test_serialization_assert(b, c)
-
-    def test_serialization_offset(self):
-        a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
-        m = torch.nn.Conv2d(1, 1, (1, 3))
-        i, j = 41, 43
-        with tempfile.NamedTemporaryFile() as f:
-            pickle.dump(i, f)
-            torch.save(a, f)
-            pickle.dump(j, f)
-            torch.save(b, f)
-            torch.save(m, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
-            f.seek(0)
-            i_loaded = pickle.load(f)
-            a_loaded = torch.load(f)
-            j_loaded = pickle.load(f)
-            b_loaded = torch.load(f)
-            m_loaded = torch.load(f)
-        self.assertTrue(torch.equal(a, a_loaded))
-        self.assertTrue(torch.equal(b, b_loaded))
-        self.assertTrue(m.kernel_size == m_loaded.kernel_size)
-        self.assertEqual(i, i_loaded)
-        self.assertEqual(j, j_loaded)
 
     @unittest.skipIf(
         not TEST_DILL or HAS_DILL_AT_LEAST_0_3_1,
@@ -304,26 +261,7 @@ class TestSerialization(TestCase):
             self.assertIsInstance(x3, type(x))
             self.assertEqual(x, x3)
 
-    def test_serialization_offset_filelike(self):
-        a = torch.randn(5, 5)
-        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
-        i, j = 41, 43
-        with BytesIOContext() as f:
-            pickle.dump(i, f)
-            torch.save(a, f)
-            pickle.dump(j, f)
-            torch.save(b, f)
-            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
-            f.seek(0)
-            i_loaded = pickle.load(f)
-            a_loaded = torch.load(f)
-            j_loaded = pickle.load(f)
-            b_loaded = torch.load(f)
-        self.assertTrue(torch.equal(a, a_loaded))
-        self.assertTrue(torch.equal(b, b_loaded))
-        self.assertEqual(i, i_loaded)
-        self.assertEqual(j, j_loaded)
-
+    @unittest.skipIf(not PY3, "gzip doesn't support os.seek(0, os.SEEK_END) on Python 2")
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
         i = 41
@@ -404,57 +342,6 @@ class TestSerialization(TestCase):
             with tempfile.NamedTemporaryFile() as checkpoint:
                 x = torch.save(torch.nn.Linear(2, 3), checkpoint)
                 self.assertEquals(len(warns), 0)
-
-
-    # unique_key is necessary because on Python 2.7, if a warning passed to
-    # the warning module is the same, it is not raised again.
-    def _test_serialization_container(self, unique_key, filecontext_lambda):
-
-        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
-
-        def import_module(name, filename):
-            if sys.version_info >= (3, 5):
-                import importlib.util
-                spec = importlib.util.spec_from_file_location(name, filename)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-            else:
-                import imp
-                module = imp.load_source(name, filename)
-            sys.modules[module.__name__] = module
-            return module
-
-        with filecontext_lambda() as checkpoint:
-            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
-                                    '_internal', 'data', 'network1.py')
-            module = import_module(tmpmodule_name, fname)
-            torch.save(module.Net(), checkpoint)
-
-            # First check that the checkpoint can be loaded without warnings
-            checkpoint.seek(0)
-            with warnings.catch_warnings(record=True) as w:
-                loaded = torch.load(checkpoint)
-                self.assertTrue(isinstance(loaded, module.Net))
-                if can_retrieve_source:
-                    self.assertEquals(len(w), 0)
-
-            # Replace the module with different source
-            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
-                                    '_internal', 'data', 'network2.py')
-            module = import_module(tmpmodule_name, fname)
-            checkpoint.seek(0)
-            with warnings.catch_warnings(record=True) as w:
-                loaded = torch.load(checkpoint)
-                self.assertTrue(isinstance(loaded, module.Net))
-                if can_retrieve_source:
-                    self.assertEquals(len(w), 1)
-                    self.assertTrue(w[0].category, 'SourceChangeWarning')
-
-    def test_serialization_container(self):
-        self._test_serialization_container('file', tempfile.NamedTemporaryFile)
-
-    def test_serialization_container_filelike(self):
-        self._test_serialization_container('filelike', BytesIOContext)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -630,7 +517,8 @@ class TestSerialization(TestCase):
     def test_load_python2_unicode_module(self):
         # This Pickle contains some Unicode data!
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
-        self.assertIsNotNone(torch.load(path))
+        with warnings.catch_warnings(record=True) as w:
+            self.assertIsNotNone(torch.load(path))
 
     def test_load_error_msg(self):
         expected_err_msg = (".*You can only torch.load from a file that is seekable. " +
@@ -642,6 +530,151 @@ class TestSerialization(TestCase):
         delattr(resource, "seek")
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
+
+
+class serialization_method(object):
+    def __init__(self, use_zip):
+        self.use_zip = use_zip
+        self.torch_save = torch.save
+
+    def __enter__(self, *args, **kwargs):
+        def wrapper(*args, **kwargs):
+            if '_use_new_zipfile_serialization' in kwargs:
+                raise RuntimeError("Cannot set method manually")
+            kwargs['_use_new_zipfile_serialization'] = self.use_zip
+            return self.torch_save(*args, **kwargs)
+
+        torch.save = wrapper
+
+    def __exit__(self, *args, **kwargs):
+        torch.save = self.torch_save
+
+
+class TestOldSerialization(TestCase, SerializationMixin):
+    # unique_key is necessary because on Python 2.7, if a warning passed to
+    # the warning module is the same, it is not raised again.
+    def _test_serialization_container(self, unique_key, filecontext_lambda):
+
+        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
+
+        def import_module(name, filename):
+            if sys.version_info >= (3, 5):
+                import importlib.util
+                spec = importlib.util.spec_from_file_location(name, filename)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+            else:
+                import imp
+                module = imp.load_source(name, filename)
+            sys.modules[module.__name__] = module
+            return module
+
+        with filecontext_lambda() as checkpoint:
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                                    '_internal', 'data', 'network1.py')
+            module = import_module(tmpmodule_name, fname)
+            torch.save(module.Net(), checkpoint)
+
+            # First check that the checkpoint can be loaded without warnings
+            checkpoint.seek(0)
+            with warnings.catch_warnings(record=True) as w:
+                loaded = torch.load(checkpoint)
+                self.assertTrue(isinstance(loaded, module.Net))
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 0)
+
+            # Replace the module with different source
+            fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
+                                    '_internal', 'data', 'network2.py')
+            module = import_module(tmpmodule_name, fname)
+            checkpoint.seek(0)
+            with warnings.catch_warnings(record=True) as w:
+                loaded = torch.load(checkpoint)
+                self.assertTrue(isinstance(loaded, module.Net))
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 1)
+                    self.assertTrue(w[0].category, 'SourceChangeWarning')
+
+    def test_serialization_container(self):
+        self._test_serialization_container('file', tempfile.NamedTemporaryFile)
+
+    def test_serialization_container_filelike(self):
+        self._test_serialization_container('filelike', BytesIOContext)
+
+    def test_serialization_offset(self):
+        a = torch.randn(5, 5)
+        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        m = torch.nn.Conv2d(1, 1, (1, 3))
+        i, j = 41, 43
+        with tempfile.NamedTemporaryFile() as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+            pickle.dump(j, f)
+            torch.save(b, f)
+            torch.save(m, f)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            f.seek(0)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+            m_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertTrue(m.kernel_size == m_loaded.kernel_size)
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
+
+    def test_serialization_offset_filelike(self):
+        a = torch.randn(5, 5)
+        b = torch.randn(1024, 1024, 512, dtype=torch.float32)
+        i, j = 41, 43
+        with BytesIOContext() as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+            pickle.dump(j, f)
+            torch.save(b, f)
+            self.assertTrue(f.tell() > 2 * 1024 * 1024 * 1024)
+            f.seek(0)
+            i_loaded = pickle.load(f)
+            a_loaded = torch.load(f)
+            j_loaded = pickle.load(f)
+            b_loaded = torch.load(f)
+        self.assertTrue(torch.equal(a, a_loaded))
+        self.assertTrue(torch.equal(b, b_loaded))
+        self.assertEqual(i, i_loaded)
+        self.assertEqual(j, j_loaded)
+
+    def run(self, *args, **kwargs):
+        with serialization_method(use_zip=False):
+            return super(TestOldSerialization, self).run(*args, **kwargs)
+
+
+class TestSerialization(TestCase, SerializationMixin):
+    @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
+    def test_serialization_zipfile(self):
+        data = self._test_serialization_data()
+
+        def test(name_or_buffer):
+            torch.save(data, name_or_buffer)
+
+            if hasattr(name_or_buffer, 'seek'):
+                name_or_buffer.seek(0)
+
+            result = torch.load(name_or_buffer)
+            self.assertEqual(result, data)
+
+        with tempfile.NamedTemporaryFile() as f:
+            test(f)
+        with tempfile.NamedTemporaryFile() as f:
+            test(f.name)
+
+        test(io.BytesIO())
+
+    def run(self, *args, **kwargs):
+        with serialization_method(use_zip=True):
+            return super(TestSerialization, self).run(*args, **kwargs)
+
 
 if __name__ == '__main__':
     run_tests()

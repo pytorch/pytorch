@@ -681,15 +681,35 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
     });
 }
 
+void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
+  if (signature.deprecated) {
+    auto msg = c10::str(
+      "This overload of ", signature.name, " is deprecated:\n\t",
+      signature.name, signature.toString());
+    auto signatures = get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n\t";
+        msg += signature.name;
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
+  }
+}
+
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
+    check_deprecated(signature);
     return PythonArgs(traceable, signature, parsed_args);
   }
 
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
+      check_deprecated(signature);
       return PythonArgs(traceable, signature, parsed_args);
     }
   }
