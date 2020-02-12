@@ -4341,7 +4341,7 @@ def foo(x):
 
     def _test_device_type(self, dest):
         def fn(x):
-            # type: (Device) -> str, Optional[int]
+            # type: (Device) -> Tuple[str, Optional[int]]
             return x.type, x.index
 
         device = torch.ones(2).to(dest).device
