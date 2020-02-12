@@ -20,9 +20,15 @@ ValType promote_type(const ValType& t1, const ValType& t2){
   return t1 < t2 ? t1 : t2;
 }
 
+bool is_cast_legal(const DataType& t1, const DataType& t2) {
+  if((DataType::Null == t1) || (DataType::Null == t2)) return false;
+  // In theory there could be stronger real check here in the future
+  return true;
+}
+
 static std::unordered_map<DataType, std::string> data_type_string_map {
   {DataType::Float, "Float"},
-  {DataType::Int, "Int"}
+  {DataType::Int,   "Int"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
   {ValType::Tensor, "Tensor"},
@@ -80,9 +86,18 @@ std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   return out << data_type_string_map[dtype];
 }
 
+<<<<<<< HEAD
 std::ostream& operator<<(std::ostream& out, const ExprType etype) {
   TORCH_CHECK(expr_type_string_map.count(etype) != 0);
   return out << expr_type_string_map[etype];
+=======
+std::ostream& operator<<(std::ostream& out, const DataType datatype) {
+  return out << stringify(datatype);
+}
+
+std::ostream& operator<<(std::ostream& out, const ValType valtype) {
+  return out << stringify(valtype);
+>>>>>>> Add cast_op container function
 }
 
 std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
