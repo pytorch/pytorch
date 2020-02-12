@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 
 namespace torch {
@@ -13,7 +12,7 @@ void InlineForkWait(
       auto graph = b->owningGraph();
       auto subgraph = n->g(attr::Subgraph);
 
-      auto output = inlineCallTo(*graph, *subgraph, n->inputs());
+      auto output = insertGraph(*graph, *subgraph, n->inputs());
 
       future_remap[n->output()] = output.at(0);
     } else if (n->kind() == aten::wait) {

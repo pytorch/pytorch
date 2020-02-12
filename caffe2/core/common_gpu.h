@@ -29,40 +29,11 @@
 #include "c10/cuda/CUDAMathCompat.h"
 #include <c10/cuda/CUDAGuard.h>
 
-// Defines CAFFE2_CUDA_EXPORT and CAFFE2_CUDA_IMPORT. On Windows, this
-// corresponds to different declarations (dllexport and dllimport). On
-// Linux/Mac, it just resolves to the same "default visibility" setting.
-#if defined(_MSC_VER)
-#if defined(CAFFE2_BUILD_SHARED_LIBS)
-#define CAFFE2_CUDA_EXPORT __declspec(dllexport)
-#define CAFFE2_CUDA_IMPORT __declspec(dllimport)
-#else
-#define CAFFE2_CUDA_EXPORT
-#define CAFFE2_CUDA_IMPORT
-#endif
-#else
-#if defined(__GNUC__)
-#define CAFFE2_CUDA_EXPORT __attribute__((__visibility__("default")))
-#else
-#define CAFFE2_CUDA_EXPORT
-#endif
-#define CAFFE2_CUDA_IMPORT CAFFE2_CUDA_EXPORT
-#endif
+#define CAFFE2_CUDA_EXPORT C10_EXPORT
+#define CAFFE2_CUDA_API TORCH_CUDA_API
 
-// CAFFE2_CUDA_API is a macro that, depends on whether you are building the
-// main caffe2 library or not, resolves to either CAFFE2_CUDA_EXPORT or
-// CAFFE2_CUDA_IMPORT.
-//
-// This is used in e.g. Caffe2's protobuf files: when building the main library,
-// it is defined as CAFFE2_CUDA_EXPORT to fix a Windows global-variable-in-dll
-// issue, and for anyone dependent on Caffe2 it will be defined as
-// CAFFE2_CUDA_IMPORT.
-
-#ifdef CAFFE2_CUDA_BUILD_MAIN_LIB
-#define CAFFE2_CUDA_API CAFFE2_CUDA_EXPORT
-#else
-#define CAFFE2_CUDA_API CAFFE2_CUDA_IMPORT
-#endif
+#define CAFFE2_HIP_EXPORT C10_EXPORT
+#define CAFFE2_HIP_API TORCH_HIP_API
 
 // This is a macro defined for cuda fp16 support. In default, cuda fp16 is
 // supported by NVCC 7.5, but it is also included in the Tegra X1 platform with

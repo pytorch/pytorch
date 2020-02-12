@@ -27,7 +27,7 @@ void Get1DPartitionOf2D(
     int* n_begin,
     int* n_end,
     int n_align /*=1*/) {
-  if (m >= nthreads) {
+  if (m >= nthreads || m == 0) {
     // When m >= nthreads, just parallelize over m.
     std::tie(*m_begin, *m_end) = Get1DPartition(m, nthreads, tid);
     *n_begin = 0;

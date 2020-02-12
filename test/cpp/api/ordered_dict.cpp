@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/api/support.h>
-#include <torch/ordered_dict.h>
+#include <torch/torch.h>
 
 template <typename T>
 using OrderedDict = torch::OrderedDict<std::string, T>;
@@ -135,6 +135,20 @@ TEST(OrderedDictTest, CanIterateItems) {
   ASSERT_EQ(iterator->value(), 2);
   ++iterator;
   ASSERT_EQ(iterator, dict.end());
+}
+
+TEST(OrderedDictTest, EraseWorks) {
+  OrderedDict<int> dict = {{"a", 1}, {"b", 2}, {"c", 3}};
+  dict.erase("b");
+  ASSERT_FALSE(dict.contains("b"));
+  ASSERT_EQ(dict["a"], 1);
+  ASSERT_EQ(dict["c"], 3);
+  dict.erase("a");
+  ASSERT_FALSE(dict.contains("a"));
+  ASSERT_EQ(dict["c"], 3);
+  dict.erase("c");
+  ASSERT_FALSE(dict.contains("c"));
+  ASSERT_TRUE(dict.is_empty());
 }
 
 TEST(OrderedDictTest, ClearMakesTheDictEmpty) {

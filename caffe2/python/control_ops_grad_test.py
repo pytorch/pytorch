@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import unittest
 from caffe2.python import core, test_util, workspace
 from caffe2.python.control_ops_grad import disambiguate_grad_if_op_output
 from caffe2.python.model_helper import ModelHelper
@@ -37,4 +38,12 @@ class TestControl(test_util.TestCase):
         new_grad_output = "input_grad" + "_autosplit_" + "0"
         disambiguate_grad_if_op_output(grad_op, 0, new_grad_output)
         self.assertEqual(grad_op.output[0], new_grad_output)
-        self.assertEqual(grad_op.arg[1].n.op[1].output[0], new_grad_output)
+        for arg in grad_op.arg:
+            if arg.name == "else_net":
+                self.assertEqual(arg.n.op[1].output[0], new_grad_output)
+            else:
+                self.assertEqual(arg.name, "then_net")
+
+
+if __name__ == '__main__':
+    unittest.main()

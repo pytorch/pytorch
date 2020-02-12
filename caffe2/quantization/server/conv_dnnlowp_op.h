@@ -1,7 +1,6 @@
 #pragma once
 
 #include <fbgemm/Fbgemm.h>
-#include <fbgemm/src/FbgemmI8DepthwiseAvx2.h>
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
@@ -111,18 +110,22 @@ class ConvDNNLowPOp : public ConvPoolDNNLowPOpBase<T, ConvFp32Op> {
 
   void ConvNHWCCore_(const T* col_buffer_data, vector<std::int32_t>* Y_int32);
 
+  fbgemm::conv_param_t<> GetConvParam_();
+  fbgemm::conv_param_t<3> GetConv3DParam_();
+
   std::vector<dnnlowp::RequantizationParams> requantization_params_;
 
   // used in fast path for T == uint8_t
   std::shared_ptr<fbgemm::PackBMatrix<std::int8_t>> Wq_packed_;
 
-  // For depthwise 3x3 conv
-  std::shared_ptr<fbgemm::Packed3x3ConvMatrix> Wq_depthwise_3x3_packed_;
-  // For depthwise 3x3x3 conv
-  std::shared_ptr<fbgemm::Packed3x3x3ConvMatrix> Wq_depthwise_3x3x3_packed_;
+  // For depthwise conv
+  std::shared_ptr<fbgemm::PackedDepthWiseConvMatrix> Wq_depthwise_packed_;
   // For small gconv
   std::shared_ptr<fbgemm::PackWeightMatrixForGConv<std::int8_t>>
       Wq_gconv_packed_;
+  std::shared_ptr<
+      fbgemm::PackWeightMatrixForGConv<std::int8_t, std::int32_t, 3>>
+      Wq_gconv3d_packed_;
 
   // pre-computed biases and offsets
   std::shared_ptr<std::vector<std::int32_t>> b_quantized_;

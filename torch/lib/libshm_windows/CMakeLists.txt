@@ -11,17 +11,18 @@ TARGET_COMPILE_DEFINITIONS(shm PRIVATE
 )
 
 target_include_directories(shm PRIVATE
+  ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
   ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
-TARGET_LINK_LIBRARIES(shm caffe2 c10)
+TARGET_LINK_LIBRARIES(shm torch c10)
 
 
 INSTALL(TARGETS shm DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}")
 INSTALL(FILES libshm.h DESTINATION "include")
 
-if (MSVC AND NOT TORCH_STATIC)
+if (MSVC AND BUILD_SHARED_LIBS)
   INSTALL(FILES $<TARGET_PDB_FILE:shm> DESTINATION "${LIBSHM_INSTALL_LIB_SUBDIR}" OPTIONAL)
 endif()

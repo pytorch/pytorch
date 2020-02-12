@@ -8,29 +8,13 @@ folder.
 """
 
 import sys
-import traceback
 import atexit
+
+# old private location of the ExceptionWrapper that some users rely on:
+from torch._utils import ExceptionWrapper
 
 
 IS_WINDOWS = sys.platform == "win32"
-
-
-# NOTE [ Python Traceback Reference Cycle Problem ]
-#
-# When using sys.exc_info(), it is important to **not** store the exc_info[2],
-# which is the traceback, because otherwise you will run into the traceback
-# reference cycle problem, i.e., the traceback holding reference to the frame,
-# and the frame (which holds reference to all the object in its temporary scope)
-# holding reference the traceback.
-
-
-class ExceptionWrapper(object):
-    r"""Wraps an exception plus traceback to communicate across threads"""
-    def __init__(self, exc_info):
-        # It is important that we don't store exc_info, see
-        # NOTE [ Python Traceback Reference Cycle Problem ]
-        self.exc_type = exc_info[0]
-        self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
 MP_STATUS_CHECK_INTERVAL = 5.0
@@ -58,4 +42,4 @@ def _set_python_exit_flag():
 atexit.register(_set_python_exit_flag)
 
 
-from . import worker, signal_handling, pin_memory, collate  # noqa: F401
+from . import worker, signal_handling, pin_memory, collate, fetch

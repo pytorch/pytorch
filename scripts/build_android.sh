@@ -22,7 +22,9 @@
 set -e
 
 # Android specific flags
-ANDROID_ABI="armeabi-v7a with NEON"
+if [ -z "$ANDROID_ABI" ]; then
+  ANDROID_ABI="armeabi-v7a with NEON"
+fi
 ANDROID_NATIVE_API_LEVEL="21"
 echo "Build with ANDROID_ABI[$ANDROID_ABI], ANDROID_NATIVE_API_LEVEL[$ANDROID_NATIVE_API_LEVEL]"
 
@@ -45,10 +47,6 @@ echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
 
-# Build protobuf from third_party so we have a host protoc binary.
-echo "Building protoc"
-$CAFFE2_ROOT/scripts/build_host_protoc.sh
-
 # Now, actually build the Android target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
 INSTALL_PREFIX=${BUILD_ROOT}/install
@@ -57,14 +55,29 @@ cd $BUILD_ROOT
 
 CMAKE_ARGS=()
 
+if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
+  CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+  # custom build with selected ops
+  if [ -n "${SELECTED_OP_LIST}" ]; then
+    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+  fi
+else
+  # Build protobuf from third_party so we have a host protoc binary.
+  echo "Building protoc"
+  $CAFFE2_ROOT/scripts/build_host_protoc.sh
+  # Use locally built protoc because we'll build libprotobuf for the
+  # target architecture and need an exact version match.
+  CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+fi
+
 # If Ninja is installed, prefer it to Make
 if [ -x "$(command -v ninja)" ]; then
   CMAKE_ARGS+=("-GNinja")
 fi
-
-# Use locally built protoc because we'll build libprotobuf for the
-# target architecture and need an exact version match.
-CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
 
 # Use android-cmake to build Android project from CMake.
 CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
@@ -98,6 +111,10 @@ CMAKE_ARGS+=("-DANDROID_ABI=$ANDROID_ABI")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=$ANDROID_NATIVE_API_LEVEL")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 
+if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DANDROID_DEBUG_SYMBOLS=1")
+fi
+
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
@@ -114,9 +131,7 @@ if [ -z "$MAX_JOBS" ]; then
     MAX_JOBS=$(nproc)
   fi
 fi
-cmake --build . -- "-j${MAX_JOBS}"
 
-# copy headers and libs to install directory
 echo "Will install headers and libs to $INSTALL_PREFIX for further Android project usage."
-make install
+cmake --build . --target install -- "-j${MAX_JOBS}"
 echo "Installation completed, now you can copy the headers/libs from $INSTALL_PREFIX to your Android project directory."

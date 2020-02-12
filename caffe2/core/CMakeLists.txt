@@ -1,3 +1,11 @@
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  list(APPEND Caffe2_CPU_SRCS
+    "${CMAKE_CURRENT_SOURCE_DIR}/common.cc"
+  )
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} PARENT_SCOPE)
+  return()
+endif()
+
 # ---[ GPU files
 # ------[ cuDNN
 if (USE_CUDNN)

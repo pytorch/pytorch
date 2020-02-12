@@ -8,6 +8,7 @@ type_map = {
         'Float',
         'Double',
         'Half',
+        'BFloat16',
     ],
     'integral': [
         'Byte',
@@ -19,6 +20,8 @@ type_map = {
     ],
     'quantized': [
         'QInt8',
+        'QUInt8',
+        'QInt32',
     ]
 }
 
@@ -63,16 +66,19 @@ def process_types_and_backends(option):
         assert(backend in all_backends)
         backend_types[backend] = set(expand(backend_types[backend]))
 
-    # disable CUDA Half if there is a Sparse argument
-    for arg in option.get('arguments', []):
-        if arg['type'] == 'THSTensor*':
-            if 'CUDA' in backend_types:
-                backend_types['CUDA'].discard('Half')
-
     # special case remove Half for cpu unless it is explicitly enabled
     if not option.get('cpu_half', False):
         if 'CPU' in backend_types:
             backend_types['CPU'].discard('Half')
+
+    # special case remove BFloat16 for cpu and cuda unless it is explicitly enabled
+    if not option.get('cpu_bfloat16', False):
+        if 'CPU' in backend_types:
+            backend_types['CPU'].discard('BFloat16')
+
+    if not option.get('cuda_bfloat16', False):
+        if 'CUDA' in backend_types:
+            backend_types['CUDA'].discard('BFloat16')
 
     # special cases remove bool for cpu and cuda unless it is explicitly enabled
     if not option.get('cpu_bool', False):
@@ -171,14 +177,10 @@ def set_mode(option):
 
 
 def discover_zero_dim_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
     def signature(option, i=None, value=None):
         elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
                     if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
+                    for j, arg in enumerate(option['arguments'])]
         return '#'.join(elements)
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
@@ -190,8 +192,7 @@ def discover_zero_dim_tensor_operations(declaration):
                 if signature_of_tensor_version in signature_to_option:
                     tensor_version = \
                         signature_to_option[signature_of_tensor_version]
-                    names = [arg['name'] for arg in tensor_version['arguments']
-                             if not exclude(arg)]
+                    names = [arg['name'] for arg in tensor_version['arguments']]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
                     # print("FOUND "+str(i)   )
                     # print("Scalar Version ===== ")
@@ -199,42 +200,6 @@ def discover_zero_dim_tensor_operations(declaration):
                     # print("Tensor Version ===== ")
                     # print(yaml.dump(tensor_version))
                     # print("SHARED "+names[i])
-
-
-def discover_sparse_tensor_operations(declaration):
-    def exclude(arg):
-        return arg.get('ignore_check')
-
-    def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
-
-    # Determine if any options have the 'aten_dense_sparse' flag
-    dense_sparse_options = [option
-                            for option in declaration['options']
-                            if option.get('aten_dense_sparse', False)]
-    if len(dense_sparse_options) > 0:
-        signature_to_option = {signature(option): option
-                               for option in declaration['options']}
-
-        for option in declaration['options']:
-            for i, arg in enumerate(option['arguments']):
-                if (arg['type'] == 'THSTensor*' and
-                        option.get('aten_dense_sparse', False)):
-                    signature_of_tensor_version = signature(
-                        option, i, 'Tensor &')
-                    if signature_of_tensor_version in signature_to_option:
-                        tensor_version = \
-                            signature_to_option[signature_of_tensor_version]
-                        raw_args = len(tensor_version['arguments'])
-                        names = [arg['name'] for arg in tensor_version['arguments']
-                                 if not exclude(arg)]
-                        filtered_args = len(names)
-                        tensor_version['when_sparse_dispatch'] = names[i -
-                                                                       (raw_args - filtered_args)]
 
 
 def is_extended_method(option):
@@ -256,10 +221,9 @@ def run(declarations):
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)
 
-        common_with_cwrap.sort_by_number_of_options(declaration)
+        common_with_cwrap.sort_by_number_of_args(declaration)
 
         discover_zero_dim_tensor_operations(declaration)
-        discover_sparse_tensor_operations(declaration)
 
         for option in declaration['options']:
             set_mode(option)

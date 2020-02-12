@@ -18,7 +18,7 @@ namespace multiprocessing {
 
 namespace {
 
-PyObject* multiprocessing_init(PyObject* _unused) {
+PyObject* multiprocessing_init(PyObject* _unused, PyObject *noargs) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   if (!multiprocessing_module) {

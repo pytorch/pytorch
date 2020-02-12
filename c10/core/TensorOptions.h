@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKeySet.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
@@ -55,7 +56,7 @@ namespace c10 {
 /// NOTE [ TensorOptions Constructors ]
 ///
 /// TensorOptions is like a dictionary with entries from the set:
-/// {requires_grad, is_variable, device, dtype, layout}, where each entry may be
+/// {requires_grad, device, dtype, layout}, where each entry may be
 /// unspecified (i.e., is optional). It is used to specify the properties of
 /// tensors in many places both in C++ internal and API, e.g., tensor factory
 /// methods like `at::empty({10}, options)`, tensor conversions like
@@ -99,13 +100,11 @@ namespace c10 {
 struct C10_API TensorOptions {
   TensorOptions()
     : requires_grad_(false)
-    , is_variable_(false)
     , pinned_memory_(false)
     , has_device_(false)
     , has_dtype_(false)
     , has_layout_(false)
     , has_requires_grad_(false)
-    , has_is_variable_(false)
     , has_pinned_memory_(false)
     {}
 
@@ -117,7 +116,7 @@ struct C10_API TensorOptions {
   /// Constructs a `TensorOptions` object with the given device.
   /// See NOTE [ TensorOptions Constructors ] on why this is templatized.
   template<typename T,
-           typename = c10::guts::enable_if_t<std::is_same<c10::guts::decay_t<T>, Device>::value>>
+           typename = std::enable_if_t<std::is_same<std::decay_t<T>, Device>::value>>
   /* implicit */ TensorOptions(T&& device) : TensorOptions() {
     this->set_device(std::forward<T>(device));
   }
@@ -131,7 +130,7 @@ struct C10_API TensorOptions {
   ///     way to detect them. So we have this one that allows explicit
   ///     constructors too.
   template <typename... Args,
-            typename = c10::guts::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
+            typename = std::enable_if_t<std::is_constructible<Device, Args&&...>::value>>
    /* implicit */ TensorOptions(Args&&... args)
     : TensorOptions(Device(std::forward<Args>(args)...)) {}
 
@@ -143,27 +142,6 @@ struct C10_API TensorOptions {
   /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
-  }
-
-  /// True if all elements of the `TensorOptions` match that of the other.
-  bool operator==(const TensorOptions& other) const noexcept {
-    return
-        has_dtype_ == other.has_dtype_ &&
-        has_layout_ == other.has_layout_ &&
-        has_device_ == other.has_device_ &&
-        has_requires_grad_ == other.has_requires_grad_ &&
-        has_is_variable_ == other.has_is_variable_ &&
-        (!has_dtype_ || dtype_ == other.dtype_) &&
-        (!has_layout_ || layout_ == other.layout_) &&
-        (!has_device_ || device_ == other.device_) &&
-        (!requires_grad_ || requires_grad_ == other.requires_grad_) &&
-        (!is_variable_ || is_variable_ == other.is_variable_);
-  }
-
-  /// True if any of the elements of this `TensorOptions` do not match that of
-  /// the other.
-  bool operator!=(const TensorOptions& other) const noexcept {
-    return !(*this == other);
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
@@ -226,14 +204,6 @@ struct C10_API TensorOptions {
     r.set_requires_grad(requires_grad);
     return r;
   }
-
-  /// Sets the `is_variable` property on the `TensorOptions`.
-  C10_NODISCARD TensorOptions is_variable(c10::optional<bool> is_variable) const noexcept {
-    TensorOptions r = *this;
-    r.set_is_variable(is_variable);
-    return r;
-  }
-
 
   /// Sets the `pinned_memory` property on the `TensorOptions`.
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
@@ -312,17 +282,6 @@ struct C10_API TensorOptions {
                               : c10::nullopt;
   }
 
-  /// Returns the `is_variable` property of the `TensorOptions`.
-  bool is_variable() const noexcept {
-    return has_is_variable_ ? is_variable_ : false;
-  }
-
-  /// Returns whether the `is_variable` is specified.
-  bool has_is_variable() const noexcept {
-    return has_is_variable_;
-  }
-
-
   /// Returns the `pinned_memory` property of the `TensorOptions`.
   bool pinned_memory() const noexcept {
     return has_pinned_memory_ ? pinned_memory_ : false;
@@ -333,13 +292,15 @@ struct C10_API TensorOptions {
     return has_pinned_memory_;
   }
 
-
-  /// Returns the `is_variable` property of the `TensorOptions`, or
-  /// `c10::nullopt` if `is_variable` is not specified.
-  c10::optional<bool> is_variable_opt() const noexcept {
-    return has_is_variable_ ? c10::make_optional(is_variable_) : c10::nullopt;
+  /// Returns if the layout is sparse
+  bool is_sparse() const {
+    return layout_ == c10::Layout::Sparse;
   }
 
+  // For compatibility with legacy tensor.type() comparisons
+  bool type_equal(const TensorOptions& other) const {
+    return backend() == other.backend() && typeMetaToScalarType(dtype_) == typeMetaToScalarType(other.dtype());
+  }
 
   /// Returns the `pinned_memory` property of the `TensorOptions`, or
   /// `c10::nullopt` if `pinned_memory` is not specified.
@@ -348,59 +309,90 @@ struct C10_API TensorOptions {
   }
 
   // Resolves the ATen backend specified by the current construction axes.
+  // TODO: Deprecate this
   Backend backend() const noexcept {
-    return at::tensorTypeIdToBackend(computeTensorTypeId());
+    return at::dispatchKeyToBackend(computeDispatchKey());
   }
 
-  inline TensorTypeId computeTensorTypeId() const {
+  /// Return the right-biased merge of two TensorOptions.  This has the
+  /// effect of overwriting settings from self with specified options
+  /// of options.
+  ///
+  /// NB: This merging operation does NOT respect device merges.
+  /// For example, if you device({kCUDA, 1}).merge_in(kCUDA)
+  /// you will get kCUDA in the end!  Functions like Tensor.new_empty
+  /// ensure the right device is selected anyway by way of a
+  /// device guard.
+  ///
+  TensorOptions merge_in(TensorOptions options) const noexcept {
+    TensorOptions r = options;
+    if (!r.has_device()) r.set_device(device());
+    if (!r.has_dtype()) r.set_dtype(dtype());
+    if (!r.has_layout()) r.set_layout(layout());
+    // NB: requires grad is right biased; not a logical AND/OR!
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    return r;
+  }
+
+  // Resolves the tensor type set specified by the current construction axes.
+  DispatchKeySet key_set() const noexcept {
+    // BackendSelect is a very special dispatch key which was introduced only for
+    // the factory functions with TensorOptions and should be special cased here.
+    return DispatchKeySet(computeDispatchKey()).add(DispatchKey::BackendSelect);
+  }
+
+  inline DispatchKey computeDispatchKey() const {
     switch (layout()) {
       case Layout::Strided:
         switch (device().type()) {
-          case DeviceType::CPU:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCPUTensorId();
+          case DeviceType::CPU: {
+            auto dtype_tmp = typeMetaToScalarType(dtype());
+            if (isComplexType(dtype_tmp)) {
+              return DispatchKey::ComplexCPUTensorId;
             }
-            if (isQIntType(typeMetaToScalarType(dtype()))) {
-              return QuantizedCPUTensorId();
+            if (isQIntType(dtype_tmp)) {
+              return DispatchKey::QuantizedCPUTensorId;
             }
-            return CPUTensorId();
+            return DispatchKey::CPUTensorId;
+            }
           case DeviceType::CUDA:
             if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return ComplexCUDATensorId();
+              return DispatchKey::ComplexCUDATensorId;
             }
-            return CUDATensorId();
+            return DispatchKey::CUDATensorId;
           case DeviceType::MKLDNN:
-            return MKLDNNTensorId();
+            return DispatchKey::MKLDNNTensorId;
           case DeviceType::OPENGL:
-            return OpenGLTensorId();
+            return DispatchKey::OpenGLTensorId;
           case DeviceType::OPENCL:
-            return OpenCLTensorId();
+            return DispatchKey::OpenCLTensorId;
           case DeviceType::IDEEP:
-            return IDEEPTensorId();
+            return DispatchKey::IDEEPTensorId;
           case DeviceType::HIP:
-            return HIPTensorId();
+            return DispatchKey::HIPTensorId;
           case DeviceType::MSNPU:
-            return MSNPUTensorId();
+            return DispatchKey::MSNPUTensorId;
           case DeviceType::XLA:
-            return XLATensorId();
+            return DispatchKey::XLATensorId;
           default:
             AT_ERROR("Unsupported device type for dense layout: ", device().type());
         }
       case Layout::Sparse:
         switch (device().type()) {
           case DeviceType::CPU:
-            return SparseCPUTensorId();
+            return DispatchKey::SparseCPUTensorId;
           case DeviceType::CUDA:
-            return SparseCUDATensorId();
+            return DispatchKey::SparseCUDATensorId;
           case DeviceType::HIP:
-            return SparseHIPTensorId();
+            return DispatchKey::SparseHIPTensorId;
           default:
             AT_ERROR("Unsupported device type for sparse layout: ", device().type());
         }
       case Layout::Mkldnn:
         switch (device().type()) {
           case DeviceType::CPU:
-            return MkldnnCPUTensorId();
+            return DispatchKey::MkldnnCPUTensorId;
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device().type());
         }
@@ -473,16 +465,6 @@ struct C10_API TensorOptions {
     }
   }
 
-  /// Mutably set the `is_variable` property of `TensorOptions`.
-  void set_is_variable(c10::optional<bool> is_variable) & noexcept {
-    if (is_variable) {
-      is_variable_ = *is_variable;
-      has_is_variable_ = true;
-    } else {
-      has_is_variable_ = false;
-    }
-  }
-
   /// Mutably set the `pinned_memory` property of `TensorOptions`.
   void set_pinned_memory(c10::optional<bool> pinned_memory) & noexcept {
     if (pinned_memory) {
@@ -507,7 +489,6 @@ struct C10_API TensorOptions {
   // for that matter)
 
   bool requires_grad_     : 1;
-  bool is_variable_       : 1;
   bool pinned_memory_     : 1;
 
 
@@ -515,7 +496,6 @@ struct C10_API TensorOptions {
   bool has_dtype_         : 1;
   bool has_layout_        : 1;
   bool has_requires_grad_ : 1;
-  bool has_is_variable_   : 1;
   bool has_pinned_memory_ : 1;
 };
 
@@ -569,48 +549,58 @@ inline TensorOptions dtype() {
   return dtype(caffe2::TypeMeta::Make<T>());
 }
 
+inline std::string toString(const TensorOptions options) {
+  std::ostringstream stream;
+  stream << options;
+  return stream.str();
+}
+
 // This is intended to be a centralized location by which we can determine
-// what an appropriate TensorTypeId for a tensor is.
+// what an appropriate DispatchKey for a tensor is.
 //
 // This takes a TensorOptions, rather than just a DeviceType and Layout, because
 // we reserve the right to change dispatch based on *any* aspect of
 // TensorOptions.  WARNING: If you do this, you need to fix the calls
-// to computeTensorTypeId in caffe2/tensor.h
-inline TensorTypeId computeTensorTypeId(TensorOptions options) {
-  return options.computeTensorTypeId();
+// to computeDispatchKey in caffe2/tensor.h
+inline DispatchKey computeDispatchKey(TensorOptions options) {
+  return options.computeDispatchKey();
 }
 
-inline DeviceType computeDeviceType(TensorTypeId tid) {
-  if (tid == CPUTensorId()) {
+inline DeviceType computeDeviceType(DispatchKey tid) {
+  if (tid == DispatchKey::CPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == CUDATensorId()) {
+  } else if (tid == DispatchKey::CUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == DispatchKey::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MKLDNNTensorId()) {
+  } else if (tid == DispatchKey::MKLDNNTensorId) {
     return DeviceType::MKLDNN;
-  } else if (tid == OpenGLTensorId()) {
+  } else if (tid == DispatchKey::OpenGLTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == OpenCLTensorId()) {
+  } else if (tid == DispatchKey::OpenCLTensorId) {
     return DeviceType::OPENCL;
-  } else if (tid == IDEEPTensorId()) {
+  } else if (tid == DispatchKey::IDEEPTensorId) {
     return DeviceType::IDEEP;
-  } else if (tid == HIPTensorId()) {
+  } else if (tid == DispatchKey::HIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MSNPUTensorId()) {
+  } else if (tid == DispatchKey::MSNPUTensorId) {
     return DeviceType::MSNPU;
-  } else if (tid == XLATensorId()) {
+  } else if (tid == DispatchKey::XLATensorId) {
     return DeviceType::XLA;
-  } else if (tid == SparseCPUTensorId()) {
+  } else if (tid == DispatchKey::SparseCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == SparseCUDATensorId()) {
+  } else if (tid == DispatchKey::SparseCUDATensorId) {
     return DeviceType::CUDA;
-  } else if (tid == SparseHIPTensorId()) {
+  } else if (tid == DispatchKey::SparseHIPTensorId) {
     return DeviceType::HIP;
-  } else if (tid == MkldnnCPUTensorId()) {
+  } else if (tid == DispatchKey::MkldnnCPUTensorId) {
     return DeviceType::CPU;
+  } else if (tid == DispatchKey::ComplexCPUTensorId) {
+    return DeviceType::CPU;
+  } else if (tid == DispatchKey::ComplexCUDATensorId) {
+    return DeviceType::CUDA;
   } else {
-    AT_ASSERTM(false, "Unknown TensorTypeId: ", tid);
+    AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }
 }
 

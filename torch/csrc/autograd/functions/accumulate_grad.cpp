@@ -17,7 +17,7 @@ namespace torch { namespace autograd {
 // AccumulateGrad sets sequence_nr to the max value so it's always called
 // ASAP during backwards.
 AccumulateGrad::AccumulateGrad(Variable variable_)
-    : Function(/*sequence_nr=*/UINT64_MAX)
+    : Node(/*sequence_nr=*/UINT64_MAX)
     , variable(std::move(variable_)) {
   add_input_metadata(variable);
 }
@@ -34,7 +34,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     return {};
 
   auto new_grad = std::move(grads[0]);
-  for (auto& hook : variable.hooks()) {
+  for (auto& hook : impl::hooks(variable)) {
     new_grad = (*hook)({new_grad})[0];
   }
 
@@ -54,19 +54,35 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
-      variable.grad() = new_grad.clone();
+      if (new_grad.is_sparse()) {
+        variable.grad() = new_grad.clone();
+      } else {
+        variable.grad() = new_grad.clone(at::MemoryFormat::Contiguous);
+      }
     }
   } else if (!GradMode::is_enabled()) {
-    Variable& grad_variable = as_variable_ref(grad);
     // This case is not strictly necessary, but it makes the first-order only case
-    // slightly more efficient and, what's more important, more predictable for
-    // the users. Thanks to this case we can avoid changing the grad tensor,
-    // a thing never promised and documented, but used in some hacks seen
-    // on the internet.
+    // slightly more efficient.
+    Variable& grad_variable = as_variable_ref(grad);
     if (grad_variable.is_sparse() && !new_grad.is_sparse()) {
-      grad_variable.set_data(new_grad.data() + grad_variable.data());
+      // If `grad_variable` is sparse and `new_grad` is not sparse, their sum is not
+      // sparse, and we must change the TensorImpl type of `grad_variable` for it to
+      // store the result. However, changing the TensorImpl type of a tensor requires
+      // changing the tensor itself, and thus in this case we have to change the grad
+      // tensor.
+      grad_variable = new_grad + grad_variable;
     } else {
-      grad_variable.data() += new_grad.data();
+      // In this case we can avoid changing the grad tensor. There are three scenarios
+      // when we'll hit this case:
+      //
+      // 1. `grad_variable` is sparse, and `new_grad` is sparse.
+      // 2. `grad_variable` is dense, and `new_grad` is sparse.
+      // 3. `grad_variable` is dense, and `new_grad` is dense.
+      //
+      // In all of these three cases, `grad_variable += new_grad` is a valid operation
+      // which adds `new_grad` to `grad_variable` in place. `grad_variable` is thus
+      // still referring to the same tensor after the operation.
+      grad_variable += new_grad;
     }
   } else {
     variable.grad() = grad + new_grad;

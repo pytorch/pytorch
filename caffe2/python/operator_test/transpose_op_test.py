@@ -38,6 +38,19 @@ class TestTransposeOp(serial.SerializedTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
+    @given(M=st.integers(10, 200), N=st.integers(10, 200), **hu.gcs)
+    def test_transpose_large_matrix(self, M, N, gc, dc):
+        op = core.CreateOperator("Transpose", ["X"], ["Y"], device_option=gc)
+        X = np.random.rand(M, N).astype(np.float32) - 0.5
+
+        def transpose_ref(X):
+            return [np.transpose(X)]
+
+        self.assertReferenceChecks(gc, op, [X], transpose_ref)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+
     @unittest.skipIf(not workspace.has_cuda_support, "no cuda support")
     @given(X=hu.tensor(dtype=np.float32), use_axes=st.booleans(),
            **hu.gcs_cuda_only)

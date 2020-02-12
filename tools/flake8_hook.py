@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import sys
 
 from flake8.main import git

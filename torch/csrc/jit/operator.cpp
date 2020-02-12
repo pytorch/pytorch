@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/operator.h>
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/edit_distance.h>
@@ -21,7 +21,7 @@ struct OperatorRegistry {
   std::mutex lock;
   OperatorMap operators;
   // list of operators whose schema have not yet been parsed, and must
-  // be registered before any call to lookup an opeator
+  // be registered before any call to lookup an operator
   std::vector<std::shared_ptr<Operator>> to_register;
   // Those two maps are used to implement lookupByLiteral, which is needed for
   // the n->match(...) calls. Basically, every function schema is assigned a
@@ -68,7 +68,7 @@ struct OperatorRegistry {
         }
       }
 #endif
-      AT_CHECK(
+      TORCH_CHECK(
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name,
@@ -114,6 +114,17 @@ struct OperatorRegistry {
     }
     return ret;
   }
+
+  const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+    std::lock_guard<std::mutex> guard(lock);
+    registerPendingOperators();
+    std::vector<std::shared_ptr<Operator>> values;
+    values.clear();
+    for (auto & kv : operators) {
+      values.insert(values.end(), kv.second.begin(), kv.second.end());
+    }
+    return values;
+  }
 };
 
 OperatorRegistry& getRegistry() {
@@ -132,15 +143,27 @@ void registerOperator(Operator&& op) {
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
-    if (!aliasAnalysisHasSpecialCaseFor(s)) {
+    if (!aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
       AT_ERROR(
           "Missing special case in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
           ". File a bug to add a case for this operator.\n");
     }
+    if (aliasAnalysisHasSpecialCaseFor(s) &&
+        op.aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
+      AT_ERROR(
+          "The operator ",
+          op.schema().name(),
+          " is special cased and cannot use explicit alias analysis.");
+    }
   }
   getRegistry().registerOperator(std::move(op));
+}
+
+const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+  return getRegistry().getAllOperators();
 }
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
@@ -197,17 +220,28 @@ bool Operator::matches(const Node* node) const {
   const auto& formals = schema().arguments();
 
   // not enough inputs
-  if (actuals.size() < formals.size())
+  if (actuals.size() < formals.size()) {
     return false;
+  }
 
   TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
-    const MatchTypeReturn matched_type =
-        matchTypeVariables(formals[i].type(), actuals[i]->type(), type_env);
-    if (!matched_type.type) {
+    auto formal = formals[i].type();
+    const MatchTypeReturn matched_type = matchTypeVariables(
+        formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
       return false;
     }
-    TypePtr formal = *matched_type.type;
+
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
+
     if (!actuals[i]->type()->isSubtypeOf(formal)) {
       return false;
     }
@@ -236,7 +270,7 @@ const Operator& getOperatorFor(const Node* node) {
   if (op)
     return *op;
 
-  auto er = script::ErrorReport(node->getSourceLocation());
+  auto er = script::ErrorReport(node->sourceRange());
   er << "Schema not found for node. File a bug report.\n";
   er << "Node: " << *node << "\n";
   er << "Input types:";
@@ -245,11 +279,16 @@ const Operator& getOperatorFor(const Node* node) {
       er << ", ";
     er << *node->inputs()[i]->type();
   }
-  er << "\ncandidates were:\n";
   const auto& candidates = getAllOperatorsFor(node->kind());
-  for (auto& candidate : candidates) {
-    er << "  " << candidate->schema() << "\n";
+  if (candidates.size() > 0) {
+    er << "\ncandidates were:\n";
+    for (auto& candidate : candidates) {
+      er << "  " << candidate->schema() << "\n";
+    }
+  } else {
+    er << "\nno candidates found\n";
   }
+  er << "within the graph:\n";
   er << *node->owningGraph() << "\n";
   throw er;
 }

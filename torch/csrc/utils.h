@@ -81,6 +81,10 @@
 #define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
+#define THPBFloat16Utils_checkReal(object)    THPUtils_checkReal_FLOAT(object)
+#define THPBFloat16Utils_unpackReal(object)   (at::BFloat16)THPUtils_unpackReal_FLOAT(object)
+#define THPBFloat16Utils_newReal(value)       PyFloat_FromDouble(value)
+#define THPBFloat16Utils_newAccreal(value)    THPUtils_newReal_FLOAT(value)
 
 #define THPBoolUtils_checkReal(object)        THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackReal(object)       THPUtils_unpackReal_BOOL(object)
@@ -103,6 +107,17 @@
 #define THPByteUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object)       (unsigned char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newReal(value)           THPUtils_newReal_INT(value)
+// quantized types
+#define THPQUInt8Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQUInt8Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQUInt8Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQInt8Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQInt8Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQInt8Utils_newReal(value)           THPUtils_newReal_INT(value)
+#define THPQInt32Utils_checkReal(object)         THPUtils_checkReal_INT(object)
+#define THPQInt32Utils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
+#define THPQInt32Utils_newReal(value)           THPUtils_newReal_INT(value)
+
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
@@ -111,8 +126,6 @@ THP_API void THPUtils_setError(const char *format, ...);
 THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
-
-#ifdef _THP_CORE
 
 bool THPUtils_checkIntTuple(PyObject *arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
@@ -139,7 +152,13 @@ struct THPUtils_typeTraits {};
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateBoolType.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateQTypes.h>
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
@@ -171,7 +190,5 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
-
-#endif /* _THP_CORE */
 
 #endif

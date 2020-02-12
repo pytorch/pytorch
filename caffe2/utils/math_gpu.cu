@@ -622,10 +622,8 @@ CAFFE2_CUDA_EXPORT void Gemm<at::Half, CUDAContext>(
         N, // ldd
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0, // solution index, reserved for future use
-        0, // flags, reserved for future use
-        NULL, // size of workspace
-        NULL)); // workspace
+        0,   // solution index, reserved for future use
+        0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(
         context->cublas_handle(),
@@ -1033,10 +1031,8 @@ CAFFE2_CUDA_EXPORT void GemmStridedBatched<at::Half, CUDAContext>(
         batch_size,
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0, // solution index, reserved for future use
-        0, // flags, reserved for future use
-        NULL, // size of workspace
-        NULL)); // workspace
+        0,   // solution index, reserved for future use
+        0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasGemmStridedBatchedEx(
         context->cublas_handle(),
@@ -1178,10 +1174,8 @@ CAFFE2_CUDA_EXPORT void Gemv<at::Half, CUDAContext>(
         ldc, // ldd
         rocblas_datatype_f32_r, // compute type
         rocblas_gemm_algo_standard, // rocblas_gemm_algo
-        0, // solution index, reserved for future use
-        0, // flags, reserved for future use
-        NULL, // size of workspace
-        NULL)); // workspace
+        0,   // solution index, reserved for future use
+        0)); // flags, reserved for future use
 #else
     CUBLAS_ENFORCE(cublasSgemmEx(
         context->cublas_handle(),
@@ -2682,6 +2676,22 @@ CAFFE2_CUDA_EXPORT void CopyVector<float, CUDAContext>(
         dst,
         src,
         sizeof(float) * N,
+        cudaMemcpyDeviceToDevice,
+        context->cuda_stream());
+  }
+}
+
+template <>
+CAFFE2_CUDA_EXPORT void CopyVector<int, CUDAContext>(
+    const int N,
+    const int* src,
+    int* dst,
+    CUDAContext* context) {
+  if (src != dst && N > 0) {
+    cudaMemcpyAsync(
+        dst,
+        src,
+        sizeof(int) * N,
         cudaMemcpyDeviceToDevice,
         context->cuda_stream());
   }

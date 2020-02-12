@@ -1,3 +1,8 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+from __future__ import unicode_literals
+
 import torch
 from torch.autograd import Function
 from torch.nn import Module, Parameter
@@ -73,7 +78,8 @@ class TestVerify(TestCase):
                 return y
 
         x = torch.tensor([1, 2])
-        self.assertVerifyExpectFail(MyModel(), x, backend)
+        # To keep the unused model parameter, need to set constant folding to False
+        self.assertVerifyExpectFail(MyModel(), x, backend, do_constant_folding=False)
 
     def test_dynamic_model_structure(self):
         class MyModel(Module):

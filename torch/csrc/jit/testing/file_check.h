@@ -1,7 +1,8 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/testing/file_check.h>
+#include <string>
+#include <memory>
 
 namespace torch {
 namespace jit {

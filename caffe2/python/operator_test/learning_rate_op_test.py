@@ -82,9 +82,41 @@ class TestLearningRate(serial.SerializedTestCase):
         )
         self.assertReferenceChecks(gc, op, [iter], ref)
 
-    @given(gc=hu.gcs['gc'],
-            min_num_iter=st.integers(min_value=10, max_value=20),
-            max_num_iter=st.integers(min_value=50, max_value=100))
+    @given(
+        **hu.gcs_cpu_only
+    )
+    def test_gate_learningrate(self, gc, dc):
+        iter = np.random.randint(low=1, high=1e5, size=1)
+        num_iter = int(np.random.randint(low=1e2, high=1e3, size=1))
+        base_lr = float(np.random.uniform(-1, 1))
+        multiplier_1 = float(np.random.uniform(-1, 1))
+        multiplier_2 = float(np.random.uniform(-1, 1))
+
+        def ref(iter):
+            iter = float(iter)
+            if iter < num_iter:
+                return (np.array(multiplier_1 * base_lr), )
+            else:
+                return (np.array(multiplier_2 * base_lr), )
+
+        op = core.CreateOperator(
+            'LearningRate',
+            'data',
+            'out',
+            policy="gate",
+            num_iter=num_iter,
+            multiplier_1=multiplier_1,
+            multiplier_2=multiplier_2,
+            base_lr=base_lr,
+        )
+
+        self.assertReferenceChecks(gc, op, [iter], ref)
+
+    @given(
+        gc=hu.gcs['gc'],
+        min_num_iter=st.integers(min_value=10, max_value=20),
+        max_num_iter=st.integers(min_value=50, max_value=100),
+    )
     def test_composite_learning_rate_op(self, gc, min_num_iter, max_num_iter):
         np.random.seed(65535)
         # Generate the iteration numbers for sub policy
@@ -98,7 +130,7 @@ class TestLearningRate(serial.SerializedTestCase):
             accu_iter_num[i] += accu_iter_num[i - 1]
         total_iter_nums = accu_iter_num[-1]
 
-        policy_lr_scale = np.random.uniform(low=2.0, high=2.0, size=num_lr_policy)
+        policy_lr_scale = np.random.uniform(low=0.1, high=2.0, size=num_lr_policy)
 
         # args for StepLRPolicy
         step_size = np.random.randint(low=2, high=min_num_iter // 2)

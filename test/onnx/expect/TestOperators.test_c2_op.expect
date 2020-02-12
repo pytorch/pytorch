@@ -1,6 +1,6 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
     input: "0"
@@ -9,6 +9,7 @@ graph {
     input: "3"
     output: "4"
     output: "5"
+    name: "GenerateProposals_0"
     op_type: "GenerateProposals"
     attribute {
       name: "spatial_scale"
@@ -54,6 +55,11 @@ graph {
       name: "clip_angle_thresh"
       f: 1
       type: FLOAT
+    }
+    attribute {
+      name: "legacy_plus_one"
+      i: 1
+      type: INT
     }
     domain: "org.pytorch._caffe2"
   }

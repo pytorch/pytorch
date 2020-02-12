@@ -1,11 +1,25 @@
 #include "memory_dag.h"
 
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <queue>
 
 namespace torch {
 namespace jit {
+
+Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
+    : dag(dag_), index(index_), value(value_) {}
+
+const Element* MemoryDAG::fromIndex(unsigned x) const {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
+}
+
+Element* MemoryDAG::fromIndex(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
+}
 
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
   return mayAliasImpl(a, b);
@@ -15,28 +29,11 @@ bool MemoryDAG::mayAlias(const Element* a, const Element* b) const {
   return mayAliasImpl(a, b);
 }
 
-bool MemoryDAG::memoryLocationOverlap(
-    const std::unordered_set<const Element*>& aMemLoc,
-    const std::unordered_set<const Element*>& bMemLoc) const {
-  // XXX: This could be more efficiently done as a bitwise AND on two bitfields
-  // that represent memory location membership. If these comparisons end up
-  // being a bottleneck, consider implementing it that way.
-  for (const auto aLoc : aMemLoc) {
-    for (const auto bLoc : bMemLoc) {
-      if (aLoc == bLoc) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 bool MemoryDAG::mayAliasImpl(const Element* a, const Element* b) const {
   const auto aMemLoc = a->getMemoryLocations();
   const auto bMemLoc = b->getMemoryLocations();
 
-  return memoryLocationOverlap(aMemLoc, bMemLoc);
+  return aMemLoc.intersects(bMemLoc);
 }
 
 bool MemoryDAG::mayContainAlias(const Element* a, const Element* b) const {
@@ -47,108 +44,101 @@ bool MemoryDAG::mayContainAlias(Element* a, Element* b) const {
   return mayContainAliasImpl(a, b);
 }
 
-void collectAllContainedMemoryLocations(
+void MemoryDAG::collectAllContainedMemoryLocations(
     const Element* elem,
-    std::unordered_set<const Element*>& cont) {
+    MemoryLocations& cont) const {
   // we have already recursed on this element
-  if (cont.count(elem)) {
+  unsigned compIdx = elem->index;
+  if (cont.test(compIdx)) {
     return;
   }
-
-  cont.insert(elem);
+  cont.set(compIdx);
 
   for (const auto& mem_loc : elem->getMemoryLocations()) {
-    collectAllContainedMemoryLocations(mem_loc, cont);
+    collectAllContainedMemoryLocations(fromIndex(mem_loc), cont);
   }
 
-  for (const auto& contained : elem->contained_elements) {
-    collectAllContainedMemoryLocations(contained, cont);
+  for (const auto& contained : elem->containedElements) {
+    collectAllContainedMemoryLocations(fromIndex(contained), cont);
   }
 }
 
 bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
-  std::unordered_set<const Element*> all_a_mlocs;
-  std::unordered_set<const Element*> all_b_mlocs;
+  MemoryLocations all_a_mlocs;
+  MemoryLocations all_b_mlocs;
 
   collectAllContainedMemoryLocations(a, all_a_mlocs);
   collectAllContainedMemoryLocations(b, all_b_mlocs);
 
-  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
+  return all_a_mlocs.intersects(all_b_mlocs);
 }
 
 bool MemoryDAG::mayContainAlias(
-    const at::ArrayRef<Element*>& a,
-    const at::ArrayRef<Element*>& b) const {
+    const at::ArrayRef<Element*> a,
+    const at::ArrayRef<Element*> b) const {
   if (a.size() == 0 || b.size() == 0) {
     return false;
   }
 
-  std::unordered_set<const Element*> all_a_mlocs;
+  MemoryLocations all_a_mlocs;
   for (const auto& elem : a) {
     collectAllContainedMemoryLocations(elem, all_a_mlocs);
   }
 
-  std::unordered_set<const Element*> all_b_mlocs;
+  MemoryLocations all_b_mlocs;
   for (const auto& elem : b) {
     collectAllContainedMemoryLocations(elem, all_b_mlocs);
   }
 
-  return memoryLocationOverlap(all_a_mlocs, all_b_mlocs);
+  return all_a_mlocs.intersects(all_b_mlocs);
 }
 
-// Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
-  from->pointsTo.insert(to);
-  to->pointedFrom.insert(from);
+  from->pointsTo.set(to->index);
+  from->cachedMemoryLocations_.clear();
+
+  to->pointedFrom.set(from->index);
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.insert(elem);
+  TORCH_INTERNAL_ASSERT(
+      elem != container, "Elements cannot contain themselves");
+  container->containedElements.set(elem->index);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
-  auto el = torch::make_unique<Element>();
-  el->value = v;
-
-  auto rawPtr = el.get();
-  elements_.emplace(rawPtr, std::move(el));
-  return rawPtr;
+  indexToElementMap_.emplace_back(
+    torch::make_unique<Element>(*this, v, indexToElementMap_.size()));
+  return indexToElementMap_.back().get();
 }
 
-std::unordered_set<const Element*> Element::getMemoryLocations() const {
+const MemoryLocations& Element::getMemoryLocations() const {
   if (!cachedMemoryLocations_.empty()) {
     return cachedMemoryLocations_;
   }
 
   // Do a BFS in the `points-to` direction, collecting all memory locations
-  std::unordered_set<const Element*> ret;
-  this->bfs(
-      [&](const Element* el) {
-        if (el->pointsTo.empty()) {
-          ret.insert(el);
-        }
-      },
-      BfsDirection::POINTS_TO);
-
+  MemoryLocations ret;
+  this->bfs(BfsDirection::POINTS_TO, ret);
   cachedMemoryLocations_ = ret;
-  return ret;
+  return cachedMemoryLocations_;
 }
 
 // Do a breadth-first search over the graph, starting at `this` and
 // traversing in the direction `dir`.`fn` will be run on each element.
-template <typename Fn>
-bool Element::bfs(Fn fn, BfsDirection dir) const {
-  std::queue<const Element*> queue;
-  std::unordered_set<const Element*> seen;
-
-  queue.push(this);
+void Element::bfs(BfsDirection dir, MemoryLocations& res) const {
+  std::queue<unsigned> queue;
+  ska::flat_hash_set<int> seen;
+  queue.push(this->index);
   while (!queue.empty()) {
-    const auto el = queue.front();
+    const auto index = queue.front();
     queue.pop();
-    seen.insert(el);
-
-    fn(el);
+    seen.insert(index);
+    auto el = dag.fromIndex(index);
+    if (el->pointsTo.empty()) {
+      res.set(index);
+    }
 
     switch (dir) {
       case BfsDirection::POINTS_TO: {
@@ -168,7 +158,6 @@ bool Element::bfs(Fn fn, BfsDirection dir) const {
       } break;
     }
   }
-  return false;
 }
 } // namespace jit
 } // namespace torch

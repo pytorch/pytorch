@@ -14,7 +14,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-
+ 
   if (weight != NULL) {
     THCUNN_argCheck(state, !weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
                     "non-empty 2D or 4D weight tensor expected, but got: %s");
@@ -36,7 +36,16 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+  // Allow for empty batch size but not other dimensions
+  bool valid_empty = false;
+  if (ndim == 3) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0;
+  } else if (ndim == 4) {
+    valid_empty = input->size(0) == 0 && input->size(1) != 0 && input->size(2) != 0 && input->size(3) != 0;
+  }
+         
+
+  THCUNN_argCheck(state, (!input->is_empty() || valid_empty) && (ndim == 3 || ndim == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size(dimh);
@@ -105,6 +114,9 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            int kW, int kH,
            int dW, int dH,
            int padW, int padH) {
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "SpatialConvolutionMM_updateOutput not suppported with BFloat16");
+  #else
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
     THCUNN_assertSameGPU(state, 2, weight, bias);
@@ -185,6 +197,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(  
       #endif
           state,
           't', 'n',
@@ -200,13 +214,14 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     }
 
     // Extract columns:
-    im2col(
+    at::native::im2col<scalar_t>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nInputPlane, inputHeight, inputWidth,
       outputHeight, outputWidth,
       kH, kW, padH, padW, dH, dW,
-      1, 1, THCTensor_(data)(state, columns)
+      1, 1, 
+      columns->data<scalar_t>()
     );
 
     // M,N,K are dims of matrix A and B
@@ -222,6 +237,8 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_BFLOAT16)
+    THCudaBlas_Bgemm(
     #endif
         state,
         'n', 'n',
@@ -246,6 +263,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, weight);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_updateGradInput)(
@@ -260,6 +278,9 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
            int dW, int dH,
            int padW, int padH) {
 
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradInput not suppported with BFloat16");
+  #else
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
   weight = THNN_(newViewWeightMM2d)(state, weight);
@@ -319,6 +340,8 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     THCudaBlas_Hgemm(
     #elif defined(THC_REAL_IS_DOUBLE)
     THCudaBlas_Dgemm(
+    #elif defined(THC_REAL_IS_BFLOAT16)
+    THCudaBlas_Bgemm(
     #endif
         state,
         'n', 't',
@@ -331,7 +354,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
     );
 
     // Unpack columns back into input:
-    col2im<scalar_t, accreal>(
+    at::native::col2im<scalar_t, accreal>(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradColumns),
       nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
@@ -353,6 +376,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialConvolutionMM_accGradParameters)(
@@ -368,6 +392,9 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            int padW, int padH,
            accreal scale_) {
 
+  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
+  TORCH_CHECK(false, "SpatialConvolutionMM_updateGradParameters not suppported with BFloat16");
+  #else
   scalar_t scale = ScalarConvert<accreal, scalar_t>::to(scale_);
   THCUNN_assertSameGPU(state, 5, input, gradOutput, gradWeight, gradBias, columns, ones);
   if (gradWeight) {
@@ -430,13 +457,14 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCTensor_(select)(state, input_n, input, 0, elt);
 
       // Extract columns:
-      im2col(
+      at::native::im2col<scalar_t>(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, input_n),
         nInputPlane, inputHeight, inputWidth,
         outputHeight, outputWidth,
         kH, kW, padH, padW, dH, dW,
-        1, 1, THCTensor_(data)(state, columns)
+        1, 1, 
+        columns->data<scalar_t>()
       );
 
       // M,N,K are dims of matrix A and B
@@ -452,6 +480,8 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
       THCudaBlas_Hgemm(
       #elif defined(THC_REAL_IS_DOUBLE)
       THCudaBlas_Dgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(
       #endif
           state,
           't', 'n',
@@ -488,8 +518,12 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
           THCTensor_(data)(state, gradBias), 1
       );
       #endif
+      #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_BFLOAT16)
       #ifdef THC_REAL_IS_HALF
       THCudaBlas_Hgemm(
+      #elif defined(THC_REAL_IS_BFLOAT16)
+      THCudaBlas_Bgemm(
+      #endif
           state,
           't', 'n',
           m_, 1, k_,
@@ -517,6 +551,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
+  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif

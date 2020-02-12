@@ -8,8 +8,13 @@
 #include <vector>
 
 extern "C" {
+#include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
+#include <libavutil/log.h>
+#include <libavutil/motion_vector.h>
+#include <libswresample/swresample.h>
+#include <libswscale/swscale.h>
 }
 
 namespace caffe2 {
@@ -29,21 +34,22 @@ enum SpecialFps {
 
 // three different types of resolution when decoding the video
 // 0: resize to width x height and ignore the aspect ratio;
-// 1: resize to make size at least (width x height) and keep the aspect ratio;
+// 1: resize to short_edge and keep the aspect ratio;
 // 2: using the original resolution of the video; if resolution
-//    is smaller than crop_height x crop_width, resize to ensure
-//    new height >= crop_height and new width >= crop_width
+//    is smaller than crop_size x crop_size, resize to crop_size
 //    and keep the aspect ratio;
+// 3: for xray video service
 enum VideoResType {
   USE_WIDTH_HEIGHT = 0,
-  USE_MINIMAL_WIDTH_HEIGHT = 1,
+  USE_SHORT_EDGE = 1,
   ORIGINAL_RES = 2,
 };
 
 // three different types of decoding behavior are supported
 // 0: do temporal jittering to sample a random clip from the video
-// 1: sample a clip from a given starting frame
-// 2: uniformly sample multiple clips from the video;
+// 1: uniformly sample multiple clips from the video;
+// 2: sample a clip from a given starting frame
+// 3: for xray video service
 enum DecodeType {
   DO_TMP_JITTER = 0,
   DO_UNIFORM_SMP = 1,
@@ -72,6 +78,14 @@ class Params {
   // return all key-frames regardless of specified fps
   bool keyFrames_ = false;
 
+  // return audio data while decoding the video
+  bool getAudio_ = false;
+
+  // for sampling audio data
+  int outrate_ = 22000;
+  int outfmt_ = AV_SAMPLE_FMT_FLT;
+  int64_t outlayout_ = AV_CH_LAYOUT_MONO;
+
   // Output image pixel format
   AVPixelFormat pixelFormat_ = AVPixelFormat::AV_PIX_FMT_RGB24;
 
@@ -85,18 +99,17 @@ class Params {
 
   // params for video resolution
   int video_res_type_ = VideoResType::USE_WIDTH_HEIGHT;
+  int crop_size_ = -1;
+  int short_edge_ = -1;
 
-  // the size of the patch croped from the input video
-  int crop_height_ = -1;
-  int crop_width_ = -1;
+  // Output video size, -1 to preserve origianl dimension
+  int outputWidth_ = -1;
+  int outputHeight_ = -1;
 
-  // minimal resolution for resizing when using USE_MINIMAL_WIDTH_HEIGHT
-  int height_min_ = -1;
-  int width_min_ = -1;
-
-  // the video resolution after resizing
-  int scale_w_ = -1;
-  int scale_h_ = -1;
+  // max output dimension, -1 to preserve original size
+  // the larger dimension of the video will be scaled to this size,
+  // and the second dimension will be scaled to preserve aspect ratio
+  int maxOutputDimension_ = -1;
 
   // params for decoding behavior
   int decode_type_ = DecodeType::DO_TMP_JITTER;
@@ -172,7 +185,7 @@ class Params {
    * Output frame width, default to video width
    */
   Params& outputWidth(int width) {
-    scale_w_ = width;
+    outputWidth_ = width;
     return *this;
   }
 
@@ -180,7 +193,17 @@ class Params {
    * Output frame height, default to video height
    */
   Params& outputHeight(int height) {
-    scale_h_ = height;
+    outputHeight_ = height;
+    return *this;
+  }
+
+  /**
+   * Max dimension of either width or height, if any is bigger
+   * it will be scaled down to this and econd dimension
+   * will be scaled down to maintain aspect ratio.
+   */
+  Params& maxOutputDimension(int size) {
+    maxOutputDimension_ = size;
     return *this;
   }
 };
@@ -218,6 +241,21 @@ class DecodedFrame {
   int outputFrameIndex_ = -1;
 };
 
+// data structure for storing decoded audio data
+struct DecodedAudio {
+  int dataSize_;
+  int outSampleSize_;
+  std::unique_ptr<float[]> audio_data_;
+
+  explicit DecodedAudio(
+      int dataSize = 0,
+      int outSampleSize = 0,
+      std::unique_ptr<float[]> audio_data = nullptr)
+      : dataSize_(dataSize),
+        outSampleSize_(outSampleSize),
+        audio_data_(std::move(audio_data)) {}
+};
+
 class VideoIOContext {
  public:
   explicit VideoIOContext(const std::string& fname)
@@ -229,6 +267,7 @@ class VideoIOContext {
     inputFile_ = fopen(fname.c_str(), "rb");
     if (inputFile_ == nullptr) {
       LOG(ERROR) << "Error opening video file " << fname;
+      return;
     }
     ctx_ = avio_alloc_context(
         static_cast<unsigned char*>(workBuffer_.get()),
@@ -383,6 +422,16 @@ struct VideoMeta {
         pixFormat(AVPixelFormat::AV_PIX_FMT_RGB24) {}
 };
 
+class Callback {
+ public:
+  virtual void frameDecoded(std::unique_ptr<DecodedFrame> img) = 0;
+  virtual void audioDecoded(
+      std::unique_ptr<DecodedAudio> /*decoded audio data*/) {}
+  virtual void videoDecodingStarted(const VideoMeta& /*videoMeta*/) {}
+  virtual void videoDecodingEnded(double /*lastFrameTimestamp*/) {}
+  virtual ~Callback() {}
+};
+
 class VideoDecoder {
  public:
   VideoDecoder();
@@ -391,33 +440,86 @@ class VideoDecoder {
       const std::string& filename,
       const Params& params,
       const int start_frm,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      Callback& callback);
 
   void decodeMemory(
+      const std::string& filename,
       const char* buffer,
       const int size,
       const Params& params,
       const int start_frm,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      Callback& callback);
 
  private:
   std::string ffmpegErrorStr(int result);
 
   void ResizeAndKeepAspectRatio(
-      const int origHeight,
       const int origWidth,
-      const int heightMin,
-      const int widthMin,
-      int& outHeight,
-      int& outWidth);
+      const int origHeight,
+      const int short_edge,
+      const int long_edge,
+      int& outWidth,
+      int& outHeight);
+
+  void getAudioSample(
+      AVPacket& packet,
+      AVCodecContext* audioCodecContext_,
+      AVFrame* audioStreamFrame_,
+      SwrContext* convertCtx_,
+      Callback& callback,
+      const Params& params);
 
   void decodeLoop(
       const std::string& videoName,
       VideoIOContext& ioctx,
       const Params& params,
       const int start_frm,
-      std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames);
+      Callback& callback);
 };
+
+CAFFE2_API void FreeDecodedData(
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
+    std::vector<std::unique_ptr<DecodedAudio>>& sampledAudio);
+
+CAFFE2_API bool DecodeMultipleClipsFromVideo(
+    const char* video_buffer,
+    const std::string& video_filename,
+    const int encoded_size,
+    const Params& params,
+    const int start_frm,
+    const int clip_per_video,
+    const std::vector<int>& clip_start_positions,
+    const bool use_local_file,
+    int& height,
+    int& width,
+    std::vector<unsigned char*>& buffer_rgb);
+
+class CallbackImpl : public Callback {
+ public:
+  std::vector<std::unique_ptr<DecodedFrame>> frames;
+  std::vector<std::unique_ptr<DecodedAudio>> audio_samples;
+
+  explicit CallbackImpl() {
+    clear();
+  }
+
+  void clear() {
+    FreeDecodedData(frames, audio_samples);
+  }
+
+  void frameDecoded(std::unique_ptr<DecodedFrame> frame) override {
+    frames.push_back(move(frame));
+  }
+
+  void audioDecoded(std::unique_ptr<DecodedAudio> audio_sample) override {
+    audio_samples.push_back(move(audio_sample));
+  }
+
+  void videoDecodingStarted(const VideoMeta& /*videoMeta*/) override {
+    clear();
+  }
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_VIDEO_VIDEO_DECODER_H_

@@ -4,6 +4,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 namespace torch {
@@ -42,6 +43,12 @@ static std::pair<std::string, std::string> getDtypeNames(
       return std::make_pair("bool", "");
     case at::ScalarType::QInt8:
       return std::make_pair("qint8", "");
+    case at::ScalarType::QUInt8:
+      return std::make_pair("quint8", "");
+    case at::ScalarType::QInt32:
+      return std::make_pair("qint32", "");
+    case at::ScalarType::BFloat16:
+      return std::make_pair("bfloat16", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -52,10 +59,10 @@ void initializeDtypes() {
   if (!torch_module)
     throw python_error();
 
-#define DEFINE_SCALAR_TYPE(_1, n, _2) at::ScalarType::n,
+#define DEFINE_SCALAR_TYPE(_1, n) at::ScalarType::n,
 
   at::ScalarType all_scalar_types[] = {
-      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_SCALAR_TYPE)};
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
     std::string primary_name, legacy_name;

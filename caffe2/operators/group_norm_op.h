@@ -41,13 +41,18 @@ class GroupNormOp final : public Operator<Context> {
     const int ndim = X.dim();
     const int N = X.dim32(0);
     const int C = order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1);
-    const int HxW = X.numel() / (N * C);
+    const size_t HxW = order_ == StorageOrder::NCHW
+        ? X.size_from_dim(2)
+        : X.size_between_dim(0, ndim - 1);
     CAFFE_ENFORCE_EQ(C % group_, 0);
     CAFFE_ENFORCE_EQ(gamma.numel(), C);
     CAFFE_ENFORCE_EQ(beta.numel(), C);
     const int G = group_;
     const int K = C / G;
     auto* Y = Output(OUTPUT, X.sizes(), at::dtype<T>());
+    if (N == 0) {
+      return true;
+    }
     T* mu_data = nullptr;
     T* rsig_data = nullptr;
     if (OutputSize() == 3) {

@@ -49,7 +49,7 @@ NO_GRADIENT(InferenceLSTM);
 } // namespace
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     InferenceLSTM,
     "_caffe2::InferenceLSTM("
       "Tensor[] input_list, "

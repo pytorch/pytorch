@@ -1,54 +1,34 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
-    input: "1"
-    output: "3"
-    op_type: "Transpose"
-    attribute {
-      name: "perm"
-      ints: 1
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
     input: "input.1"
-    input: "3"
+    input: "7"
     output: "4"
+    name: "MatMul_0"
     op_type: "MatMul"
   }
   node {
-    input: "2"
-    output: "5"
-    op_type: "Transpose"
-    attribute {
-      name: "perm"
-      ints: 1
-      ints: 0
-      type: INTS
-    }
-  }
-  node {
     input: "4"
-    input: "5"
+    input: "8"
     output: "6"
+    name: "MatMul_1"
     op_type: "MatMul"
   }
   name: "torch-jit-export"
   initializer {
-    dims: 5
     dims: 4
+    dims: 5
     data_type: 1
-    name: "1"
+    name: "7"
     raw_data: "\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@"
   }
   initializer {
-    dims: 6
     dims: 5
+    dims: 6
     data_type: 1
-    name: "2"
+    name: "8"
     raw_data: "\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@"
   }
   input {
@@ -68,32 +48,32 @@ graph {
     }
   }
   input {
-    name: "1"
+    name: "7"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 5
+            dim_value: 4
           }
           dim {
-            dim_value: 4
+            dim_value: 5
           }
         }
       }
     }
   }
   input {
-    name: "2"
+    name: "8"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 6
+            dim_value: 5
           }
           dim {
-            dim_value: 5
+            dim_value: 6
           }
         }
       }

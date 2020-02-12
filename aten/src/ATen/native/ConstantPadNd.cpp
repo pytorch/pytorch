@@ -3,7 +3,7 @@
 namespace at { namespace native {
 
 Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
-    AT_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
+    TORCH_CHECK(pad.size() % 2 == 0, "Length of pad must be even but instead it equals ",
              pad.size());
 
     auto input_sizes = self.sizes();
@@ -11,7 +11,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
 
     auto l_pad = pad.size() / 2;
     auto l_diff = l_inp - l_pad;
-    AT_CHECK(l_inp >= l_pad, "Length of pad should be no more than twice the number of "
+    TORCH_CHECK(l_inp >= (int64_t)l_pad, "Length of pad should be no more than twice the number of "
              "dimensions of the input. Pad length is ", pad.size(), "while the input has ",
              l_inp, "dimensions.");
 
@@ -37,18 +37,18 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
     // if none of the pads are positive we can optimize and just return the result
     // of calling .narrow() on the input
     if (all_pads_non_positive) {
-        return c_input;
+        return c_input.clone();
     }
 
 
-    for (int i = 0; i < l_diff; i ++) {
+    for (size_t i = 0; i < (size_t)l_diff; i ++) {
         new_shape.emplace_back(input_sizes[i]);
     }
 
-    for (int i = 0; i < l_pad; i++) {
+    for (size_t i = 0; i < (size_t)l_pad; i++) {
         auto pad_idx = pad.size() - ((i + 1) * 2);
         auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
-        AT_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",
+        TORCH_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",
                  pad[pad_idx], " and ", pad[pad_idx + 1], "resulted in a negative output size, "
                  "which is invalid. Check dimension ", l_diff + i, "of your input.");
         new_shape.emplace_back(new_dim);

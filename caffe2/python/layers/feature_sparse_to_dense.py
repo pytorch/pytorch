@@ -2,9 +2,10 @@
 # Module caffe2.python.layers.sparse_to_dense
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from collections import defaultdict
 import numpy as np
 from caffe2.python import schema
-from caffe2.python.layers.layers import ModelLayer
+from caffe2.python.layers.layers import ModelLayer, AccessedFeatures
 
 
 class FeatureSparseToDense(ModelLayer):
@@ -115,7 +116,7 @@ class FeatureSparseToDense(ModelLayer):
                 # we keep ranges blob to check input data later.
                 # Currently this schema with ranges and values is only for
                 # generic type enum 1. If new types are implemented, we need to
-                # modify the ParseGeneric operator, and this part accordinly
+                # modify the ParseGeneric operator, and this part accordingly
                 outputs.append(
                     (
                         field,
@@ -149,7 +150,7 @@ class FeatureSparseToDense(ModelLayer):
         self.output_schema = schema.Struct(*outputs)
 
         # TODO(amalevich): Consider moving this data to schema, instead
-        # Structs doens't support attaching metadata to them and clonning
+        # Structs doesn't support attaching metadata to them and clonning
         # will break things badly, but this is the most elegant way to pass
         # this info around. Should we change it or it'll be too much work and
         # not worse it?
@@ -259,7 +260,7 @@ class FeatureSparseToDense(ModelLayer):
                 # Currently our implementation only supports
                 # generic type enum 1. If new types are implemented, we need to
                 # modify the ParseGeneric operator, the schema above,
-                # and this part accordinly to parse the generic feature strings
+                # and this part accordingly to parse the generic feature strings
                 # into input_record
 
                 ranges = net.LengthsToRanges(
@@ -294,3 +295,18 @@ class FeatureSparseToDense(ModelLayer):
             if feature_specs.feature_type == "FLOAT":
                 metadata[-1][0]["cardinality"] = 1
         return metadata
+
+    def get_accessed_features(self):
+        accessed_features = defaultdict(list)
+
+        # The features that are accessed are just those features that appear in
+        # the input specs
+        for field, feature_specs in self.input_specs:
+            accessed_features[field].append(
+                AccessedFeatures(
+                    feature_specs.feature_type,
+                    set(feature_specs.feature_ids)
+                )
+            )
+
+        return accessed_features

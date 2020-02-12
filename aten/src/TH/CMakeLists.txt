@@ -10,13 +10,12 @@ IF(C_AVX2_FOUND)
 ENDIF(C_AVX2_FOUND)
 
 SET(hdr
-  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h THMath.h
-  THLapack.h THLogAdd.h THRandom.h THVector.h )
+  THGeneral.h THHalf.h THAllocator.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h
+  THLapack.h THVector.h )
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorRandom.cpp
@@ -24,12 +23,9 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorMoreMath.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorEvenMoreMath.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensorConv.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensorLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLogAdd.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.cpp
@@ -58,13 +54,13 @@ CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 INSTALL(FILES
   TH.h
   THAllocator.h
-  THMath.h
   THBlas.h
   THDiskFile.h
   THFile.h
   THFilePrivate.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
+  THGenerateBFloat16Type.h
   THGenerateBoolType.h
   THGenerateDoubleType.h
   THGenerateFloatType.h
@@ -76,11 +72,12 @@ INSTALL(FILES
   THGenerateByteType.h
   THGenerateFloatTypes.h
   THGenerateIntTypes.h
+  THGenerateQUInt8Type.h
+  THGenerateQInt8Type.h
+  THGenerateQInt32Type.h
+  THGenerateQTypes.h
   THLapack.h
-  THLogAdd.h
   THMemoryFile.h
-  THRandom.h
-  THSize.h
   THStorage.h
   THStorageFunctions.h
   THTensor.h
@@ -111,8 +108,6 @@ INSTALL(FILES
   generic/THTensor.cpp
   generic/THTensor.h
   generic/THTensor.hpp
-  generic/THTensorConv.cpp
-  generic/THTensorConv.h
   generic/THTensorFill.cpp
   generic/THTensorFill.h
   generic/THTensorLapack.cpp

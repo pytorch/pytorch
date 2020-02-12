@@ -7,6 +7,11 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+namespace c10 {
+struct Type;
+using TypePtr = std::shared_ptr<Type>;
+} // namespace c10
+
 namespace torch {
 namespace jit {
 
@@ -14,10 +19,21 @@ using ::c10::Symbol;
 
 constexpr int max_tensor_display_size = 10;
 
-enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs };
+enum class AttributeKind { f, fs, i, is, s, ss, t, ts, g, gs, ty, tys, ival };
 static inline const char* toString(AttributeKind kind) {
-  static const char* names[] = {
-      "f", "fs", "i", "is", "s", "ss", "t", "ts", "g", "gs"};
+  static const char* names[] = {"f",
+                                "fs",
+                                "i",
+                                "is",
+                                "s",
+                                "ss",
+                                "t",
+                                "ts",
+                                "g",
+                                "gs",
+                                "ty",
+                                "tys",
+                                "ival"};
   AT_ASSERT(size_t(kind) < sizeof(names) / sizeof(AttributeKind));
   return names[int(kind)];
 }
@@ -80,11 +96,15 @@ using StringAttr = ScalarAttributeValue<std::string, AttributeKind::s>;
 using StringsAttr = VectorAttributeValue<std::string, AttributeKind::ss>;
 using TensorAttr = ScalarAttributeValue<at::Tensor, AttributeKind::t>;
 using TensorsAttr = VectorAttributeValue<at::Tensor, AttributeKind::ts>;
+using TypeAttr = ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
+using TypesAttr = VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
+using IValueAttr = ScalarAttributeValue<at::IValue, AttributeKind::ival>;
+
 struct Graph;
 
 // We special case Graph attributes like this because we want to ensure that
 // Graph::copy() is called when we clone() these attributes.
-struct GraphAttr : public AttributeValue {
+struct TORCH_API GraphAttr : public AttributeValue {
   using ConstructorType = std::shared_ptr<Graph>;
   using ValueType = std::shared_ptr<Graph>;
   GraphAttr(Symbol name, ConstructorType value_)
@@ -92,7 +112,7 @@ struct GraphAttr : public AttributeValue {
   ValueType& value() {
     return value_;
   }
-  TORCH_API Ptr clone() const override;
+  Ptr clone() const override;
   AttributeKind kind() const override {
     return AttributeKind::g;
   }
@@ -101,7 +121,7 @@ struct GraphAttr : public AttributeValue {
   std::shared_ptr<Graph> value_;
 };
 
-struct GraphsAttr : public AttributeValue {
+struct TORCH_API GraphsAttr : public AttributeValue {
   using ConstructorType = std::vector<std::shared_ptr<Graph>>;
   using ValueType = std::vector<std::shared_ptr<Graph>>;
   GraphsAttr(Symbol name, ConstructorType value_)
@@ -112,7 +132,7 @@ struct GraphsAttr : public AttributeValue {
   AttributeKind kind() const override {
     return AttributeKind::gs;
   }
-  TORCH_API std::unique_ptr<AttributeValue> clone() const override;
+  std::unique_ptr<AttributeValue> clone() const override;
 
  private:
   ValueType value_;
@@ -123,7 +143,7 @@ struct AttributeError : public std::exception {
     std::stringstream ss;
     if (!defined) {
       ss << "required keyword attribute '" << name.toUnqualString()
-         << "' is undefined.";
+         << "' is undefined";
     } else {
       ss << "required keyword attribute '" << name.toUnqualString()
          << "' has the wrong type";

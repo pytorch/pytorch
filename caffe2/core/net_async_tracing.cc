@@ -145,6 +145,10 @@ std::string Tracer::serializeEvent(const TracerEvent& event) {
       int_args["task_id"] = event.task_id_;
     }
 
+    if (event.iter_ >= 0) {
+      int_args["iter_id"] = event.iter_;
+    }
+
     if (event.stream_id_ >= 0) {
       int_args["stream_id"] = event.stream_id_;
     }
@@ -258,6 +262,10 @@ int Tracer::bumpIter() {
   return iter_++;
 }
 
+int Tracer::getIter() {
+  return iter_;
+}
+
 int Tracer::bumpDumpingIter() {
   return dumping_iter_++;
 }
@@ -288,8 +296,13 @@ Tracer::~Tracer() {
   dumpTracingResultAndClearEvents("final_batch");
 }
 
+thread_local TracerGuard* current_tracer_guard;
+
 void TracerGuard::init(Tracer* tracer) {
-  enabled_ = true;
+  enabled_ = tracer && tracer->isEnabled();
+  if (enabled_) {
+    current_tracer_guard = this;
+  }
   tracer_ = tracer;
 }
 
@@ -329,6 +342,10 @@ void TracerGuard::addArgument(TracingField field, int value) {
       event_.thread_label_ = value;
       break;
     }
+    case TRACE_ITER: {
+      event_.iter_ = value;
+      break;
+    }
     default: {
       CAFFE_THROW("Unexpected tracing int field ", field);
     }
@@ -351,7 +368,18 @@ TracerGuard::~TracerGuard() {
     event_.is_beginning_ = false;
     event_.timestamp_ = (long)caffe2::round(tracer_->timer_.MicroSeconds());
     tracer_->recordEvent(event_);
+    if (current_tracer_guard == this) {
+      current_tracer_guard = nullptr;
+    }
   }
+}
+
+void TracerGuard::disable() {
+  enabled_ = false;
+}
+
+TracerGuard* TracerGuard::getCurrentTracerGuard() {
+  return current_tracer_guard;
 }
 
 int extractShardId(const std::string& name) {
@@ -433,7 +461,7 @@ std::shared_ptr<Tracer> create(
     const std::string& net_name) {
   // Enable the tracer if the net has the "enable_tracing" argument set OR
   // if the command line option includes the net name option in the list of
-  // tracable nets.
+  // traceable nets.
   bool trace_net = hasEnableTracingFlag(net) || isTraceableNetName(net_name);
   return trace_net
       ? std::make_shared<Tracer>(net, net_name, getTracingConfigFromNet(net))

@@ -6,6 +6,26 @@
 
 namespace caffe2 {
 
+void TypedAxpy__avx_f16c(int N, const float a, const float* x, float* y) {
+  int current = 0;
+  const int bound = (N % 8) ? N - 8 : N;
+  __m256 mma = _mm256_set1_ps(a);
+  for (; current < bound; current += 8) {
+    _mm256_storeu_ps(
+        y + current,
+        _mm256_add_ps(
+            _mm256_mul_ps(mma, _mm256_loadu_ps(x + current)),
+            _mm256_loadu_ps(y + current)));
+  }
+
+  if (bound != N) {
+    while (current < N) {
+      y[current] += x[current] * a;
+      ++current;
+    }
+  }
+}
+
 void TypedAxpyHalffloat__avx_f16c(
     int N,
     const float a,

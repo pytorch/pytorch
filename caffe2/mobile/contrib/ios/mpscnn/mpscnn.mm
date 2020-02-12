@@ -150,7 +150,7 @@ class MPSImageWrapper {
      * it is still in use. If the parent wrapper contains a static image, we
      * should create a new command buffer because we use static image so it can
      * survive synchronization(commit of the command buffer), which means if we
-     * pass on the command buffer the command buffer will be commited in
+     * pass on the command buffer the command buffer will be committed in
      * multiple places in the graph. Also since we don't pass on parent's
      * command buffer,we need to synchronize(commit) it since it won't be used
      * in the future.
@@ -2072,7 +2072,9 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
             OperatorBase::GetSingleArgument<int>("post_nms_topN", 300)),
         rpn_nms_thresh_(
             OperatorBase::GetSingleArgument<float>("nms_thresh", 0.7f)),
-        rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)) {}
+        rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)),
+        legacy_plus_one_(
+            this->template GetSingleArgument<bool>("legacy_plus_one", true)) {}
 
   template <class Derived1, class Derived2>
   std::vector<int> nms_metal(
@@ -2207,14 +2209,21 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     Eigen::Map<ERMatXf>(scores.data(), H * W, A) =
         Eigen::Map<const ERMatXf>(scores_tensor.data(), A, H * W).transpose();
     // Transform anchors into proposals via bbox transformations
-    auto proposals = utils::bbox_transform(all_anchors.array(), bbox_deltas);
+    auto proposals = utils::bbox_transform(
+        all_anchors.array(),
+        bbox_deltas,
+        std::vector<float>{1.0, 1.0, 1.0, 1.0},
+        utils::BBOX_XFORM_CLIP_DEFAULT,
+        legacy_plus_one_);
 
     // 2. clip proposals to image (may result in proposals with zero area
     // that will be removed in the next step)
-    proposals = utils::clip_boxes(proposals, im_info[0], im_info[1]);
+    proposals = utils::clip_boxes(
+        proposals, im_info[0], im_info[1], 1.0, legacy_plus_one_);
 
     // 3. remove predicted boxes with either height or width < min_size
-    auto keep = utils::filter_boxes(proposals, min_size, im_info);
+    auto keep =
+        utils::filter_boxes(proposals, min_size, im_info, legacy_plus_one_);
 
     DCHECK_LE(keep.size(), scores.size());
 
@@ -2334,12 +2343,10 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
   float rpn_nms_thresh_{0.7};
   // RPN_MIN_SIZE
   float rpn_min_size_{16};
+  // The infamous "+ 1" for box width and height dating back to the DPM days
+  bool legacy_plus_one_{true};
   // threads per thread group, used in nms
   ushort maxThreadsPerThreadgroup{32};
-
- private:
-  id<MTLBuffer> out_rois_{nullptr};
-  id<MTLBuffer> out_rois_probs_{nullptr};
 };
 
 REGISTER_CPU_OPERATOR(MPSCNNGenerateProposalsCPP, MPSCNNGenerateProposalsCPPOp);

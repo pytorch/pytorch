@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/jit/ir.h>
 
 namespace torch {
@@ -32,6 +34,12 @@ struct IfView {
     return node_;
   }
 
+  void permuteOutputs(const std::vector<size_t>& new_output_order) {
+    node_->permuteOutputs(new_output_order);
+    thenBlock()->permuteOutputs(new_output_order);
+    elseBlock()->permuteOutputs(new_output_order);
+  }
+
  private:
   Node* node_;
 };
@@ -63,6 +71,10 @@ struct LoopView {
     // skip trip count and cond
     return node_->inputs().slice(2);
   }
+  ArrayRef<Value*> carriedInputsWithCond() const {
+    // skip trip count and cond
+    return node_->inputs().slice(1);
+  }
   ArrayRef<Value*> carriedOutputs() const {
     return node_->outputs();
   }
@@ -80,9 +92,71 @@ struct LoopView {
     return node_;
   }
 
+  void permuteLoopCarried(const std::vector<size_t>& new_output_order) {
+    node_->permuteOutputs(new_output_order);
+    // skip trip count and cond
+    node_->permuteInputs(adjustIndices(2, new_output_order));
+    auto adjusted_block_order = adjustIndices(1, new_output_order);
+    bodyBlock()->permuteOutputs(adjusted_block_order);
+    bodyBlock()->permuteInputs(adjusted_block_order);
+  }
+
+  void replaceMaxTripCount(Value* new_max_trip_count) {
+    node_->replaceInput(0, new_max_trip_count);
+  }
+  void replaceInputCondition(Value* new_input_condition) {
+    node_->replaceInput(1, new_input_condition);
+  }
+
+  // our way of encoding loops makes them difficult to turn back into python
+  // syntax. we have to check properties of the condition and trip count inputs
+  // to figure out which one it initially was. ModifiedLoops are not directly
+  // mappable to either For or While
+  enum LoopType { While, For, ModifiedLoop };
+
+  LoopType loopType() {
+    auto trip_count = toIValue(maxTripCount());
+    auto cond_input = toIValue(inputCond());
+    auto cond_next = toIValue(nextCond());
+
+    bool condition_is_always_true =
+        cond_input && cond_input->toBool() && cond_next && cond_next->toBool();
+    bool trip_count_is_specified = !trip_count || // trip is not a constant
+        trip_count->toInt() !=
+            std::numeric_limits<int64_t>::max() || // it is a constant but not
+                                                   // the default one
+        currentTripCount()->uses().size() >
+            0; // it is actually being used in the body.
+
+    if (condition_is_always_true) {
+      // if the trip count was not specified this was a user-written while True:
+      return trip_count_is_specified ? For : While;
+    } else {
+      if (trip_count_is_specified) {
+        return ModifiedLoop;
+      }
+      return While;
+    }
+  }
+
  private:
   Node* node_;
-};
 
+  // adjust index_ordering by adding indices 0 - thorugh adjust, and
+  // incrementing all existing inputs by adjust
+  static std::vector<size_t> adjustIndices(
+      size_t adjust,
+      const std::vector<size_t>& index_ordering) {
+    std::vector<size_t> adjusted;
+    adjusted.reserve(adjust + index_ordering.size());
+    for (size_t i = 0; i < adjust; ++i) {
+      adjusted.push_back(i);
+    }
+    for (auto index : index_ordering) {
+      adjusted.push_back(index + adjust);
+    }
+    return adjusted;
+  }
+};
 } // namespace jit
 } // namespace torch

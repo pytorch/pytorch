@@ -1,29 +1,31 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
-#include "THC/THCNumerics.cuh"
+#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
-
-#define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
-
-#define START_IND(a,b,c) (int)std::floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)std::ceil((float)((a + 1) * c) / b)
-// #define START_IND(a,b,c) a * c / b
-// #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
 
 namespace at {
 namespace native {
 
 namespace {
+
+__device__ inline int start_index(int a, int b, int c) {
+  return (int)std::floor((float)(a * c) / b);
+}
+
+__device__ inline int end_index(int a, int b, int c) {
+  return (int)std::ceil((float)((a + 1) * c) / b);
+}
 
 // 4d tensor B x D x H x W
 
@@ -60,13 +62,13 @@ __global__ void adaptivemaxpool(T *input, T *output, int64_t *indices,
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
+    int istartH = start_index(oh, osizeH, isizeH);
+    int iendH   = end_index(oh, osizeH, isizeH);
     int kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
+      int istartW = start_index(ow, osizeW, isizeW);
+      int iendW   = end_index(ow, osizeW, isizeW);
 
       int kW = iendW - istartW;
 
@@ -183,7 +185,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      atomicAdd(&(gradInput[argmax]), z);
+      gpuAtomicAdd(&(gradInput[argmax]), z);
     }
   }
 }
@@ -203,21 +205,20 @@ void adaptive_max_pool2d_out_cuda_template(
   checkAllSameGPU("adaptive_max_pool2d_cuda", {output_arg, indices_arg, input_arg});
 
   for (int64_t i = 0; i < input.ndimension(); i++) {
-     AT_CHECK(input.size(i) > 0,
+     TORCH_CHECK(input.size(i) > 0,
         "adaptive_max_pool2d_cuda(): expected input to have non-empty spatial dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
   }
 
-  AT_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
     "non-empty 3D or 4D (batch mode) tensor expected for input");
 
-  // the jit sometimes passes output_size.size() == 1
-  AT_CHECK(output_size.size() == 1 || output_size.size() == 2,
-    "adaptive_max_pool2d: internal error: output_size.size() must be 1 or 2");
+  TORCH_CHECK(output_size.size() == 2,
+    "adaptive_max_pool2d: internal error: output_size.size() must be 2");
 
   int64_t osizeH = output_size[0];
-  int64_t osizeW = output_size.size() == 1 ? output_size[0] : output_size[1];
+  int64_t osizeW = output_size[1];
 
   if (input.ndimension() == 3) {
     int64_t sizeD  = input.size(0);
@@ -234,9 +235,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeD, osizeH, osizeW});
         indices.resize_({sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -271,9 +272,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeB, sizeD, osizeH, osizeW});
         indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input_.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input_.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -287,7 +288,7 @@ void adaptive_max_pool2d_out_cuda_template(
                                    indices_data,
                                    isizeH, isizeW, osizeH, osizeW,
                                    istrideD, istrideH, istrideW);
-      } 
+      }
     );
     THCudaCheck(cudaGetLastError());
 
@@ -328,9 +329,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -374,9 +375,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -455,7 +456,7 @@ Tensor adaptive_max_pool2d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,
@@ -466,7 +467,3 @@ Tensor adaptive_max_pool2d_backward_cuda(
 
 } // at::native
 } // at
-
-#undef CUDA_MAX_THREADS
-#undef START_IND
-#undef END_IND

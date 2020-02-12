@@ -57,4 +57,13 @@ message ProfDAGProto {
 message ProfDAGProtos {
   repeated ProfDAGProto stats = 1;
   optional string net_name = 2;
+  repeated OpProfile ops_stats = 3;
+}
+
+// Represents specification of an operation cost.
+message OpProfile {
+  optional string idx = 1;
+  optional string net_name = 2;
+  optional string type = 3;
+  optional float exec_time_secs = 4;
 }

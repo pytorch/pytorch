@@ -9,10 +9,15 @@ namespace caffe2 {
 template <class Context>
 class FloatToHalfOp : public Operator<Context> {
  public:
+  explicit FloatToHalfOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        clip_(this->template GetSingleArgument<bool>("clip", false)) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(FloatToHalfOp);
 
   bool RunOnDevice() override;
+
+ private:
+  bool clip_;
 };
 
 template <class Context>

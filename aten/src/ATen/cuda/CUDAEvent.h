@@ -24,13 +24,11 @@ namespace at { namespace cuda {
 * called before the event is ever recorded, it will use the current device.
 * Later streams that record the event must match this device.
 */
-struct AT_CUDA_API CUDAEvent {
-  // Constants
-  static constexpr unsigned int DEFAULT_FLAGS = cudaEventDisableTiming;
-
+struct TORCH_CUDA_API CUDAEvent {
   // Constructors
-  CUDAEvent(unsigned int flags = DEFAULT_FLAGS)
-  : flags_{flags} { }
+  // Default value for `flags` is specified below - it's cudaEventDisableTiming
+  CUDAEvent() {}
+  CUDAEvent(unsigned int flags) : flags_{flags} {}
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
@@ -112,7 +110,7 @@ struct AT_CUDA_API CUDAEvent {
       createEvent(stream.device_index());
     }
 
-    AT_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
+    TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
       " does not match recording stream's device ", stream.device_index(), ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
@@ -130,7 +128,7 @@ struct AT_CUDA_API CUDAEvent {
 
   // Note: cudaEventElapsedTime can be safely called from any device
   float elapsed_time(const CUDAEvent& other) const {
-    AT_CHECK(is_created_ && other.isCreated(),
+    TORCH_CHECK(is_created_ && other.isCreated(),
       "Both events must be recorded before calculating elapsed time.");
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
@@ -161,7 +159,7 @@ struct AT_CUDA_API CUDAEvent {
   }
 
 private:
-  unsigned int flags_ = DEFAULT_FLAGS;
+  unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
   bool was_recorded_ = false;
   DeviceIndex device_index_ = -1;

@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 namespace torch {
 namespace jit {
@@ -42,36 +41,7 @@ static void CanonicalizeOps(Block* block) {
        ++it) {
     for (auto sub : it->blocks())
       CanonicalizeOps(sub);
-    // For the case where we have an addmm where alpha and beta are Attributes
-    // and both of those scalars are equal to 1.0, decompose this into an mm
-    // followed by an add so that it can go through the existing optimization,
-    // shape analysis and differentiation passes for those two individual ops.
-    // Later, we will fuse together those two ops into a single addmm.
-    if (it->matches(
-            "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha) -> Tensor",
-            /*const_inputs=*/{attr::beta, attr::alpha})) {
-      if (it->get<at::Scalar>(attr::alpha)->toDouble() != 1.0 ||
-          it->get<at::Scalar>(attr::beta)->toDouble() != 1.0) {
-        continue;
-      }
-
-      WithInsertPoint guard(*it);
-
-      SymbolicVariable mat(it->inputs()[0]);
-      SymbolicVariable mat1(it->inputs()[1]);
-      SymbolicVariable mat2(it->inputs()[2]);
-
-      auto mm_result = mat1.mm(mat2);
-      // Set this intermediate aten::mm node to have the same output type as the
-      // original aten::addmm otherwise the canonicalized graph will have
-      // DynamicType as the output of this node which is incorrect
-      (static_cast<Value*>(mm_result))->setType(it->output()->type());
-      auto result = mat + mm_result;
-      (static_cast<Value*>(result))->setType(it->output()->type());
-
-      it->output()->replaceAllUsesWith(result);
-      it.destroyCurrent();
-    } else if (
+    if (
         it->matches(
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
         it->matches(
@@ -87,6 +57,7 @@ static void CanonicalizeOps(Block* block) {
           inputs.at(1) = new_other;
           Value* new_output =
               graph->insertNode(graph->create(it->kind(), inputs))->output();
+          new_output->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(new_output);
         }
       }
@@ -95,13 +66,16 @@ static void CanonicalizeOps(Block* block) {
                    /*const_inputs=*/{attr::chunks, attr::dim})) {
       if (auto orig_outputs = getChunkOutputs(*it)) {
         WithInsertPoint guard(*it);
-        SymbolicVariable self{it->namedInput(attr::self)};
-        auto outputs = self.chunk(
-            it->get<int64_t>(attr::chunks).value(),
-            it->get<int64_t>(attr::dim).value());
-        for (ChunkOutput orig_out : *orig_outputs) {
-          orig_out.val->replaceAllUsesWith(outputs.at(orig_out.offset));
-          outputs[orig_out.offset].value()->setType(orig_out.val->type());
+        auto* self = it->namedInput(attr::self);
+        auto* graph = it->owningGraph();
+        const auto chunks = it->get<int64_t>(attr::chunks).value();
+        const auto dim = it->get<int64_t>(attr::dim).value();
+        auto* node = graph->insertNode(graph->create(prim::ConstantChunk, chunks));
+        node->addInput(self);
+        node->i_(attr::chunks, chunks)->i_(attr::dim, dim);
+        for (const auto& orig_out : *orig_outputs) {
+          orig_out.val->replaceAllUsesWith(node->outputs()[orig_out.offset]);
+          node->outputs()[orig_out.offset]->setType(orig_out.val->type());
         }
       }
     }

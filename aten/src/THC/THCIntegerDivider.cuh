@@ -2,8 +2,11 @@
 #define THC_INTEGER_DIVIDER_INC
 
 #include <assert.h>
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#include <cuda_runtime.h>
+#endif
 
-// A utility class to implement integer division by muliplication, given a fixed
+// A utility class to implement integer division by multiplication, given a fixed
 // divisor.
 //
 // WARNING: The fast divider algorithm is only implemented for unsigned int;
@@ -91,7 +94,7 @@ struct IntDivider<unsigned int> {
   }
 
   __host__ __device__ inline unsigned int div(unsigned int n) const {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     // 't' is the higher 32-bits of unsigned 32-bit multiplication of 'n' and
     // 'm1'.
     unsigned int t = __umulhi(n, m1);

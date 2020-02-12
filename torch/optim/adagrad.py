@@ -14,12 +14,14 @@ class Adagrad(Optimizer):
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-10)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -28,34 +30,24 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         if not 0.0 <= initial_accumulator_value:
             raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
+        if not 0.0 <= eps:
+            raise ValueError("Invalid epsilon value: {}".format(eps))
 
-        defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
+        defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
                         initial_accumulator_value=initial_accumulator_value)
         super(Adagrad, self).__init__(params, defaults)
-        self._is_share_memory = False
 
-    def share_memory(self):
-        self._is_share_memory = True
-        # ensure the existing state is shared memory
         for group in self.param_groups:
             for p in group['params']:
                 state = self.state[p]
-                if len(state) != 0:
-                    state['sum'].share_memory_()
+                state['step'] = 0
+                state['sum'] = torch.full_like(p.data, initial_accumulator_value, memory_format=torch.preserve_format)
 
-    def __getstate__(self):
-        base_dict = super(Adagrad, self).__getstate__()
-        base_dict['_is_share_memory'] = self._is_share_memory
-        return base_dict
-
-    def state_dict(self):
-        base_state_dict = super(Adagrad, self).state_dict()
-        base_state_dict['_is_share_memory'] = self._is_share_memory
-        return base_state_dict
-
-    def load_state_dict(self, state_dict):
-        super(Adagrad, self).load_state_dict(state_dict)
-        self._is_share_memory = state_dict.get('_is_share_memory', False)
+    def share_memory(self):
+        for group in self.param_groups:
+            for p in group['params']:
+                state = self.state[p]
+                state['sum'].share_memory_()
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -75,13 +67,6 @@ class Adagrad(Optimizer):
 
                 grad = p.grad.data
                 state = self.state[p]
-
-                # state initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['sum'] = torch.full_like(p.data, group['initial_accumulator_value'])
-                    if self._is_share_memory:
-                        state['sum'].share_memory_()
 
                 state['step'] += 1
 
@@ -105,11 +90,11 @@ class Adagrad(Optimizer):
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum'].sparse_mask(grad)
-                    std_values = std._values().sqrt_().add_(1e-10)
+                    std_values = std._values().sqrt_().add_(group['eps'])
                     p.data.add_(-clr, make_sparse(grad_values / std_values))
                 else:
                     state['sum'].addcmul_(1, grad, grad)
-                    std = state['sum'].sqrt().add_(1e-10)
+                    std = state['sum'].sqrt().add_(group['eps'])
                     p.data.addcdiv_(-clr, grad, std)
 
         return loss

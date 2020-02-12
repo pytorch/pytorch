@@ -64,7 +64,7 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #ifdef USE_MAGMA
   THArgCheck(!a_->is_empty() && a_->dim() == 2, 1, "A should be (non-empty) 2 dimensional");
   THArgCheck(!b_->is_empty() && b_->dim() == 2, 1, "b should be (non-empty) 2 dimensional");
-  AT_CHECK(a_->size(0) == b_->size(0), "Expected A and b to have same size "
+  TORCH_CHECK(a_->size(0) == b_->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a_->size(0), " rows and B has ", b_->size(0), " rows");
   THArgCheck(a_->size(0) >= a_->size(1), 2, "Expected A with shape (m x n) to have "
       "m >= n. The case for m < n is not implemented yet.");
@@ -106,78 +106,14 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #endif
 }
 
-void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
+void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, bool eigenvectors)
 {
 #ifdef USE_MAGMA
-  int64_t n = THTensor_sizeLegacyNoScalars(a, 0);
-  int64_t lda = n;
-
-  magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
-  magma_vec_t jobz = jobzs[0] == 'N' ? MagmaNoVec : MagmaVec;
-
-  THCTensor *input = THCTensor_(newColumnMajor)(state, rv_, a);
-  scalar_t *input_data = THCTensor_(data)(state, input);
-
-  if (n > 0) {
-    // eigen values and workspace
-    scalar_t *w = th_magma_malloc_pinned<scalar_t>(n);
-    scalar_t *wA = th_magma_malloc_pinned<scalar_t>(lda * n);
-
-    // compute optimal size of work array
-    int info;
-    scalar_t lwork;
-    int liwork;
-
-#if defined(THC_REAL_IS_FLOAT)
-    magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
-#else
-    magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
-#endif
-
-    scalar_t *work = th_magma_malloc_pinned<scalar_t>((size_t)lwork);
-    int *iwork = th_magma_malloc_pinned<int>(liwork);
-
-  // compute eigenvalues and, optionally, eigenvectors
-#if defined(THC_REAL_IS_FLOAT)
-    magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
-#else
-    magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
-#endif
-
-    // copy eigen values from w to re_
-    if (info == 0)
-      THCTensor_(copyArray1d)(state, re_, w, n);
-
-    magma_free_pinned(iwork);
-    magma_free_pinned(work);
-    magma_free_pinned(wA);
-    magma_free_pinned(w);
-
-    // check error value
-    if (info > 0)
-      THError("MAGMA syev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
-    else if (info < 0)
-      THError("MAGMA syev : Argument %d : illegal value", -info);
-  }
-  if (jobzs[0] == 'N') {
-    // If eigenvector is not needed, fill the result with zeros.
-    THCTensor_(zero)(state, rv_);
-    THCTensor_(free)(state, input);
-  } else {
-    THCTensor_(freeCopyTo)(state, input, rv_);
-  }
-#else
-  THError(NoMagma(syev));
-#endif
-}
-
-void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
-{
-#ifdef USE_MAGMA
+  char jobvrs = eigenvectors ? 'V' : 'N';
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 3, "A should be square");
 
-  magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
+  magma_vec_t jobvr = jobvrs == 'N' ? MagmaNoVec : MagmaVec;
   int64_t n = a_->size(0);
 
   scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(n * n);
@@ -245,201 +181,6 @@ void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor
 #endif
 }
 
-void THCTensor_(gesdd)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *a,
-                       const char *some, const char* compute_uv)
-{
-#ifdef USE_MAGMA
-  THCTensor *ra_ = THCTensor_(new)(state);
-  THCTensor_(gesdd2)(state, ru_, rs_, rv_,  ra_, a, some, compute_uv);
-  THCTensor_(free)(state, ra_);
-#else
-  THError(NoMagma(gesdd));
-#endif
-}
-
-void THCTensor_(gesdd2)(THCState *state, THCTensor *ru_, THCTensor *rs_, THCTensor *rv_, THCTensor *ra_, THCTensor *a,
-                        const char *some, const char* compute_uv)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
-
-  char jobus = compute_uv[0] == 'N' ? 'N' : some[0];
-  magma_vec_t jobz = jobus == 'A' ? MagmaAllVec : jobus == 'S' ? MagmaSomeVec : jobus == 'O' ? MagmaOverwriteVec : MagmaNoVec;
-
-  int iunused[1];
-  int64_t m = a->size(0);
-  int64_t n = a->size(1);
-  int64_t k = m < n ? m : n;
-  int64_t j = (jobz == MagmaAllVec) ? m : k;
-  int64_t jv = (jobz == MagmaAllVec) ? n : k;
-
-  scalar_t *a_data = th_magma_malloc_pinned<scalar_t>(m * n);
-  THCTensor_(copyTensor2d)(state, a_data, a);
-
-  scalar_t *rs_data = th_magma_malloc_pinned<scalar_t>(k);
-  scalar_t *ru_data = NULL;
-  scalar_t *rv_data = NULL;
-  if (jobz != MagmaNoVec) {
-    ru_data = th_magma_malloc_pinned<scalar_t>(m * j);
-    rv_data = th_magma_malloc_pinned<scalar_t>(n * n);
-  }
-
-  scalar_t wkopt;
-  int info;
-
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgesdd(jobz, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, &wkopt, -1, iunused, &info);
-#else
-  magma_dgesdd(jobz, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, &wkopt, -1, iunused, &info);
-#endif
-
-  int lwork = (int) wkopt;
-  scalar_t *work_data = th_magma_malloc_pinned<scalar_t>(lwork);
-  int *iwork = th_magma_malloc_pinned<int>(8 * k);
-
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgesdd(jobz, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, iwork, &info);
-#else
-  magma_dgesdd(jobz, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, iwork, &info);
-#endif
-
-  if (info > 0)
-    THError("MAGMA gesdd : the updating process of SBDSDC did not converge (error: %d)", info);
-  else if (info < 0)
-    THError("MAGMA gesdd : Argument %d : illegal value", -info);
-
-  THCTensor_(copyArray1d)(state, rs_, rs_data, k);
-  THCTensor_(copyArray2d)(state, ra_, a_data, m, n);
-  if (jobz != MagmaNoVec) {
-    THCTensor_(copyArray2d)(state, rv_, rv_data, n, n);
-    THCTensor_(transpose)(state, rv_, NULL, 0, 1);
-    if (jobz != MagmaAllVec)
-      THCTensor_(narrow)(state, rv_, rv_, 1, 0, jv);
-    THCTensor_(copyArray2d)(state, ru_, ru_data, m, j);
-    magma_free_pinned(rv_data);
-    magma_free_pinned(ru_data);
-  } else {
-    THCTensor_(resize2d)(state, rv_, n, n);
-    THCTensor_(zero)(state, rv_);
-    THCTensor_(resize2d)(state, ru_, m, m);
-    THCTensor_(zero)(state, ru_);
-  }
-
-  magma_free_pinned(work_data);
-  magma_free_pinned(iwork);
-  magma_free_pinned(rs_data);
-  magma_free_pinned(a_data);
-#else
-  THError(NoMagma(gesdd2));
-#endif
-}
-
-void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
-{
-  THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
-
-#ifdef USE_MAGMA
-  int info;
-  int64_t n = a->size(0);
-  int lwork = n * magma_get_sgetri_nb(n);
-
-  THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
-  scalar_t *input_data = THCTensor_(data)(state, input);
-
-  int *ipiv = th_magma_malloc_pinned<int>(n);
-
-  THCTensor *work = THCTensor_(newWithSize1d)(state, lwork);
-  scalar_t *work_data = THCTensor_(data)(state, work);
-
-  // Run LU
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgetrf_gpu(n, n, input_data, n, ipiv, &info);
-#else
-  magma_dgetrf_gpu(n, n, input_data, n, ipiv, &info);
-#endif
-
-  if (info > 0)
-    THError("MAGMA getrf : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("MAGMA getrf : Argument %d : illegal value", -info);
-
-  // Inverse
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgetri_gpu(n, input_data, n, ipiv, work_data, lwork, &info);
-#else
-  magma_dgetri_gpu(n, input_data, n, ipiv, work_data, lwork, &info);
-#endif
-
-  if (info > 0)
-    THError("MAGMA getri : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("MAGMA getri : Argument %d : illegal value", -info);
-
-  THCTensor_(free)(state, work);
-  magma_free_pinned(ipiv);
-  THCTensor_(freeCopyTo)(state, input, ra_);
-#else
-  int64_t n = a->size(0);
-
-  // input
-  THCTensor *input = THCTensor_(newColumnMajor)(state, a, a);
-  THCTensor_(resizeNd)(state, ra_, 2, THTensor_getSizePtr(input), THTensor_getStridePtr(input));
-
-  scalar_t *matrices1[1] = { THCTensor_(data)(state, input) };
-  scalar_t *matrices2[1] = { THCTensor_(data)(state, ra_) };
-
-  // Copy pointers to device.
-  auto d_matrices1 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
-  auto d_matrices2 = static_cast<scalar_t**>(THCudaMalloc(state, sizeof(scalar_t*)));
-
-  THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, sizeof(scalar_t*),
-                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
-  THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, sizeof(scalar_t*),
-                              cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
-  int info;
-  auto info_gpu = static_cast<int*>(THCudaMalloc(state, sizeof(int)));
-
-  auto ipiv_gpu = static_cast<int*>(THCudaMalloc(state, n * sizeof(int)));
-
-  // Run LU
-#if defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgetrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
-#else
-  THCudaBlas_Dgetrf(state, n, d_matrices1, n, ipiv_gpu, info_gpu, 1);
-#endif
-
-  THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
-
-  if (info > 0)
-    THError("CUBLAS getrf : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("CUBLAS getrf : Argument %d : illegal value", -info);
-
-  // Inverse
-#if defined(THC_REAL_IS_FLOAT)
-  THCudaBlas_Sgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
-#else
-  THCudaBlas_Dgetri(state, n, (const scalar_t**)d_matrices1, n, ipiv_gpu, d_matrices2, n, info_gpu, 1);
-#endif
-
-  THCudaCheck(cudaMemcpy(&info, info_gpu, sizeof(int), cudaMemcpyDeviceToHost));
-
-  if (info > 0)
-    THError("CUBLAS getri : U(%d,%d) is 0, U is singular", info, info);
-  else if (info < 0)
-    THError("CUBLAS getri : Argument %d : illegal value", -info);
-
-  THCudaFree(state, ipiv_gpu);
-  THCudaFree(state, info_gpu);
-
-  THCudaFree(state, d_matrices1);
-  THCudaFree(state, d_matrices2);
-
-  THCTensor_(free)(state, input);
-#endif
-}
-
 __global__ void THCTensor_(copyUpperSymmetric)(scalar_t *input, int n, int len)
 {
   for (int idx = threadIdx.x + blockIdx.x * blockDim.x; idx < len; idx += 65535) {
@@ -462,14 +203,15 @@ __global__ void THCTensor_(copyLowerSymmetric)(scalar_t *input, int n, int len)
   }
 }
 
-void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char *uplo)
+void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper)
 {
+  char uplo = upper ? 'U' : 'L';
 #ifdef USE_MAGMA
   THArgCheck(!a->is_empty() && a->dim() == 2, 2, "A should be non-empty 2 dimensional");
   THArgCheck(a->size(0) == a->size(1), 2, "A should be square");
 
   int64_t n = a->size(0);
-  magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
+  magma_uplo_t ul = uplo == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
   scalar_t *input_data = THCTensor_(data)(state, input);
@@ -490,7 +232,7 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, const char
   const int len = n*n;
   dim3 blocks(std::min(DIVUP(len, 128), 65535));
   dim3 threads(128);
-  if (uplo[0] == 'U') {
+  if (uplo == 'U') {
     THCTensor_(copyUpperSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
   } else {
     THCTensor_(copyLowerSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
@@ -536,81 +278,6 @@ void THCTensor_(geqrf)(THCState *state, THCTensor *ra_, THCTensor *rtau_, THCTen
   magma_free_pinned(rtau_data);
 #else
   THError(NoMagma(geqrf));
-#endif
-}
-
-void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THCTensor *a_)
-{
-#ifdef USE_MAGMA
-  THArgCheck(!a_->is_empty() && a_->dim() == 2, 2, "A should be non-empty 2 dimensional");
-
-  THCTensor *a = THCTensor_(newColumnMajor)(state, rr_, a_);
-  int64_t m = a->size(0);
-  int64_t n = a->size(1);
-  int64_t k = (m < n ? m : n);
-
-#if defined(THC_REAL_IS_FLOAT)
-  int64_t nb = magma_get_sgeqrf_nb(m, n);
-#else
-  int64_t nb = magma_get_dgeqrf_nb(m, n);
-#endif
-
-  scalar_t *a_data = THCTensor_(data)(state, a);
-  scalar_t *tau_data = th_magma_malloc_pinned<scalar_t>(k);
-  THCTensor *work = THCTensor_(newWithSize1d)(state, (2*k + magma_roundup(n, 32))*nb);
-  scalar_t *work_data = THCTensor_(data)(state, work);
-
-  int info;
-  // We need to call two different versions of ?geqrf:
-  //   ?geqrf_gpu allows fast computation of Q via ?orqrf_gpu, but doesn't give
-  //     R properly. Note that the MAGMA documentation for this method is wrong.
-  //     http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
-  //   ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orqrf_gpu
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgeqrf2_gpu(m, n, a_data, m, tau_data, &info);
-#else
-  magma_dgeqrf2_gpu(m, n, a_data, m, tau_data, &info);
-#endif
-
-  if (info != 0)
-    THError("MAGMA geqrf2 : Argument %d : illegal value.", -info);
-
-  THCTensor_(narrow)(state, a, a, 0, 0, k);
-  THCTensor_(triu)(state, rr_, a, 0);
-  THCTensor_(free)(state, a);
-
-  a = THCTensor_(newColumnMajor)(state, rq_, a_);
-  a_data = THCTensor_(data)(state, a);
-
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
-#else
-  magma_dgeqrf_gpu(m, n, a_data, m, tau_data, work_data, &info);
-#endif
-
-  if (info != 0)
-    THError("MAGMA geqrf : Argument %d : illegal value.", -info);
-
-  THCTensor *q = THCTensor_(newColumnMajor)(state, rq_, a);
-  scalar_t *q_data = THCTensor_(data)(state, q);
-
-#if defined(THC_REAL_IS_FLOAT)
-  magma_sorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);
-#else
-  magma_dorgqr_gpu(m, k, k, q_data, m, tau_data, work_data, nb, &info);
-#endif
-
-  if (info != 0)
-    THError("MAGMA orgqr : Argument %d : illegal value.", -info);
-
-  THCTensor_(free)(state, a);
-  THCTensor_(free)(state, work);
-  magma_free_pinned(tau_data);
-
-  THCTensor_(narrow)(state, q, q, 1, 0, k);
-  THCTensor_(freeCopyTo)(state, q, rq_);
-#else
-  THError(NoMagma(qr));
 #endif
 }
 

@@ -12,9 +12,8 @@ TEST(Caffe2ToPytorch, SimpleLegacy) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
 
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
@@ -27,9 +26,8 @@ TEST(Caffe2ToPytorch, Simple) {
     data[i] = i;
   }
   at::Tensor at_tensor(c2_tensor);
-  ASSERT_TRUE(&at_tensor.dispatch_type() != nullptr);
 
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
@@ -46,7 +44,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   // If the buffer is allocated externally, we can still pass tensor around,
   // but we can't resize its storage using PT APIs
   at::Tensor at_tensor(c2_tensor);
-  auto it = at_tensor.data<int64_t>();
+  auto it = at_tensor.data_ptr<int64_t>();
   for (int64_t i = 0; i < 16; i++) {
     ASSERT_EQ(it[i], i);
   }
@@ -278,15 +276,6 @@ TEST(PytorchToCaffe2, NonRegularTensor) {
   ASSERT_TRUE(at_tensor.is_sparse());
   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(at_tensor));
 }
-
-// With current build system it's too bothersome to set it up, but the test
-// passes
-// TEST(PytorchToCaffe2, Variable) {
-//   at::Tensor var =
-//       torch::autograd::make_variable(at::empty({2, 3}, at::dtype<float>()));
-//   ASSERT_TRUE(var.is_variable());
-//   ASSERT_ANY_THROW(caffe2::Tensor c2_tensor(var));
-// }
 
 TEST(Caffe2ToPytorch, NonPOD) {
   caffe2::Tensor c2_tensor = caffe2::empty({1}, at::dtype<std::string>());

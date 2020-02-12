@@ -1,0 +1,51 @@
+apply plugin: 'com.android.library'
+apply plugin: 'maven'
+
+android {
+    compileSdkVersion rootProject.compileSdkVersion
+    buildToolsVersion rootProject.buildToolsVersion
+
+    defaultConfig {
+        minSdkVersion rootProject.minSdkVersion
+        targetSdkVersion rootProject.targetSdkVersion
+
+        sourceSets {
+            main {
+                manifest.srcFile '../fbjni/java/com/facebook/jni/AndroidManifest.xml'
+                java {
+                    srcDir '../fbjni/java'
+                }
+            }
+        }
+        ndk {
+            abiFilters ABI_FILTERS.split(",")
+        }
+    }
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "../fbjni/CMakeLists.txt"
+        }
+    }
+}
+
+dependencies {
+    compileOnly 'com.google.code.findbugs:jsr305:3.0.1'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
+}
+
+apply from: rootProject.file('gradle/release.gradle')
+
+task sourcesJar(type: Jar) {
+    from android.sourceSets.main.java.srcDirs
+    classifier = 'sources'
+}
+
+artifacts.add('archives', sourcesJar)

@@ -57,3 +57,29 @@ inline PyObject* THPUtils_packString(const std::string& str) {
   return PyUnicode_FromStringAndSize(str.c_str(), str.size());
 #endif
 }
+
+inline PyObject* THPUtils_internString(const std::string& str) {
+#if PY_MAJOR_VERSION == 2
+  return PyString_InternFromString(str.c_str());
+#else
+  return PyUnicode_InternFromString(str.c_str());
+#endif
+}
+
+// Precondition: THPUtils_checkString(obj) must be true
+inline bool THPUtils_isInterned(PyObject* obj) {
+#if PY_MAJOR_VERSION == 2
+  return PyString_CHECK_INTERNED(obj);
+#else
+  return PyUnicode_CHECK_INTERNED(obj);
+#endif
+}
+
+// Precondition: THPUtils_checkString(obj) must be true
+inline void THPUtils_internStringInPlace(PyObject** obj) {
+#if PY_MAJOR_VERSION == 2
+  PyString_InternInPlace(obj);
+#else
+  PyUnicode_InternInPlace(obj);
+#endif
+}

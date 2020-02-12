@@ -24,12 +24,12 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
            const bool inverse, IntArrayRef signal_sizes, const bool normalized,
            const bool onesided) {
 
-  AT_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
+  TORCH_CHECK(signal_ndim >= 1 && signal_ndim <= 3,
            "Expected signal_ndim to be 1, 2, or 3, but got signal_ndim=",
            signal_ndim);
-  AT_CHECK(at::isFloatingType(self.scalar_type()),
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()),
            "Expected an input tensor of floating types, but got input=",
-           self.type(), self.sizes());
+           self.toString(), self.sizes());
 
   auto signal_tensor_ndim = signal_ndim + static_cast<int64_t>(complex_input);  // add complex dim
   if (self.dim() < signal_tensor_ndim) {
@@ -39,7 +39,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     if (complex_input) {
       ss << " (complex input adds an extra dimension)";
     }
-    ss << ", but got input=" << self.type() << self.sizes();
+    ss << ", but got input=" << self.toString() << self.sizes();
     AT_ERROR(ss.str());
   }
 
@@ -62,14 +62,14 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   // now we assume that input is batched as [ B x signal_dims... ]
 
   if (complex_input) {
-    AT_CHECK(input.size(signal_ndim + 1) == 2,
+    TORCH_CHECK(input.size(signal_ndim + 1) == 2,
              "Expected an input tensor with a last dimension of size 2 "
              "representing real + imaginary components, but got input ",
-             self.type(), self.sizes());
+             self.toString(), self.sizes());
   }
 
   // build signal_sizes and output_size
-  AT_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
+  TORCH_CHECK(signal_sizes.size() == 0 || static_cast<int64_t>(signal_sizes.size()) == signal_ndim,
            "Expected signal_sizes to be empty (default) or of signal_ndim=",
            signal_ndim, "D, but got signal_sizes=", signal_sizes);
   std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
@@ -98,10 +98,10 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
         output_sizes[i + 1] = input_size;
       }
       checked_signal_sizes[i] = input_size;
-      AT_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
+      TORCH_CHECK(signal_sizes.size() == 0 || signal_sizes[i] == checked_signal_sizes[i],
                "Expected given signal_sizes=", signal_sizes," to have same "
                "shape with input at signal dimension ", i, ", but got "
-               "signal_sizes=", signal_sizes, " and input=", self.type(),
+               "signal_sizes=", signal_sizes, " and input=", self.toString(),
                self.sizes());
     }
   }
@@ -177,11 +177,11 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
             const optional<int64_t> win_lengthOpt, const Tensor& window,
             const bool normalized, const bool onesided) {
   #define REPR(SS) \
-    SS << "stft(" << self.type() << self.sizes() << ", n_fft=" << n_fft \
+    SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.type() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << "{" << window.sizes() << "}"; \
     } else { \
       SS << "None"; \
     } \

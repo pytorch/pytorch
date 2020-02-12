@@ -9,8 +9,8 @@ libraries users call in the workers. In this file and `DataLoader.cpp`, we make
 our best effort to provide some error message to users when such unfortunate
 events happen.
 
-When a _DataLoaderIter starts worker processes, their pids are registered in a
-defined in `DataLoader.cpp`: id(_DataLoaderIter) => Collection[ Worker pids ]
+When a _BaseDataLoaderIter starts worker processes, their pids are registered in a
+defined in `DataLoader.cpp`: id(_BaseDataLoaderIter) => Collection[ Worker pids ]
 via `_set_worker_pids`.
 
 When an error happens in a worker process, the main process received a SIGCHLD,
@@ -32,9 +32,12 @@ multiprocessing data loading robust to errors.
 
 import signal
 import threading
-from torch._C import _set_worker_pids, _remove_worker_pids, _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
 from . import IS_WINDOWS
 
+# Some of the following imported functions are not used in this file, but are to
+# be used `_utils.signal_handling.XXXXX`.
+from torch._C import _set_worker_pids, _remove_worker_pids  # noqa: F401
+from torch._C import _error_if_any_worker_fails, _set_worker_signal_handlers  # noqa: F401
 
 _SIGCHLD_handler_set = False
 r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one

@@ -1,10 +1,15 @@
 #ifndef CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 #define CAFFE2_OPERATORS_SEGMENT_REDUCTION_OP_H_
 
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LengthsSum);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LengthsMean);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LengthsMax);
 
 namespace caffe2 {
 
@@ -1976,7 +1981,7 @@ This op is basically Gather and Lengths{op} fused together.
 INDICES should contain integers in range 0..N-1 where N is the first dimension
 of DATA. INDICES represent which slices of DATA need to be pulled in.
 
-LENGTHS is a vector that defines slice sizes by first dimention of DATA. Values
+LENGTHS is a vector that defines slice sizes by first dimension of DATA. Values
 belonging to the same segment are aggregated together. sum(LENGTHS) has
 to match INDICES size.
 
@@ -2042,7 +2047,7 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
       SIndex,
       Context,
       ReducerGradient>;
-  // Will return 3 input version. This is aliging new CPU/GPU nets.
+  // Will return 3 input version. This is aligning new CPU/GPU nets.
   using GetGradient = LengthsOpGetGradient<
       ForwardOp,
       ReducerDef,

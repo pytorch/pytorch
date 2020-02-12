@@ -4,8 +4,6 @@
 
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
 
 namespace torch {

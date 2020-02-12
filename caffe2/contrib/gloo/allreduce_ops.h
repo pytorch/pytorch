@@ -59,12 +59,11 @@ class AllreduceOp final : public Operator<Context> {
  protected:
   void initialize() {
     Mode mode = HALVING_DOUBLING;
-    auto bytes = Input(1).nbytes();
 
     // Store which inputs/outputs this instance initialized with
     update(init_);
 
-    // Verify inputs == ouputs
+    // Verify inputs == outputs
     CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
     for (auto i = 0; i < init_.inputs.size(); i++) {
       CAFFE_ENFORCE_EQ(init_.inputs[i], init_.outputs[i]);

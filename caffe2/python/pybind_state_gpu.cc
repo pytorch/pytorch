@@ -16,6 +16,8 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 #include "caffe2/python/pybind_state_registry.h"
+#include <c10/cuda/CUDAGuard.h>
+
 
 #ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
@@ -50,6 +52,12 @@ void addCUDAGlobalMethods(py::module& m) {
   m.attr("cudnn_convolution_bwd_data_algo_count") = py::int_(0);
   m.attr("cudnn_convolution_bwd_filter_algo_count") = py::int_(0);
 #endif
+  m.def("get_gpu_memory_info", [](int device_id) {
+    CUDAGuard guard(device_id);
+    size_t device_free, device_total;
+    CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return std::pair<size_t, size_t>{device_free, device_total};
+  });
   m.def("get_cuda_peer_access_pattern", []() {
     std::vector<std::vector<bool>> pattern;
     CAFFE_ENFORCE(caffe2::GetCudaPeerAccessPattern(&pattern));

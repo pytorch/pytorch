@@ -35,7 +35,7 @@ class Categorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log-odds
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}
@@ -93,22 +93,19 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     @property
     def variance(self):
-        return self.probs.new_tensor(nan).expand(self._extended_shape())
+        return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)
         param_shape = sample_shape + torch.Size((self._num_events,))
         probs = self.probs.expand(param_shape)
-        if self.probs.dim() == 1 or self.probs.size(0) == 1:
-            probs_2d = probs.view(-1, self._num_events)
-        else:
-            probs_2d = probs.contiguous().view(-1, self._num_events)
+        probs_2d = probs.reshape(-1, self._num_events)
         sample_2d = torch.multinomial(probs_2d, 1, True)
-        return sample_2d.contiguous().view(sample_shape)
+        return sample_2d.reshape(sample_shape)
 
     def log_prob(self, value):
         if self._validate_args:

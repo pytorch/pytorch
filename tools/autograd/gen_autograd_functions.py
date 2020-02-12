@@ -1,16 +1,17 @@
 # Generates C++ autograd functions for the derivatives of ATen operations
 #
 # This writes two files:
-#  Functions.h/cpp: subclasses of autograd::Function
+#  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
+import os
 import re
 from .utils import nested_dict, CodeTemplate, write
 from .gen_autograd import VIEW_FUNCTIONS
 from .utils import IDENT_REGEX
 
 FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public ${superclass} {
+struct TORCH_API ${op} : public ${superclass} {
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -32,6 +33,7 @@ void will_release_variables() override {
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(variable_list&& grads) {
+  ${asserts}
   IndexRangeGenerator gen;
   ${compute_index_ranges}
   variable_list grad_inputs(gen.size());
@@ -81,17 +83,20 @@ if (should_compute_output({ ${idx_ranges} })) {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
-def gen_autograd_functions(out, autograd_functions, template_path):
+def gen_autograd_functions_lib(out, autograd_functions, template_path):
+    gen_autograd_functions(out, autograd_functions, template_path, "Functions")
+
+
+def gen_autograd_functions_python(out, autograd_functions, template_path):
+    gen_autograd_functions(out, autograd_functions, template_path, "python_functions")
+
+
+def gen_autograd_functions(out, autograd_functions, template_path, file_basename):
     """Functions.h and Functions.cpp body
 
-    These contain the auto-generated subclasses of torch::autograd::Function
+    These contain the auto-generated subclasses of torch::autograd::Node
     for each every differentiable torch function.
     """
-
-    FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
-    FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
-    PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
-    PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
 
     function_definitions = []
     function_declarations = []
@@ -110,10 +115,10 @@ def gen_autograd_functions(out, autograd_functions, template_path):
         'py_function_initializers': py_function_initializers,
     }
 
-    write(out, 'Functions.h', FUNCTIONS_H, top_env)
-    write(out, 'Functions.cpp', FUNCTIONS_CPP, top_env)
-    write(out, 'python_functions.h', PY_FUNCTIONS_H, top_env)
-    write(out, 'python_functions.cpp', PY_FUNCTIONS_CPP, top_env)
+    for suffix in [".h", ".cpp"]:
+        f = file_basename + suffix
+        templated_output = CodeTemplate.from_file(os.path.join(template_path, f))
+        write(out, f, templated_output, top_env)
 
 
 def process_function(func):
@@ -122,6 +127,7 @@ def process_function(func):
     release_variables = []
     saved_list_sizes = []
     unpack = []
+    asserts = []
 
     env['compute_index_ranges'] = []
     for arg in func['args_with_derivatives']:
@@ -134,6 +140,7 @@ def process_function(func):
 
     def save_arg(arg, is_output):
         name = arg['name']
+
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))
@@ -142,8 +149,13 @@ def process_function(func):
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':
             saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
+            saved_variables.append('bool {}_released_ = false;'.format(name))
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append('{}_.clear();'.format(name))
+            release_variables.append('{}_released_ = true;'.format(name))
             unpack.append('auto {} = unpack_list({}_);'.format(name, name))
+            asserts.append('TORCH_CHECK(!{}_released_, ERR_BACKWARD_TWICE);'.format(name))
         elif arg['type'] == 'IntArrayRef':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
         elif arg['type'] == 'int64_t':
@@ -158,6 +170,7 @@ def process_function(func):
     env['saved_variables'] = saved_variables
     env['release_variables'] = release_variables
     env['saved_list_sizes'] = saved_list_sizes
+    env['asserts'] = asserts
 
     if uses_retain_variables(func):
         env['will_release_variables'] = WILL_RELEASE_VARIABLES.substitute()
@@ -195,7 +208,7 @@ def process_function(func):
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:
-        env['superclass'] = 'Function'
+        env['superclass'] = 'Node'
     else:
         env['superclass'] = 'TraceableFunction'
     return nested_dict(env, func)

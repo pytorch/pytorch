@@ -445,7 +445,7 @@ namespace {
                 &data_type,
                 &format,
                 &nb_dims,
-                filter_dim_a.data<int>()
+                filter_dim_a.data_ptr<int>()
                 ));
 
           AT_ASSERTM(nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
@@ -460,7 +460,7 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
-          int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data<int>();
+          int mat_numel = *filter_dim_a.prod(at::ScalarType::Int).data_ptr<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
             std::initializer_list<int64_t> size = {
               mat_numel * num_linear_layers / 2, 1};
@@ -627,7 +627,7 @@ Tensor _cudnn_rnn_flatten_weight(
     bool fn_bidirectional
     ) {
 
-  AT_CHECK(weight_arr.size() > 0,
+  TORCH_CHECK(weight_arr.size() > 0,
            "_cudnn_rnn_flatten_weight_: cannot flatten empty weight list");
 
   auto any_param = weight_arr[0];
@@ -701,7 +701,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // TODO: Set device to input
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -714,9 +714,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -750,7 +750,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     w_desc.set(weight_buf, 3);
   }
 
-  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
 
   size_t workspace_size;
@@ -842,7 +842,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -857,9 +857,9 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -873,24 +873,24 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   AT_ASSERTM(cx.defined() || !output_mask[2], "illegally required grad of cx for non-LSTM RNN");
   auto dcx = cx.defined() ? at::empty(hidden_size, cx.options()) : Tensor();
 
-  AT_CHECK(fn_train,
+  TORCH_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
 
-  AT_CHECK(input.sizes().equals(input_size),
+  TORCH_CHECK(input.sizes().equals(input_size),
            "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-  AT_CHECK(output.sizes().equals(output_size),
+  TORCH_CHECK(output.sizes().equals(output_size),
            "Expected output size ", IntArrayRef{output_size}, ", got ", output.sizes());
 
-  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+  TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
-  AT_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
+  TORCH_CHECK(!cx.defined() || cx.sizes().equals(hidden_size),
            "Expected cell size ", IntArrayRef{hidden_size}, ", got ", cx.sizes());
-  AT_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
+  TORCH_CHECK(!dhy.defined() || dhy.sizes().equals(hidden_size),
            "Expected d_hidden size ", IntArrayRef{hidden_size}, ", got ", dhy.sizes());
-  AT_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
+  TORCH_CHECK(!dcy.defined() || dcy.sizes().equals(hidden_size),
            "Expected d_cell size ", IntArrayRef{hidden_size}, ", got ", dcy.sizes());
 
-  AT_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
+  TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
            "Gradients aren't CUDA tensors");
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input);
@@ -912,7 +912,6 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
         ));
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
   AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
@@ -965,7 +964,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto handle = getCudnnHandle();
 
   if (fn.rnn.mode != CUDNN_LSTM) {
-    AT_CHECK(!cx.defined(),
+    TORCH_CHECK(!cx.defined(),
              "rnn: illegal defined cx for non-LSTM RNN");
   }
 
@@ -978,20 +977,20 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto input_size = _input_size(fn.tensors);
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-  AT_CHECK(fn_train,
+  TORCH_CHECK(fn_train,
            "cudnn RNN backward can only be called in training mode");
 
-  AT_CHECK(input.sizes().equals(input_size),
+  TORCH_CHECK(input.sizes().equals(input_size),
            "Expected input size ", IntArrayRef{input_size}, ", got ", input.sizes());
-  AT_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
+  TORCH_CHECK(!hx.defined() || hx.sizes().equals(hidden_size),
            "Expected hidden size ", IntArrayRef{hidden_size}, ", got ", hx.sizes());
 
   // TODO: the above were the only checks in rnn.py, but it doesn't seem
   // like these checks are enough
 
-  AT_CHECK(hx.is_contiguous(),
+  TORCH_CHECK(hx.is_contiguous(),
            "rnn: hx is not contiguous");
-  AT_CHECK(!cx.defined() || cx.is_contiguous(),
+  TORCH_CHECK(!cx.defined() || cx.is_contiguous(),
            "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
@@ -1016,7 +1015,6 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         &workspace_size
         ));
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
-
   AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
@@ -1062,9 +1060,9 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     std::array<bool, 4> output_mask
     ) {
 
-  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output);
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx);
-  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx)) : grad_cy_r;
+  auto grad_output = grad_output_r.defined() ? grad_output_r : at::zeros_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
@@ -1121,7 +1119,7 @@ std::tuple<Tensor, Tensor> pack_hidden<std::tuple<Tensor, Tensor>>(const Tensor&
 struct DropoutState {
   // Both buffer and event are lazily instantiated when a dropout state is needed
   // for the first time. Note that in this case needed != used, as we don't need
-  // a bufer to e.g. run RNNs in test mode.
+  // a buffer to e.g. run RNNs in test mode.
   at::Tensor buffer;
   c10::optional<cuda::CUDAEvent> event;
   std::mutex mutex;
@@ -1151,14 +1149,12 @@ struct DropoutState {
 
 DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions options) {
   // Each state is slightly over 2MB and initialized lazily, so it's fine to cache them.
-  static std::vector<DropoutState> ten_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
-  static std::vector<DropoutState> var_dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
+  static std::vector<DropoutState> dropout_state_cache { static_cast<size_t>(cuda::getNumGPUs()) };
   static std::mutex state_cache_mut;
 
   int device = cuda::current_device();
   std::unique_lock<std::mutex> lock {state_cache_mut};
-  auto& state = options.is_variable() ? var_dropout_state_cache.at(device)
-                                      : ten_dropout_state_cache.at(device);
+  auto& state = dropout_state_cache.at(device);
   if (train && dropout_p > 0 && !state.buffer.defined()) {
     std::unique_lock<std::mutex> lock {state.mutex};
     int64_t seed = at::empty({}, at::kLong).random_().item<int64_t>();
@@ -1236,8 +1232,8 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     AT_WARN(WEIGHT_FORMAT_WARN);
   }
 
-  AT_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  IntArrayRef batch_sizes { _batch_sizes.data<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
+  TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
+  IntArrayRef batch_sizes { _batch_sizes.data_ptr<int64_t>(), static_cast<size_t>(_batch_sizes.size(0)) };
 
   auto & dropout_state = get_dropout_state(dropout_p, train, input.options());
   std::unique_lock<DropoutState> lock { dropout_state };

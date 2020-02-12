@@ -1,11 +1,12 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
     input: "0"
     output: "1"
     output: "2"
+    name: "Split_0"
     op_type: "Split"
     attribute {
       name: "axis"

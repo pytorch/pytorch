@@ -2,12 +2,13 @@
 
 #include <stdexcept>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 namespace torch {
 namespace jit {
 
-struct JITException : public std::runtime_error {
-  JITException() = default;
-  explicit JITException(const std::string& msg) : std::runtime_error(msg) {}
+struct TORCH_API JITException : public std::runtime_error {
+  explicit JITException(const std::string& msg);
 };
 
 } // namespace jit

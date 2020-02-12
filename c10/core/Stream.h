@@ -92,6 +92,15 @@ public:
   DeviceIndex device_index() const noexcept { return device_.index(); }
   StreamId id() const noexcept { return id_; }
 
+  // Enqueues a wait instruction in the stream's work queue.
+  // This instruction is a no-op unless the event is marked
+  // for recording. In that case the stream stops processing
+  // until the event is recorded.
+  template <typename T>
+  void wait(const T& event) const {
+    event.block(*this);
+  }
+
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
   // class with two fields (device and stream id); with packing I can just
@@ -120,7 +129,7 @@ public:
     auto device_index = static_cast<DeviceIndex>(bits) & 0xFFFFull;
     bits >>= 16;
     auto device_type = static_cast<DeviceType>(bits);
-    AT_CHECK(isValidDeviceType(device_type));
+    TORCH_CHECK(isValidDeviceType(device_type));
     // Unfortunately, we can't check if the StreamId is valid here; it
     // will be checked upon first use.
     return Stream(UNSAFE, Device(device_type, device_index), stream_id);
@@ -143,8 +152,3 @@ namespace std {
     }
   };
 } // namespace std
-
-namespace at {
-  using c10::StreamId;
-  using c10::Stream;
-}

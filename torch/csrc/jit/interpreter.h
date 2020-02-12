@@ -3,15 +3,17 @@
 #include <memory>
 #include <vector>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
 class Tensor;
 }
 namespace c10 {
 struct IValue;
-}
+struct OperatorName;
+} // namespace c10
+
 namespace torch {
 namespace jit {
 
@@ -25,13 +27,18 @@ struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
 struct Node;
+struct Instruction;
 using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
-using c10::ivalue::Tuple;
 
 struct TORCH_API Code {
   Code() : pImpl(nullptr) {}
-  explicit Code(const std::shared_ptr<Graph>& graph);
+  // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
+  // is directly created by `GraphExecutor` in which case it's likely to contain
+  // `prim::BailOut`s to control the maximum depth of bailout chains
+  explicit Code(
+      const std::shared_ptr<Graph>& graph,
+      size_t remaining_bailout_depth = 0);
   ~Code();
 
   const std::vector<GraphExecutor*>& grad_executors();
@@ -39,7 +46,14 @@ struct TORCH_API Code {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
-
+  size_t num_inputs() const;
+  size_t num_outputs() const;
+  size_t num_bailouts() const;
+  const std::vector<c10::IValue>& constant_table() const;
+  const std::vector<Instruction>& instructions() const;
+  const std::vector<Node*>& instructions_source() const;
+  void request_bailout(size_t index);
+  size_t register_size() const;
  private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
@@ -47,11 +61,11 @@ struct TORCH_API Code {
 };
 
 struct InterpreterState {
-  InterpreterState(const Code& code);
-  void run(Stack& stack);
+  TORCH_API InterpreterState(const Code& code);
+  TORCH_API void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
-  ~InterpreterState();
+  TORCH_API ~InterpreterState();
 
  private:
   InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl);
@@ -75,8 +89,13 @@ struct Suspend : public std::exception {
 };
 
 struct InterpreterContinuation {
-  InterpreterContinuation(InterpreterState state_, Stack stack_, bool grad_mode_enabled_)
-      : state(state_), stack(std::move(stack_)), grad_mode_enabled(grad_mode_enabled_) {}
+  InterpreterContinuation(
+      InterpreterState state_,
+      Stack stack_,
+      bool grad_mode_enabled_)
+      : state(state_),
+        stack(std::move(stack_)),
+        grad_mode_enabled(grad_mode_enabled_) {}
 
   void operator()();
 
@@ -85,5 +104,12 @@ struct InterpreterContinuation {
   Stack stack;
   bool grad_mode_enabled;
 };
+
+// what is the tensors type, including state from the current execution context
+// that modifies how the tensor behaves. For instance if no_grad is enabled
+// this will cause the TensorType to have requires_grad=False.
+TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
+    const at::Tensor& t);
+
 } // namespace jit
 } // namespace torch

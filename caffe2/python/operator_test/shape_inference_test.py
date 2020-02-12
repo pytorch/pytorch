@@ -528,6 +528,17 @@ class TestShapeInference(test_util.TestCase):
         # TODO: find a tighter bound
         assert(np.allclose(x, x_recovered, atol=1e-2))
 
+        model = model_helper.ModelHelper(name="fp32_int8_conversion_test")
+        model.FloatToFused8BitRowwiseQuantizedHalfScaleBias('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedHalfScaleBiasToFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
+
+
     def testHalfInt8Conversion(self):
         model = model_helper.ModelHelper(name="fp16_int8_conversion_test")
         model.HalfFloatToFused8BitRowwiseQuantized('x', 'x_8bit')
@@ -538,6 +549,39 @@ class TestShapeInference(test_util.TestCase):
         x_recovered = workspace.FetchBlob('x_recovered')
         # TODO: find a tighter bound
         assert(np.allclose(x, x_recovered, atol=1e-2))
+
+        model = model_helper.ModelHelper(name="fp16_int8_conversion_test")
+        model.HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias('x', 'x_8bit')
+        model.Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat('x_8bit', 'x_recovered')
+        workspace.FeedBlob('x', np.random.rand(100, 150).astype(np.float16))
+        self.InferTensorRunAndCompare(model)
+        x = workspace.FetchBlob('x')
+        x_recovered = workspace.FetchBlob('x_recovered')
+        # TODO: find a tighter bound
+        assert(np.allclose(x, x_recovered, atol=1e-2))
+
+
+    def testLearningRateOp(self):
+        net = core.Net("lr_test")
+        iteration = net.ConstantFill(
+            [],
+            "iteration",
+            shape=[1],
+            value=0,
+            dtype=core.DataType.INT64,
+        )
+        lr = net.LearningRate(
+            [iteration],
+            net.NextScopedBlob("weight_decay"),
+            base_lr=0.5,
+            policy="constantWarmup",
+            multiplier=0.0,
+            num_iter=0,
+        )
+        (shapes, types) = workspace.InferShapesAndTypes(
+            [net],
+        )
+        self.assertEqual(shapes['weight_decay'], [1])
 
     def testShapeOp(self):
         model = model_helper.ModelHelper(name="shape_op_test")

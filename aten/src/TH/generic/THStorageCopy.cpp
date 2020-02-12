@@ -2,18 +2,14 @@
 #define TH_GENERIC_FILE "TH/generic/THStorageCopy.cpp"
 #else
 
-void THStorage_(rawCopy)(THStorage *storage, scalar_t *src)
-{
-  ptrdiff_t i;
-  scalar_t *data = THStorage_(data)(storage);
-  for(i = 0; i < storage->numel(); i++)
-    data[i] = src[i];
-}
-
 void THStorage_(copy)(THStorage *storage, THStorage *src)
 {
   THArgCheck(storage->numel() == src->numel(), 2, "size mismatch");
-  THStorage_(rawCopy)(storage, THStorage_(data)(src));
+  scalar_t *scalar_src = THStorage_(data)(src);
+  scalar_t *data = THStorage_(data)(storage);
+  for (ptrdiff_t i = 0; i < storage->numel(); ++i) {
+    data[i] = scalar_src[i];
+  }
 }
 
 // NOTE: for performance, these macros generally use the raw data pointer in the inner loops,
@@ -38,5 +34,15 @@ IMPLEMENT_THStorage_COPY(Float)
 IMPLEMENT_THStorage_COPY(Double)
 IMPLEMENT_THStorage_COPY(Half)
 IMPLEMENT_THStorage_COPY(Bool)
+IMPLEMENT_THStorage_COPY(BFloat16)
+#ifdef THQUINT8
+IMPLEMENT_THStorage_COPY(QUInt8)
+#endif
+#ifdef THQINT8
+IMPLEMENT_THStorage_COPY(QInt8)
+#endif
+#ifdef THQINT32
+IMPLEMENT_THStorage_COPY(QInt32)
+#endif
 
 #endif

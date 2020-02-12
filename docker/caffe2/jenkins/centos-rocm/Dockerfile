@@ -7,6 +7,7 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install required packages to build Caffe2
 ARG EC2
+ARG CENTOS_VERSION
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
@@ -16,6 +17,12 @@ ADD ./install_devtoolset.sh install_devtoolset.sh
 RUN bash ./install_devtoolset.sh
 RUN rm install_devtoolset.sh
 ENV BASH_ENV "/etc/profile"
+
+# (optional) Install non-default glibc version
+ARG GLIBC_VERSION
+ADD ./install_glibc.sh install_glibc.sh
+RUN if [ -n "${GLIBC_VERSION}" ]; then bash ./install_glibc.sh; fi
+RUN rm install_glibc.sh
 
 # Install rocm
 ARG ROCM_VERSION

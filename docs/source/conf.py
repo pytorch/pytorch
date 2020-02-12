@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
 # PyTorch documentation build configuration file, created by
@@ -53,19 +52,20 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinxcontrib.katex',
+    'sphinx.ext.autosectionlabel',
+    'javasphinx',
 ]
+
+# autosectionlabel throws warnings if section names are duplicated.
+# The following tells autosectionlabel to not throw a warning for
+# duplicated section names that are in different documents.
+autosectionlabel_prefix_document = True
 
 # katex options
 #
 #
 
-katex_options = r'''
-delimiters : [
-   {left: "$$", right: "$$", display: true},
-   {left: "\\(", right: "\\)", display: false},
-   {left: "\\[", right: "\\]", display: true}
-]
-'''
+katex_prerender = True
 
 napoleon_use_ivar = True
 
@@ -85,7 +85,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2018, Torch Contributors'
+copyright = '2019, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -158,7 +158,11 @@ if RELEASE:
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static', '_images']
+html_static_path = ['_static']
+
+html_css_files = [
+    'css/jit.css',
+]
 
 
 # Called automatically by Sphinx, making this `conf.py` an "extension".
@@ -246,6 +250,17 @@ intersphinx_mapping = {
 from docutils import nodes
 from sphinx.util.docfields import TypedField
 from sphinx import addnodes
+import sphinx.ext.doctest
+
+# Without this, doctest adds any example with a `>>>` as a test
+doctest_test_doctest_blocks = ''
+doctest_default_flags = sphinx.ext.doctest.doctest.ELLIPSIS
+doctest_global_setup = '''
+try:
+    import torchvision
+except ImportError:
+    torchvision = None
+'''
 
 
 def patched_make_field(self, types, domain, items, **kw):

@@ -2,12 +2,14 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/variable_tensor_list.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>
 #include <vector>
+
+#include <torch/csrc/utils/hash.h>
 
 namespace torch {
 namespace jit {
@@ -39,11 +41,18 @@ struct ArgumentInfo {
   at::ScalarType type() const {
     return at::ScalarType(type_);
   }
-  operator TypePtr() const {
+  TypePtr toType() const {
     if (!defined())
       return TensorType::get();
-    return DimensionedTensorType::create(
-        type(), ConvertIntToCPUOrCUDA(device()), dim());
+    return TensorType::create(
+        type(),
+        ConvertIntToCPUOrCUDA(device()),
+        c10::VaryingShape(dim()),
+        c10::VaryingShape(dim()),
+        requires_grad());
+  }
+  operator TypePtr() const {
+    return toType();
   }
 
  private:
@@ -64,15 +73,22 @@ static_assert(
     "ArgumentInfo is expected to be a 32-bit struct");
 
 struct ArgumentSpec {
-  ArgumentSpec(size_t num_flat_inputs) {
-    hash_code = num_flat_inputs;
-    args.reserve(num_flat_inputs);
+  ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
+    hash_code = hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+    tensor_args.reserve(num_flat_tensor_inputs);
+    optional_presence.reserve(num_flat_optional_inputs);
+  }
+
+  void addOptional(const IValue& input) {
+    bool is_present = !input.isNone();
+    optional_presence.push_back(is_present);
+    hash_code = hash_combine(hash_code, is_present);
   }
 
   void addTensor(const IValue& input, bool with_grad) {
-    AT_ASSERT(input.isTensor());
-    args.emplace_back();
-    auto& arg = args.back();
+    AT_ASSERT(input.isTensor(), "Expected Tensor but found ", input.tagKind());
+    tensor_args.emplace_back();
+    auto& arg = tensor_args.back();
     // Initialize all fields to 0. This is convenient, because e.g.
     // requires_grad() can be checked even on tensors AND will make
     // padding bits all 0s.
@@ -100,26 +116,36 @@ struct ArgumentSpec {
 
   // equality is fast: check ninputs, and then check the raw array data,
   // there are no size/stride indirections
+  // hopefully std::vector<bool> has fast equality
   bool operator==(const ArgumentSpec& spec) const {
-    if (args.size() != spec.args.size())
+    if (optional_presence != spec.optional_presence) {
+      return false;
+    }
+    if (tensor_args.size() != spec.tensor_args.size())
       return false;
     // NB: we need to break out early when there are no elements, because
     // passing a nullptr to memcmp is UB.
-    if (args.size() == 0)
+    if (tensor_args.size() == 0)
       return true;
     return std::memcmp(
-               args.data(),
-               spec.args.data(),
-               args.size() * sizeof(ArgumentInfo)) == 0;
+               tensor_args.data(),
+               spec.tensor_args.data(),
+               tensor_args.size() * sizeof(ArgumentInfo)) == 0;
   }
   bool operator!=(const ArgumentSpec& spec) const {
     return !(*this == spec);
   }
-  size_t size() const {
-    return args.size();
+  size_t numTensors() const {
+    return tensor_args.size();
   }
-  const ArgumentInfo& at(size_t i) const {
-    return args[i];
+  const ArgumentInfo& tensorAt(size_t i) const {
+    return tensor_args[i];
+  }
+  size_t numOptionals() const {
+    return optional_presence.size();
+  }
+  bool isPresent(size_t i) const {
+    return optional_presence[i];
   }
   size_t hashCode() const {
     return hash_code;
@@ -127,13 +153,18 @@ struct ArgumentSpec {
 
  private:
   size_t hash_code; // precomputed on construction
-  std::vector<ArgumentInfo> args;
+  std::vector<ArgumentInfo> tensor_args;
+  std::vector<bool> optional_presence;
 };
+
+namespace {
+static constexpr size_t ARG_SPEC_DEPTH_LIMIT = 128;
+}
 
 // ArgumentSpecCreator takes an initial graph and comes up with a set
 // of simple instructions to compute the ArgumentSpec given a set of
 // input tensors.
-struct ArgumentSpecCreator {
+struct TORCH_API ArgumentSpecCreator {
   // instructs acts on a stack of a list of input IValues
   // at the beginning the stack contains a single list of the inputs to the
   // function the ENTER_ instructs descend into subobjects and push new lists
@@ -144,26 +175,29 @@ struct ArgumentSpecCreator {
     ENTER_OBJECT, // same as ENTER_TUPLE, but the input is a class
     LEAVE, // pop the top-most list from the stack
     SKIP, // consume an element from the top-most list, and discard
-    SPECIALIZE_TENSOR, // consume a tensor for the top-most list, and
-                       // add it to the ArgSpec key being created
+    SPECIALIZE_OPTIONAL_TENSOR, // consume a optional tensor for the top-most
+                                // list, and add it to the ArgSpec key being
+                                // created
+    SPECIALIZE_TENSOR, // consume a tensor for the top-most
+                       // list, and add it to the ArgSpec key being created
+    SPECIALIZE_OPTIONAL,
+    // consume a nontensor optional from the top-most list,
+    // and add it to the ArgSpec key being created
   };
   ArgumentSpecCreator(Graph& graph);
   ArgumentSpec create(bool with_grad, const Stack& stack) const;
-  void setInputTypes(Graph& g, const ArgumentSpec& spec) const;
-  std::vector<TypePtr> getSpecializedTypes(
-      Graph& graph,
-      const ArgumentSpec& spec) const;
+  void specializeTypes(Graph& g, const ArgumentSpec& spec) const;
   void dump() const;
   using WrittenSlots = std::unordered_set<std::string>;
 
  private:
-  static constexpr size_t DEPTH_LIMIT = 128;
   void scan(
       const TypePtr& typ,
       size_t depth,
       const WrittenSlots& written_slots);
   size_t num_inputs_;
   size_t num_tensors_ = 0;
+  size_t num_optionals_ = 0;
   std::vector<Inst> instructions_;
 };
 
@@ -319,7 +353,7 @@ struct CompleteArgumentInfo {
   operator TypePtr() const {
     if (!defined())
       return TensorType::get();
-    return CompleteTensorType::create(
+    return TensorType::create(
         type(), ConvertIntToCPUOrCUDA(device()), sizes(), strides());
   }
 
@@ -352,10 +386,16 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
   out << "{";
-  for (size_t i = 0; i < spec.size(); ++i) {
+  for (size_t i = 0; i < spec.numTensors(); ++i) {
     if (i > 0)
       out << ", ";
-    out << spec.at(i);
+    out << spec.tensorAt(i);
+  }
+  out << "; ";
+  for (size_t i = 0; i < spec.numOptionals(); ++i) {
+    if (i > 0)
+      out << ", ";
+    out << spec.isPresent(i);
   }
   out << "}";
   return out;
@@ -390,10 +430,41 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
   return CompleteArgumentInfo(*this, i);
 }
 
+inline c10::optional<int8_t> convertOptional(
+    c10::optional<c10::ScalarType> const& from) {
+  return (from) ? c10::optional<int8_t>(static_cast<int8_t>(*from))
+                : c10::optional<int8_t>{};
+}
+
 } // namespace jit
 } // namespace torch
 
 namespace std {
+
+template <>
+struct hash<c10::VaryingShape> {
+  size_t operator()(const c10::VaryingShape& vs) const {
+    return torch::get_hash(
+        vs.size(),
+        vs.size() ? vs.sizes().value() : std::vector<c10::optional<int64_t>>());
+  }
+};
+
+template <>
+struct hash<c10::TensorType> {
+  size_t operator()(const c10::TensorType& ptt) const {
+    return torch::get_hash<
+        c10::optional<int8_t>,
+        c10::VaryingShape,
+        c10::VaryingShape,
+        c10::optional<bool>>(
+        torch::jit::convertOptional(ptt.scalarType()),
+        ptt.sizes(),
+        ptt.strides(),
+        ptt.requiresGrad());
+  }
+};
+
 template <>
 struct hash<torch::jit::ArgumentSpec> {
   size_t operator()(const torch::jit::ArgumentSpec& spec) const {

@@ -663,6 +663,7 @@ DELEGATE_REDUCE_FUNCTION(double, ReduceL2, 0.0, true)
     MomentsImpl<T>(ndim, X_dims, Y_dims, X, mean, var, context); \
   }
 CAFFE2_SPECIALIZED_MOMENTS(float)
+CAFFE2_SPECIALIZED_MOMENTS(double)
 #undef CAFFE2_SPECIALIZED_MOMENTS
 
 } // namespace math

@@ -32,15 +32,6 @@ std::string join_name(const std::string& name_prefix, const std::string& name) {
   full_name += name;
   return full_name;
 }
-
-void extend(
-    std::vector<Tensor>& vector,
-    const OrderedDict<std::string, Tensor>& dict) {
-  vector.reserve(vector.size() + dict.size());
-  for (const auto& item : dict) {
-    vector.push_back(item.value());
-  }
-}
 } // namespace
 
 Module::Module()
@@ -141,46 +132,48 @@ void Module::apply(
 }
 
 std::vector<Tensor> Module::parameters(bool recurse) const {
-  if (!recurse) {
-    return parameters_.values();
-  }
-  std::vector<Tensor> result;
-  apply(
-      [&result](const Module& module) { extend(result, module.parameters_); });
-  return result;
+  return named_parameters(recurse).values();
 }
 
 OrderedDict<std::string, Tensor> Module::named_parameters(bool recurse) const {
-  if (!recurse) {
-    return parameters_;
-  }
   OrderedDict<std::string, Tensor> result;
-  apply([&result](const std::string& name, const Module& module) {
-    for (const auto& parameter : module.parameters_) {
-      result.insert(join_name(name, parameter.key()), parameter.value());
+  if (!recurse) {
+    for (const auto& parameter : parameters_) {
+      if (parameter.value().defined()) {
+        result.insert(parameter.key(), parameter.value());
+      }
     }
-  });
+  } else {
+    apply([&result](const std::string& name, const Module& module) {
+      for (const auto& parameter : module.named_parameters(/*recurse=*/false)) {
+        TORCH_INTERNAL_ASSERT(parameter.value().defined());
+        result.insert(join_name(name, parameter.key()), parameter.value());
+      }
+    });
+  }
   return result;
 }
 
 std::vector<Tensor> Module::buffers(bool recurse) const {
-  if (!recurse) {
-    return buffers_.values();
-  }
-  std::vector<Tensor> result;
-  apply([&result](const Module& module) { extend(result, module.buffers_); });
-  return result;
+  return named_buffers(recurse).values();
 }
+
 OrderedDict<std::string, Tensor> Module::named_buffers(bool recurse) const {
-  if (!recurse) {
-    return buffers_;
-  }
   OrderedDict<std::string, Tensor> result;
-  apply([&result](const std::string& name, const Module& module) {
-    for (const auto& buffer : module.buffers_) {
-      result.insert(join_name(name, buffer.key()), buffer.value());
+  if (!recurse) {
+    for (const auto& buffer : buffers_) {
+      if (buffer.value().defined()) {
+        result.insert(buffer.key(), buffer.value());
+      }
     }
-  });
+  } else {
+    apply([&result](const std::string& name, const Module& module) {
+      for (const auto& buffer : module.named_buffers(/*recurse=*/false)) {
+        TORCH_INTERNAL_ASSERT(buffer.value().defined());
+        result.insert(join_name(name, buffer.key()), buffer.value());
+      }
+    });
+  }
   return result;
 }
 
@@ -261,7 +254,7 @@ void Module::zero_grad() {
   for (auto& child : children_) {
     child.value()->zero_grad();
   }
-  for (auto& parameter : parameters_) {
+  for (auto& parameter : named_parameters(/*recurse=*/false)) {
     auto& grad = parameter->grad();
     if (grad.defined()) {
       grad = grad.detach();
@@ -271,55 +264,80 @@ void Module::zero_grad() {
 }
 
 void Module::save(serialize::OutputArchive& archive) const {
-  for (const auto& parameter : parameters_) {
+  for (const auto& parameter : named_parameters(/*recurse=*/false)) {
     archive.write(parameter.key(), parameter.value());
   }
-  for (const auto& buffer : buffers_) {
+  for (const auto& buffer : named_buffers(/*recurse=*/false)) {
     archive.write(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    serialize::OutputArchive child_archive;
-    child.value()->save(child_archive);
-    archive.write(child.key(), child_archive);
+    if (child.value()->is_serializable()) {
+      serialize::OutputArchive child_archive(archive.compilation_unit());
+      child.value()->save(child_archive);
+      archive.write(child.key(), child_archive);
+    }
   }
 }
 
 void Module::load(serialize::InputArchive& archive) {
-  for (auto& parameter : parameters_) {
+  for (auto& parameter : named_parameters(/*recurse=*/false)) {
     archive.read(parameter.key(), parameter.value());
   }
-  for (auto& buffer : buffers_) {
+  for (auto& buffer : named_buffers(/*recurse=*/false)) {
     archive.read(buffer.key(), buffer.value(), /*is_buffer=*/true);
   }
   for (const auto& child : children_) {
-    serialize::InputArchive child_archive;
-    archive.read(child.key(), child_archive);
-    child.value()->load(child_archive);
+    if (child.value()->is_serializable()) {
+      serialize::InputArchive child_archive;
+      archive.read(child.key(), child_archive);
+      child.value()->load(child_archive);
+    }
   }
+}
+
+bool Module::is_serializable() const {
+  return true;
 }
 
 Tensor& Module::register_parameter(
     std::string name,
     Tensor tensor,
     bool requires_grad) {
-  AT_CHECK(!name.empty(), "Parameter name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Parameter name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Parameter name must not contain a dot (got '",
       name,
       "')");
-  tensor.set_requires_grad(requires_grad);
+  if (!tensor.defined()) {
+    if (requires_grad) {
+      TORCH_WARN(
+        "An undefined tensor cannot require grad. ",
+        "Ignoring the `requires_grad=true` function parameter.");
+    }
+  } else {
+    tensor.set_requires_grad(requires_grad);
+  }
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 
 Tensor& Module::register_buffer(std::string name, Tensor tensor) {
-  AT_CHECK(!name.empty(), "Buffer name must not be empty");
-  AT_CHECK(
+  TORCH_CHECK(!name.empty(), "Buffer name must not be empty");
+  TORCH_CHECK(
       name.find('.') == std::string::npos,
       "Buffer name must not contain a dot (got '",
       name,
       "')");
   return buffers_.insert(std::move(name), std::move(tensor));
+}
+
+void Module::unregister_module(const std::string& name) {
+  TORCH_CHECK(
+      children_.contains(name),
+      "No Module with name `",
+      name,
+      "` is registered");
+  children_.erase(name);
 }
 
 void Module::pretty_print(std::ostream& stream) const {
@@ -380,7 +398,7 @@ std::ostream& operator<<(std::ostream& stream, const nn::Module& module) {
 serialize::OutputArchive& operator<<(
     serialize::OutputArchive& archive,
     const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot serialize empty module");
+  TORCH_CHECK(module != nullptr, "Cannot serialize empty module");
   module->save(archive);
   return archive;
 }
@@ -388,7 +406,7 @@ serialize::OutputArchive& operator<<(
 serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     const std::shared_ptr<nn::Module>& module) {
-  AT_CHECK(module != nullptr, "Cannot deserialize empty module");
+  TORCH_CHECK(module != nullptr, "Cannot deserialize empty module");
   module->load(archive);
   return archive;
 }

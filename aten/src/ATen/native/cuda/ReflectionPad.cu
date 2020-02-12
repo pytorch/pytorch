@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-// keeping THC headers for atomicAdd
+// keeping THC headers for gpuAtomicAdd
 #include <THC/THCAtomics.cuh>
 
 #include <thrust/pair.h>
@@ -101,7 +101,7 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
-    atomicAdd(
+    gpuAtomicAdd(
       &grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
@@ -142,20 +142,20 @@ __global__ void reflection_pad2d_backward_out_kernel(
       pad_l, pad_t,
       output_xy);
 
-    atomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
+    gpuAtomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
 
 void reflection_pad1d_out_template(
     Tensor &output, const Tensor &input_, IntArrayRef padding) {
-  AT_CHECK(canUse32BitIndexMath(input_),
+  TORCH_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
   int64_t nbatch = 1;
 
-  AT_CHECK(input_.numel() > 0 &&
+  TORCH_CHECK(input_.numel() > 0 &&
     (input_.ndimension() == 2 || input_.ndimension() == 3), "non-empty 2D "
     "or 3D (batch mode) tensor expected for input, but got: ", input_);
 
@@ -172,11 +172,11 @@ void reflection_pad1d_out_template(
   int64_t input_w = input_.size(dim_w);
   int64_t output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(pad_l < input_w && pad_r < input_w, "Padding size should be less "
+  TORCH_CHECK(pad_l < input_w && pad_r < input_w, "Padding size should be less "
     "than the corresponding input dimension, but got: padding (",  pad_l, ", ",
     pad_r, ") at dimension ", dim_w, " of input ", input_);
 
-  AT_CHECK(output_w >= 1,
+  TORCH_CHECK(output_w >= 1,
     "input (W: ", input_w, ")is too small. Calculated output W: ", output_w);
 
   if (input_.ndimension() == 2) {
@@ -194,7 +194,7 @@ void reflection_pad1d_out_template(
     input.scalar_type(), "reflection_pad1d_out_template", [&] {
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -206,10 +206,10 @@ void reflection_pad1d_backward_out_template(
     Tensor & grad_input, const Tensor & grad_output_,
     const Tensor & input, IntArrayRef padding) {
 
-  AT_CHECK(canUse32BitIndexMath(input),
+  TORCH_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
 
-  AT_CHECK(canUse32BitIndexMath(grad_output_),
+  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
     "input tensor must fit into 32-bit index math");
 
   int64_t dim_plane = 0;
@@ -231,7 +231,7 @@ void reflection_pad1d_backward_out_template(
 
   Tensor grad_output = grad_output_.contiguous();
 
-  AT_CHECK(output_w == grad_output.size(dim_w),
+  TORCH_CHECK(output_w == grad_output.size(dim_w),
     "gradOutput width unexpected. Expected: ", output_w, ", Got: ",
     grad_output.size(dim_w));
 
@@ -242,7 +242,7 @@ void reflection_pad1d_backward_out_template(
     grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -252,7 +252,7 @@ void reflection_pad1d_backward_out_template(
 
 void reflection_pad2d_out_template(
     Tensor &output, const Tensor &input_, IntArrayRef padding) {
-  AT_CHECK(canUse32BitIndexMath(input_),
+  TORCH_CHECK(canUse32BitIndexMath(input_),
     "input tensor must fit into 32-bit index math");
 
   int plane_dim = 0;
@@ -260,7 +260,7 @@ void reflection_pad2d_out_template(
   int dim_w = 2;
   int nbatch = 1;
 
-  AT_CHECK(input_.numel() > 0 &&
+  TORCH_CHECK(input_.numel() > 0 &&
     (input_.ndimension() == 3 || input_.ndimension() == 4), "non-empty 3D or "
     "4D (batch mode) tensor expected for input, but got: ", input_);
 
@@ -280,12 +280,12 @@ void reflection_pad2d_out_template(
   int input_h = input_.size(dim_h);
   int input_w = input_.size(dim_w);
 
-  AT_CHECK(pad_l < input_w && pad_r < input_w,
+  TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Padding size should be less than the corresponding input dimension, but "
     "got: padding (", pad_l, ", ", pad_r, ") at dimension ", dim_w,
     " of input ", input_.sizes());
 
-  AT_CHECK(pad_t < input_h && pad_b < input_h,
+  TORCH_CHECK(pad_t < input_h && pad_b < input_h,
     "Padding size should be less than the corresponding input dimension, but "
     "got: padding (", pad_t, ", ", pad_b, ") at dimension ", dim_h,
     " of input ", input_.sizes());
@@ -293,7 +293,7 @@ void reflection_pad2d_out_template(
   int output_h = input_h + pad_t + pad_b;
   int output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(output_w >= 1 || output_h >= 1,
+  TORCH_CHECK(output_w >= 1 || output_h >= 1,
     "input (H: ", input_h, ", W: ", input_w, ")is too small.  Calculated "
     "output H: ", output_h, " W: ", output_w);
 
@@ -314,7 +314,7 @@ void reflection_pad2d_out_template(
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
       reflection_pad2d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }
@@ -326,9 +326,9 @@ void reflection_pad2d_out_template(
 void reflection_pad2d_backward_out_template(
     Tensor &grad_input, const Tensor &grad_output_,
     const Tensor &input, IntArrayRef padding) {
-  AT_CHECK(canUse32BitIndexMath(input),
+  TORCH_CHECK(canUse32BitIndexMath(input),
     "input tensor must fit into 32-bit index math");
-  AT_CHECK(canUse32BitIndexMath(grad_output_),
+  TORCH_CHECK(canUse32BitIndexMath(grad_output_),
     "output gradient tensor must fit into 32-bit index math");
 
   int plane_dim = 0;
@@ -355,9 +355,9 @@ void reflection_pad2d_backward_out_template(
   int output_h = input_h + pad_t + pad_b;
   int output_w  = input_w + pad_l + pad_r;
 
-  AT_CHECK(output_w == grad_output_.size(dim_w), "grad_output width "
+  TORCH_CHECK(output_w == grad_output_.size(dim_w), "grad_output width "
     "unexpected. Expected: ", output_w, ", Got: ", grad_output_.size(dim_w));
-  AT_CHECK(output_h == grad_output_.size(dim_h), "grad_output height "
+  TORCH_CHECK(output_h == grad_output_.size(dim_h), "grad_output height "
     "unexpected. Expected: ", output_h, ", Got: ", grad_output_.size(dim_h));
 
   Tensor grad_output = grad_output_.contiguous();
@@ -371,7 +371,7 @@ void reflection_pad2d_backward_out_template(
     input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }
@@ -410,7 +410,7 @@ Tensor reflection_pad1d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -443,7 +443,7 @@ Tensor reflection_pad2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

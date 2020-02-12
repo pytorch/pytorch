@@ -47,7 +47,7 @@ std::shared_ptr<Graph> normalizeGraphForCache(
 // precondition: graph has been normalized via normalizeGraphForCache
 int64_t store(std::shared_ptr<Graph> graph) {
   auto& cache = getKernelCache();
-  std::string repr = graph->toString();
+  std::string repr = graph->toString(false);
 
   std::lock_guard<std::mutex> guard{cache.mutex_};
   const auto key = cache.kernel_counter++;
@@ -78,7 +78,7 @@ at::optional<KernelSpec*> retrieve(const int64_t key) {
 // precondition: graph has been normalized via normalizeGraphForCache
 at::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph) {
   auto& cache = getKernelCache();
-  std::string repr = graph->toString();
+  std::string repr = graph->toString(false);
 
   std::lock_guard<std::mutex> guard{cache.mutex_};
   auto it = cache.graphToKey_.find(repr);

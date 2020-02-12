@@ -55,7 +55,8 @@ class Registry {
  public:
   typedef std::function<ObjectPtrType(Args...)> Creator;
 
-  Registry() : registry_(), priority_(), terminate_(true) {}
+  Registry(bool warning = true)
+    : registry_(), priority_(), terminate_(true), warning_(warning) {}
 
   void Register(
       const SrcType& key,
@@ -71,9 +72,11 @@ class Registry {
     if (registry_.count(key) != 0) {
       auto cur_priority = priority_[key];
       if (priority > cur_priority) {
+  #ifdef DEBUG
         std::string warn_msg =
             "Overwriting already registered item for key " + KeyStrRepr(key);
         fprintf(stderr, "%s\n", warn_msg.c_str());
+  #endif
         registry_[key] = creator;
         priority_[key] = priority;
       } else if (priority == cur_priority) {
@@ -85,7 +88,7 @@ class Registry {
         } else {
           throw std::runtime_error(err_msg);
         }
-      } else {
+      } else if (warning_) {
         std::string warn_msg =
             "Higher priority item already registered, skipping registration of " +
             KeyStrRepr(key);
@@ -151,6 +154,7 @@ class Registry {
   std::unordered_map<SrcType, Creator> registry_;
   std::unordered_map<SrcType, RegistryPriority> priority_;
   bool terminate_;
+  const bool warning_;
   std::unordered_map<SrcType, std::string> help_message_;
   std::mutex register_mutex_;
 
@@ -184,18 +188,6 @@ class Registerer {
 };
 
 /**
- * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
- * str and ending with a number that varies with the line.
- */
-#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
-#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
-#ifdef __COUNTER__
-#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
-#else
-#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
-#endif
-
-/**
  * C10_DECLARE_TYPED_REGISTRY is a macro that expands to a function
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
@@ -227,6 +219,16 @@ class Registerer {
     static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
         registry = new ::c10::                                             \
             Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();       \
+    return registry;                                                       \
+  }
+
+#define C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(                         \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                       \
+  C10_EXPORT ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* \
+  RegistryName() {                                                         \
+    static ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*   \
+        registry = new ::c10::                                             \
+            Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>(false);  \
     return registry;                                                       \
   }
 
@@ -273,6 +275,11 @@ class Registerer {
 
 #define C10_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
   C10_DEFINE_TYPED_REGISTRY(                                      \
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+
+#define C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING( \
+    RegistryName, ObjectType, ...)                  \
+  C10_DEFINE_TYPED_REGISTRY_WITHOUT_WARNING(        \
       RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 // C10_REGISTER_CREATOR and C10_REGISTER_CLASS are hard-wired to use std::string

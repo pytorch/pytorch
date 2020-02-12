@@ -1,14 +1,14 @@
 #include <gtest/gtest.h>
 
-#include <torch/nn/init.h>
-#include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/conv.h>
+#include <torch/torch.h>
 
 #include <test/cpp/api/init_baseline.h>
 #include <test/cpp/api/support.h>
 
 #include <functional>
 #include <vector>
+
+using namespace torch::test;
 
 void check_exact_values(
     const std::vector<torch::Tensor>& parameters,
@@ -29,8 +29,9 @@ void check_exact_values(
     }
 
     for (size_t p = 0; p < layerParameters.size(0); p++) {
-      auto tensor = layerParameters[p];
-      auto expectedTensor = expectedLayerParameters[p];
+      // Always compare using double dtype, regardless of the original dtype of the tensors
+      auto tensor = layerParameters[p].to(torch::kFloat64);
+      auto expectedTensor = expectedLayerParameters[p].to(torch::kFloat64);
 
       if (!tensor.allclose(expectedTensor, /*rtol=*/1e-3, /*atol=*/5e-4)) {
         std::cout << "layer " << i << ": " << tensor << " != " << expectedTensor
@@ -104,7 +105,7 @@ TEST(InitTest, CanInitializeTensorThatRequiresGrad) {
   ASSERT_THROWS_WITH(
       tensor.fill_(1),
       "a leaf Variable that requires grad "
-      "has been used in an in-place operation");
+      "is being used in an in-place operation");
   ASSERT_EQ(torch::nn::init::ones_(tensor).sum().item<int32_t>(), 12);
 }
 
@@ -129,4 +130,42 @@ TEST(InitTest, CalculateGainWithLeakyRelu) {
 TEST(InitTest, CanInitializeCnnWithOrthogonal) {
   torch::nn::Conv2d conv_layer(torch::nn::Conv2dOptions(3, 2, 3).stride(2));
   torch::nn::init::orthogonal_(conv_layer->named_parameters()["weight"]);
+}
+
+#define NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(func_name, enum_name, enum_torch_kname) \
+{ \
+  std::stringstream buffer; \
+  CerrRedirect cerr_redirect(buffer.rdbuf()); \
+  std::cerr << torch::nn::init::func_name(torch::nn::init::Nonlinearity::enum_name) << std::endl; \
+  ASSERT_EQ(count_substr_occurrences(buffer.str(), enum_torch_kname), 1); \
+}
+
+#define FANMODE_ENUM_LEGACY_WARNING_CHECK(func_name, enum_name, enum_torch_kname) \
+{ \
+  std::stringstream buffer; \
+  CerrRedirect cerr_redirect(buffer.rdbuf()); \
+  std::cerr << torch::nn::init::func_name(torch::randn({4, 5}), 0, torch::nn::init::FanMode::enum_name) << std::endl; \
+  ASSERT_EQ(count_substr_occurrences(buffer.str(), enum_torch_kname), 1); \
+}
+
+TEST(InitTest, NonlinearityLegacyEnum) {
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Linear, "torch::kLinear")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Conv1D, "torch::kConv1D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Conv2D, "torch::kConv2D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Conv3D, "torch::kConv3D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, ConvTranspose1D, "torch::kConvTranspose1D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, ConvTranspose2D, "torch::kConvTranspose2D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, ConvTranspose3D, "torch::kConvTranspose3D")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Sigmoid, "torch::kSigmoid")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, Tanh, "torch::kTanh")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, ReLU, "torch::kReLU")
+  NONLINEARITY_ENUM_LEGACY_WARNING_CHECK(calculate_gain, LeakyReLU, "torch::kLeakyReLU")
+}
+
+TEST(InitTest, FanModeLegacyEnum) {
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(kaiming_normal_, FanIn, "torch::kFanIn")
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(kaiming_normal_, FanOut, "torch::kFanOut")
+
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(kaiming_uniform_, FanIn, "torch::kFanIn")
+  FANMODE_ENUM_LEGACY_WARNING_CHECK(kaiming_uniform_, FanOut, "torch::kFanOut")
 }

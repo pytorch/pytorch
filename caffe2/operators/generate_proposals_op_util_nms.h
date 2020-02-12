@@ -27,7 +27,8 @@ std::vector<int> nms_cpu_upright(
     const Eigen::ArrayBase<Derived2>& scores,
     const std::vector<int>& sorted_indices,
     float thresh,
-    int topN = -1) {
+    int topN = -1,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE_EQ(proposals.rows(), scores.rows());
   CAFFE_ENFORCE_EQ(proposals.cols(), 4);
   CAFFE_ENFORCE_EQ(scores.cols(), 1);
@@ -40,7 +41,8 @@ std::vector<int> nms_cpu_upright(
   auto x2 = proposals.col(2);
   auto y2 = proposals.col(3);
 
-  EArrX areas = (x2 - x1 + 1.0) * (y2 - y1 + 1.0);
+  EArrX areas =
+      (x2 - x1 + int(legacy_plus_one)) * (y2 - y1 + int(legacy_plus_one));
 
   EArrXi order = AsEArrXt(sorted_indices);
   std::vector<int> keep;
@@ -59,8 +61,8 @@ std::vector<int> nms_cpu_upright(
     EArrX xx2 = GetSubArray(x2, rest_indices).cwiseMin(x2[i]);
     EArrX yy2 = GetSubArray(y2, rest_indices).cwiseMin(y2[i]);
 
-    EArrX w = (xx2 - xx1 + 1.0).cwiseMax(0.0);
-    EArrX h = (yy2 - yy1 + 1.0).cwiseMax(0.0);
+    EArrX w = (xx2 - xx1 + int(legacy_plus_one)).cwiseMax(0.0);
+    EArrX h = (yy2 - yy1 + int(legacy_plus_one)).cwiseMax(0.0);
     EArrX inter = w * h;
     EArrX ovr = inter / (areas[i] + GetSubArray(areas, rest_indices) - inter);
 
@@ -98,7 +100,8 @@ std::vector<int> soft_nms_cpu_upright(
     float overlap_thresh = 0.3,
     float score_thresh = 0.001,
     unsigned int method = 1,
-    int topN = -1) {
+    int topN = -1,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE_EQ(proposals.rows(), scores.rows());
   CAFFE_ENFORCE_EQ(proposals.cols(), 4);
   CAFFE_ENFORCE_EQ(scores.cols(), 1);
@@ -110,7 +113,8 @@ std::vector<int> soft_nms_cpu_upright(
   const auto& x2 = proposals.col(2);
   const auto& y2 = proposals.col(3);
 
-  EArrX areas = (x2 - x1 + 1.0) * (y2 - y1 + 1.0);
+  EArrX areas =
+      (x2 - x1 + int(legacy_plus_one)) * (y2 - y1 + int(legacy_plus_one));
 
   // Initialize out_scores with original scores. Will be iteratively updated
   // as Soft-NMS is applied.
@@ -138,8 +142,8 @@ std::vector<int> soft_nms_cpu_upright(
     EArrX xx2 = GetSubArray(x2, rest_indices).cwiseMin(x2[i]);
     EArrX yy2 = GetSubArray(y2, rest_indices).cwiseMin(y2[i]);
 
-    EArrX w = (xx2 - xx1 + 1.0).cwiseMax(0.0);
-    EArrX h = (yy2 - yy1 + 1.0).cwiseMax(0.0);
+    EArrX w = (xx2 - xx1 + int(legacy_plus_one)).cwiseMax(0.0);
+    EArrX h = (yy2 - yy1 + int(legacy_plus_one)).cwiseMax(0.0);
     EArrX inter = w * h;
     EArrX ovr = inter / (areas[i] + GetSubArray(areas, rest_indices) - inter);
 
@@ -430,9 +434,9 @@ double polygon_area(const Eigen::Vector2f* q, const int& m) {
 double rotated_rect_intersection(
     const RotatedRect& rect1,
     const RotatedRect& rect2) {
-  // There are up to 16 intersections returned from
-  // rotated_rect_intersection_pts
-  Eigen::Vector2f intersectPts[16], orderedPts[16];
+  // There are up to 4 x 4 + 4 + 4 = 24 intersections (including dups) returned
+  // from rotated_rect_intersection_pts
+  Eigen::Vector2f intersectPts[24], orderedPts[24];
   int num = 0; // number of intersections
 
   // Find points of intersection
@@ -444,7 +448,24 @@ double rotated_rect_intersection(
   // https://github.com/opencv/opencv/pull/12222
   // Note: it doesn't matter if #intersections is greater than 8 here
   auto ret = rotated_rect_intersection_pts(rect1, rect2, intersectPts, num);
-  CAFFE_ENFORCE(num <= 16);
+
+  if (num > 24) {
+    // should never happen
+    string msg = "";
+    msg += "num_intersections = " + to_string(num);
+    msg += "; rect1.center = (" + to_string(rect1.center.x()) + ", " +
+        to_string(rect1.center.y()) + "), ";
+    msg += "rect1.size = (" + to_string(rect1.size.x()) + ", " +
+        to_string(rect1.size.y()) + "), ";
+    msg += "rect1.angle = " + to_string(rect1.angle);
+    msg += "; rect2.center = (" + to_string(rect2.center.x()) + ", " +
+        to_string(rect2.center.y()) + "), ";
+    msg += "rect2.size = (" + to_string(rect2.size.x()) + ", " +
+        to_string(rect2.size.y()) + "), ";
+    msg += "rect2.angle = " + to_string(rect2.angle);
+    CAFFE_ENFORCE(num <= 24, msg);
+  }
+
   if (num <= 2)
     return 0.0;
 
@@ -656,11 +677,13 @@ std::vector<int> nms_cpu(
     const Eigen::ArrayBase<Derived2>& scores,
     const std::vector<int>& sorted_indices,
     float thresh,
-    int topN = -1) {
+    int topN = -1,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE(proposals.cols() == 4 || proposals.cols() == 5);
   if (proposals.cols() == 4) {
     // Upright boxes
-    return nms_cpu_upright(proposals, scores, sorted_indices, thresh, topN);
+    return nms_cpu_upright(
+        proposals, scores, sorted_indices, thresh, topN, legacy_plus_one);
   } else {
     // Rotated boxes with angle info
     return nms_cpu_rotated(proposals, scores, sorted_indices, thresh, topN);
@@ -681,7 +704,8 @@ template <class Derived1, class Derived2>
 std::vector<int> nms_cpu(
     const Eigen::ArrayBase<Derived1>& proposals,
     const Eigen::ArrayBase<Derived2>& scores,
-    float thres) {
+    float thres,
+    bool legacy_plus_one = false) {
   std::vector<int> indices(proposals.rows());
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(
@@ -689,7 +713,13 @@ std::vector<int> nms_cpu(
       indices.data() + indices.size(),
       [&scores](int lhs, int rhs) { return scores(lhs) > scores(rhs); });
 
-  return nms_cpu(proposals, scores, indices, thres);
+  return nms_cpu(
+      proposals,
+      scores,
+      indices,
+      thres,
+      -1 /* topN */,
+      legacy_plus_one /* legacy_plus_one */);
 }
 
 template <class Derived1, class Derived2, class Derived3>
@@ -702,7 +732,8 @@ std::vector<int> soft_nms_cpu(
     float overlap_thresh = 0.3,
     float score_thresh = 0.001,
     unsigned int method = 1,
-    int topN = -1) {
+    int topN = -1,
+    bool legacy_plus_one = false) {
   CAFFE_ENFORCE(proposals.cols() == 4 || proposals.cols() == 5);
   if (proposals.cols() == 4) {
     // Upright boxes
@@ -715,7 +746,8 @@ std::vector<int> soft_nms_cpu(
         overlap_thresh,
         score_thresh,
         method,
-        topN);
+        topN,
+        legacy_plus_one);
   } else {
     // Rotated boxes with angle info
     return soft_nms_cpu_rotated(
@@ -740,7 +772,8 @@ std::vector<int> soft_nms_cpu(
     float overlap_thresh = 0.3,
     float score_thresh = 0.001,
     unsigned int method = 1,
-    int topN = -1) {
+    int topN = -1,
+    bool legacy_plus_one = false) {
   std::vector<int> indices(proposals.rows());
   std::iota(indices.begin(), indices.end(), 0);
   return soft_nms_cpu(
@@ -752,7 +785,8 @@ std::vector<int> soft_nms_cpu(
       overlap_thresh,
       score_thresh,
       method,
-      topN);
+      topN,
+      legacy_plus_one);
 }
 
 } // namespace utils

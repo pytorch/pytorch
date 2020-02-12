@@ -5,9 +5,9 @@
 #       - "Auto" detects local machine GPU compute arch at runtime.
 #       - "Common" and "All" cover common and entire subsets of architectures
 #      ARCH_AND_PTX : NAME | NUM.NUM | NUM.NUM(NUM.NUM) | NUM.NUM+PTX
-#      NAME: Fermi Kepler Maxwell Kepler+Tegra Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
+#      NAME: Kepler Maxwell Kepler+Tesla Maxwell+Tegra Pascal Volta Turing
 #      NUM: Any number. Only those pairs are currently accepted by NVCC though:
-#            2.0 2.1 3.0 3.2 3.5 3.7 5.0 5.2 5.3 6.0 6.2 7.0 7.2 7.5
+#            3.5 3.7 5.0 5.2 5.3 6.0 6.1 6.2 7.0 7.2 7.5
 #      Returns LIST of flags to be added to CUDA_NVCC_FLAGS in ${out_variable}
 #      Additionally, sets ${out_variable}_readable to the resulting numeric list
 #      Example:
@@ -27,20 +27,20 @@ endif()
 # See: https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#gpu-feature-list
 
 # This list will be used for CUDA_ARCH_NAME = All option
-set(CUDA_KNOWN_GPU_ARCHITECTURES  "Fermi" "Kepler" "Maxwell")
+set(CUDA_KNOWN_GPU_ARCHITECTURES  "Kepler" "Maxwell")
 
 # This list will be used for CUDA_ARCH_NAME = Common option (enabled by default)
-set(CUDA_COMMON_GPU_ARCHITECTURES "3.0" "3.5" "5.0")
+set(CUDA_COMMON_GPU_ARCHITECTURES "3.5" "5.0")
 
 if(CUDA_VERSION VERSION_LESS "7.0")
   set(CUDA_LIMIT_GPU_ARCHITECTURE "5.2")
 endif()
 
 # This list is used to filter CUDA archs when autodetecting
-set(CUDA_ALL_GPU_ARCHITECTURES "3.0" "3.2" "3.5" "5.0")
+set(CUDA_ALL_GPU_ARCHITECTURES "3.5" "5.0")
 
 if(CUDA_VERSION VERSION_GREATER "6.5")
-  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tegra" "Kepler+Tesla" "Maxwell+Tegra")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Kepler+Tesla" "Maxwell+Tegra")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2")
 
   if(CUDA_VERSION VERSION_LESS "8.0")
@@ -192,14 +192,10 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       set(arch_ptx ${arch_bin})
     else()
       # Look for it in our list of known architectures
-      if(${arch_name} STREQUAL "Fermi")
-        set(arch_bin 2.0 "2.1(2.0)")
-      elseif(${arch_name} STREQUAL "Kepler+Tegra")
-        set(arch_bin 3.2)
-      elseif(${arch_name} STREQUAL "Kepler+Tesla")
+      if(${arch_name} STREQUAL "Kepler+Tesla")
         set(arch_bin 3.7)
       elseif(${arch_name} STREQUAL "Kepler")
-        set(arch_bin 3.0 3.5)
+        set(arch_bin 3.5)
         set(arch_ptx 3.5)
       elseif(${arch_name} STREQUAL "Maxwell+Tegra")
         set(arch_bin 5.3)

@@ -1,3 +1,5 @@
+# @lint-ignore-every PYTHON3COMPATIMPORTS
+
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and mathematical operations over these are defined.
@@ -11,58 +13,94 @@ on an NVIDIA GPU with compute capability >= 3.0.
 import os
 import sys
 import platform
+import ctypes
 from ._utils import _import_dotted_name
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment
-from .version import __version__  # noqa: F401
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
+    USE_RTLD_GLOBAL_WITH_LIBTORCH
+from .version import __version__
 from ._six import string_classes as _string_classes
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
+    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
     'no_grad', 'enable_grad', 'rand', 'randn',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage',
+    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
 ]
 
 ################################################################################
 # Load the extension module
 ################################################################################
 
-# Loading the extension with RTLD_GLOBAL option allows to not link extension
-# modules against the _C shared object. Their missing THP symbols will be
-# automatically filled by the dynamic loader.
-import os as _dl_flags
-
-# if we have numpy, it *must* be imported before the call to setdlopenflags()
-# or there is risk that later c modules will segfault when importing numpy
-try:
-    import numpy as _np  # noqa: F401
-except ImportError:
-    pass
-
 if platform.system() == 'Windows':
-    # first get nvToolsExt PATH
-    def get_nvToolsExt_path():
-        NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
+    is_conda = os.path.exists(os.path.join(sys.prefix, 'conda-meta'))
+    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
+    th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
 
-        if _dl_flags.path.exists(NVTOOLEXT_HOME):
-            return _dl_flags.path.join(NVTOOLEXT_HOME, 'bin', 'x64')
-        else:
-            return ''
+    if not os.path.exists(os.path.join(th_dll_path, 'nvToolsExt64_1.dll')) and \
+            not os.path.exists(os.path.join(py_dll_path, 'nvToolsExt64_1.dll')):
+        nvtoolsext_dll_path = os.path.join(
+            os.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt'), 'bin', 'x64')
+    else:
+        nvtoolsext_dll_path = ''
 
-    py_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(sys.executable), 'Library', 'bin')
-    th_dll_path = _dl_flags.path.join(_dl_flags.path.dirname(__file__), 'lib')
+    from .version import cuda as cuda_version
+    import glob
+    if cuda_version and len(glob.glob(os.path.join(th_dll_path, 'cudart64*.dll'))) == 0 and \
+            len(glob.glob(os.path.join(py_dll_path, 'cudart64*.dll'))) == 0:
+        cuda_version_1 = cuda_version.replace('.', '_')
+        cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
+        default_path = 'C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v' + cuda_version
+        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+    else:
+        cuda_path = ''
 
-    dll_paths = [th_dll_path, py_dll_path, get_nvToolsExt_path(), _dl_flags.environ['PATH']]
+    if not is_conda and sys.version_info >= (3, 8):
+        dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]))
 
-    # then add the path to env
-    _dl_flags.environ['PATH'] = ';'.join(dll_paths)
+        for dll_path in dll_paths:
+            os.add_dll_directory(dll_path)
+    else:
+        dll_paths = [th_dll_path, py_dll_path, nvtoolsext_dll_path, cuda_path]
+        dll_paths = list(filter(os.path.exists, dll_paths)) + [os.environ['PATH']]
 
-else:
-    # first check if the os package has the required flags
+        os.environ['PATH'] = ';'.join(dll_paths)
+
+
+# See Note [Global dependencies]
+def _load_global_deps():
+    if platform.system() == 'Windows':
+        return
+
+    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    here = os.path.abspath(__file__)
+    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+
+    ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+
+
+if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
+        platform.system() != 'Windows':
+    # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
+    # few circumstances:
+    #
+    #   1. You're in a build environment (e.g., fbcode) where
+    #      libtorch_global_deps is not available, but you still need
+    #      to get mkl to link in with RTLD_GLOBAL or it will just
+    #      not work.
+    #
+    #   2. You're trying to run PyTorch under UBSAN and you need
+    #      to ensure that only one copy of libtorch is loaded, so
+    #      vptr checks work properly
+    #
+    # If you're using this setting, you must verify that all the libraries
+    # you load consistently use the same libstdc++, or you may have
+    # mysterious segfaults.
+    #
+    import os as _dl_flags
     if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
         try:
             # next try if DLFCN exists
@@ -70,21 +108,25 @@ else:
         except ImportError:
             # as a last attempt, use compile-time constants
             import torch._dl as _dl_flags
-
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+    from torch._C import *
+    sys.setdlopenflags(old_flags)
+    del old_flags
+    del _dl_flags
 
-del _dl_flags
-
-from torch._C import *
+else:
+    # Easy way.  You want this most of the time, because it will prevent
+    # C++ symbols from libtorch clobbering C++ symbols from other
+    # libraries, leading to mysterious segfaults.
+    #
+    # See Note [Global dependencies]
+    _load_global_deps()
+    from torch._C import *
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
-
-if platform.system() != 'Windows':
-    sys.setdlopenflags(old_flags)
-    del old_flags
 
 ################################################################################
 # Define basic utilities
@@ -131,7 +173,7 @@ def is_storage(obj):
 
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to floating point tensor type
-    :attr:`t`. This type will also be used as default floating point type for
+    ``t``. This type will also be used as default floating point type for
     type inference in :func:`torch.tensor`.
 
     The default floating point tensor type is initially ``torch.FloatTensor``.
@@ -175,7 +217,7 @@ def set_default_dtype(d):
     _C._set_default_dtype(d)
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
+from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
 from ._tensor_str import set_printoptions
 
@@ -222,9 +264,25 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
 class BoolStorage(_C.BoolStorageBase, _StorageBase):
     pass
 
+
+class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
+    pass
+
+
+class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
+    pass
+
+class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
+    pass
+
+class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
+    pass
+
+
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage
+    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
+    QInt32Storage, BFloat16Storage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -274,6 +332,8 @@ del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
 del BoolStorageBase
+del QUInt8StorageBase
+del BFloat16StorageBase
 
 ################################################################################
 # Import most common subpackages
@@ -281,8 +341,10 @@ del BoolStorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled  # noqa: F401
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 import torch.nn
+import torch.nn.intrinsic
+import torch.nn.quantized
 import torch.optim
 import torch.multiprocessing
 import torch.sparse
@@ -295,8 +357,13 @@ import torch.distributions
 import torch.testing
 import torch.backends.cuda
 import torch.backends.mkl
+import torch.backends.mkldnn
 import torch.backends.openmp
+import torch.backends.quantized
+import torch.quantization
+import torch.utils.data
 import torch.__config__
+import torch.__future__
 
 _C._init_names(list(torch._storage_classes))
 
@@ -311,7 +378,18 @@ def compiled_with_cxx11_abi():
 
 
 # Import the ops "namespace"
-from torch._ops import ops  # noqa: F401
+from torch._ops import ops
+from torch._classes import classes
 
 # Import the quasi random sampler
 import torch.quasirandom
+
+# If you are seeing this, it means that this call site was not checked if
+# the memory format could be preserved, and it was switched to old default
+# behaviour of contiguous
+legacy_contiguous_format = contiguous_format
+
+# Register fork handler to initialize OpenMP in child processes (see gh-28389)
+from torch.multiprocessing._atfork import register_after_fork
+register_after_fork(torch.get_num_threads)
+del register_after_fork

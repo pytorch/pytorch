@@ -16,18 +16,6 @@
 #include <cstddef>
 #include <vector>
 
-
-// The following code is used to ensure torch is linked against caffe2_gpu.
-#ifdef _MSC_VER
-namespace {
-#pragma optimize("", off)
-  int warp_size() {
-    return at::cuda::warp_size();
-  }
-#pragma optimize("", on)
-}
-#endif
-
 namespace torch { namespace cuda {
 using namespace at;
 using namespace torch::autograd;
@@ -98,9 +86,11 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
 // one of them is modified in-place during `forward` but the other is needed in
 // backward, autograd engine will complain.
 //
-// We thus re-wrap these Variables after broadcasting (i.e., effetively doing
+// We thus re-wrap these Variables after broadcasting (i.e., effectively doing
 // what is equivalent to .data in Python), and give them individual version
 // counters.
+//
+// NB: Just calling detach() on the variables is not sufficient
 //
 // NB: For `device[0]` in broadcast_coalesced, the input Variables are always
 //     returned as-is, so **do not** re-wrap them.
@@ -142,9 +132,8 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         auto & vals = broadcast_values[i];
         for (auto & t : utils::unflatten_sparse_tensors(inds, vals, chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     } else {
@@ -155,9 +144,8 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntArrayRef devices, size_
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors)) {
           // See NOTE [ Version Counter in comm.*_coalesced ]
-          AT_ASSERT(t.is_variable());
           Variable var = t;
-          device_outputs.push_back(make_variable(var.data(), false));
+          device_outputs.push_back(make_variable(var.tensor_data(), false));
         }
       }
     }
@@ -181,7 +169,7 @@ std::vector<at::Tensor> scatter(
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
         std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), int64_t{0});
-    AT_CHECK(
+    TORCH_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
       "(sum(chunk_sizes) == ", chunk_size_sum,
@@ -190,7 +178,7 @@ std::vector<at::Tensor> scatter(
     int64_t chunk_start = 0;
     for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
       const int64_t chunk_size = (*chunk_sizes)[chunk];
-      AT_CHECK(chunk_size > 0, "Chunk size must be positive");
+      TORCH_CHECK(chunk_size > 0, "Chunk size must be positive");
       chunks.push_back(tensor.narrow(dim, chunk_start, chunk_size));
       chunk_start += chunk_size;
     }
@@ -202,7 +190,7 @@ std::vector<at::Tensor> scatter(
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int16_t>(devices[chunk]);
     if (streams && (*streams)[chunk]) {
-      AT_CHECK(
+      TORCH_CHECK(
           (*streams)[chunk]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
           chunk, " (was ", (*streams)[chunk]->device_index(), ") ",
@@ -210,8 +198,12 @@ std::vector<at::Tensor> scatter(
           "(expected ", device_index, ")");
       cuda_guard.reset_stream(*(*streams)[chunk]);
     }
-    chunks[chunk] = chunks[chunk].contiguous().to(
-        {at::DeviceType::CUDA, device_index}, /*non_blocking=*/true);
+    chunks[chunk] =
+        chunks[chunk].to(
+            {at::DeviceType::CUDA, device_index},
+            /*non_blocking=*/true,
+            /*copy=*/false,
+            /*memory_format=*/at::MemoryFormat::Preserve);
   }
   return chunks;
 }
@@ -220,31 +212,43 @@ at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     c10::optional<int32_t> destination_index) {
-  AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
+  TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;
   auto& first = tensors.front();
   const auto first_size = first.sizes();
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
+  bool all_channels_last = true;
   for (const auto& tensor : tensors) {
-    AT_CHECK(
+    TORCH_CHECK(
         tensor.is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    TORCH_CHECK(
+        tensor.ndimension() == static_cast<int64_t>(expected_size.size()),
+        "Gather input tensors must have the same number of dimensions: got ",
+        tensor.ndimension(), ", but expected ", expected_size.size());
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
-      AT_CHECK(
+      TORCH_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
           tensor.sizes(), ", but expected ", at::IntArrayRef(expected_size));
     }
     total_size += tensor.size(dim);
+    all_channels_last = all_channels_last &&
+        tensor.suggest_memory_format() == MemoryFormat::ChannelsLast;
   }
   expected_size[dim] = total_size;
   at::Device device(at::DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
     device = at::Device(at::DeviceType::CUDA, destination_index ? *destination_index : -1);
   }
-  result = at::empty(expected_size, first.options().device(device));
+
+  auto memory_format = MemoryFormat::Contiguous;
+  if (all_channels_last) {
+    memory_format = MemoryFormat::ChannelsLast;
+  }
+  result =
+      at::empty(expected_size, first.options().device(device), memory_format);
 
   int64_t chunk_start = 0;
   for (const auto& tensor : tensors) {

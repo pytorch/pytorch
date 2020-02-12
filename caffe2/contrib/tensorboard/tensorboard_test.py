@@ -12,7 +12,23 @@ import unittest
 from caffe2.python import brew, core, model_helper
 import caffe2.contrib.tensorboard.tensorboard as tb
 import caffe2.contrib.tensorboard.tensorboard_exporter as tb_exporter
-import tensorflow as tf
+
+try:
+    # tensorboard>=1.14.0
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
+except ImportError:
+    from tensorflow import GraphDef
+
+
+def load_events(filename):
+    try:
+        # tensorboard>=1.14.0
+        from tensorboard.backend.event_processing import event_file_loader
+        loader = event_file_loader.EventFileLoader(filename)
+        return list(loader.Load())
+    except ImportError:
+        import tensorflow as tf
+        return list(tf.train.summary_iterator(filename))
 
 
 class TensorboardTest(unittest.TestCase):
@@ -43,7 +59,7 @@ class TensorboardTest(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         ((d, _, (fname,)),) = entries
         self.assertEqual(tf_dir, d)
-        events = list(tf.train.summary_iterator(os.path.join(tf_dir, fname)))
+        events = load_events(os.path.join(tf_dir, fname))
         self.assertEqual(len(events), n_iters + 1)
         events = events[1:]
         self.maxDiff = None
@@ -84,14 +100,14 @@ class TensorboardTest(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         ((d, _, (fname,)),) = entries
         self.assertEqual(tf_dir, d)
-        events = list(tf.train.summary_iterator(os.path.join(tf_dir, fname)))
+        events = load_events(os.path.join(tf_dir, fname))
         self.assertEqual(len(events), 3)
         events = events[1:]
         nets = [model.param_init_net, model.net]
         for i, (event, net) in enumerate(zip(events, nets), start=1):
             self.assertEqual(event.step, i)
             self.assertEqual(event.wall_time, i)
-            g = tf.GraphDef()
+            g = GraphDef()
             g.ParseFromString(event.graph_def)
             self.assertMultiLineEqual(
                 str(g),

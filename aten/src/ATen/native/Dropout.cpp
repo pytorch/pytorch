@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at { namespace native {
 
@@ -10,7 +11,7 @@ using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
-  AT_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
+  TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
@@ -21,7 +22,7 @@ Tensor make_feature_noise(const Tensor& input) {
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return input.is_cuda() && p > 0 && p < 1;
+  return input.is_cuda() && p > 0 && p < 1 && input.numel() > 0;
 }
 
 // NB: sure, we could have used different overloads here, but I would feel insecure
@@ -40,8 +41,8 @@ Tensor multiply(const Tensor& input, const Tensor& noise) {
 
 template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
-  AT_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
-  if (p == 0 || !train) {
+  TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
+  if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
 
@@ -50,7 +51,7 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input);
+  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
@@ -82,10 +83,15 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  if (train && is_fused_kernel_acceptable(input, p)) {
-    return std::get<0>(at::_fused_dropout(input, 1 - p));
-  }
-  return _dropout<false>(input, p, train);
+  auto result = [&]() {
+    NoNamesGuard guard;
+    if (train && is_fused_kernel_acceptable(input, p)) {
+      return std::get<0>(at::_fused_dropout(input, 1 - p));
+    }
+    return _dropout<false>(input, p, train);
+  }();
+  namedinference::propagate_names(result, input);
+  return result;
 }
 
 Tensor& dropout_(Tensor& input, double p, bool train) {

@@ -1,14 +1,17 @@
-if (BUILD_ATEN_MOBILE)
+if (NOT INTERN_BUILD_ATEN_OPS)
   return()
 endif()
 
 # Find modules
+if (NOT INTERN_BUILD_MOBILE)
+  list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
+  list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH
-  /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/public
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix)
-list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ /usr/lib/aarch64-linux-gnu/)
 
 cmake_policy(SET CMP0012 NEW)
 
@@ -21,6 +24,7 @@ set(ATen_THIRD_PARTY_INCLUDE)
 set(ATen_CUDA_SRCS)
 set(ATen_CUDA_TEST_SRCS)
 set(ATen_CUDA_INCLUDE)
+set(ATen_NVRTC_STUB_SRCS)
 set(ATen_HIP_SRCS)
 set(ATen_HIP_TEST_SRCS)
 set(ATen_HIP_INCLUDE)
@@ -51,10 +55,14 @@ add_subdirectory(src/THNN)
 IF(USE_ROCM)
   include(LoadHIP)
   if (NOT PYTORCH_FOUND_HIP)
-    MESSAGE(FATAL_ERROR
-      "Could not find HIP installation")
+    set(USE_ROCM OFF)
   endif()
 ENDIF()
+
+# Both CUDA and ROCM are enabled and found. Report an error.
+if(USE_CUDA AND USE_ROCM)
+  message(FATAL_ERROR "Both CUDA and ROCm are enabled and found. PyTorch can only be built with either of them. Please turn one off by using either USE_CUDA=OFF or USE_ROCM=OFF.")
+endif()
 
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
@@ -98,6 +106,7 @@ add_subdirectory(src/ATen)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
+set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)
 set(ATen_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS} PARENT_SCOPE)

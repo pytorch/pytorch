@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Layout.h>
+#include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
@@ -51,13 +52,13 @@ Tensor &_coalesced_sparse_(SparseTensor& self, bool coalesced) {
 }
 
 Tensor indices_sparse(const Tensor& self) {
-  AT_CHECK(self.is_coalesced(),
+  TORCH_CHECK(self.is_coalesced(),
            "Cannot get indices on an uncoalesced tensor, please call .coalesce() first");
   return get_sparse_impl(self)->indices().alias();
 }
 
 Tensor values_sparse(const Tensor& self) {
-  AT_CHECK(self.is_coalesced(),
+  TORCH_CHECK(self.is_coalesced(),
            "Cannot get values on an uncoalesced tensor, please call .coalesce() first");
   return get_sparse_impl(self)->values().alias();
 }
@@ -70,16 +71,16 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparse);
-  TensorTypeId type_id;
+  DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
-    type_id = SparseCUDATensorId();
+    dispatch_key = DispatchKey::SparseCUDATensorId;
   } else {
-    type_id = SparseCPUTensorId();
+    dispatch_key = DispatchKey::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, options.dtype());
+      DispatchKeySet(dispatch_key), options.dtype());
 }
 
 /** Actual dispatched creation methods ***/
@@ -90,7 +91,6 @@ SparseTensor new_with_dims_sparse(int64_t sparse_dim, int64_t dense_dim, ArrayRe
   return self;
 }
 
-// Does NOT make copies of indices and values
 SparseTensor new_with_dims_and_tensor_sparse(
     int64_t sparse_dim,
     int64_t dense_dim,
@@ -100,15 +100,24 @@ SparseTensor new_with_dims_and_tensor_sparse(
     const TensorOptions& options) {
   SparseTensor self = new_sparse(options);
   get_sparse_impl(self)->resize_(sparse_dim, dense_dim, size);
-  alias_into_sparse(self, indices, values);
+  // NOTE: There is no guarantee that `indices` and `values` don't contain AutogradMeta. However,
+  // we want to maintain the invariant that `indices_` and `values_` of a sparse tensor don't
+  // contain AutogradMeta, and to achieve that we shallow-copy `indices` and `values` here.
+  auto indices_shallow_copy = LongTensor(indices.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/indices.unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/true));
+  auto values_shallow_copy = Tensor(values.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/values.unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/true));
+  alias_into_sparse(self, indices_shallow_copy, values_shallow_copy);
   return self;
 }
 
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
-  AT_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
 
@@ -136,11 +145,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
-  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
-  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
 
   // If sizes are not given, it is inferred as max index of each dim.
   int64_t sparse_dim = indices.size(0);
@@ -160,7 +169,7 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const Ten
     auto cpu_computed_indices_sizes_accessor = cpu_computed_indices_sizes.accessor<int64_t, 1>();
     for (int64_t d = 0; d < sparse_dim; d++) {
       int64_t min_index_in_dim = cpu_min_indices_accessor[d];
-      AT_CHECK(min_index_in_dim >= 0,
+      TORCH_CHECK(min_index_in_dim >= 0,
                "found negative index ", min_index_in_dim, " for dim ", d);
       computed_sizes[static_cast<size_t>(d)] = cpu_computed_indices_sizes_accessor[d];
     }
@@ -185,14 +194,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
   // the following checks are redundant because they are also checked in SparseTensorImpl::set_indices_and_values_unsafe
   // but we need to ensure them in order to infer the shape.
-  AT_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
-  AT_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
+  TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes())
+  TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
-  AT_CHECK(size.size() == sparse_dim + dense_dim,
+  TORCH_CHECK(size.size() == sparse_dim + dense_dim,
            "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
   // Check to make sure all indices are within the boundaries of `size`
@@ -213,11 +222,11 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, ArrayRef<
       // NB: This used to sync ndim times to access each entry; now we copy
       // everything to CPU first and then access it.
       int64_t min_index_in_dim = cpu_min_indices_accessor[d];
-      AT_CHECK(min_index_in_dim >= 0,
+      TORCH_CHECK(min_index_in_dim >= 0,
                "found negative index ", min_index_in_dim, " for dim ", d);
       int64_t max_index_in_dim = cpu_max_indices_accessor[d];
       int64_t dim_size = size[static_cast<size_t>(d)];
-      AT_CHECK(max_index_in_dim < dim_size,
+      TORCH_CHECK(max_index_in_dim < dim_size,
                "size is inconsistent with indices: for dim ", d, ", size is ", dim_size, " but found index ", max_index_in_dim);
     }
   }
@@ -235,7 +244,7 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
   Tensor values = expand_values_if_needed(values_);
 
   // arg checking
-  AT_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparse, "expected sparse layout, but got layout ", options.layout());
 
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
@@ -246,7 +255,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
 
 // NB: Deleted newWithSizeNd variants
 
-SparseTensor clone_sparse(const SparseTensor& self) {
+SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
@@ -272,6 +285,7 @@ namespace {
   }
 }
 
+// Invoked from native/Resize.cpp (no dynamic dispatch necessary)
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
@@ -287,8 +301,8 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   int64_t dims = self.dim();
   // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() > 0,
   // but this would take some work and doesn't seem particularly useful.
-  AT_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
-  AT_CHECK(sparse_dim <= dims,
+  TORCH_CHECK(sparse_dim > 0 || self.dim() == 0, "sparse_dim must be >0 if dimensionality > 0");
+  TORCH_CHECK(sparse_dim <= dims,
     "sparse_dim must be less than or equal to self.dim()");
   at::TensorOptions sparse_options = self.options().layout(kSparse);
   std::vector<int64_t> sizes = self.sizes().vec();
@@ -309,12 +323,12 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   Tensor values;
   if (self.dim() > 0) {
     std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
-    values = self.index(ix).squeeze(0).clone();
+    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));
     // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
     // Given sparse tensor invariants, values should be shape (1,)
-    values = self.unsqueeze(0).clone();
+    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
   }
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
@@ -324,6 +338,9 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
+  if(self.scalar_type() == ScalarType::Half && self.options().device().is_cpu()) {
+    AT_ERROR("to_dense() not supported for float16 on CPU");
+  }
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
   return dst.add_(self);
 }
@@ -337,7 +354,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {
@@ -380,8 +397,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
-        scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = newValues.data<scalar_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
         for (int64_t j = 0; j < nnz; j++) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
@@ -426,26 +443,26 @@ void inline sparse_mask_out_cpu_kernel(
 ) {
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data<scalar_t>();
-  int64_t i;
+  scalar_t* t_ptr = t.data_ptr<scalar_t>();
 
-  #pragma omp parallel for private(i) if (r_nnz > 1000)
-  for (i = 0; i < r_nnz; i++) {
-    int64_t idx = 0;
-    for (int64_t d = 0; d < sparse_dim; d++) {
-      idx += mask_indices_accessor[d][i] * t.stride(d);
+  at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      int64_t idx = 0;
+      for (int64_t d = 0; d < sparse_dim; d++) {
+        idx += mask_indices_accessor[d][i] * t.stride(d);
+      }
+      r_values_accessor[i] = t_ptr[idx];
     }
-    r_values_accessor[i] = t_ptr[idx];
-  }
+  });
 }
 
 SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const SparseTensor& mask) {
-  AT_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
-  AT_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
+  TORCH_CHECK(mask.is_coalesced(), "sparse_mask: mask is uncoalesced");
+  TORCH_CHECK(mask.sizes().equals(t.sizes()), "sparse_mask: operands have incompatible sizes; self has size ",
       t.sizes(), " but mask has size ", mask.sizes());
   AT_ASSERT(!t.is_cuda()); // we were supposed to have dispatched on this
-  AT_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
-  AT_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
+  TORCH_CHECK(!r.is_cuda(), "sparse_mask: expected 'out' to be CPU, but got CUDA");
+  TORCH_CHECK(!mask.is_cuda(), "sparse_mask: expected 'mask' to be CPU, but got CUDA");
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
     return r.zero_();
@@ -496,9 +513,9 @@ SparseTensor& sparse_mask_out_cpu(SparseTensor& r, const Tensor& t, const Sparse
   return r;
 }
 
-SparseTensor sparse_mask_cpu(const Tensor& t, SparseTensorRef mask) {
+SparseTensor sparse_mask_cpu(const Tensor& t, const SparseTensor& mask) {
   SparseTensor r = at::empty({0}, t.options().layout(kSparse));
-  sparse_mask_out_cpu(r, t, mask.tref);
+  sparse_mask_out_cpu(r, t, mask);
   return r;
 }
 

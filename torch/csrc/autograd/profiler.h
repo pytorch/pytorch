@@ -1,13 +1,11 @@
 #pragma once
 
-#include <thread>
 #include <iostream>
 #include <mutex>
 #include <memory>
 #include <vector>
 #include <cstdint>
 #include <string>
-#include <list>
 #include <sstream>
 #include <forward_list>
 #include <tuple>
@@ -18,15 +16,16 @@
 #endif
 
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/code_template.h>
 
 typedef struct CUevent_st* CUDAEventStub;
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 namespace profiler {
+
+TORCH_API uint16_t getThreadId();
 
 struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
@@ -68,10 +67,13 @@ constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
-#if defined(__MACH__) && !defined(CLOCK_REALTIME)
+#if (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
 #include <sys/time.h>
 // clock_gettime is not implemented on older versions of OS X (< 10.12).
 // If implemented, CLOCK_REALTIME will have already been defined.
+
+// clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
+// CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
 #endif
 
 inline int64_t getTime() {
@@ -79,7 +81,7 @@ inline int64_t getTime() {
   using namespace std::chrono;
   using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
   return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#elif defined(__MACH__) && !defined(CLOCK_REALTIME)
+#elif (defined(__MACH__) && !defined(CLOCK_REALTIME)) || defined(C10_IOS)
   struct timeval now;
   gettimeofday(&now, NULL);
   return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
@@ -91,17 +93,49 @@ inline int64_t getTime() {
 #endif
 }
 
-enum class EventKind : uint16_t {
+// Old GCC versions generate warnings incorrectly
+// see https://stackoverflow.com/questions/2463113/g-c0x-enum-class-compiler-warnings
+#ifndef _MSC_VER
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wattributes"
+#endif
+enum class TORCH_API ProfilerState {
+    Disabled,
+    CPU, // CPU-only profiling
+    CUDA, // CPU + CUDA events
+    NVTX,  // only emit NVTX markers
+};
+
+struct TORCH_API ProfilerConfig {
+  ProfilerConfig(ProfilerState state, bool report_input_shapes)
+      : state(state), report_input_shapes(report_input_shapes) {}
+  ~ProfilerConfig();
+  ProfilerState state;
+  bool report_input_shapes;
+};
+
+enum class TORCH_API EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange
 };
+#ifndef _MSC_VER
+#  pragma GCC diagnostic pop
+#endif
 
 struct TORCH_API Event final {
-  Event(EventKind kind, StringView name, uint16_t thread_id, bool record_cuda)
-  : name_(std::move(name))
-  , kind_(kind)
-  , thread_id_(thread_id) { record(record_cuda); }
+  Event(
+      EventKind kind,
+      StringView name,
+      uint16_t thread_id,
+      bool record_cuda,
+      std::vector<std::vector<int64_t>>&& shapes = {})
+      : name_(std::move(name)),
+        kind_(kind),
+        thread_id_(thread_id),
+        shapes_(shapes) {
+    record(record_cuda);
+  }
 
   void record(bool record_cuda);
   std::string kind() const {
@@ -118,6 +152,9 @@ struct TORCH_API Event final {
   uint16_t thread_id() const {
     return thread_id_;
   }
+  std::vector<std::vector<int64_t>> shapes() const {
+    return shapes_;
+  }
   double cpu_elapsed_us(const Event & e) {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
@@ -129,10 +166,12 @@ struct TORCH_API Event final {
     return device_;
   }
 private:
-  int64_t cpu_ns_ = 0; // signed to allow for negative intervals, initialized for safety.
+  // signed to allow for negative intervals, initialized for safety.
+  int64_t cpu_ns_ = 0;
   StringView name_;
   EventKind kind_;
   uint16_t thread_id_;
+  std::vector<std::vector<int64_t>> shapes_;
   int device_ = -1;
   struct CUevent_st* event = nullptr;
 };
@@ -183,13 +222,6 @@ struct RangeEventList {
   std::forward_list<block_type> blocks;
 };
 
-enum class ProfilerState {
-    Disabled,
-    CPU, // CPU-only profiling
-    CUDA, // CPU + CUDA events
-    NVTX,  // only emit NVTX markers
-};
-
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
@@ -198,8 +230,9 @@ TORCH_API void popRange();
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-TORCH_API void enableProfiler(ProfilerState new_state);
+TORCH_API void enableProfiler(ProfilerConfig);
 TORCH_API thread_event_lists disableProfiler();
+TORCH_API bool profilerEnabled();
 
 
 // Usage:

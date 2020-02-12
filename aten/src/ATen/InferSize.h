@@ -9,7 +9,7 @@ namespace at {
 
 // Infers the size of a dim with size -1, if it exists. Also checks that new
 // shape is compatible with the number of elements.
-static std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
+inline std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
   auto res = shape.vec();
   int64_t newsize = 1;
   auto infer_dim = c10::optional<int64_t>();
@@ -36,7 +36,7 @@ static std::vector<int64_t> infer_size(IntArrayRef shape, int64_t numel) {
       // works yet
       //   empty_tensor.view(-1, 0)
       // doesn't.
-      AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ",
+      TORCH_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ",
                shape, " because the unspecified dimension size -1 can be any "
                "value and is ambiguous");
       res[*infer_dim] = numel / newsize;

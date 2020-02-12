@@ -18,7 +18,7 @@ TORCH_API Decl mergeTypesFromTypeComment(
     bool is_method);
 
 struct TORCH_API Parser {
-  explicit Parser(const std::string& str);
+  explicit Parser(const std::shared_ptr<Source>& src);
   TreeRef parseFunction(bool is_method);
   TreeRef parseClass();
   Decl parseTypeComment();

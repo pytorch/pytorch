@@ -1,9 +1,15 @@
 #include "caffe2/operators/gelu_op.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <numeric>
 #include <vector>
+
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <math.h>
+#endif // _MSC_VER
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
@@ -34,7 +40,7 @@ __global__ void FastGeluCUDAKernel(const int N, const T* X, T* Y);
 #define DELEGATE_FAST_GELU_CUDA_KERNEL(T, FMAFunc, TanhFunc)             \
   template <>                                                            \
   __global__ void FastGeluCUDAKernel(const int N, const T* X, T* Y) {    \
-    constexpr T kAlpha = gelu_utils::kSqrt2 / gelu_utils::kSqrtPi;       \
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2;                         \
     const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x; \
     if (index < N) {                                                     \
       Y[index] = static_cast<T>(0.5) *                                   \
@@ -59,7 +65,7 @@ GeluGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX);
   template <>                                                                \
   __global__ void GeluGradientCUDAKernel<T>(                                 \
       const int N, const T* dY, const T* X, T* dX) {                         \
-    constexpr T kAlpha = T(1) / (gelu_utils::kSqrt2 * gelu_utils::kSqrtPi);  \
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2 * T(0.5);                    \
     const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;     \
     if (index < N) {                                                         \
       dX[index] = dY[index] *                                                \
@@ -79,7 +85,7 @@ FastGeluGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX);
   template <>                                                            \
   __global__ void FastGeluGradientCUDAKernel<T>(                         \
       const int N, const T* dY, const T* X, T* dX) {                     \
-    constexpr T kAlpha = gelu_utils::kSqrt2 / gelu_utils::kSqrtPi;       \
+    constexpr T kAlpha = M_2_SQRTPI * M_SQRT1_2;                         \
     constexpr T kBeta = kAlpha * gelu_utils::kFastCoeff * T(3);          \
     const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x; \
     if (index < N) {                                                     \

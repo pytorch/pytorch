@@ -128,6 +128,12 @@ def AddBlobs(meta_net_def, blob_name, blob_def):
     for blob in blob_def:
         blobs.append(blob)
 
+def ReplaceBlobs(meta_net_def, blob_name, blob_def):
+    blobs = _ProtoMapGet(meta_net_def.blobs, blob_name)
+    assert blobs is not None, "The blob_name:{} does not exist".format(blob_name)
+    del blobs[:]
+    for blob in blob_def:
+        blobs.append(blob)
 
 def AddPlan(meta_net_def, plan_name, plan_def):
     meta_net_def.plans.add(key=plan_name, value=plan_def)

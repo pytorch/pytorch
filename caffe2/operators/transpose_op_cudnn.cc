@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 #include "caffe2/core/context_gpu.h"
@@ -65,14 +66,15 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     if (X.numel() == 0) {
       return true;
     }
-    if (ndim < 3 || ndim > CUDNN_DIM_MAX ||
-        X.numel() > std::numeric_limits<std::int32_t>::max()) {
+    if (!IsFloatType<T>() || !IsCuDNNValidTensor(X)) {
       math::Transpose<std::int64_t, T, CUDAContext>(
           ndim, X_dims.data(), axes_.data(), X_data, Y_data, &context_);
       return true;
     }
-    if (X_dims != cached_X_dims_) {
+    if (cudnnTypeWrapper<T>::type != cached_dtype_ ||
+        X_dims != cached_X_dims_) {
       SetTensorDescriptor(cudnnTypeWrapper<T>::type, X_dims, Y_dims);
+      cached_dtype_ = cudnnTypeWrapper<T>::type;
       cached_X_dims_ = X_dims;
     }
     CUDNN_ENFORCE(cudnnTransformTensor(
@@ -87,6 +89,18 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   }
 
  private:
+  template <typename T>
+  constexpr bool IsFloatType() const {
+    return std::is_same<T, float>::value || std::is_same<T, double>::value ||
+        std::is_same<T, at::Half>::value;
+  }
+
+  bool IsCuDNNValidTensor(const Tensor& X) const {
+    const int ndim = X.dim();
+    return ndim >= 3 && ndim <= CUDNN_DIM_MAX &&
+        X.numel() < std::numeric_limits<int32_t>::max();
+  }
+
   void SetTensorDescriptor(
       const cudnnDataType_t data_type,
       const std::vector<std::int64_t>& X_dims,
@@ -115,6 +129,7 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
   cudnnTensorDescriptor_t X_desc_;
   cudnnTensorDescriptor_t Y_desc_;
 
+  cudnnDataType_t cached_dtype_ = cudnnTypeWrapper<float>::type;
   std::vector<std::int64_t> cached_X_dims_;
   std::vector<std::int32_t> axes_;
 };

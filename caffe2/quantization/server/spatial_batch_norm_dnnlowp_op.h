@@ -9,7 +9,7 @@ namespace caffe2 {
  * Note this implementation assumes SCALE, BIAS, EST_MEAN, and EST_VAR inputs
  * are still in fp32, so is epsilon argument
  */
-template <typename T>
+template <typename T, bool ReluFused = false>
 class SpatialBNDNNLowPOp final : public DNNLowPOp<T, SpatialBNOp<CPUContext>> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
@@ -40,4 +40,20 @@ class SpatialBNDNNLowPOp final : public DNNLowPOp<T, SpatialBNOp<CPUContext>> {
   OUTPUT_TAGS(OUTPUT);
 };
 
+namespace internal {
+
+template <typename T>
+void SpatialBNNHWCAVX2(
+    const int N,
+    const int C,
+    const int HxW,
+    const int in_zero_point,
+    const int out_zero_point,
+    const T* X,
+    const float* alpha,
+    const float* beta,
+    T* Y,
+    bool relu_fused);
+
+} // namespace internal
 } // namespace caffe2

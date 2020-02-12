@@ -1,6 +1,7 @@
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/code_template.h>
 #include <torch/csrc/jit/script/builtin_functions.h>
+#include <torch/csrc/jit/script/resolver.h>
 
 namespace torch {
 namespace jit {
@@ -36,8 +37,15 @@ def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
+auto floordiv = CodeTemplate(
+    R"SCRIPT(
+def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
+  return torch.floor_divide(self, other)
+)SCRIPT");
+
 struct BuiltinFunctionRegistry {
-  const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+  const std::vector<Function*>& getAllBuiltinFunctionsFor(
+      Symbol name) {
     const static std::vector<Function*> empty;
     // when initializing the builtin function library, we will re-enter
     // getAllBuiltinFunctionsFor since it is called in the compiler to
@@ -54,8 +62,8 @@ struct BuiltinFunctionRegistry {
       state = INITIALIZED;
     }
     AT_ASSERT(state == INITIALIZED);
-    auto it = builtins_by_name.find(name);
-    if (it == builtins_by_name.end())
+    auto it = builtins_by_name_.find(name);
+    if (it == builtins_by_name_.end())
       return empty;
     return it->second;
   }
@@ -64,10 +72,11 @@ struct BuiltinFunctionRegistry {
   void loadSource(const std::string& source) {
     std::shared_ptr<CompilationUnit> cu = std::make_shared<CompilationUnit>();
     modules.emplace_back(cu);
-    cu->define(source, script::nativeResolver(), /*self=*/nullptr);
+    cu->define(
+        c10::nullopt, source, script::nativeResolver(), /*self=*/nullptr);
     for (auto& method : cu->get_functions()) {
-      builtins_by_name[Symbol::fromQualString("aten::" + method->name())]
-          .push_back(method.get());
+      builtins_by_name_[Symbol::fromQualString("aten::" + method->name())]
+          .push_back(method);
     }
   }
   void loadBuiltinFunctions() {
@@ -84,8 +93,8 @@ struct BuiltinFunctionRegistry {
         str_pair("triple", "3"),
         str_pair("quadruple", "4"),
     };
-    for (auto scalar : {"float", "int"}) {
-      for (auto pair : name_len) {
+    for (const auto scalar : {"float", "int"}) {
+      for (const auto& pair : name_len) {
         TemplateEnv env;
         env.s("Scalar", scalar);
         env.s("name", pair.first);
@@ -93,14 +102,21 @@ struct BuiltinFunctionRegistry {
         loadSource(_ntuple_ops.format(env));
       }
     }
+    for (auto rhs : {"number", "Tensor"}) {
+      TemplateEnv env;
+      env.s("Rhs_Type", rhs);
+      loadSource(floordiv.format(env));
+    }
   }
   enum { UNINITIALIZED, INTIIALIZING, INITIALIZED } state = UNINITIALIZED;
   std::recursive_mutex mutex;
   std::vector<std::shared_ptr<CompilationUnit>> modules;
-  std::unordered_map<Symbol, std::vector<Function*>> builtins_by_name;
+  std::unordered_map<Symbol, std::vector<Function*>>
+      builtins_by_name_;
 };
 
-TORCH_API const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
+const std::vector<Function*>& getAllBuiltinFunctionsFor(
+    Symbol name) {
   static BuiltinFunctionRegistry registry;
   return registry.getAllBuiltinFunctionsFor(name);
 }

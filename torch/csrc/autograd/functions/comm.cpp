@@ -28,11 +28,13 @@ Scatter::Scatter(
       streams_(streams),
       unsqueeze_scalars_(unsqueeze_scalars) {}
 
+Scatter::~Scatter() {}
+
 variable_list Scatter::apply(variable_list&& inputs) {
   AT_ASSERT(inputs.size() == 1);
   auto& input = inputs.front();
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(input)) {
     grad_fn =
         std::make_shared<Gather>(/*destination_device=*/input.device(), dim_);
@@ -57,7 +59,9 @@ variable_list Scatter::apply(variable_list&& inputs) {
     }
   }
 
-  set_history(variables, grad_fn);
+  if (grad_fn) {
+    set_history(variables, grad_fn);
+  }
 
   return variables;
 }
@@ -65,13 +69,15 @@ variable_list Scatter::apply(variable_list&& inputs) {
 Gather::Gather(const at::Device& destination_device, int64_t dim)
     : destination_device_(destination_device), dim_(dim) {}
 
+Gather::~Gather() {}
+
 variable_list Gather::apply(variable_list&& inputs) {
   bool all_are_zero_dim = true;
   for (const auto& input : inputs) {
-    AT_CHECK(
+    TORCH_CHECK(
         input.is_cuda(),
         "All inputs to Gather must be CUDA tensors, got ",
-        input.type());
+        input.toString());
     if (input.dim() > 0) {
       all_are_zero_dim = false;
     }
@@ -95,7 +101,7 @@ variable_list Gather::apply(variable_list&& inputs) {
     }
   }
 
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Node> grad_fn;
   if (compute_requires_grad(inputs)) {
     std::vector<at::Device> source_devices;
     std::vector<int64_t> input_sizes;
@@ -116,7 +122,9 @@ variable_list Gather::apply(variable_list&& inputs) {
   const auto destination_index =
       destination_device_.is_cpu() ? -1 : destination_device_.index();
   auto variable = torch::cuda::gather(tensors, dim_, destination_index);
-  set_history(variable, grad_fn);
+  if (grad_fn) {
+    set_history(variable, grad_fn);
+  }
   return {variable};
 }
 

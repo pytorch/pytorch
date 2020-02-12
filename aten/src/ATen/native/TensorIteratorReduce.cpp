@@ -10,11 +10,11 @@ namespace at {
 using loop2d_t = TensorIterator::loop2d_t;
 
 static bool use_two_pass_reduction(TensorIterator& iter);
-static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop);
-static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop);
+static void two_pass_reduction(TensorIterator& iter, loop2d_t loop);
+static void parallel_dim_reduction(TensorIterator& iter, loop2d_t loop);
 
-void TensorIterator::parallel_reduce(const loop2d_t& loop) {
-  AT_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
+void TensorIterator::parallel_reduce(loop2d_t loop) {
+  TORCH_CHECK(ntensors() == 2, "parallel_reduce only supports one input and one output");
   int64_t numel = this->numel();
   if (numel < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||
       at::in_parallel_region()) {
@@ -27,13 +27,13 @@ void TensorIterator::parallel_reduce(const loop2d_t& loop) {
 }
 
 static bool use_two_pass_reduction(TensorIterator& iter) {
-  return iter.tensor(0).numel() == 1;
+  return iter.output(0).numel() == 1;
 }
 
-static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
+static void two_pass_reduction(TensorIterator& iter, loop2d_t loop) {
   int max_threads = at::get_num_threads();
 
-  auto& dst = iter.tensor(0);
+  auto dst = iter.output(0);
   auto buffer_shape = DimVector(dst.sizes());
   buffer_shape.insert(buffer_shape.begin(), max_threads);
   auto buffer = at::empty(buffer_shape, dst.options());
@@ -47,8 +47,8 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
     auto slice = buffer[thread_num];
     slice.copy_(dst);
 
-    auto sub_iter = TensorIterator::reduce_op(slice, iter.tensor(1));
-    sub_iter->serial_for_each(loop, {begin, end});
+    auto sub_iter = TensorIterator::reduce_op(slice, iter.input(0));
+    sub_iter.serial_for_each(loop, {begin, end});
   });
 
   // fill any unwritten slices of the buffer with the identity
@@ -60,7 +60,7 @@ static void two_pass_reduction(TensorIterator& iter, const loop2d_t& loop) {
 
   auto unsqueezed = dst.unsqueeze(0);
   auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
-  final_reduce->for_each(loop);
+  final_reduce.for_each(loop);
 }
 
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
@@ -93,7 +93,7 @@ round_columns(TensorIterator& iter, int dim, int multiple, int64_t begin, int64_
   return std::make_tuple(begin, end);
 }
 
-static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
+static void parallel_dim_reduction(TensorIterator& iter, loop2d_t loop) {
   AT_ASSERT(iter.ndim() >= 1);
   int dim = find_split_dim(iter);
   int64_t cols = iter.shape()[dim];
@@ -116,14 +116,15 @@ static void parallel_dim_reduction(TensorIterator& iter, const loop2d_t& loop) {
   });
 }
 
-void TensorIterator::foreach_reduced_elt(const loop_subiter_t &loop, bool parallelize) {
-  AT_ASSERT(ntensors() == 2 && num_outputs_ == 1);
+void TensorIterator::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) {
+  AT_ASSERT(ninputs() == 1);
+  AT_ASSERT(noutputs() >= 1);
 
   auto shape = this->shape();
-  if (tensor(0).numel() == 0) {
+  if (output(0).numel() == 0) {
     return;
   }
-  if (tensor(0).numel() == 1) {
+  if (output(0).numel() == 1) {
     loop(*this);
   }
   else if (numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ||

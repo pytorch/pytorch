@@ -19,6 +19,7 @@ struct PerformanceInformation {
   std::string type = ""; // the type of the operator
   // Measured
   double latency = 0;
+  double cpuMilliseconds = 0;
 };
 
 class CAFFE2_OBSERVER_API NetObserverReporter {

@@ -8,6 +8,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -115,7 +116,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int inputH = index / gradInput.size(3);
     assert(inputH < gradInput.size(2));
 
-    atomicAdd(
+    gpuAtomicAdd(
       &gradInput[batch][plane][inputH][inputW],
       gradOutput[batch][plane][outputH][outputW]
     );
@@ -135,11 +136,11 @@ void fractional_max_pool2d_out_cuda_template(
   int numBatch = 1;
 
   int ndims = input.ndimension();
-  AT_CHECK(input.numel() > 0,
+  TORCH_CHECK(input.numel() > 0,
     "fractional_max_pool2d(): expected input to have non-empty ",
     "spatial dimensions.");
 
-  AT_CHECK((ndims == 3 || ndims == 4),
+  TORCH_CHECK((ndims == 3 || ndims == 4),
      "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   if (ndims == 4) {
@@ -159,10 +160,10 @@ void fractional_max_pool2d_out_cuda_template(
   int poolSizeH = pool_size[0];
   int poolSizeW = pool_size[1];
 
-  AT_CHECK(outputH + poolSizeH - 1 <= inputH,
+  TORCH_CHECK(outputH + poolSizeH - 1 <= inputH,
              "fractional_max_pool2d(): pool_size height ", poolSizeH,
              " too large relative to input height ", inputH);
-  AT_CHECK(outputW + poolSizeW - 1 <= inputW,
+  TORCH_CHECK(outputW + poolSizeW - 1 <= inputW,
            "pool_size width ", poolSizeW,
            " too large relative to input width ", inputW);
 
@@ -208,7 +209,7 @@ void fractional_max_pool2d_out_cuda_template(
           poolSizeH, poolSizeW);
        }
      );
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
      "fractional_max_pool2d_out_cuda_frame failed with error code ",
      cudaGetLastError());
 }
@@ -237,9 +238,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
   int outputH = output_size[0];
   int outputW = output_size[1];
 
-  AT_CHECK(outputH == gradOutput.size(dimh),
+  TORCH_CHECK(outputH == gradOutput.size(dimh),
            "fractional_max_pool2d(): gradOutput height unexpected");
-  AT_CHECK(outputW == gradOutput.size(dimw),
+  TORCH_CHECK(outputW == gradOutput.size(dimw),
            "fractional_max_pool2d(): gradOutput width unexpected");
 
   /* resize */
@@ -277,7 +278,7 @@ void fractional_max_pool2d_backward_out_cuda_template(
         devGradInput, devGradOutput, devIndices);
       }
     );
-  AT_CHECK(cudaGetLastError() == cudaSuccess,
+  TORCH_CHECK(cudaGetLastError() == cudaSuccess,
     "fractional_max_pool2d_backward_out_cuda_frame failed with error code ",
     cudaGetLastError());
 }

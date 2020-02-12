@@ -1,7 +1,7 @@
 #!/bin/bash
 
 echo "RUNNING ON $(uname -a) WITH $(nproc) CPUS AND $(free -m)"
-set -ex
+set -eux -o pipefail
 source /env
 
 # Defaults here so they can be changed in one place
@@ -19,7 +19,7 @@ fi
 # We want to call unbuffer, which calls tclsh which finds the expect
 # package. The expect was installed by yum into /usr/bin so we want to
 # find /usr/bin/tclsh, but this is shadowed by /opt/conda/bin/tclsh in
-# the conda docker images.
+# the conda docker images, so we prepend it to the path here.
 if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
   mkdir /just_tclsh_bin
   ln -s /usr/bin/tclsh /just_tclsh_bin/tclsh

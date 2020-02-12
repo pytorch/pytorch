@@ -9,16 +9,18 @@
 source /home/circleci/project/env
 echo "Running the following code in Docker"
 cat /home/circleci/project/ci_test_script.sh
-set -ex
+echo
+echo
+set -eux -o pipefail
 
 # Expect actual code to be written to this file
 chmod +x /home/circleci/project/ci_test_script.sh
 
 # Run the docker
-if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-  export id=$(docker run --runtime=nvidia -t -d "${DOCKER_IMAGE}")
+if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d "${DOCKER_IMAGE}")
 else
-  export id=$(docker run -t -d "${DOCKER_IMAGE}")
+  export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d "${DOCKER_IMAGE}")
 fi
 
 # Copy the envfile and script with all the code to run into the docker.
@@ -38,7 +40,7 @@ if [[ -d "$PYTORCH_ROOT" ]]; then
   docker cp "$PYTORCH_ROOT" "$id:/pytorch"
 fi
 if [[ -d "$BUILDER_ROOT" ]]; then
-  docker cp "$BUILDER ROOT" "$id:/builder"
+  docker cp "$BUILDER_ROOT" "$id:/builder"
 fi
 
 # Execute the test script that was populated by an earlier section

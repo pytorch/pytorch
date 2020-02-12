@@ -12,16 +12,16 @@
 #include <THCUNN/SharedMem.cuh>
 #include <THCUNN/common.h>
 #include <algorithm>
+#include <c10/macros/Macros.h>
 
 
-const int WARP_SIZE = 32;
 // Crude benchmarks suggest 256 is better than 512 and 1024
 // TODO: Autotune/use better heuristics, improve speed more.
 const int MAX_BLOCK_SIZE = 256;
 
 static int getGradParamsNumThreads(int batchSize){
 //warp per item in a batch, up to a maximum
-   return std::min(batchSize * WARP_SIZE, MAX_BLOCK_SIZE);
+   return std::min(batchSize * C10_WARP_SIZE, MAX_BLOCK_SIZE);
 
 }
 
@@ -213,9 +213,9 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
 
   AccT grad = ScalarConvert<float, AccT>::to(0.0);
 
-  const int laneId = threadIdx.x % WARP_SIZE;
-  const int batch = threadIdx.x / WARP_SIZE;
-  const int nwarps = blockDim.x / WARP_SIZE;
+  const int laneId = threadIdx.x % C10_WARP_SIZE;
+  const int batch = threadIdx.x / C10_WARP_SIZE;
+  const int nwarps = blockDim.x / C10_WARP_SIZE;
   const int imageElements = outputWidth * outputHeight;
   // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
   // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
@@ -227,7 +227,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){
     // Warp-stride loop over elements in a batch item
-    for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
+    for (IndexType idx = laneId; idx < imageElements; idx += C10_WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
     // in height, and width. We can intuit the corresponding position in the input from
     // the other parameters we have
@@ -266,3 +266,6 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
 
 #include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
 #include <THC/THCGenerateFloatTypes.h>
+
+#include <THCUNN/generic/SpatialDepthwiseConvolution.cu>
+#include <THC/THCGenerateBFloat16Type.h>

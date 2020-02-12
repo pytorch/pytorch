@@ -12,8 +12,8 @@ import hypothesis.strategies as st
 import hypothesis.extra.numpy as hnp
 
 # Basic implementation of gather for axis == 0, shich is lookup of indices
-# in the outer dimention. Keeping it for reference here, although is similar
-# to more general funciton below.
+# in the outer dimension. Keeping it for reference here, although is similar
+# to more general function below.
 def ref_gather_axis0():
     def inner(data, ind):
         if ind.size == 0 or data.shape[0] == 0:
@@ -32,6 +32,28 @@ def ref_gather(axis):
             return [np.zeros(tuple(shape)).astype(np.float32)]
         # np.take() does axis lookup same as gather
         output = data.take(ind, axis).astype(np.float32)
+        return [output]
+    return inner
+
+# Gather(..., match_outer==True)
+def ref_gather_match_outer(axis=1):
+    def inner(data, ind):
+        if ind.size == 0 or data.shape[axis] == 0:
+            shape = list(data.shape)
+            shape[0] = 0
+            return [np.zeros(tuple(shape)).astype(np.float32)]
+        input_shape = list(data.shape)
+        output_shape = input_shape[:axis] + list(ind.shape[axis:]) + input_shape[axis + 1:]
+        output = np.zeros(tuple(output_shape)).astype(np.float32)
+        if axis == 1:
+            for i in range(data.shape[0]):
+                output[i] = data[i, ind[i], ]
+        elif axis == 2:
+            for i in range(data.shape[0]):
+                for j in range(data.shape[1]):
+                    output[i, j] = data[i, j, ind[i, j], ]
+        else:
+            raise NotImplementedError
         return [output]
     return inner
 
@@ -58,9 +80,9 @@ class TestGatherOps(serial.SerializedTestCase):
     # Test axis == 2, this keeps outer dimension but will replace data
     # within axis by lookup of index array (repeated for each outer entry)
     @given(batch_num=st.integers(1, 4000),
-        rows_num=st.integers(1, 6),
-        index_num=st.integers(1, 20),
-        **hu.gcs)
+           rows_num=st.integers(1, 6),
+           index_num=st.integers(1, 20),
+           **hu.gcs)
     def test_gather_ops_axis2(self, batch_num, rows_num, index_num, gc, dc):
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(5, size=(index_num, )).astype('int32')
@@ -72,6 +94,75 @@ class TestGatherOps(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [data, ind], ref_gather(axis=2))
         self.assertDeviceChecks(dc, op, [data, ind], [0])
+        return
+
+    # Test match_outer == true, the indices has the same outer dimensions as data
+    @given(batch_num=st.integers(1, 40),
+           rows_num=st.integers(1, 6),
+           index_num=st.integers(1, 20),
+           **hu.gcs_cpu_only)
+    def test_gather_ops_match_outer(self, batch_num, rows_num, index_num, gc, dc):
+        data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
+        ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
+        op = core.CreateOperator(
+            'Gather',
+            ['data', 'ind'],
+            ['output'],
+            axis=1,
+            match_outer=True)
+
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather_match_outer())
+        self.assertDeviceChecks(dc, op, [data, ind], [0])
+        self.assertGradientChecks(gc, op, [data, ind], 0, [0])
+        return
+
+    # Test BatchGather with match_outer == true, the indices has the same outer dimensions as data
+    # Note BatchGather is equivalent to Gather(..., axis=1)
+    @given(batch_num=st.integers(1, 40),
+           rows_num=st.integers(1, 6),
+           index_num=st.integers(1, 20),
+           **hu.gcs_cpu_only)
+    def test_batch_gather_op_match_outer(self, batch_num, rows_num, index_num, gc, dc):
+        data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
+        ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
+        op = core.CreateOperator(
+            'BatchGather',
+            ['data', 'ind'],
+            ['output'],
+            match_outer=True)
+
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather_match_outer())
+        self.assertDeviceChecks(dc, op, [data, ind], [0])
+        self.assertGradientChecks(gc, op, [data, ind], 0, [0])
+        return
+
+    # when the data is larger,
+    # this test sometimes passes, sometimes fails,
+    # test log here: https://fb.quip.com/SeiyAVWQXvsN (second run failed)
+    # after some digging, this turns out to be numerical error,
+    # the failed run has max|grad - estimated_grad| = 0.009
+    # so here we changed the gradient checking threshold to 0.02 for this test to pass
+    @given(batch_num=st.integers(1, 30),
+           rows_num=st.integers(1, 6),
+           index_num=st.integers(1, 10),
+           index_num2=st.integers(1, 10),
+           axis2_num=st.integers(1, 10),
+           **hu.gcs_cpu_only)
+    def test_gather_op_match_outer_axis2_data4D_ind4D(
+        self, batch_num, rows_num, axis2_num, index_num, index_num2, gc, dc
+    ):
+        data = np.random.random((batch_num, rows_num, axis2_num, 5)).astype(np.float32)
+        ind = np.random.randint(axis2_num, size=(batch_num, rows_num, index_num, index_num2)).astype('int32')
+        op = core.CreateOperator(
+            'Gather',
+            ['data', 'ind'],
+            ['output'],
+            axis=2,
+            match_outer=True)
+
+        self.assertReferenceChecks(gc, op, [data, ind], ref_gather_match_outer(axis=2))
+        self.assertDeviceChecks(dc, op, [data, ind], [0])
+        self.assertGradientChecks(gc, op, [data, ind], 0, [0], threshold=0.02)
         return
 
 

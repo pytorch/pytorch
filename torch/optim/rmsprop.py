@@ -3,13 +3,19 @@ from .optimizer import Optimizer
 
 
 class RMSprop(Optimizer):
-    """Implements RMSprop algorithm.
+    r"""Implements RMSprop algorithm.
 
     Proposed by G. Hinton in his
     `course <http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_.
 
     The centered version first appears in `Generating Sequences
     With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
+
+    The implementation here takes the square root of the gradient average before
+    adding epsilon (note that TensorFlow interchanges these two operations). The effective
+    learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
+    is the scheduled learning rate and :math:`v` is the weighted moving average
+    of the squared gradient.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -69,11 +75,11 @@ class RMSprop(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p.data)
+                    state['square_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     if group['momentum'] > 0:
-                        state['momentum_buffer'] = torch.zeros_like(p.data)
+                        state['momentum_buffer'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
                     if group['centered']:
-                        state['grad_avg'] = torch.zeros_like(p.data)
+                        state['grad_avg'] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']
@@ -88,7 +94,7 @@ class RMSprop(Optimizer):
                 if group['centered']:
                     grad_avg = state['grad_avg']
                     grad_avg.mul_(alpha).add_(1 - alpha, grad)
-                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt().add_(group['eps'])
+                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt_().add_(group['eps'])
                 else:
                     avg = square_avg.sqrt().add_(group['eps'])
 

@@ -23,8 +23,10 @@ def onnxifi_caffe2_net(
         max_seq_size=1,
         debug=False,
         use_onnx=True,
+        merge_fp32_inputs_into_fp16=False,
         adjust_batch=True,
-        black_list=None):
+        black_list=None,
+        weight_names=None):
     """
     Transform the caffe2_net by collapsing ONNXIFI-runnable nodes into Onnxifi c2 ops
     """
@@ -34,10 +36,12 @@ def onnxifi_caffe2_net(
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
                              shape_hints,
                              black_list if black_list else [],
+                             weight_names if weight_names is not None else [],
                              max_batch_size,
                              max_seq_size,
                              adjust_batch,
                              debug,
+                             merge_fp32_inputs_into_fp16,
                              use_onnx)
     pred_net_cut = caffe2_pb2.NetDef()
     pred_net_cut.ParseFromString(pred_net_str)

@@ -2,39 +2,27 @@
 
 // ${generated_comment}
 
+#include <ATen/Context.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+
+namespace c10 {
+class Scalar;
+}
 namespace at {
-namespace legacy {
-namespace th {
-
-namespace detail {
-
-static inline LegacyTHDispatcher & infer_dispatcher(const Tensor & t) {
-  AT_CHECK(t.defined(), "undefined Tensor");
-  return getLegacyTHDispatcher(t);
-}
-static inline LegacyTHDispatcher & infer_dispatcher(const TensorList & tl) {
-  AT_CHECK(tl.size() > 0, "expected a non-empty list of Tensors");
-  return getLegacyTHDispatcher(tl[0]);
-}
-
-} // namespace detail
-
-// function definitions are all static inline because
-// they are one-line statically dispatched functions that
-// invoke the actual dynamic dispatch on the correct argument
-
-}
-}
-}
-
-// FIXME: this is temporary until we start generating into at::legacy::th
-
-#include <ATen/Functions.h>
+struct Generator;
+class Tensor;
+struct Type;
+} // namespace at
 
 namespace at {
+namespace native {
 namespace legacy {
-namespace th {
-  using namespace at;
-}
-}
-}
+namespace ${namespace} {
+
+${legacy_th_declarations}
+
+} // namespace th
+} // namespace legacy
+} // namespace native
+} // namespace at

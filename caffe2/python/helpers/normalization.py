@@ -243,20 +243,10 @@ def layer_norm(
             - The standard deviation of the input blob acress the given axis.
     '''
 
-    # The LayerNorm operator only performs the layerwise z-shift, without
-    # scaling and shifting by the learned scale and bias parameters. We have
-    # to do that separately below.
-    normalized, mean, stdev = model.net.LayerNorm(
-        [blob_in],
-        [blob_out, blob_out + "_mean", blob_out + "_stdev"],
-        axis=axis,
-        epsilon=epsilon,
-    )
-
     # The learned multiplicative scale or "gain".
     scale = model.create_param(
         param_name='{}_scale'.format(blob_out),
-        shape=[dim_in],
+        shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',
             value=initial_scale,
@@ -267,7 +257,7 @@ def layer_norm(
     # The learned additive bias or "shift".
     bias = model.create_param(
         param_name='{}_bias'.format(blob_out),
-        shape=[dim_in],
+        shape=[dim_in] if isinstance(dim_in, int) else dim_in,
         initializer=initializers.Initializer(
             'ConstantFill',
             value=initial_bias,
@@ -275,21 +265,15 @@ def layer_norm(
         tags=ParameterTags.BIAS,
     )
 
-    scaled = model.net.Mul(
-        [normalized, scale],
-        ['{}_scaled'.format(blob_out)],
-        broadcast=1,
+    normalized, mean, std = model.net.LayerNorm(
+        [blob_in, scale, bias],
+        [blob_out, blob_out + "_mean", blob_out + "_std"],
         axis=axis,
+        epsilon=epsilon,
+        elementwise_affine=True,
     )
 
-    biased = model.net.Add(
-        [scaled, bias],
-        ['{}_biased'.format(blob_out)],
-        broadcast=1,
-        axis=axis,
-    )
-
-    return biased, mean, stdev
+    return normalized, mean, std
 
 def moments_with_running_stats(model, blob_in, blob_out, dim_in,
                                      RunningMeanInitializer=None, RunningVarianceInitializer=None,

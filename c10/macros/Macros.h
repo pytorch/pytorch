@@ -29,25 +29,58 @@
   classname(const classname&) = delete;        \
   classname& operator=(const classname&) = delete
 
-#define CONCAT_IMPL(x, y) x##y
-#define MACRO_CONCAT(x, y) CONCAT_IMPL(x, y)
+#define C10_CONCATENATE_IMPL(s1, s2) s1##s2
+#define C10_CONCATENATE(s1, s2) C10_CONCATENATE_IMPL(s1, s2)
 
-#define MACRO_EXPAND(args) args
+#define C10_MACRO_EXPAND(args) args
+
+/**
+ * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
+ * str and ending with a number that varies with the line.
+ */
+#ifdef __COUNTER__
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __COUNTER__)
+#else
+#define C10_ANONYMOUS_VARIABLE(str) C10_CONCATENATE(str, __LINE__)
+#endif
+
 
 /// C10_NODISCARD - Warn if a type or return value is discarded.
+
+// Technically, we should check if __cplusplus > 201402L here, because
+// [[nodiscard]] is only defined in C++17.  However, some compilers
+// we care about don't advertise being C++17 (e.g., clang), but
+// support the attribute anyway.  In fact, this is not just a good idea,
+// it's the law: clang::warn_unused_result doesn't work on nvcc + clang
+// and the best workaround for this case is to use [[nodiscard]]
+// instead; see https://github.com/pytorch/pytorch/issues/13118
+//
+// Note to future editors: if you have noticed that a compiler is
+// misbehaving (e.g., it advertises support, but the support doesn't
+// actually work, or it is emitting warnings).  Some compilers which
+// are strict about the matter include MSVC, which will complain:
+//
+//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
+//
+// Exhibits:
+//  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
+//  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
+//  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
 #define C10_NODISCARD
-#if __cplusplus > 201402L && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(nodiscard)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[nodiscard]]
-#endif
+#if defined(__has_cpp_attribute)
+# if __has_cpp_attribute(nodiscard)
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[nodiscard]]
+# endif
 // Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
 // error when __has_cpp_attribute is given a scoped attribute in C mode.
 #elif __cplusplus && defined(__has_cpp_attribute)
-#if __has_cpp_attribute(clang::warn_unused_result)
-#undef C10_NODISCARD
-#define C10_NODISCARD [[clang::warn_unused_result]]
-#endif
+# if __has_cpp_attribute(clang::warn_unused_result)
+// TODO: It's possible this is still triggering https://github.com/pytorch/pytorch/issues/13118
+// on Windows; if it is, better fix it.
+#  undef C10_NODISCARD
+#  define C10_NODISCARD [[clang::warn_unused_result]]
+# endif
 #endif
 
 // suppress an unused variable.
@@ -56,6 +89,8 @@
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
+
+#define C10_RESTRICT __restrict
 
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
@@ -80,13 +115,6 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
 namespace at { namespace cuda { using namespace c10::hip; }}
-
-// C10_NORETURN
-#if defined(_MSC_VER)
-#define C10_NORETURN __declspec(noreturn)
-#else
-#define C10_NORETURN __attribute__((noreturn))
-#endif
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -158,6 +186,25 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
+#ifdef __HIP_PLATFORM_HCC__
+#define C10_WARP_SIZE 64
+#else
+#define C10_WARP_SIZE 32
+#endif
+
+// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels. This is not supported by Apple platforms so we special case it.
+// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#define CUDA_KERNEL_ASSERT(...)
+#else // __APPLE__
+#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #if defined(__ANDROID__)
 #define C10_ANDROID 1
 #define C10_MOBILE 1
@@ -175,6 +222,55 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+#endif
+
+// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
+// device code in CUDA to call host constexpr functions. Unfortunately,
+// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
+// with many of the constexpr things we'd like to do and the device code
+// compiler crashes when it sees one of these host-only functions.
+// It works when nvcc builds host code, but not when it builds device code
+// and notices it can call these constexpr functions from device code.
+// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
+// functions. This enables constexpr when compiled on the host and applies
+// __host__ when it is compiled on the device in an attempt to stop it from
+// being called from device functions. Not sure if the latter works, but
+// even if not, it not being constexpr anymore should be enough to stop
+// it from being called from device code.
+// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
+#if defined(__CUDA_ARCH__)
+#define C10_HOST_CONSTEXPR __host__
+#define C10_HOST_CONSTEXPR_VAR
+#else
+#define C10_HOST_CONSTEXPR constexpr
+#define C10_HOST_CONSTEXPR_VAR constexpr
+#endif
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 constexpr
+#define IS_NOT_GCC5_CONSTEXPR 1
+#endif
+
+#if defined(__CUDA_ARCH__)
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#endif
+#else
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

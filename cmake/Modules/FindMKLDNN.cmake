@@ -7,16 +7,15 @@
 #  MKLDNN_FOUND          : set to true if mkl-dnn is found.
 #  MKLDNN_INCLUDE_DIR    : path to mkl-dnn include dir.
 #  MKLDNN_LIBRARIES      : list of libraries for mkl-dnn
+#
+# The following variables are used:
+#  MKLDNN_USE_NATIVE_ARCH : Whether native CPU instructions should be used in MKLDNN. This should be turned off for
+#  general packaging to avoid incompatible CPU instructions. Default: OFF.
 
 IF (NOT MKLDNN_FOUND)
 
 SET(MKLDNN_LIBRARIES)
 SET(MKLDNN_INCLUDE_DIR)
-
-IF(MSVC)
-  MESSAGE(STATUS "MKL-DNN needs omp 3+ which is not supported in MSVC so far")
-  RETURN()
-ENDIF(MSVC)
 
 SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
 SET(MKLDNN_ROOT "${IDEEP_ROOT}/mkl-dnn")
@@ -34,73 +33,61 @@ IF (NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
   RETURN()
 ENDIF(NOT IDEEP_INCLUDE_DIR OR NOT MKLDNN_INCLUDE_DIR)
 LIST(APPEND MKLDNN_INCLUDE_DIR ${IDEEP_INCLUDE_DIR})
-
 IF(MKL_FOUND)
+  ADD_DEFINITIONS(-DIDEEP_USE_MKL)
   # Append to mkldnn dependencies
   LIST(APPEND MKLDNN_LIBRARIES ${MKL_LIBRARIES})
   LIST(APPEND MKLDNN_INCLUDE_DIR ${MKL_INCLUDE_DIR})
 ELSE(MKL_FOUND)
-  # If we cannot find MKL, we will use the Intel MKL Small library
-  # comes with ${MKLDNN_ROOT}/external
-  IF(NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
-    IF(UNIX)
-      EXECUTE_PROCESS(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.sh" RESULT_VARIABLE __result)
-    ELSE(UNIX)
-      EXECUTE_PROCESS(COMMAND "${MKLDNN_ROOT}/scripts/prepare_mkl.bat" RESULT_VARIABLE __result)
-    ENDIF(UNIX)
-  ENDIF(NOT IS_DIRECTORY ${MKLDNN_ROOT}/external)
-
-  FILE(GLOB_RECURSE MKLML_INNER_INCLUDE_DIR ${MKLDNN_ROOT}/external/*/mkl.h)
-  IF(NOT MKLML_INNER_INCLUDE_DIR)
-    MESSAGE(STATUS "MKL-DNN not found. Compiling without MKL-DNN support")
-    RETURN()
-  ENDIF(NOT MKLML_INNER_INCLUDE_DIR)
-  # if user has multiple version under external/ then guess last
-  # one alphabetically is "latest" and warn
-  LIST(LENGTH MKLML_INNER_INCLUDE_DIR MKLINCLEN)
-  IF(MKLINCLEN GREATER 1)
-    LIST(SORT MKLML_INNER_INCLUDE_DIR)
-    LIST(REVERSE MKLML_INNER_INCLUDE_DIR)
-    LIST(GET MKLML_INNER_INCLUDE_DIR 0 MKLINCLST)
-    SET(MKLML_INNER_INCLUDE_DIR "${MKLINCLST}")
-  ENDIF(MKLINCLEN GREATER 1)
-  GET_FILENAME_COMPONENT(MKLML_INNER_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR} DIRECTORY)
-  LIST(APPEND MKLDNN_INCLUDE_DIR ${MKLML_INNER_INCLUDE_DIR})
-
-  IF(APPLE)
-    SET(__mklml_inner_libs mklml iomp5)
-  ELSE(APPLE)
-    SET(__mklml_inner_libs mklml_intel iomp5)
-  ENDIF(APPLE)
-  FOREACH(__mklml_inner_lib ${__mklml_inner_libs})
-    STRING(TOUPPER ${__mklml_inner_lib} __mklml_inner_lib_upper)
-    FIND_LIBRARY(${__mklml_inner_lib_upper}_LIBRARY
-          NAMES ${__mklml_inner_lib}
-          PATHS  "${MKLML_INNER_INCLUDE_DIR}/../lib"
-          DOC "The path to Intel(R) MKLML ${__mklml_inner_lib} library")
-    MARK_AS_ADVANCED(${__mklml_inner_lib_upper}_LIBRARY)
-    IF(NOT ${__mklml_inner_lib_upper}_LIBRARY)
-      MESSAGE(STATUS "MKL-DNN not found. Compiling without MKL-DNN support")
-      RETURN()
-    ENDIF(NOT ${__mklml_inner_lib_upper}_LIBRARY)
-    LIST(APPEND MKLDNN_LIBRARIES ${${__mklml_inner_lib_upper}_LIBRARY})
-  ENDFOREACH(__mklml_inner_lib)
+  SET(MKLDNN_USE_MKL "NONE" CACHE STRING "" FORCE)
 ENDIF(MKL_FOUND)
 
-IF(MKL_FOUND)
-  SET(MKL_cmake_included TRUE)
-  SET(MKLDNN_THREADING "OMP:COMP" CACHE STRING "" FORCE)
-ENDIF(MKL_FOUND)
+SET(MKL_cmake_included TRUE)
+IF (NOT MKLDNN_THREADING)
+  SET(MKLDNN_THREADING "OMP:COMP" CACHE STRING "")
+ELSEIF (MKLDNN_THREADING STREQUAL "TBB")
+  IF (USE_TBB)
+    MESSAGE(STATUS "MKL-DNN is using TBB")
+
+    SET(TBB_cmake_included TRUE)
+    SET(Threading_cmake_included TRUE)
+
+    REMOVE_DEFINITIONS(-DMKLDNN_THR)
+    ADD_DEFINITIONS(-DMKLDNN_THR=MKLDNN_THR_TBB)
+
+    SET(TBB_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/third_party/tbb/include")
+    INCLUDE_DIRECTORIES(${TBB_INCLUDE_DIRS})
+    LIST(APPEND EXTRA_SHARED_LIBS tbb)
+  ELSE()
+    MESSAGE(FATAL_ERROR "MKLDNN_THREADING is set to TBB but TBB is not used")
+  ENDIF()
+ENDIF()
+MESSAGE(STATUS "MKLDNN_THREADING = ${MKLDNN_THREADING}")
+
 SET(WITH_TEST FALSE CACHE BOOL "" FORCE)
 SET(WITH_EXAMPLE FALSE CACHE BOOL "" FORCE)
 SET(MKLDNN_LIBRARY_TYPE STATIC CACHE STRING "" FORCE)
+IF(MKLDNN_USE_NATIVE_ARCH)  # Disable HostOpts in MKLDNN unless MKLDNN_USE_NATIVE_ARCH is set.
+  SET(ARCH_OPT_FLAGS "HostOpts" CACHE STRING "" FORCE)
+ELSE()
+  IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    SET(ARCH_OPT_FLAGS "-msse4" CACHE STRING "" FORCE)
+  ELSE()
+    SET(ARCH_OPT_FLAGS "" CACHE STRING "" FORCE)
+  ENDIF()
+ENDIF()
+
 ADD_SUBDIRECTORY(${MKLDNN_ROOT})
 IF(NOT TARGET mkldnn)
   MESSAGE("Failed to include MKL-DNN target")
   RETURN()
 ENDIF(NOT TARGET mkldnn)
 IF(MKL_FOUND)
-  TARGET_COMPILE_DEFINITIONS(mkldnn PRIVATE -DUSE_MKL)
+  SET(USE_MKL_CBLAS -DUSE_MKL)
+  IF(USE_MKLDNN_CBLAS)
+    LIST(APPEND USE_MKL_CBLAS -DUSE_CBLAS)
+  ENDIF(USE_MKLDNN_CBLAS)
+  TARGET_COMPILE_DEFINITIONS(mkldnn PRIVATE USE_MKL_CBLAS)
 ENDIF(MKL_FOUND)
 IF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
   TARGET_COMPILE_OPTIONS(mkldnn PRIVATE -Wno-maybe-uninitialized)

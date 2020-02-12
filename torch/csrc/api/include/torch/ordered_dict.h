@@ -1,9 +1,6 @@
 #pragma once
 
-#include <c10/util/Exception.h>
-
 #include <cstdint>
-#include <functional>
 #include <initializer_list>
 #include <string>
 #include <unordered_map>
@@ -131,13 +128,13 @@ class OrderedDict {
   // Modifiers
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   template <typename K, typename V>
   Value& insert(K&& key, V&& value);
 
   /// Inserts a new `(key, value)` pair into the `OrderedDict`. Throws an
-  /// exception if the key is already present. If insertion is succesful,
+  /// exception if the key is already present. If insertion is successful,
   /// immediately returns a reference to the inserted value.
   Value& insert(Key key, Value&& value);
 
@@ -148,6 +145,10 @@ class OrderedDict {
   /// Inserts all items from `other` into this `OrderedDict`. If any key from
   /// `other` is already present in this `OrderedDict`, an exception is thrown.
   void update(const OrderedDict& other);
+
+  /// Removes the item that has `key` from this `OrderedDict` if exists and if
+  /// it doesn't an exception is thrown.
+  void erase(const Key& key);
 
   /// Removes all items from this `OrderedDict`.
   void clear();
@@ -224,14 +225,14 @@ class OrderedDict<Key, Value>::Item {
   }
 
   /// Returns a `(key, value)` pair.
-  const std::pair<const Key, Value>& pair() const noexcept {
+  const std::pair<Key, Value>& pair() const noexcept {
     return pair_;
   }
 
  private:
   /// This is stored as an std::pair because it will make Python binding a lot,
   /// lot easier.
-  ::std::pair<const Key, Value> pair_;
+  ::std::pair<Key, Value> pair_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ OrderedDict ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,41 +299,41 @@ typename OrderedDict<Key, Value>::ConstIterator OrderedDict<Key, Value>::end()
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::front() {
-  AT_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
   return items_.front();
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::front()
     const {
-  AT_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called front() on an empty OrderedDict");
   return items_.front();
 }
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::back() {
-  AT_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
   return items_.back();
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::back()
     const {
-  AT_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
+  TORCH_CHECK(!items_.empty(), "Called back() on an empty OrderedDict");
   return items_.back();
 }
 
 template <typename Key, typename Value>
 typename OrderedDict<Key, Value>::Item& OrderedDict<Key, Value>::operator[](
     size_t index) {
-  AT_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
+  TORCH_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
   return items_[index];
 }
 
 template <typename Key, typename Value>
 const typename OrderedDict<Key, Value>::
     Item& OrderedDict<Key, Value>::operator[](size_t index) const {
-  AT_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
+  TORCH_CHECK(index < items_.size(), "Index ", index, " is out of bounds");
   return items_[index];
 }
 
@@ -355,7 +356,7 @@ const Value& OrderedDict<Key, Value>::operator[](const Key& key) const {
 template <typename Key, typename Value>
 template <typename K, typename V>
 Value& OrderedDict<Key, Value>::insert(K&& key, V&& value) {
-  AT_CHECK(
+  TORCH_CHECK(
       index_.count(key) == 0, key_description_, " '", key, "' already defined");
   // Copy `key` here and move it into the index.
   items_.emplace_back(key, std::forward<V>(value));
@@ -402,6 +403,20 @@ const Value* OrderedDict<Key, Value>::find(const Key& key) const noexcept {
     return nullptr;
   }
   return &items_[iterator->second].value();
+}
+
+template <typename Key, typename Value>
+void OrderedDict<Key, Value>::erase(const Key& key) {
+  auto it = index_.find(key);
+  TORCH_CHECK(it != index_.end(), "Key '", key, "' doesn't exist");
+
+  auto index = it->second;
+  index_.erase(it);
+  items_.erase(items_.begin() + index);
+
+  for (auto& pair : index_)
+    if (pair.second > index)
+      --pair.second;
 }
 
 template <typename Key, typename Value>

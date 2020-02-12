@@ -1,5 +1,0 @@
-# This file contains a list of disabled configurations.  Disabled
-# configurations are skipped and not considered a failure if they
-# fail.  You can use this to temporarily reserve a test name to
-# turn on CI side before PyTorch repository supports it.  This
-# file has the same format as .jenkins/enabled-configs.txt

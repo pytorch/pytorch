@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 
 #include <ATen/ATen.h>
 #include <algorithm>
@@ -16,6 +15,14 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+c10::OperatorOptions aliasAnalysisIsSpecialCase() {
+  c10::OperatorOptions options;
+  options.setAliasAnalysis(AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
+  return options;
+}
+} // namespace
 
 // This pass looks for trees in the graph, where leaves are mm ops, and the
 // inner vertices are add nodes. Once we have such a tree they can be reduced to
@@ -84,14 +91,13 @@ bool have_same_shape(at::TensorList inputs) {
 }
 
 bool should_be_transposed(at::TensorList inputs) {
-  return (std::all_of(
-      inputs.begin(), inputs.end(), [](const at::Tensor& t) {
-        return t.stride(0) == 1 && t.stride(1) == t.size(0);
-      }));
+  return (std::all_of(inputs.begin(), inputs.end(), [](const at::Tensor& t) {
+    return t.stride(0) == 1 && t.stride(1) == t.size(0);
+  }));
 }
 
-std::vector<at::Tensor> transpose_inputs(at::TensorList inputs){
-    return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
+std::vector<at::Tensor> transpose_inputs(at::TensorList inputs) {
+  return fmap(inputs, [](const at::Tensor& i) { return i.t(); });
 }
 
 bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
@@ -102,8 +108,9 @@ bool shape_is_fast_for_reduce(const at::Tensor& lhs, const at::Tensor& rhs) {
   return m < 512 || ((l < 256 && r < 256) || (l > 256 && r > 256));
 }
 
-RegisterOperators mm_tree_reduction_reg(
-    {Operator(prim::MMTreeReduce, [](const Node* node) {
+RegisterOperators mm_tree_reduction_reg({Operator(
+    prim::MMTreeReduce,
+    [](const Node* node) -> Operation {
       size_t num_inputs = node->inputs().size();
       return [num_inputs](Stack& stack) {
         std::vector<at::Tensor> inputs;
@@ -122,21 +129,24 @@ RegisterOperators mm_tree_reduction_reg(
         // failing
         if (have_same_shape(lhs_inputs) && have_same_shape(rhs_inputs) &&
             shape_is_fast_for_reduce(lhs_inputs[0], rhs_inputs[0])) {
-          //sometimes lhs_inputs or rhs_inputs are not contiguous, and that causes at::cat to go through slow path
-          //view them as contiguous if possible by transposing
+          // sometimes lhs_inputs or rhs_inputs are not contiguous, and that
+          // causes at::cat to go through slow path view them as contiguous if
+          // possible by transposing
           bool lhs_input_transposed = should_be_transposed(lhs_inputs);
           bool rhs_input_transposed = should_be_transposed(rhs_inputs);
           at::Tensor lhs, rhs;
           if (lhs_input_transposed) {
-            std::vector<at::Tensor> lhs_contig_inputs = transpose_inputs(lhs_inputs);
-            lhs = at::cat(lhs_contig_inputs, /*dim*/0);
+            std::vector<at::Tensor> lhs_contig_inputs =
+                transpose_inputs(lhs_inputs);
+            lhs = at::cat(lhs_contig_inputs, /*dim*/ 0);
             lhs = lhs.t();
           } else {
             lhs = at::cat(lhs_inputs, /*dim=*/1);
           }
           if (rhs_input_transposed) {
-            std::vector<at::Tensor> rhs_contig_inputs = transpose_inputs(rhs_inputs);
-            rhs = at::cat(rhs_contig_inputs, /*dim*/1);
+            std::vector<at::Tensor> rhs_contig_inputs =
+                transpose_inputs(rhs_inputs);
+            rhs = at::cat(rhs_contig_inputs, /*dim*/ 1);
             rhs = rhs.t();
           } else {
             rhs = at::cat(rhs_inputs, /*dim=*/0);
@@ -151,12 +161,13 @@ RegisterOperators mm_tree_reduction_reg(
         }
         return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
 // when we reach node N with inputs A and B, then A and B have already been
-// procesed, and we can try to unify their TreeTokens (if they have them)
+// processed, and we can try to unify their TreeTokens (if they have them)
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
@@ -308,8 +319,9 @@ bool shape_is_fast_for_side(const at::Tensor& other_side_input) {
   return other_side_input.numel() <= 1024 * 2048;
 }
 
-RegisterOperators mm_batch_side_reg(
-    {Operator(prim::MMBatchSide, [](const Node* node) {
+RegisterOperators mm_batch_side_reg({Operator(
+    prim::MMBatchSide,
+    [](const Node* node) -> Operation {
       size_t num_other_side_inputs = node->inputs().size() - 1;
       Side single_side = static_cast<Side>(node->i(Symbol::attr("side")));
       return [num_other_side_inputs, single_side](Stack& stack) {
@@ -353,7 +365,8 @@ RegisterOperators mm_batch_side_reg(
 
         return 0;
       };
-    })});
+    },
+    aliasAnalysisIsSpecialCase())});
 
 std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,

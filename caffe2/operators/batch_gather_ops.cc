@@ -17,7 +17,7 @@ OPERATOR_SCHEMA(BatchGather)
 
       vector<int> output_dims =
           caffe2::gather_helper::calc_output_shape_vector<int>(
-              data_dims, indices_dims, 1);
+              data_dims, indices_dims, 1, false);
       out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
       return out;
     })

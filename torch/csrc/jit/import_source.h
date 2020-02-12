@@ -1,35 +1,44 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/module.h>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace jit {
 namespace script {
-// Helpers to define modules and classes from source strings. Used in model
-// saving/loading, so it expects the format produced by the model exporter.
 
-// Add the methods defined in `src` to the module `mod`.
-TORCH_API void import_methods(
-    const std::shared_ptr<script::Module>& mod,
-    const std::string& src,
-    const std::vector<at::Tensor>& constant_table);
+struct SourceImporterImpl;
 
-// Defined the list of classes in `src`.
-TORCH_API void import_libs(
-    const std::string& src,
-    const std::vector<at::Tensor>& constant_table);
+// Given a directory of serialized TorchScript sources,
+// This class allows the loading of individual named types in source.
+// Resolves the dependencies between source files and parses
+// the source files as necessary.
+using SourceLoader = std::function<std::shared_ptr<Source>(const std::string&)>;
 
-// Add the functions defined in `src` to the module `mod`.
-// self is passed through the CompilationUnit's define function.
-// If present, it determines the SugaredValue for the first argument
-// and that argument is no longer expected to have type annotations.
-TORCH_API void import_functions(
-    CompilationUnit& cu,
-    const std::string& src,
-    const std::vector<at::Tensor>& constant_table,
-    const Self& self=nullptr);
+struct TORCH_API SourceImporter {
+  SourceImporter(
+      // The compilation unit that will own the imported source
+      std::shared_ptr<CompilationUnit> cu,
+      const std::vector<at::Tensor>* tensor_table,
+      SourceLoader loader,
+      size_t version);
+
+  TypePtr loadNamedType(const QualifiedName& name) const;
+
+  // Add the methods defined in `src` to the module `mod`, using SourceImporter
+  // to resolve any classes via loadNamedType
+  void LEGACY_import_methods(
+      const script::Module& mod,
+      const std::shared_ptr<Source>& src);
+  ~SourceImporter();
+
+ private:
+  std::shared_ptr<SourceImporterImpl> pImpl;
+};
 
 } // namespace script
 } // namespace jit

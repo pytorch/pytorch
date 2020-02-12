@@ -1,247 +1,178 @@
 #include <c10/util/Optional.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/utils/memory.h>
-
-#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/autograd/utils/error_messages.h>
+#include <torch/csrc/autograd/autograd.h>
+#include <ATen/core/op_registration/op_registration.h>
 
 using namespace at;
 using namespace torch::autograd::generated;
 
-namespace torch { namespace autograd {
+namespace torch { namespace autograd { namespace VariableType {
 
-VariableType::VariableType(Context* context, TypeExtendedInterface* baseType)
-  : TypeDefault(baseType->type_id(), /*is_variable=*/true, /*is_undefined=*/false)
-  , baseType(baseType)
-  , id_(context->freshTypeID()) {
-  str = std::string("Variable[") + baseType->toString() + "]";
-}
-
-Backend VariableType::backend() const {
-  return baseType->backend();
-}
-Allocator* VariableType::allocator() const {
-  return baseType->allocator();
-}
-Device VariableType::getDeviceFromPtr(void * data) const {
-  return baseType->getDeviceFromPtr(data);
-}
-Storage VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  return baseType->unsafeStorageFromTH(th_pointer, retain);
-}
-Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
-}
-std::unique_ptr<Generator> VariableType::generator() const {
-  return baseType->generator();
-}
-
-const char * VariableType::toString() const {
-  return str.c_str();
-}
-Type & VariableType::toBackend(Backend b) const {
-  return *getVariableTypeFromBaseType(baseType->toBackend(b));
-}
-Type & VariableType::toScalarType(ScalarType s) const {
-  return *getVariableTypeFromBaseType(baseType->toScalarType(s));
-}
-TypeID VariableType::ID() const {
-  return static_cast<TypeID>(id_);
-}
-
-std::vector<std::unique_ptr<Type>> type_to_variable_type;
-
-// XXX - this is not threadsafe with uses of Variables
-void register_variable_type_for(TypeExtendedInterface* baseType) {
-  AT_ASSERT(baseType);
-  const auto base_id = static_cast<size_t>(baseType->ID());
-  if(type_to_variable_type.size() <= base_id) {
-    type_to_variable_type.resize(base_id + 1);
-  }
-  type_to_variable_type[base_id] =
-      make_unique<VariableType>(&at::globalContext(), baseType);
-}
-
-struct VariableTypeRegistry {
-  VariableTypeRegistry() {
-    auto& context = at::globalContext();
-    for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
-        auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
-        if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(baseType);
-        }
-      }
-    }
-  }
-};
-
-struct VariableHooks : public at::VariableHooksInterface {
-  VariableHooks(at::VariableHooksArgs) {}
-  void registerVariableTypeFor(at::LegacyTypeDispatch*, at::Backend) const override;
-  at::Type& getVariableTypeFromBaseType(const at::Type&) const override;
-};
-
-// Sigh, the registry doesn't support namespaces :(
-using at::RegistererVariableHooksRegistry;
-using at::VariableHooksRegistry;
-
-// WARNING: YOU MUST DO THE NEXT TWO STATIC INITIALIZERS IN THIS ORDER.
-//
-// If you do it in the other order, this is what can happen if
-// these static initializers are called before Context is
-// initialized:
-//
-//    - VariableHooks::registerVariableTypeFor will be activated
-//      to register a variable type
-//
-//    - We run the constructor of VariableTypeRegistry, which
-//      calls at::globalContext()
-//
-//    - Context is not initialized yet, so we call the constructor
-//      of Context
-//
-//    - We register CPU types, calling VariableHooks::registerVariableTypeFor
-//
-//    - We register the CPU type as a variable type
-//
-//    - In VariableTypeRegistry, we try to register the Variable type AGAIN!!
-//      Disaster.
-//
-static VariableTypeRegistry registry;
-REGISTER_VARIABLE_HOOKS(VariableHooks)
-
-// Pre-condition: backend/scalar_type is a valid type in the type_registry
-void VariableHooks::registerVariableTypeFor(at::LegacyTypeDispatch* context, at::Backend backend) const {
-  auto* baseType = context->getNonVariableTypeRaw(backend, ScalarType::Undefined);
-  register_variable_type_for(static_cast<at::TypeExtendedInterface*>(baseType));
-}
-
-at::Type& VariableHooks::getVariableTypeFromBaseType(const at::Type& baseType) const {
-  return *VariableType::getVariableTypeFromBaseType(baseType);
-}
-
-bool VariableType::isVariableType(const at::Type& type) {
-  return type.is_variable();
-}
-
-at::TypeExtendedInterface* VariableType::getVariableTypeFromBaseType(const at::Type& baseType) {
-  auto id = static_cast<size_t>(baseType.ID());
-  if(id >= type_to_variable_type.size())
-    return nullptr;
-  return static_cast<at::TypeExtendedInterface*>(type_to_variable_type[id].get());
-}
-
-namespace {
-std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
-  auto& context = at::globalContext();
-  std::vector<Type*> res;
+std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
+  std::vector<DeprecatedTypeProperties*> res;
   res.reserve(backends.size());
   for (auto p : backends) {
-    auto baseType = context.getNonVariableTypeRaw(static_cast<Backend>(p), ScalarType::Undefined);
-    if (baseType) {
-      res.emplace_back(VariableType::getVariableTypeFromBaseType(*baseType));
+    for (int64_t s = 0; s < static_cast<int64_t>(ScalarType::NumOptions); s++) {
+      auto& type = getDeprecatedTypeProperties(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      res.emplace_back(&type);
     }
   }
   return res;
 }
-}
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
   return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
 }
 
-std::vector<at::Type*> VariableType::allCUDATypes() {
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
-const Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
+namespace {
+const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
-  }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
   }
   return as_variable_ref(t);
 }
 
-Variable & VariableType::checked_cast_variable(Tensor & t, const char * name, int pos) {
+Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
   }
-  if (!t.is_variable()) {
-    AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " for argument #", pos, " '", name, "'");
-  }
   return as_variable_ref(t);
 }
-
-const Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
 }
 
-Tensor & VariableType::unpack(Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+const Tensor & unpack(const Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos);
 }
 
-SparseTensorRef VariableType::unpack(SparseTensorRef t, const char * name, int pos) {
-  return SparseTensorRef(checked_cast_variable(t.tref, name, pos).data());
+Tensor & unpack(Tensor & t, const char * name, int pos) {
+  return checked_cast_variable(t, name, pos);
 }
 
-Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
+Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     return Tensor();
   }
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) {
+std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
       continue;
     }
-    if (!isVariableType(t.dispatch_type())) {
-      AT_ERROR("Expected object of type Variable but found type ", t.dispatch_type().toString(), " at position #", i, " "
-                    "for iterable argument #", pos, " '", name, "'");
-    }
-    ret[i] = static_cast<const Variable&>(t).data();
+    ret[i] = static_cast<const Variable&>(t);
   }
   return ret;
 }
 
-void VariableType::backward(
-    Tensor& self,
-    c10::optional<Tensor> gradient,
+namespace {
+
+void backward(
+    const Tensor& self,
+    const Tensor& gradient,
     bool keep_graph,
-    bool create_graph) const {
-  as_variable_ref(self).backward(gradient, keep_graph, create_graph);
+    bool create_graph) {
+  torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
 }
 
-void VariableType::set_data(Tensor & self, Tensor new_data) const {
-  as_variable_ref(self).set_data(new_data);
+void set_data(const Tensor & self, const Tensor & new_data) {
+  // `var.set_data(new_data)` shallow-copies all non-autograd TensorImpl fields
+  // from `new_data` to `var`. It requires that `new_data` and `var` have compatible
+  // tensor type.
+  TORCH_CHECK(
+    _has_compatible_shallow_copy_type(self, new_data),
+    "Attempted to call `variable.set_data(tensor)`, but `variable` and `tensor` have incompatible tensor type.");
+
+  // Resets gradient accumulator if metadata is out of date
+  AutogradMeta* autograd_meta = impl::get_autograd_meta(self);
+  if (autograd_meta) {
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+    auto prior_accumulator = autograd_meta->grad_accumulator_.lock();
+    if (prior_accumulator) {
+      const auto prior_device = prior_accumulator->input_metadata(0).device();
+      const auto new_device = new_data.device();
+
+      if (!new_data.options().type_equal(self.options()) || prior_device != new_device) {
+        autograd_meta->grad_accumulator_.reset();
+      }
+    }
+  }
+
+  // Version counter is not shared when we replace a `Variable`'s tensor data
+  // by calling `set_data(...)`. The original version of the `Variable` is always preserved.
+  // See NOTE [ Version Counter Sharing ] for details.
+  //
+  // `var.set_data(new_data)` always ignores `var`'s `allow_tensor_metadata_change_`, because
+  // users need this API as an escape hatch for changing a tensor's metadata regardless of its
+  // `allow_tensor_metadata_change_` value, and the users are responsible for ensuring this is
+  // the behavior they want.
+  self.unsafeGetTensorImpl()->shallow_copy_from(new_data.getIntrusivePtr());
+}
+
+Tensor data(const Tensor & self) {
+  return as_variable_ref(self).variable_data();
+}
+
+bool is_leaf(const Tensor & self) {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+int64_t output_nr(const Tensor & self) {
+  if (impl::get_autograd_meta(self)) {
+    return impl::get_autograd_meta(self)->output_nr_;
+  } else {
+    return 0;
+  }
+}
+
+int64_t _version(const Tensor & self) {
+  return self.unsafeGetTensorImpl()->version_counter().current_version();
+}
+
+Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
+  if (!self.is_leaf() && !_requires_grad) {
+    throw std::runtime_error(
+      autograd::utils::requires_grad_leaf_error(_requires_grad)
+    );
+  }
+  return self.set_requires_grad(_requires_grad);
 }
 
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
   if(torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
     auto& graph = state.graph;
-    if (state.force_outplace) {
+    if (state.force_outplace && self.storage().use_count() <= 1) {
       // if you have no views of self, then an in place copy is equivalent to
       // making sure we expand src to the same size as self
       jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
       jit::tracer::addInputs(node, "src", src);
       jit::tracer::addInputs(node, "self", self);
       graph->insertNode(node);
-      jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
       output = node->output();
     } else {
       output = graph->insert(
           jit::aten::copy_,
           {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
+      jit::tracer::recordSourceLocation(output->node());
     }
+    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
   }
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
@@ -250,16 +181,18 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
-  requires_grad &= isFloatingPoint(self.scalar_type());
+  // currently, isFloatingType will return false for (floating) complex types,
+  // so this might have to be amended when they should be differentiable
+  requires_grad &= isFloatingType(self.scalar_type());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
-    grad_fn->src_type = &src.type();
+    grad_fn->src_options = src.options();
     grad_fn->src_device = src.device();
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    baseType->copy_(self_, src_, non_blocking);
+    self_.copy_(src_, non_blocking);
   }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
@@ -269,7 +202,10 @@ Tensor & VariableType::copy_(Tensor & self, const Tensor & src, bool non_blockin
   return self;
 }
 
-Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
+Tensor& resize_(
+    Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (as_variable_ref(self).requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -281,12 +217,15 @@ Tensor & VariableType::resize_(Tensor & self, IntArrayRef size) const {
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    baseType->resize_(self_, size);
+    self_.resize_(size, std::move(optional_memory_format));
   }
   return self;
 }
 
-Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
+Tensor& resize_as_(
+    Tensor& self,
+    const Tensor& the_template,
+    c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (as_variable_ref(self).requires_grad()) {
@@ -298,12 +237,12 @@ Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) co
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    baseType->resize_as_(self_, the_template_);
+    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
   return self;
 }
 
-Tensor VariableType::detach(const Tensor & self) const {
+Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -316,15 +255,16 @@ Tensor VariableType::detach(const Tensor & self) const {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = as_variable_ref(const_cast<Tensor&>(self)).detach(); // NOLINT(cppcoreguidelines-pro-type-const-cast)
+  auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
+  namedinference::propagate_names(result, self);
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, result);
   }
-  return std::move(result);
+  return result;
 }
 
-Tensor & VariableType::detach_(Tensor & self) const {
+Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
 
   torch::jit::Node* node = nullptr;
@@ -337,7 +277,19 @@ Tensor & VariableType::detach_(Tensor & self) const {
     jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
   }
   // <NON_GENERATED_CODE>
-  as_variable_ref(self).detach_();
+  if (as_variable_ref(self).is_view()) {
+    AT_ERROR("Can't detach views in-place. Use detach() instead");
+  }
+  // I think the choice here is conservative.  In principle, doing
+  // an in-place detach should give us the ability to just clear
+  // the autograd meta.  But this function ONLY resets requires_grad,
+  // grad_fn and output_nr; there's other metadata like debug name
+  // and hooks which aren't cleared.  Is this function supposed to
+  // clear those too? I'm not too sure, so I'm leaving it be for now.
+  auto autograd_meta = impl::materialize_autograd_meta(as_variable_ref(self));
+  autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
+  autograd_meta->grad_fn_.reset();
+  autograd_meta->output_nr_ = 0;
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
     jit::tracer::addOutput(node, self);
@@ -345,4 +297,79 @@ Tensor & VariableType::detach_(Tensor & self) const {
   return self;
 }
 
-}} // namespace torch::autograd
+// Some ops in the following registration list are registered as catch-all kernels,
+// some as catch-all kernels and additionally as backend kernels for VariableTensorId.
+// The reason for this is that ops that also use dispatch (e.g. register CPU/CUDA/QuantizedCPU
+// kernels) need to get a separate VariableTensorId kernel instead of a catch-all kernel,
+// otherwise we won't ever call it for CPU/CUDA/QuantizedCPU tensors, because the backend
+// kernel has a higher priority than catch-all kernels.
+// Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
+// skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
+// (and that don't use dispatch), we register them as catch-all kernels instead.
+static auto registry = torch::RegisterOperators()
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach(Tensor self) -> Tensor")
+    .kernel<decltype(VariableType::detach)>(DispatchKey::VariableTensorId, &VariableType::detach)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
+    .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::VariableTensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()")
+    // For backward(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
+    // tensor argument.
+    // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
+    .catchAllKernel<decltype(VariableType::set_data), &VariableType::set_data>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::data(Tensor self) -> Tensor")
+    .catchAllKernel<decltype(VariableType::data), &VariableType::data>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::is_leaf(Tensor self) -> bool")
+    .catchAllKernel<decltype(VariableType::is_leaf), &VariableType::is_leaf>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::output_nr(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::output_nr), &VariableType::output_nr>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::_version(Tensor self) -> int")
+    .catchAllKernel<decltype(VariableType::_version), &VariableType::_version>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::requires_grad_(Tensor(a!) self, bool _requires_grad=True) -> Tensor(a!)")
+    // For requires_grad_(), we need the catch-all kernel (see comment above), but we also need the VariableTensorId backend
+    // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
+    // which calls callBoxed(), which doesn't support mutable tensor arguments yet and requires_grad_() has a mutable
+    // tensor argument.
+    // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
+    //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
+    .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::VariableTensorId)
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  ;
+
+}  // namespace
+}}} // namespace torch::autograd::VariableType

@@ -116,7 +116,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new_tensor(inf).expand_as(tensor)
+    return torch.full_like(tensor, inf)
 
 
 def _x_log_x(tensor):
@@ -245,7 +245,7 @@ def _kl_expfamily_expfamily(p, q):
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
-    result = q._log_normalizer(*q_nparams) - lg_normal.clone()
+    result = q._log_normalizer(*q_nparams) - lg_normal
     for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
         term = (qnp - pnp) * g
         result -= _sum_rightmost(term, len(q.event_shape))

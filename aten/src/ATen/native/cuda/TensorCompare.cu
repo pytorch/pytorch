@@ -1,56 +1,38 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
-
+#include <ATen/native/DispatchStub.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
-namespace {
-template <typename scalar_t>
-void where_cuda(
-    at::Tensor& ret,
-    const at::Tensor& condition,
-    const at::Tensor& self,
-    const at::Tensor& other) {
-  if (condition.scalar_type() == at::ScalarType::Byte) {
-    // Yes this name is repetitive, but the CPU version is called
-    // CPU_tensor_apply4 and we don't have a CPU namespace or directory.
-    at::cuda::CUDA_tensor_apply4<scalar_t, uint8_t, scalar_t, scalar_t>(
-        ret,
-        condition,
-        self,
-        other,
-        [] __device__(
-            scalar_t & ret_val,
-            const uint8_t& cond_val,
-            const scalar_t& self_val,
-            const scalar_t& other_val) {
-          ret_val = cond_val ? self_val : other_val;
-        });
-   } else {
-     at::cuda::CUDA_tensor_apply4<scalar_t, bool, scalar_t, scalar_t>(
-         ret,
-         condition,
-         self,
-         other,
-         [] __device__(
-             scalar_t & ret_val,
-             const bool& cond_val,
-             const scalar_t& self_val,
-             const scalar_t& other_val) {
-           ret_val = cond_val ? self_val : other_val;
-         });
-   }
-}
-} // namespace
 
 namespace at { namespace native {
-Tensor _s_where_cuda(
-    const Tensor& condition,
-    const Tensor& self,
-    const Tensor& other) {
-  Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ret.scalar_type(), "where_cuda", [&] {
-    where_cuda<scalar_t>(ret, condition, self, other);
+
+using where_fn = void (*)(TensorIterator &, ScalarType);
+DECLARE_DISPATCH(where_fn, where_kernel);
+
+namespace {
+
+void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBool, iter.dtype(), "where_cuda", [&] {
+    if (condition_type == at::ScalarType::Byte) {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+          return cond_val ? self_val : other_val;
+        });
+    } else {
+      gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+          return cond_val ? self_val : other_val;
+        });
+    }
   });
-  return ret;
 }
+
+} // anonymous namespace
+
+
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
+
 }} // namespace at::native

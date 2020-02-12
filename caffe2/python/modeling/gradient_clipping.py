@@ -90,7 +90,7 @@ class GradientClipping(NetModifier):
 
         for param, grad in final_param_map.items():
             # currently sparse gradients won't be clipped
-            # futher implementation is needed to enable it
+            # further implementation is needed to enable it
             if isinstance(grad, core.GradientSlice):
                 continue
 
@@ -136,7 +136,7 @@ class GradientClipping(NetModifier):
                             net.Div(
                                 [grad_norm, param_norm],
                                 [net.NextScopedBlob(
-                                    prefix=str(param) + '_norm_ratio')]
+                                    prefix=str(param) + "_norm_ratio")]
                             )
 
                     net.ClipTensorByScaling(
