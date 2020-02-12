@@ -596,7 +596,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0

@@ -5265,12 +5265,12 @@
 - func: _cumprod(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: legacy::cpu::_th_cumprod
+    CPU: _cumprod_cpu
     CUDA: legacy::cuda::_th_cumprod
 
 - func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cumprod_out
+    CPU: _cumprod_out_cpu
     CUDA: legacy::cuda::_th_cumprod_out
 
 - func: _var(Tensor self, bool unbiased=True) -> Tensor
