@@ -295,8 +295,8 @@ static inline bool isFloatingType(ScalarType t) {
 
 static inline bool isComplexType(ScalarType t) {
   return (
-      t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble) ||
-      t == ScalarType::ComplexHalf;
+      t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
+      t == ScalarType::ComplexDouble);
 }
 
 static inline bool isQIntType(ScalarType t) {
