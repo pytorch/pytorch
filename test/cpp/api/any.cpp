@@ -84,26 +84,32 @@ TEST_F(AnyModuleTest, WrongArgumentType) {
       "but received value of type double");
 }
 
+struct M_test_wrong_number_of_arguments : torch::nn::Module {
+  int forward(int a, int b) {
+    return a + b;
+  }
+};
+
 TEST_F(AnyModuleTest, WrongNumberOfArguments) {
-  struct M : torch::nn::Module {
-    int forward(int a, int b) {
-      return a + b;
-    }
-  };
-  AnyModule any(M{});
+  AnyModule any(M_test_wrong_number_of_arguments{});
+#if defined(_MSC_VER)
+  std::string module_name = "struct M_test_wrong_number_of_arguments";
+#else
+  std::string module_name = "M_test_wrong_number_of_arguments";
+#endif
   ASSERT_THROWS_WITH(
       any.forward(),
-      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 0. "
-      "If AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method has default arguments, "
+      module_name, "'s forward() method expects 2 argument(s), but received 0. "
+      "If ", module_name, "'s forward() method has default arguments, "
       "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(5),
-      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 1. "
-      "If AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method has default arguments, "
+      module_name, "'s forward() method expects 2 argument(s), but received 1. "
+      "If ", module_name, "'s forward() method has default arguments, "
       "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(1, 2, 3),
-      "AnyModuleTest_WrongNumberOfArguments_Test::TestBody()::M's forward() method expects 2 argument(s), but received 3.");
+      module_name, "'s forward() method expects 2 argument(s), but received 3.");
 }
 
 struct M_default_arg_with_macro : torch::nn::Module {
@@ -140,24 +146,30 @@ TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMetho
 
     ASSERT_EQ(any.forward<double>(1, 3, 5.0), 9.0);
 
+#if defined(_MSC_VER)
+    std::string module_name = "struct M_default_arg_without_macro";
+#else
+    std::string module_name = "M_default_arg_without_macro";
+#endif
+
     ASSERT_THROWS_WITH(
         any.forward(),
-        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 0. "
-        "If M_default_arg_without_macro's forward() method has default arguments, "
+        module_name, "'s forward() method expects 3 argument(s), but received 0. "
+        "If ", module_name, "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1),
-        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 1. "
-        "If M_default_arg_without_macro's forward() method has default arguments, "
+        module_name, "'s forward() method expects 3 argument(s), but received 1. "
+        "If ", module_name, "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1, 3),
-        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 2. "
-        "If M_default_arg_without_macro's forward() method has default arguments, "
+        module_name, "'s forward() method expects 3 argument(s), but received 2. "
+        "If ", module_name, "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward(1, 2, 3.0, 4),
-        "M_default_arg_without_macro's forward() method expects 3 argument(s), but received 4.");
+        module_name, "'s forward() method expects 3 argument(s), but received 4.");
   }
 }
 
