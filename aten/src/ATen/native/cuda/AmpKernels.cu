@@ -7,20 +7,19 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 
-
+namespace {
 // Thin wrapper around https://docs.nvidia.com/cuda/cuda-math-api/group__CUDA__MATH__SINGLE.html#group__CUDA__MATH__SINGLE_1g57a3c8313f570282a1a7bcc78743b08e,
 // to ensure the Cuda math library's isfinite is actually what gets called in
 // _amp_non_finite_check_and_unscale_cuda_'s gpu_kernel lambda.
 //
-// I'm doing this for 4 reasons:
-// - A bare call to "isfinite(val)" in the lambda causes nvcc to prefer the unrelated
+// isfinite_ensure_cuda_math is defined outside at::native because:
+// - A bare call to "isfinite(val)" inside at::native causes nvcc to prefer the unrelated
 //   Tensor at::native::isfinite(const Tensor&), resulting in an error:
 //   "no suitable constructor exists to convert from "float" to "at::Tensor""
 // - Unfortunately, the Cuda math library documentation doesn't say how (or if) you can provide a full namespace path
 //   to ensure that its version of a particular function is invoked.  It only shows bare (not-namespaced)
 //   calls to its routines inside kernel or device functions.
-// - Trying "std::isfinite(val)" in the lambda causes an "unspecified launch failure" at runtime with cuda 9 on Windows.
-// - Trying a forced-global "::isfinite(val)" compiles and runs, but makes me nervous.
+// - "std::isfinite(val)" in the gpu_kernel lambda causes an "unspecified launch failure" at runtime with cuda 9 on Windows.
 //
 // isfinite_ensure_cuda_math, declared at file scope outside the at::native region, uses isfinite as math library docs
 // suggest and allows disambiguated usage in the lambda within the at::native region.
@@ -28,6 +27,7 @@
 // "calling a __device__ function("isfinite_ensure_cuda_math") from a __host__ __device__ function("operator()") is not allowed."
 static __host__ __device__ __forceinline__ int isfinite_ensure_cuda_math(float val) {
   return isfinite(val);
+}
 }
 
 namespace at {
@@ -63,11 +63,11 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     iter.dtype(),
     "_amp_non_finite_check_and_unscale_cuda",
-    [&] {
+    [&iter, &found_inf, &inv_scale] {
       auto* found_inf_ptr = found_inf.data_ptr<float>();
       auto* inv_scale_ptr = inv_scale.data_ptr<float>();
 
-      gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t val) -> scalar_t {
+      gpu_kernel(iter, [found_inf_ptr, inv_scale_ptr]GPU_LAMBDA(scalar_t val) -> scalar_t {
           float fval = static_cast<float>(val);
           // See isfinite_ensure_cuda_math above.
           if (!isfinite_ensure_cuda_math(fval)) {
@@ -80,13 +80,13 @@ void _amp_non_finite_check_and_unscale_cuda_(Tensor& scaled_grad,
 }
 
 
-// amp_update_scale_kernel is launched with a single thread to compute the new scale.
+// amp_update_scale_cuda_kernel is launched with a single thread to compute the new scale.
 // The scale factor is maintained and updated on the GPU to avoid synchronization.
-__global__ void amp_update_scale_kernel(float* current_scale,
-                                        float* found_inf,
-                                        float* new_scale,
-                                        double scale_growth_factor,
-                                        double scale_backoff_factor)
+__global__ void amp_update_scale_cuda_kernel(float* current_scale,
+                                             float* found_inf,
+                                             float* new_scale,
+                                             double scale_growth_factor,
+                                             double scale_backoff_factor)
 {
   *new_scale = (*found_inf) ? (*current_scale)*scale_backoff_factor : (*current_scale)*scale_growth_factor;
 }
@@ -117,7 +117,7 @@ Tensor _amp_update_scale_cuda(const Tensor& current_scale,
 
   auto new_scale = at::empty_like(current_scale);
 
-  amp_update_scale_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
+  amp_update_scale_cuda_kernel<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
     current_scale.data_ptr<float>(),
     found_inf.data_ptr<float>(),
     new_scale.data_ptr<float>(),

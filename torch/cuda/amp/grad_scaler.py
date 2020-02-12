@@ -31,7 +31,7 @@ class GradScaler(object):
 
     Here's how that looks::
 
-        # Create an GradScaler instance.
+        # Create a GradScaler instance.
         scaler = GradScaler()
         ...
         for input, target in data:
@@ -269,13 +269,13 @@ class GradScaler(object):
         Updates the scale factor.
 
         If any optimizer steps were skipped the scale factor is multipled by
-        backoff_factor to reduce it. If all optimizer steps were taken
-        it is multiplied by growth_factor to increase it.
+        ``backoff_factor`` to reduce it. If all optimizer steps were taken
+        it is multiplied by ``growth_factor`` to increase it.
 
-        Passing ``new_scale`` sets the scale_factor directly.
+        Passing ``new_scale`` sets the scale factor directly.
 
         Arguments:
-            new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New shared scale factor.
+            new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
 
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has

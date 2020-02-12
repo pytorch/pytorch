@@ -1,6 +1,6 @@
 .. _amp-examples:
 
-Automatic Mixed Precision Examples
+Automatic Mixed Precision examples
 ==================================
 
 .. currentmodule:: torch.cuda.amp
@@ -24,7 +24,7 @@ Typical Use
 
 ::
 
-    # Create an GradScaler instance.
+    # Create a GradScaler instance.
     scaler = GradScaler()
     ...
     for input, target in data:
@@ -52,13 +52,13 @@ All gradients produced by ``scaler.scale(loss).backward()`` are scaled.  If you 
 the parameters' ``.grad`` attributes between ``backward()`` and ``scaler.step(optimizer)``,  you should
 unscale them first.  For example, gradient clipping manipulates a set of gradients such that their global norm
 (see :func:`torch.nn.utils.clip_grad_norm_`) or maximum magnitude (see :func:`torch.nn.utils.clip_grad_value_`)
-is :math:`<=` some user-imposed threshold.  If you attempted to clip _without_ unscaling, the gradients' norm/maximum
-magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for _unscaled_ gradients)
+is :math:`<=` some user-imposed threshold.  If you attempted to clip *without* unscaling, the gradients' norm/maximum
+magnitude would also be scaled, so your requested threshold (which was meant to be the threshold for *unscaled* gradients)
 would be invalid.
 
 ``scaler.unscale_(optimizer)`` unscales gradients held by ``optimizer``'s assigned parameters.
 If your model or models contain other parameters that were assigned to another optimizer
-(say ``optimizer1``), you may call ``scaler.unscale_(optimizer1)`` separately to unscale those
+(say ``optimizer2``), you may call ``scaler.unscale_(optimizer2)`` separately to unscale those
 parameters' gradients as well.
 
 Gradient clipping
@@ -106,8 +106,8 @@ Gradient penalty
 """"""""""""""""
 
 A gradient penalty implementation typically creates gradients out-of-place using
-:func:`torch.autograd.grad`, combines them to create the penalty scalar,
-and adds the penalty scalar to the loss.
+:func:`torch.autograd.grad`, combines them to create the penalty value,
+and adds the penalty value to the loss.
 
 Here's an ordinary example of an L2 penalty without gradient scaling::
 
@@ -129,10 +129,10 @@ Here's an ordinary example of an L2 penalty without gradient scaling::
         loss.backward()
         optimizer.step()
 
-To implement a gradient penalty _with_ gradient scaling, the loss passed to
+To implement a gradient penalty *with* gradient scaling, the loss passed to
 :func:`torch.autograd.grad` should be scaled.  The resulting out-of-place gradients
 will therefore be scaled, and should be unscaled before being combined to create the
-penalty scalar.
+penalty value.
 
 Here's how that looks for the same L2 penalty::
 
@@ -160,6 +160,8 @@ Here's how that looks for the same L2 penalty::
 
         # Apply scaling to the backward call as usual.  This accumulates leaf gradients that are appropriately scaled.
         scaler.scale(loss).backward()
+
+        # step() and update() proceed as usual.
         scaler.step(optimizer)
         scaler.update()
 
@@ -172,7 +174,7 @@ If your network has multiple optimizers, you may call ``scaler.unscale_`` on any
 and you must call ``scaler.step`` on each of them individually.
 
 However, ``scaler.update()`` should only be called once,
-after all optimizers used in this iteration have been stepped::
+after all optimizers used this iteration have been stepped::
 
     scaler = torch.cuda.amp.GradScaler()
     ...
