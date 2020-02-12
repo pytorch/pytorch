@@ -121,9 +121,7 @@ static inline void recordSliceTrace(const Tensor& start_tensor, const Tensor& st
 }
 
 static inline void recordSelectTrace(const Tensor& index_tensor) {
-  if (index_tensor.defined()) {
-    torch::jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, index_tensor, torch::jit::IntType::get());
-  }
+  torch::jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, index_tensor, torch::jit::IntType::get());
 }
 
 static inline PyObject* convertToPythonInt(PyObject* obj) {
