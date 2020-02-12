@@ -30,7 +30,7 @@ class TORCH_API Dtype {
   int lanes() const {
     return lanes_;
   }
-  TORCH_API Dtype scalar_type() const;
+  Dtype scalar_type() const;
   bool operator==(const Dtype& other) const {
     return scalar_type_ == other.scalar_type_ && lanes_ == other.lanes_;
   }
