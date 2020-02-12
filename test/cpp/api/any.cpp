@@ -99,17 +99,17 @@ TEST_F(AnyModuleTest, WrongNumberOfArguments) {
 #endif
   ASSERT_THROWS_WITH(
       any.forward(),
-      module_name "'s forward() method expects 2 argument(s), but received 0. "
-      "If " module_name "'s forward() method has default arguments, "
+      module_name + "'s forward() method expects 2 argument(s), but received 0. "
+      "If " + module_name + "'s forward() method has default arguments, "
       "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(5),
-      module_name "'s forward() method expects 2 argument(s), but received 1. "
-      "If " module_name "'s forward() method has default arguments, "
+      module_name + "'s forward() method expects 2 argument(s), but received 1. "
+      "If " + module_name + "'s forward() method has default arguments, "
       "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
   ASSERT_THROWS_WITH(
       any.forward(1, 2, 3),
-      module_name "'s forward() method expects 2 argument(s), but received 3.");
+      module_name + "'s forward() method expects 2 argument(s), but received 3.");
 }
 
 struct M_default_arg_with_macro : torch::nn::Module {
@@ -154,22 +154,22 @@ TEST_F(AnyModuleTest, PassingArgumentsToModuleWithDefaultArgumentsInForwardMetho
 
     ASSERT_THROWS_WITH(
         any.forward(),
-        module_name "'s forward() method expects 3 argument(s), but received 0. "
-        "If " module_name "'s forward() method has default arguments, "
+        module_name + "'s forward() method expects 3 argument(s), but received 0. "
+        "If " + module_name + "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1),
-        module_name "'s forward() method expects 3 argument(s), but received 1. "
-        "If " module_name "'s forward() method has default arguments, "
+        module_name + "'s forward() method expects 3 argument(s), but received 1. "
+        "If " + module_name + "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward<double>(1, 3),
-        module_name "'s forward() method expects 3 argument(s), but received 2. "
-        "If " module_name "'s forward() method has default arguments, "
+        module_name + "'s forward() method expects 3 argument(s), but received 2. "
+        "If " + module_name + "'s forward() method has default arguments, "
         "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.");
     ASSERT_THROWS_WITH(
         any.forward(1, 2, 3.0, 4),
-        module_name "'s forward() method expects 3 argument(s), but received 4.");
+        module_name + "'s forward() method expects 3 argument(s), but received 4.");
   }
 }
 
