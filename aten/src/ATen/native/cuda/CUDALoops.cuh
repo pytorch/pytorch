@@ -30,7 +30,6 @@
 
 #include <type_traits>
 #include <tuple>
-#include <thrust/tuple.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -42,6 +41,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/C++17.h>
 
 // Marks a lambda as executable on both the host and device. The __host__
 // attribute is important so that we can access static type information from
@@ -146,47 +146,18 @@ namespace modern {
 
 namespace detail {
 
-// The `thrust_tuple` convert a std::tuple to thrust::tuple
-
-template <typename T>
-struct thrust_tuple_helper {};
-
-template <typename... types>
-struct thrust_tuple_helper<std::tuple<types...>> {
-  using type = thrust::tuple<types...>;
-};
-
-template <typename T>
-using thrust_tuple = typename thrust_tuple_helper<T>::type;
-
 // The `pointers` converts std::tuple<T1, T2, ....> to std::tuple<T1*, T2*, ....>
 
 template <typename T>
 struct pointers_helper {};
 
 template <typename... types>
-struct pointers_helper<thrust::tuple<types...>> {
-  using type = thrust::tuple<types *...>;
+struct pointers_helper<std::tuple<types...>> {
+  using type = std::tuple<types *...>;
 };
 
 template <typename T>
 using pointers = typename pointers_helper<T>::type;
-
-// the thrust version of std::apply, copied and modified from c10/util/C++17.h
-
-template <class F, class Tuple, std::size_t... INDEX>
-C10_HOST_DEVICE constexpr auto apply_impl(F f, Tuple t, std::index_sequence<INDEX...>) -> decltype(f(thrust::get<INDEX>(t)...))
-{
-    return f(thrust::get<INDEX>(t)...);
-}
-
-template <class F, class Tuple>
-C10_HOST_DEVICE constexpr auto apply(F f, Tuple t) -> decltype(apply_impl(
-    f, t, std::make_index_sequence<thrust::tuple_size<Tuple>::value>{}))
-{
-    return apply_impl(
-      f, t, std::make_index_sequence<thrust::tuple_size<Tuple>::value>{});
-}
 
 template<template<int i> typename func, int end, int current=0>
 struct static_unroll {
@@ -228,17 +199,17 @@ template<int i>
 struct compute_base_ptrs {
   template <typename arg_ptrs, typename array_t>
   static __device__ void apply(arg_ptrs &args_base, array_t data, int idx) {
-    thrust::get<i>(args_base) = reinterpret_cast<typename thrust::tuple_element<i, arg_ptrs>::type>(data[i + 1]) + idx;
+    std::get<i>(args_base) = reinterpret_cast<std::tuple_element_t<i, arg_ptrs>>(data[i + 1]) + idx;
   }
 };
 
 template<int i>
 struct load_with_policy {
-  template <typename args_t, typename policy_t, typename arg_ptrs>
-  static __device__ void apply(args_t args, policy_t policy, arg_ptrs args_base) {
-    using arg_t = std::remove_pointer_t<typename thrust::tuple_element<i, arg_ptrs>::type>;
-    auto args_accessor = [&] __device__ (int index) -> arg_t & { return thrust::get<i>(args[index]); };
-    policy.load(args_accessor, thrust::get<i>(args_base));
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
+    using arg_t = std::tuple_element_t<i, args_t>;
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    policy.load(args_accessor, std::get<i>(args_base));
   }
 };
 
@@ -248,7 +219,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // 1. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
-  using args_t = detail::thrust_tuple<typename traits::ArgsTuple>;
+  using args_t = typename traits::ArgsTuple;
   constexpr int arity = traits::arity;
 
   // compute base pointers for this block
@@ -266,7 +237,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // compute
   #pragma unroll
   for (int i = 0; i < policy_t::thread_work_size; i++) {
-    results[i] = detail::apply<decltype(f), args_t>(f, args[i]);
+    results[i] = c10::guts::apply(f, args[i]);
   }
 
   // store
