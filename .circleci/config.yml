@@ -1778,7 +1778,6 @@ workflows:
     jobs:
       # Warning: indentation here matters!
 
-      # Pytorch MacOS builds
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
           cuda_version: "10"
@@ -1789,6 +1788,11 @@ workflows:
           use_cuda: "1"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1801,6 +1805,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1813,6 +1822,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
           cuda_version: "10"
@@ -1823,6 +1837,11 @@ workflows:
           use_cuda: "1"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
@@ -1835,6 +1854,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
           name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
@@ -1847,6 +1871,11 @@ workflows:
           requires:
             - setup
             - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_build:
           name: pytorch_windows_vs2019_py36_cuda10.1_build
           cuda_version: "10"
