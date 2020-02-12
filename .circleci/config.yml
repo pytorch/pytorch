@@ -1493,9 +1493,7 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install pillow==7.0.0 --progress-bar off
-            #install the latest version of PyTorch and TorchVision
-            pip install torch "torchvision>=0.5.0" --progress-bar off
+            pip install torch torchvision --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
@@ -1733,44 +1731,6 @@ workflows:
             - setup
             - pytorch_windows_build
       - setup
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_py2_7_9_build
-          requires:
-            - setup
-          build_environment: "pytorch-linux-xenial-py2.7.9-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:07597f23-fa81-474c-8bef-5c8a91b50595"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py2_7_9_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py2_7_9_build
-          build_environment: "pytorch-linux-xenial-py2.7.9-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:07597f23-fa81-474c-8bef-5c8a91b50595"
-          resource_class: large
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_py2_7_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py2.7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:07597f23-fa81-474c-8bef-5c8a91b50595"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py2_7_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py2_7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py2.7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:07597f23-fa81-474c-8bef-5c8a91b50595"
-          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
           requires:
@@ -2243,11 +2203,11 @@ workflows:
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2_7m_cu90_devtoolset7_static-without-deps_build
-      - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - setup
+#      - binary_mac_build:
+#          name: binary_macos_wheel_3_6_cpu_build
+#          build_environment: "wheel 3.6 cpu"
+#          requires:
+#            - setup
       - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_build
           build_environment: "conda 2.7 cpu"
@@ -2255,15 +2215,15 @@ workflows:
             - setup
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
-      - binary_mac_build:
-          name: binary_macos_libtorch_2_7_cpu_build
-          build_environment: "libtorch 2.7 cpu"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
+#      - binary_mac_build:
+#          name: binary_macos_libtorch_2_7_cpu_build
+#          build_environment: "libtorch 2.7 cpu"
+#          requires:
+#            - setup
+#          filters:
+#            branches:
+#              only:
+#                - master
       - binary_linux_test:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
           build_environment: "manywheel 2.7mu cpu devtoolset7"

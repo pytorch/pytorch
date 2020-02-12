@@ -547,6 +547,25 @@ private:
   int64_t counter;
 };
 
+struct KernelWithTupleInput final : OperatorKernel {
+  string operator()(std::tuple<string, int64_t, double> input1) {
+    return std::get<0>(input1);
+  }
+};
+
+TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithTupleInput_withOutput_whenRegistered_thenCanBeCalled) {
+  auto registrar = RegisterOperators()
+      .op("_test::tuple_input((str, int, float) input) -> str", RegisterOperators::options().catchAllKernel<KernelWithTupleInput>());
+
+  auto op = c10::Dispatcher::singleton().findSchema({"_test::tuple_input", ""});
+  ASSERT_TRUE(op.has_value());
+
+  std::tuple<string, int64_t, float> tup{"foobar", 123, 420.1337};
+  auto outputs = callOp(*op, tup);
+  EXPECT_EQ(1, outputs.size());
+  EXPECT_EQ("foobar", outputs[0].toString()->string());
+}
+
 TEST(OperatorRegistrationTest_FunctorBasedKernel, givenKernelWithCache_thenCacheIsKeptCorrectly) {
   auto registrar = RegisterOperators()
       .op("_test::cache_op(Tensor input) -> int", RegisterOperators::options().kernel<KernelWithCache>(DispatchKey::CPUTensorId));
