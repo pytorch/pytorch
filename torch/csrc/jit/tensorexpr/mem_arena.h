@@ -44,8 +44,8 @@ class KernelScope {
 // All its registered objects are destroyed through "delete".
 class TORCH_API KernelScopedObject {
  public:
-  TORCH_API KernelScopedObject();
-  TORCH_API virtual ~KernelScopedObject() = default;
+  KernelScopedObject();
+  virtual ~KernelScopedObject() = default;
 
  private:
   KernelScopedObject(const KernelScopedObject&) = delete;
