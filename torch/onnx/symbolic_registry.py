@@ -91,4 +91,5 @@ def get_registered_op(opname, domain, version):
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version are None.")
     global _registry
+    print("register for domain ---------------------- ", domain, " --- op ", opname)
     return _registry[(domain, version)][opname]
