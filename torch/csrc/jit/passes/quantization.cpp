@@ -720,14 +720,6 @@ void InsertObserversHelper::insertObservers(
     return;
   }
 
-  // This needs to happen after addIntermediateValuesToSkipObserver
-  // because we'll skip values in the graph of invoked methods as well
-  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
-    auto& invoked_module = std::get<0>(invoked_method);
-    const auto& invoked_method_name = std::get<1>(invoked_method);
-    insertObservers(invoked_module, invoked_method_name);
-  }
-
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
