@@ -454,6 +454,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
+
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
