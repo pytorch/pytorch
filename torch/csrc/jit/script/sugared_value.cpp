@@ -89,8 +89,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   auto kind = value_->type()->kind();
   auto builtin_entry = builtin_properties.find(kind);
   if (builtin_entry != builtin_properties.end()) {
-    auto kind_entry = builtin_entry->second.find(field);
-    if (kind_entry != builtin_entry->second.end()) {
+    if (builtin_entry->second.count(field) > 0) {
       auto r =
           m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
       return std::make_shared<SimpleValue>(r);
