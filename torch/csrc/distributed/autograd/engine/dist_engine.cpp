@@ -183,6 +183,11 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
+  // Cleanup previous state for outstanding RPCs. Outstanding RPCs could be
+  // lingering if we're running backward multiple times and some of the
+  // passes ran into errors.
+  autogradContext->clearOutstandingRpcs();
+
   auto futureGrads = engine_.execute_with_graph_task(
       autogradContext->retrieveGraphTask(), graphRoot);
 
@@ -340,6 +345,9 @@ void DistEngine::execute(const variable_list& roots, bool retainGraph) {
 void DistEngine::cleanupBackwardPass(const ContextPtr& autogradContext) {
   // Reset the graph task once we're done with all processing.
   autogradContext->resetGraphTask();
+
+  // Clear any outstanding rpcs.
+  autogradContext->clearOutstandingRpcs();
 
   // Clear the context id once we're done with the autograd engine
   // processing.
