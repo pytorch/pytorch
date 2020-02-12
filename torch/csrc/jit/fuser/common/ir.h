@@ -84,6 +84,7 @@ using StmtNameType = unsigned int;
 constexpr StmtNameType UNINITIALIZED_STMTNAMETYPE = std::numeric_limits<unsigned int>::max();
 
 struct Fusion;
+struct FusionGuard;
 struct Expr;
 struct UnaryOp;
 struct BinaryOp;
@@ -152,12 +153,11 @@ public:
 
   bool isScalar(){ return vtype_ == ValType::Scalar; }
 
-  const Expr* getOrigin(){return origin_;}
+  const Expr* getOrigin();
 
 protected:
   const ValType vtype_;
   const DataType dtype_;
-  Expr *volatile origin_ = nullptr;
 };
 
 /*
