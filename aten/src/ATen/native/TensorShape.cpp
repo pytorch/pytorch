@@ -10,8 +10,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <algorithm>
-#include <vector>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/CatKernel.h>
