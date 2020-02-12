@@ -451,14 +451,14 @@ void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar thresho
 void glu_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
     using Vec = Vec256<scalar_t>;
-    auto one_val = (scalar_t)(1);
-    auto one_vec = Vec(one_val);
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
     cpu_kernel_vec(
       iter,
-      [&](scalar_t a, scalar_t b) -> scalar_t {
+      [one_val](scalar_t a, scalar_t b) -> scalar_t {
         return a * (one_val / (one_val + std::exp(-b)));
       },
-      [&](Vec a, Vec b) -> Vec {
+      [one_vec](Vec a, Vec b) -> Vec {
         return a * (one_vec / (one_vec + b.neg().exp()));
       }
     );
@@ -468,15 +468,15 @@ void glu_kernel(TensorIterator& iter) {
 void glu_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
     using Vec = Vec256<scalar_t>;
-    auto one_val = (scalar_t)(1);
-    auto one_vec = Vec(one_val);
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
     cpu_kernel_vec(
       iter,
-      [&](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+      [one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
         return (one_val - a) * a * b * c;
       },
-      [&](Vec a, Vec b, Vec c) -> Vec {
-        return (one_vec - a) * a * b *c;
+      [one_vec](Vec a, Vec b, Vec c) -> Vec {
+        return (one_vec - a) * a * b * c;
       }
     );
   });
