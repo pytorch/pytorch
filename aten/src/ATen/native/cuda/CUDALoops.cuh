@@ -159,6 +159,22 @@ struct pointers_helper<std::tuple<types...>> {
 template <typename T>
 using pointers = typename pointers_helper<T>::type;
 
+// What does the `static_unroll` do?
+//
+// We want to do something like:
+//
+//    using args_t = typename traits::ArgsTuple;
+//    args_t args;
+//    #pragma unroll
+//    for (int i = 0; i < traits::arity; i++) {
+//      std::get<i>(args) = ....
+//    }
+//
+// but unfortunately the above code does not work because
+// the template argument has to be a compile time constant
+// so `static_unroll` is created to simulate `#pragma unroll`
+// using template metaprogramming.
+
 template<template<int i> typename func, int end, int current=0>
 struct static_unroll {
   template<typename... Args>
@@ -178,7 +194,9 @@ template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
   static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
-    using arg_t = std::tuple_element_t<i, typename traits::ArgsTuple>;
+    using arg_t = typename traits::template arg<i>::type;
+    // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
     result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
   }
 };
@@ -189,6 +207,8 @@ inline int can_vectorize_up_to(array_t pointers) {
   using return_t = typename traits::result_type;
   constexpr int arity = traits::arity;
   int result = memory::can_vectorize_up_to<return_t>(pointers[0]);
+  // We need to get the type for each argument of `func_t`, this can only
+  // be done at compile time.
   static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
@@ -199,6 +219,8 @@ template<int i>
 struct compute_base_ptrs {
   template <typename arg_ptrs, typename array_t>
   static __device__ void apply(arg_ptrs &args_base, array_t data, int idx) {
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
     std::get<i>(args_base) = reinterpret_cast<std::tuple_element_t<i, arg_ptrs>>(data[i + 1]) + idx;
   }
 };
