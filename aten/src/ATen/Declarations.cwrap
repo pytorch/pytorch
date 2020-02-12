@@ -191,6 +191,19 @@
     - bool accumulate
 ]]
 [[
+  name: _th_index_add_
+  cname: indexAdd
+  variants: function
+  backends:
+    - CUDA
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - long dim
+    - THIndexTensor* index
+    - THTensor* source
+]]
+[[
   name: _th_index_fill_
   cpu_bool: True
   cuda_bool: True
@@ -1205,10 +1218,9 @@
   name: _th_cat
   cname: catArray
   variants: [function]
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   return: self
   arguments:
