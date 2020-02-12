@@ -114,7 +114,7 @@ Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   }
 
   // indexing by tensors ("advanced" indexing)
-  return dispatch_index(sliced, tensorIndices);
+  return dispatch_index(sliced, std::move(tensorIndices));
 }
 
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
@@ -147,7 +147,7 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) 
   } else {
     valuesSliced = value;
   }
-  dispatch_index_put_(sliced, tensorIndices, valuesSliced);
+  dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
   return;
 }
 

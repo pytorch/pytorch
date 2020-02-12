@@ -318,7 +318,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   // indexing by tensors ("advanced" indexing)
   return THPVariable_Wrap(([&]() {
     pybind11::gil_scoped_release no_gil;
-    return at::indexing::dispatch_index(sliced, variableIndices);
+    return at::indexing::dispatch_index(sliced, std::move(variableIndices));
   })());
 
   Py_RETURN_NONE;
@@ -427,7 +427,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
   {
     pybind11::gil_scoped_release no_gil;
-    at::indexing::dispatch_index_put_(sliced, variableIndices, valuesSliced);
+    at::indexing::dispatch_index_put_(sliced, std::move(variableIndices), valuesSliced);
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
