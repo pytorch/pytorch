@@ -337,7 +337,9 @@ struct C10_API TensorOptions {
 
   // Resolves the tensor type set specified by the current construction axes.
   DispatchKeySet key_set() const noexcept {
-    return DispatchKeySet(computeDispatchKey());
+    // BackendSelect is a very special dispatch key which was introduced only for
+    // the factory functions with TensorOptions and should be special cased here.
+    return DispatchKeySet(computeDispatchKey()).add(DispatchKey::BackendSelect);
   }
 
   inline DispatchKey computeDispatchKey() const {
