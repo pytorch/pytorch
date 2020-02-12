@@ -234,8 +234,14 @@ Tensor& normal_out_cpu(Tensor& output, double mean, const Tensor& std, Generator
 }
 
 Tensor& normal_out_cpu(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_cpu_(output, 0, 1, gen);
-  output.mul_(std).add_(mean);
+  if (is_deprecated_th_impl) {
+    output.mul_(std.reshape(mean.sizes())).add_(mean);
+  }
+  else {
+    output.mul_(std).add_(mean);
+  }
   return output;
 }
 
@@ -252,7 +258,7 @@ Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
 }
 
 Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
+  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }
