@@ -176,7 +176,7 @@ def arg_to_type_hint(arg):
 
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
-              'radd', 'rmul', 'rfloordiv',          # reverse arithmetic
+              'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
@@ -512,7 +512,7 @@ def gen_pyi(declarations_path, out):
         'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
-        'map_': ['def map_(tensor: Tensor, callable: Callable) -> Tensor: ...'],
+        'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'storage': ['def storage(self) -> Storage: ...'],
         'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',

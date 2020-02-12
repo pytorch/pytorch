@@ -1118,7 +1118,9 @@ bool AliasDb::tryMove(
     Node* movePoint,
     MoveSide moveSide,
     bool dryRun) {
-  TORCH_INTERNAL_ASSERT(toMove->owningBlock() == movePoint->owningBlock());
+  if (toMove->owningBlock() != movePoint->owningBlock()) {
+    return false;
+  }
   if (toMove == movePoint) {
     return true;
   }
