@@ -434,6 +434,39 @@ void ModuleValue::setAttr(
   simple.setAttr(loc, m, field, newValue);
 }
 
+std::shared_ptr<SugaredValue> EnumValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  bool has =
+      py::cast<bool>(enum_.attr("__members__").attr("__contains__")(field));
+  if (!has) {
+    throw ErrorReport(loc) << "Enum " << py::str(enum_) << " has no member "
+                           << field;
+  }
+
+  return std::make_shared<EnumMemberValue>(
+      field, enum_.attr("__getitem__")(field).attr("value"));
+}
+
+std::shared_ptr<SugaredValue> EnumMemberValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (field == "name") {
+    return std::make_shared<SimpleValue>(m.graph()->insertConstant(name_, loc));
+  } else if (field == "value") {
+    return std::make_shared<SimpleValue>(
+        m.graph()->insertConstant(py::cast<int64_t>(value_), loc));
+  }
+  throw ErrorReport(loc)
+      << "Enum members only have 'name' and 'value' attributes";
+}
+
+Value* EnumMemberValue::asValue(const SourceRange& loc, Function& m) {
+    return m.graph()->insertConstant(py::cast<int64_t>(value_), loc);
+}
+
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
     Function& caller,
@@ -554,6 +587,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+  }
+
+  if (static_cast<bool>(
+          py::isinstance(obj, py::module::import("enum").attr("EnumMeta")))) {
+    return std::make_shared<EnumValue>(obj);
   }
 
   if (py::isinstance<py::function>(obj)) {

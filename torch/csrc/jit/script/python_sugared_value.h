@@ -216,6 +216,42 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
+struct VISIBILITY_HIDDEN EnumValue : public SugaredValue {
+  EnumValue(py::object the_enum) : enum_(std::move(the_enum)) {}
+
+  std::string kind() const override {
+    return "Enum";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+ private:
+  py::object enum_;
+};
+
+struct VISIBILITY_HIDDEN EnumMemberValue : public SugaredValue {
+  EnumMemberValue(std::string name, py::object value) : name_(name), value_(value) {}
+
+  std::string kind() const override {
+    return "Enum member";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+  Value* asValue(const SourceRange& loc, Function& m) override;
+
+ private:
+  std::string name_;
+  py::object value_;
+};
+
+
 } // namespace script
 } // namespace jit
 } // namespace torch
