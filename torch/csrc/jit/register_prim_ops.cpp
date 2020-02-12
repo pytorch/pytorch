@@ -604,7 +604,9 @@ RegisterOperators reg(
          "prim::type(Device self) -> str",
          [](Stack& stack) {
            auto d = pop(stack);
-           push(stack, DeviceTypeName(d.toDevice().type()));
+           push(
+               stack,
+               DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
            return 0;
          },
          aliasAnalysisFromSchema()),
