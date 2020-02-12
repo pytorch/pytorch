@@ -604,7 +604,7 @@ RegisterOperators reg(
          "prim::type(Device self) -> str",
          [](Stack& stack) {
            auto d = pop(stack);
-           push(stack, d.toDevice().str());
+           push(stack, DeviceTypeName(d.toDevice().type()));
            return 0;
          },
          aliasAnalysisFromSchema()),
