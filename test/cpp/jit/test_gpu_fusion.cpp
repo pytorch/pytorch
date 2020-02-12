@@ -186,7 +186,7 @@ void testGPU_FusionTopoSort() {
 
 }
 
-void testGPU_FuserTensor() {
+void testGPU_FusionTensor() {
   auto tensor = at::randn({20, 20}, at::kCUDA);
   auto tensor_type = TensorType::create(tensor);
 
