@@ -437,7 +437,7 @@ public:
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
-    friend class Namespace;
+    friend class Module;
   };
 
   /**
@@ -642,7 +642,7 @@ class CAFFE2_API CppFunction final {
 public:
   // This overload accepts function pointers, e.g., CppFunction(&add_impl)
   template <typename Func>
-  explicit CppFunction(Func* f, std::enable_if_t<guts::is_function_type<Func>::value, nullptr_t> = nullptr)
+  explicit CppFunction(Func* f, std::enable_if_t<guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Func>>>()())
@@ -650,7 +650,7 @@ public:
 
   // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
   template <typename Lambda>
-  explicit CppFunction(Lambda&& f, std::enable_if_t<guts::is_functor<std::decay_t<Lambda>>::value, nullptr_t> = nullptr)
+  explicit CppFunction(Lambda&& f, std::enable_if_t<guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     // TODO: Don't go through WrapRuntimeKernelFunctor
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
@@ -679,7 +679,7 @@ private:
   // The only class which actually pulls out values from CppFunction (does so
   // destructively, felt too lazy to write accessors that I don't even
   // want users to use)
-  friend class Namespace;
+  friend class Module;
 
   CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema);
 };
@@ -734,7 +734,7 @@ inline CppFunction dispatch(DeviceType t, Func&& raw_f) {
 //        .def("aten::add", ...)
 //        .def("aten::mul", ...)
 //
-class CAFFE2_API Namespace final {
+class CAFFE2_API Module final {
   // TODO: Could store a std::string if you want to support dynamically computed
   // namespaces; for now don't support
   const char* ns_;
@@ -743,38 +743,38 @@ class CAFFE2_API Namespace final {
   // RegisterOperators
   RegisterOperators register_;
 
-  Namespace(const char* ns);
+  Module(const char* ns);
 
   // Use these as the constructors
-  friend Namespace import(const char* ns);
-  friend Namespace import();
+  friend Module import(const char* ns);
+  friend Module import();
 
 public:
-  Namespace(const Namespace&) = delete;
-  Namespace& operator=(const Namespace&) = delete;
+  Module(const Module&) = delete;
+  Module& operator=(const Module&) = delete;
 
-  Namespace(Namespace&&);
-  Namespace& operator=(Namespace&&);
+  Module(Module&&);
+  Module& operator=(Module&&);
 
-  Namespace&& def(const char* schema) &&;
-  Namespace&& def(const char* unqual_name, CppFunction&& f) &&;
+  Module&& def(const char* schema) &&;
+  Module&& def(const char* unqual_name, CppFunction&& f) &&;
 
   template <typename Func>
-  Namespace&& def(const char* unqual_name, Func&& raw_f) && {
+  Module&& def(const char* unqual_name, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
     return std::move(*this).def(unqual_name, std::move(f));
   }
 };
 
 // Return the namespace corresponding to the string 'ns'
-inline Namespace import(const char* ns) {
-  return Namespace(ns);
+inline Module import(const char* ns) {
+  return Module(ns);
 }
 
 // Return the "top-level" namespace; subsequent definitions must be explicitly
 // namespaced
-inline Namespace import() {
-  return Namespace(nullptr);
+inline Module import() {
+  return Module(nullptr);
 }
 
 } // namespace c10

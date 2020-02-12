@@ -171,21 +171,21 @@ CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchem
   , schema_(std::move(schema))
   {}
 
-Namespace::Namespace(const char* ns)
+Module::Module(const char* ns)
   : ns_(ns)
   {}
 
 // NB: lives here to reduce link time
-Namespace::Namespace(Namespace&&) = default;
-Namespace& Namespace::operator=(Namespace&&) = default;
+Module::Module(Module&&) = default;
+Module& Module::operator=(Module&&) = default;
 
 
-Namespace&& Namespace::def(const char* schema) && {
+Module&& Module::def(const char* schema) && {
   register_.op(c10::RegisterOperators::options().schema(schema));
   return std::move(*this);
 }
 
-Namespace&& Namespace::def(const char* unqual_name, CppFunction&& f) && {
+Module&& Module::def(const char* unqual_name, CppFunction&& f) && {
   // TODO: slow!  Fix internal data structures so I don't have to paste the
   // names together
   std::string name;
