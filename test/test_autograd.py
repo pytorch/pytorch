@@ -2300,6 +2300,39 @@ class TestAutograd(TestCase):
             _test_with_size(a_size, b_size, upper)
 
     @skipIfNoLapack
+    def test_eig(self):
+        def func(B):
+            return torch.eig(B, eigenvectors=True)
+
+        def func_eigvals(B):
+            return torch.eig(B, eigenvectors=True)[0]
+
+        def func_eigvecs(B):
+            return torch.eig(B, eigenvectors=True)[1]
+
+        def run_test(dims):
+            # The backward operation for eig only works for real eigenvalues,
+            # so the matrix should be B = U^{-1}*A*U where A is a random
+            # symmetric matrix and U is a random full-rank matrix.
+            # Slight change to the matrix should not make the eigenvalues
+            # complex, so we apply requires_grad_ to B, not A and U
+
+            A = random_symmetric_matrix(dims[-1], *dims[:-2])
+            U = torch.rand(*dims)
+            Uinv = torch.inverse(U)
+            B = torch.matmul(Uinv, torch.matmul(A, U)).requires_grad_()
+
+            gradcheck(func, [B])
+            gradgradcheck(func, [B])
+            gradcheck(func_eigvals, [B])
+            gradgradcheck(func_eigvals, [B])
+            gradcheck(func_eigvecs, [B])
+            gradgradcheck(func_eigvecs, [B])
+
+        for dims in [(3, 3), (5, 5)]:
+            run_test(dims)
+
+    @skipIfNoLapack
     def test_symeig(self):
         def func(root, upper):
             x = 0.5 * (root + root.transpose(-2, -1))
@@ -3139,6 +3172,20 @@ class TestAutograd(TestCase):
             self.assertIn('MyFunc.apply', str(w[0].message))
 
     @skipIfNoLapack
+    def test_eig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'cannot compute backward'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
+    def test_eig_complex_eigenvalues(self):
+        A = torch.tensor([[0., -1.], [1., 0.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.eig(A, eigenvectors=True)
+        with self.assertRaisesRegex(RuntimeError, 'does not support complex eigenvalues'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
+    @skipIfNoLapack
     def test_symeig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
         w, v = torch.symeig(A, eigenvectors=False)
@@ -3469,11 +3516,11 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
+        inp_change_err = "The {}th output of UnbindBackward is being modified inplace but this is not allowed"
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
+                 should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3803,6 +3850,23 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
+    def test_custom_function_error(self):
+        class BadFw(Function):
+            @staticmethod
+            def backward(ctx, foo):
+                return foo
+
+        class BadBw(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo.clone()
+
+        inp = torch.rand(1, requires_grad=True)
+        with self.assertRaisesRegex(NotImplementedError, "must implement the forward"):
+            BadFw.apply(inp)
+
+        with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
+            BadBw.apply(inp).sum().backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

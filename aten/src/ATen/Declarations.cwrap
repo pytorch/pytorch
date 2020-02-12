@@ -263,7 +263,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: index
     - THTensor* self
     - long dim
     - THIndexTensor* index
@@ -1219,10 +1218,9 @@
   name: _th_cat
   cname: catArray
   variants: [function]
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   return: self
   arguments:
