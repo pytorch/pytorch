@@ -471,6 +471,13 @@ graph(%input, %weight, %bias, %4):
      %first_output = aten::matmul(%input, %weight_t)
      %second_output = aten::add_(%first_output, %bias, %4)
      return (%second_output) )");
+  const PatternInfo ff_add_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %ignore, %inplace):
+      %relu = prim::Constant[name="relu"]()
+      %first_output = aten::add_(%a, %b, %ignore)
+      %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+      return (%second_output) )");
+
 
   const std::vector<std::reference_wrapper<const PatternInfo>> module_function_patterns = {
     mf_conv_functional_relu
@@ -482,7 +489,8 @@ graph(%input, %weight, %bias, %4):
     mm_conv_relu
   };
   const std::vector<std::reference_wrapper<const PatternInfo>> function_patterns = {
-    ff_matmul_add
+    ff_matmul_add,
+    ff_add_relu
   };
 };
 
@@ -888,14 +896,6 @@ void InsertObserversHelper::insertObservers(
     return;
   }
 
-  // This needs to happen after addIntermediateValuesToSkipObserver
-  // because we'll skip values in the graph of invoked methods as well
-  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
-    auto& invoked_module = std::get<0>(invoked_method);
-    const auto& invoked_method_name = std::get<1>(invoked_method);
-    insertObservers(invoked_module, invoked_method_name);
-  }
-
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -912,11 +912,7 @@ void InsertObserversHelper::insertObservers(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (values_to_skip_.count(v)) {
-      GRAPH_DEBUG("Skipping input:", v->debugName());
-    }
     if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      GRAPH_DEBUG("inserting observer for input ", v->debugName());
       insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
     }
   }
