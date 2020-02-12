@@ -144,6 +144,8 @@ def _run_trainer(rref_t1, t2, ps, rank_diff):
 
 
 class SimulateBackwardError(Function):
+    _simulate_error = True
+
     @staticmethod
     def forward(ctx, input):
         return input
@@ -151,7 +153,10 @@ class SimulateBackwardError(Function):
     @staticmethod
     @once_differentiable
     def backward(ctx, input):
-        raise Exception("Simulate error on backward pass")
+        if SimulateBackwardError._simulate_error:
+            raise Exception("Simulate error on backward pass")
+        else:
+            return input
 
 
 class ExecMode(Enum):
@@ -1736,11 +1741,64 @@ class DistAutogradTest(RpcAgentTestFixture):
             loss = rpc.rpc_sync(
                 'worker{}'.format(self._next_rank()),
                 torch.add,
-                args=(t1, t2, self._next_rank())).sum()
+                args=(t1, t2)).sum()
 
             # Run backward in a loop multiple times.
             for i in range(1000):
                 dist_autograd.backward([loss], retain_graph=True)
+
+    @unittest.skipIf(
+        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
+        == "PROCESS_GROUP",
+        "Skipping this test temporarily, see https://github.com/pytorch/pytorch/issues/33208",
+    )
+    @dist_init(clean_shutdown=False)
+    def test_multiple_backward_with_errors(self):
+        initialize_pg(self.init_method, self.rank, self.world_size)
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            loss = rpc.rpc_sync(
+                'worker{}'.format(self._next_rank()),
+                DistAutogradTest._python_udf_with_backward_error,
+                args=(t1, t2)).sum()
+
+            try:
+                # Run backward in a loop multiple times.
+                for i in range(100):
+                    if i < 50:
+                        with self.assertRaisesRegex(RuntimeError, "Simulate error on backward pass"):
+                            dist_autograd.backward([loss], retain_graph=True)
+                    elif i > 50:
+                        # Recovered from error.
+                        dist_autograd.backward([loss], retain_graph=True)
+                    else:
+                        dist.barrier()
+                        SimulateBackwardError._simulate_error = False
+                        dist.barrier()
+            finally:
+                # Sync before resetting flag.
+                dist.barrier()
+
+                # Reset the flag.
+                SimulateBackwardError._simulate_error = True
+
+    @dist_init
+    def test_backward_verify_hooks(self):
+        t1 = torch.ones((3, 3), requires_grad=True)
+        # Double the gradient.
+        t1.register_hook(lambda grad: grad * 2)
+        t2 = torch.ones((3, 3), requires_grad=True)
+        local_grads = None
+        for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC, ExecMode.REMOTE]:
+            with dist_autograd.context() as context_id:
+                ret = self._exec_func(exec_mode, torch.matmul, t1, t2)
+                loss = ret.sum()
+                ret = self._verify_backwards(
+                    exec_mode, [loss], context_id, local_grads, t1, t2
+                )
+                local_grads = ret if ret else local_grads
+
 
 @unittest.skipIf(
     not torch._six.PY3,

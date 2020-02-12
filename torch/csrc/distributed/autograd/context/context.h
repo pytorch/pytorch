@@ -93,6 +93,8 @@ class TORCH_API DistAutogradContext {
   // outstanding rpcs held in this context. This should be called only once.
   std::shared_ptr<rpc::FutureMessage> clearAndWaitForOutstandingRpcsAsync();
 
+  void clearOutstandingRpcs();
+
   const int64_t contextId_;
 
   // Set containing known worker IDs, used in cleaning up autograd context.
@@ -122,7 +124,7 @@ class TORCH_API DistAutogradContext {
   std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.
-  mutable std::mutex lock_;
+  mutable std::recursive_mutex lock_;
 };
 
 using ContextPtr = std::shared_ptr<DistAutogradContext>;
