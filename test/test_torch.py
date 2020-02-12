@@ -5336,8 +5336,8 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             # inputs are non-expandable tensors, but they have same number of elements
             # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
             self.assertWarnsRegex(
-                    lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
-                    "deprecated and the support will be removed")
+                lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
+                "deprecated and the support will be removed")
             self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
