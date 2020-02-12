@@ -61,8 +61,8 @@ def _rejection_sample(loc, concentration, proposal_r, shape):
         u = torch.rand((3,) + shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()
         z = torch.cos(math.pi * u1)
-        f = (1 + _proposal_r * z) / (_proposal_r + z)
-        c = concentration * (_proposal_r - f)
+        f = (1 + proposal_r * z) / (proposal_r + z)
+        c = concentration * (proposal_r - f)
         accept = ((c * (2 - c) - u2) > 0) | ((c / u2).log() + 1 - c >= 0)
         if accept.any():
             x[accept] = torch.sign(u3[accept] - 0.5) * torch.acos(f[accept])
