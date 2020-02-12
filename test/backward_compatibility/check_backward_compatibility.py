@@ -24,6 +24,11 @@ white_list = [
     ('split_with_sizes', datetime.date(2020, 2, 1)),
     ('linear_relu_dynamic_fp16', datetime.date(2020, 2, 5)),
     ('aten::join', datetime.date(2020, 2, 10)),
+    ('prim::Drop', datetime.date(2020, 3, 1)),
+    ('prim::Store', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_view', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
+    ('prim::Load', datetime.date(2020, 3, 1)),
 ]
 
 
