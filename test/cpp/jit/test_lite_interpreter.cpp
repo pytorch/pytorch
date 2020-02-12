@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -176,5 +177,19 @@ void testLiteInterpreterPrim() {
   auto refi = ref.toInt();
   AT_ASSERT(resi == refi);
 }
-} // namespace torch
+
+void testLiteInterpreterLoadOrigJit() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m.save(ss);
+  EXPECT_THROW(_load_for_mobile(ss), c10::Error);
+}
+
 } // namespace jit
+} // namespace torch
