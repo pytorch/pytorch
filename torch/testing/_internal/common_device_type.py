@@ -507,10 +507,6 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 
-def expectedFailureXLA(fn):
-    return expectedFailure('xla')(fn)
-
-
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
     return skipCPUIf(not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
@@ -529,6 +525,10 @@ def skipCUDAIfNoMagma(fn):
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
+
+# Skips a test on CUDA when not using ROCm.
+def skipCUDAIfNotRocm(fn):
+    return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
 
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.

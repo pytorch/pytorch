@@ -40,7 +40,7 @@ make_unique_base(Args&&... args) {
 
 
 
-#ifdef __cpp_lib_logical_traits
+#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
 
 template <class... B>
 using conjunction = std::conjunction<B...>;
