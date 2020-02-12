@@ -27,26 +27,22 @@ c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
-void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
-  std::string op_name = node->kind().toUnqualString();
+void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
-    auto error = script::ErrorReport(node->sourceRange());
-    error << "Input list to torch." << op_name
-          << " must be of ints, floats, or bools, "
+    std::stringstream error;
+    error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
-      auto input = node->inputs().at(0);
-      if (input->node()->kind() == prim::ListConstruct &&
-          input->node()->inputs().size() == 0) {
+      if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
                  "of another type (torch.jit.annotate(List[T, []]) where T "
                  "is the type of elements in the list for Python 2)";
       }
     }
-    throw error;
+    throw std::runtime_error(error.str());
   }
 }
 
@@ -137,17 +133,9 @@ void recursiveStore(
 }
 
 template<bool if_set_requires_grad>
-Operation createTensorFromList(const Node* node) {
-  // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
-  // we use the template arg to distinguish between these two cases
-  auto input = node->inputs().at(0);
-  auto elem_type = input->type();
-  while (auto list_type = elem_type->cast<ListType>()) {
-    elem_type = list_type->getElementType();
-  }
-  checkListInputType(elem_type, node);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
-  return [initial_scalar_type, elem_type](Stack& stack) {
+int createTensorFromList(Stack& stack) {
+    // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
+    // we use the template arg to distinguish between these two cases
     bool requires_grad;
     IValue data;
     IValue dtype;
@@ -157,7 +145,14 @@ Operation createTensorFromList(const Node* node) {
     } else {
       pop(stack, data, dtype, device);
     }
+    auto elem_type = data.type();
+    while (auto list_type = elem_type->cast<ListType>()) {
+      elem_type = list_type->getElementType();
+    }
     auto sizes = compute_sizes(data);
+    checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
+    at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+
     auto tensor = at::empty(
         sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
@@ -189,7 +184,7 @@ Operation createTensorFromList(const Node* node) {
     }
     push(stack, std::move(tensor));
     return 0;
-  };
+
 }
 
 RegisterOperators reg({

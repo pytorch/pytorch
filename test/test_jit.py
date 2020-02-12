@@ -8013,16 +8013,18 @@ a")
         self._test_tensor_number_math()
 
     def test_torch_tensor_bad_input(self):
-        with self.assertRaisesRegex(RuntimeError, "Input list to torch.tensor must be of ints, floats, "
+        with self.assertRaisesRegex(RuntimeError, "must be of ints, floats, "
                                     "or bools, got None"):
             @torch.jit.script
             def test():
                 return torch.tensor([None])
+            test()
 
         with self.assertRaisesRegex(RuntimeError, r"Empty lists default to List\[Tensor\]"):
             @torch.jit.script
             def tmp():
                 return torch.tensor([])
+            tmp()
 
         @torch.jit.script
         def foo():
