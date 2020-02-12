@@ -188,7 +188,6 @@ inline int can_vectorize_up_to(array_t pointers) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   constexpr int arity = traits::arity;
-
   int result = memory::can_vectorize_up_to<return_t>(pointers[0]);
   static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
@@ -217,8 +216,7 @@ struct load_with_policy {
 template<typename func_t, typename array_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
   // Assumption:
-  // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
-  // 2. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
+  // 1. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
