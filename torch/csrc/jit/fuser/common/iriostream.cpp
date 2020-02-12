@@ -75,14 +75,49 @@ std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
 
-/*
-std::ostream& operator<<(std::ostream& os, const Tensor* const tensor) {
-  return os << "%T" << tensor->name() <<
-      " type: " << tensor->scalarType().value() <<
-      ", sizes: " << tensor->sizes() <<
-      ", strides: " << tensor->strides();
+TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const td){
+  os << "[ ";
+  for(std::vector<const IterDomain*>::size_type i = 0; i<td->domain.size(); i++){
+    os<<td->domain[i];
+    if(i!=td->domain.size()-1)
+      os<<", ";
+  }
+  return os<<" ]";
 }
-*/
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv){
+  assert(tv->tensor->domain != nullptr);
+  return os << tv->tensor << " -> "<<tv->view;
+}
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){
+  if(id->isReduction())
+    os << "r";
+  else
+    os << "i";
+  switch(id->parallel_method()){
+    case(ParallelType::Vectorize):
+      os <<"V";
+      break;
+    case(ParallelType::Unroll):
+      os << "U";
+      break;
+    case(ParallelType::Serial):
+      os << "S";
+      break;
+    default:
+      os << id->parallel_method();
+  }
+  return os << "{" << id->size() << "}";
+}
+
+std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
+  os << "%T" << t->name();
+  if(t->domain != nullptr)
+    os << " " << t->domain;
+  
+  return os;
+}
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {
   os << "%f";
