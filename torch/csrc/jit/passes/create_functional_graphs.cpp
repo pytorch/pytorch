@@ -265,7 +265,7 @@ struct MutationRemover {
       // We can only remove mutation to values that are unique aliases in the
       // graph. if x = y[0] or y = self.y, then removing the mutation could
       // change observable semantics
-      if (uniqueAlias(mutated_value)) {
+      if (!uniqueAlias(mutated_value)) {
         continue;
       }
 
