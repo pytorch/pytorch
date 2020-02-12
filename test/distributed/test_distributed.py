@@ -499,6 +499,7 @@ class _DistTestBase(object):
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
     @require_num_gpus(2)
+    @skip_if_rocm
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
