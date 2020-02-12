@@ -67,35 +67,30 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value_));
     }
-    // functions that are just direct property lookups on tensor
-    // must be registered as prim::<name>(Tensor t) -> <return_type>
-    static const std::unordered_set<std::string> fields = {
-        "dtype",
-        "device",
-        "grad",
-        "data",
-        "shape",
-        "is_cuda",
-        "is_sparse",
-        "is_mkldnn",
-        "is_quantized",
-        "requires_grad",
-        "layout",
-    };
-    if (fields.count(field)) {
-      auto r =
-          m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
-      return std::make_shared<SimpleValue>(r);
-    }
   }
-
-  if (value_->type()->isSubtypeOf(DeviceObjType::get())) {
-    // if (value_->type()->kind() == TypeKind::DeviceObjType) {
-    // property lookups on Device
-    static const std::unordered_set<std::string> fields = {
-        "type",
-    };
-    if (fields.count(field)) {
+  // accessing properties of Tensor and Device that are implemented as
+  // prim:: operators
+  static const std::unordered_map<TypeKind, std::unordered_set<std::string>>
+      builtin_properties = {{TypeKind::TensorType,
+                             {
+                                 "dtype",
+                                 "device",
+                                 "grad",
+                                 "data",
+                                 "shape",
+                                 "is_cuda",
+                                 "is_sparse",
+                                 "is_mkldnn",
+                                 "is_quantized",
+                                 "requires_grad",
+                                 "layout",
+                             }},
+                            {TypeKind::DeviceObjType, {"type", "index"}}};
+  auto kind = value_->type()->kind();
+  auto builtin_entry = builtin_properties.find(kind);
+  if (builtin_entry != builtin_properties.end()) {
+    auto kind_entry = builtin_entry->second.find(field);
+    if (kind_entry != builtin_entry->second.end()) {
       auto r =
           m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
       return std::make_shared<SimpleValue>(r);
