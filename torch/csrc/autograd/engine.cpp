@@ -154,8 +154,14 @@ struct ReadyQueue {
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
-  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!")
-  return graph_task->reentrant_depth_;
+  if (graph_task) {
+    return graph_task->reentrant_depth_;
+  } else {
+    // The graph task is no longer valid indicating an error. As a result, we
+    // try to move this to the front of the queue to ensure the autograd
+    // engine threads pick up this error soon.
+    return std::numeric_limits<int>::max();
+  }
 }
 
 bool graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
