@@ -133,7 +133,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
   using namespace at;
   // WARNING: by adding a value to this set, you are asserting
   // that you have also added special handling of this symbol to
-  // the printer above. Not adding handling will cause import and export
+  // the python_print.cpp. Not adding handling will cause import and export
   // of modules with this new operator to fail. This is only required
   // for operators without schema. Prefer registering your operator with
   // schema to editing this list here. These cases should only be things

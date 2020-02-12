@@ -100,7 +100,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::ComplexCPU;
   } else if (t == DispatchKey::ComplexCUDATensorId) {
     return Backend::ComplexCUDA;
-  } else if (t == DispatchKey::UndefinedTensorId) {
+  } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
     AT_ERROR("Unrecognized tensor type ID: ", t);
@@ -134,7 +134,7 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
     case Backend::ComplexCUDA:
       return DispatchKey::ComplexCUDATensorId;
     case Backend::Undefined:
-      return DispatchKey::UndefinedTensorId;
+      return DispatchKey::Undefined;
     default:
       throw std::runtime_error("Unknown backend");
   }

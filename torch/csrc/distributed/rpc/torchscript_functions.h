@@ -2,8 +2,6 @@
 
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/distributed/autograd/utils.h>
-#include <torch/csrc/distributed/rpc/py_rref.h>
-#include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 
@@ -21,14 +19,16 @@ namespace rpc {
 //                  "dist_autograd_test::my_py_add"
 //   stack: a bag of IValue args passed to torchscriptFunctionName
 // It returns c10::intrusive_ptr<ivalue::Future>
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
-    const std::string& dst,
+c10::intrusive_ptr<c10::ivalue::Future> TORCH_API rpcTorchscript(
+    const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack);
 
-std::shared_ptr<UserRRef> remoteTorchscript(
-    const WorkerInfo& dst,
+std::shared_ptr<UserRRef> TORCH_API remoteTorchscript(
+    const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
+    const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack);
 
 } // namespace rpc

@@ -85,7 +85,7 @@ class RNNBase(Module):
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
 
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -102,29 +102,40 @@ class RNNBase(Module):
         Right now, this works only if the module is on the GPU and cuDNN is enabled.
         Otherwise, it's a no-op.
         """
-        any_param = next(self.parameters()).data
-        if not any_param.is_cuda or not torch.backends.cudnn.is_acceptable(any_param):
+        # Short-circuits if _flat_weights is only partially instantiated
+        if len(self._flat_weights) != len(self._flat_weights_names):
             return
+
+        for w in self._flat_weights:
+            if not torch.is_tensor(w):
+                return
+        # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
+        # or the tensors in _flat_weights are of different dtypes
+
+        first_fw = self._flat_weights[0]
+        dtype = first_fw.dtype
+        for fw in self._flat_weights:
+            if (not torch.is_tensor(fw.data) or not (fw.data.dtype == dtype) or
+                    not fw.data.is_cuda or
+                    not torch.backends.cudnn.is_acceptable(fw.data)):
+                return
 
         # If any parameters alias, we fall back to the slower, copying code path. This is
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        all_weights = self._flat_weights
-        unique_data_ptrs = set(p.data_ptr() for p in all_weights)
-        if len(unique_data_ptrs) != len(all_weights):
+        unique_data_ptrs = set(p.data_ptr() for p in self._flat_weights)
+        if len(unique_data_ptrs) != len(self._flat_weights):
             return
 
-        with torch.cuda.device_of(any_param):
+        with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
 
-            # NB: This is a temporary hack while we still don't have Tensor
-            # bindings for ATen functions
+            # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
+            # an inplace operation on self._flat_weights
             with torch.no_grad():
-                # NB: this is an INPLACE function on all_weights, that's why the
-                # no_grad() is necessary.
                 torch._cudnn_rnn_flatten_weight(
-                    all_weights, (4 if self.bias else 2),
+                    self._flat_weights, (4 if self.bias else 2),
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
 
@@ -134,8 +145,7 @@ class RNNBase(Module):
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
         # likely rely on this behavior to properly .to() modules like LSTM.
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
-
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         # Flattens params (on CUDA)
         self.flatten_parameters()
 
@@ -261,7 +271,7 @@ class RNNBase(Module):
                 else:
                     self._all_weights += [weights[:2]]
                     self._flat_weights_names.extend(weights[:2])
-        self._flat_weights = [getattr(self, weight) for weight in self._flat_weights_names]
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
 
     @property
     def all_weights(self):

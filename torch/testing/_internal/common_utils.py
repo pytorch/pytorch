@@ -114,7 +114,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def shell(command, cwd=None):
+def shell(command, cwd=None, env=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -125,7 +125,7 @@ def shell(command, cwd=None):
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -1317,6 +1317,26 @@ def brute_pdist(inp, p=2):
     inds = torch.ones(k, dtype=torch.int)
     inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
     return unroll[..., inds.cumsum(0)]
+
+
+def pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
+    x = torch.randn(shape, dtype=dtype, device=device)
+    if trans:
+        x.transpose_(-2, -1)
+    if grad_check:
+        x.requires_grad_()
+        y = x.detach().clone().requires_grad_()
+    else:
+        y = x
+    actual = torch.pdist(x, p=p)
+    expected = brute_pdist(y, p=p)
+    self.assertEqual(expected.shape, actual.shape)
+    self.assertTrue(torch.allclose(expected, actual))
+    if grad_check and expected.size() != torch.Size([0]):
+        g0 = torch.rand_like(actual)
+        actual.backward(g0)
+        expected.backward(g0)
+        self.assertTrue(torch.allclose(x.grad, y.grad))
 
 
 def brute_cdist(x, y, p=2):
