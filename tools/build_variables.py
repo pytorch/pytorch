@@ -171,6 +171,7 @@ libtorch_sources = [
     "torch/csrc/jit/tensorexpr/expr.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
     "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
     "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/jit/tensorexpr/types.cpp",
