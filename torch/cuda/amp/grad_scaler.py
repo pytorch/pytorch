@@ -29,26 +29,27 @@ class GradScaler(object):
     * ``scaler.step(optimizer)`` safely unscales gradients and calls ``optimizer.step()``.
     * ``scaler.update()`` updates ``scaler``'s scale factor.
 
-    Here's how that looks::
+    Typical use::
 
-        # Create a GradScaler instance.
+        # Creates a GradScaler once at the beginning of training.
         scaler = GradScaler()
-        ...
-        for input, target in data:
-            optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
 
-            # Scale the loss, and call backward() on the scaled loss to create scaled gradients.
-            scaler.scale(loss).backward()
+        for epoch in epochs:
+            for input, target in data:
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
 
-            # scaler.step() first unscales the gradients of the optimizer's assigned params.
-            # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
-            # otherwise, optimizer.step() is skipped.
-            scaler.step(optimizer)
+                # Scales the loss, and calls backward() on the scaled loss to create scaled gradients.
+                scaler.scale(loss).backward()
 
-            # Update the scale for next iteration.
-            scaler.update()
+                # scaler.step() first unscales the gradients of the optimizer's assigned params.
+                # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+                # otherwise, optimizer.step() is skipped.
+                scaler.step(optimizer)
+
+                # Updates the scale for next iteration.
+                scaler.update()
 
     See the :ref:`Gradient Scaling Examples<gradient-scaling-examples>` for usage in more complex cases like
     gradient clipping, gradient penalty, and multiple losses/optimizers.
