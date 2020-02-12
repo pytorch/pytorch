@@ -35,6 +35,9 @@ class TestFunctionalBlocks(JitTestCase):
         FileCheck().check(r"%x").check_not(r"%x").check("FunctionalGraph").check(r"%x").run(graph)
         FileCheck().check(r"%y").check_not(r"%y").check("FunctionalGraph").check(r"%y").run(graph)
 
+        # Don't allow any outputs which escape scope, so there is one final addition in the graph
+        FileCheck().check("Tensor = prim::Functional").check_next("aten::add").run(graph)
+
         # z + 1, z.add_(2) z * z considered non functional
         FileCheck().check("add").check("add_").check("mul").check("FunctionalGraph").run(graph)
 

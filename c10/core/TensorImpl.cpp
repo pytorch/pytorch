@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      key_set_(key_set.add(DispatchKey::VariableTensorId)) {
+      key_set_(key_set) {
   if (!key_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());

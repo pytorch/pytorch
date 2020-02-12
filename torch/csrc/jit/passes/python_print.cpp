@@ -783,6 +783,11 @@ struct PythonPrintImpl {
         ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
         return true;
       }
+      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+        // print the namedtuple constructor and let rest of tuple printing
+        // continue
+        ss << v.type()->expect<TupleType>()->python_str();
+      }
       return false;
     };
 
