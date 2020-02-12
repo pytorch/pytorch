@@ -353,7 +353,7 @@ class ShapePropagator {
   }
 
   bool canPropagateShapeByRunningIt(Node* node) {
-    if (cannot_propagate_shape_by_running_it.find(node)) {
+    if (node->isMemberOf(cannot_propagate_shape_by_running_it)) {
       return false;
     }
 
@@ -393,7 +393,7 @@ class ShapePropagator {
   bool PropagateShapeOnNodeByRunningIt(Node* node) {
     if (!canPropagateShapeByRunningIt(node))
       return false;
-    auto op = getOperation(node);
+    auto op = node->getOperation();
     Stack stack;
 
     for (auto input : node->inputs()) {
@@ -1504,7 +1504,7 @@ class ShapePropagator {
     // First, try to match one of the registered formulas to their operator
     // sets.
     for (auto& entry : shape_formulas) {
-      if (entry.first.find(node)) {
+      if (node->isMemberOf(entry.first)) {
         auto types = entry.second(node);
         if (types.empty()) {
           return false;
