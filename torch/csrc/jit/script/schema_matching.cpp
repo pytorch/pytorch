@@ -94,16 +94,20 @@ Value* tryConvertToType(
     bool concrete_float = *concrete_type == *FloatType::get();
     bool concrete_int = *concrete_type == *IntType::get();
     bool concrete_number = *concrete_type == *NumberType::get();
-    if (value_isa_tensor && concrete_float) {
-      value = graph.insert(aten::FloatImplicit, {value});
-    } else if (value_isa_tensor && concrete_int) {
-      value = graph.insert(aten::IntImplicit, {value});
-    } else if (value_isa_tensor && concrete_number) {
-      value = graph.insert(aten::ScalarImplicit, {value});
-    } else if (value_equals_number && concrete_float) {
-      value = graph.insert(aten::Float, {value});
-    } else if (value_equals_number && concrete_int) {
-      value = graph.insert(aten::Int, {value});
+    if (value_isa_tensor) {
+      if (concrete_float) {
+        value = graph.insert(aten::FloatImplicit, {value});
+      } else if (concrete_int) {
+        value = graph.insert(aten::IntImplicit, {value});
+      } else if (concrete_number) {
+        value = graph.insert(aten::ScalarImplicit, {value});
+      }
+    } else if (value_equals_number) {
+      if (concrete_float) {
+        value = graph.insert(aten::Float, {value});
+      } else if (concrete_int) {
+        value = graph.insert(aten::Int, {value});
+      }
     }
 
     // Convert strings to device
