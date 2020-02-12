@@ -34,6 +34,11 @@ Val::Val(const ValType _vtype, const DataType _dtype)
   }
 }
 
+const Expr* Val::getOrigin(){
+  FusionGuard fg(fusion_);
+  return(fusion_->origin(this));
+}
+
 Expr::Expr(const ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
