@@ -2942,9 +2942,6 @@
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU: _s_where_cpu
-    CUDA: _s_where_cuda
 
 - func: norm_except_dim(Tensor v, int pow=2, int dim=0) -> Tensor
   variants: function
@@ -3881,7 +3878,7 @@
   variants: method
   dispatch:
     CPU: index_add_cpu_
-    CUDA: index_add_cuda_
+    CUDA: legacy::cuda::_th_index_add_
 
 - func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
   use_c10_dispatcher: full
@@ -5272,13 +5269,13 @@
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_cat
+    CPU: _cat_cpu
     CUDA: legacy::cuda::_th_cat
     QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cat_out
+    CPU: _cat_out_cpu
     CUDA: legacy::cuda::_th_cat_out
     QuantizedCPU: quantized_cat_out
 

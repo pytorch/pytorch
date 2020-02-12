@@ -123,10 +123,6 @@ TH_API scalar_t THTensor_(get2d)(const THTensor *tensor, int64_t x0, int64_t x1)
 TH_API scalar_t THTensor_(get3d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2);
 TH_API scalar_t THTensor_(get4d)(const THTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
 
-/* Shape manipulation methods */
-TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension);
-TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension);
-
 /* Debug methods */
 TH_API THDescBuff THTensor_(desc)(const THTensor *tensor);
 TH_API THDescBuff THTensor_(sizeDesc)(const THTensor *tensor);
