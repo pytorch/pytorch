@@ -4341,8 +4341,8 @@ def foo(x):
 
     def _test_device_type(self, dest):
         def fn(x):
-            # type: (Device) -> str
-            return x.type
+            # type: (Device) -> str, Optional[int]
+            return x.type, x.index
 
         device = torch.ones(2).to(dest).device
         self.checkScript(fn, [device])
