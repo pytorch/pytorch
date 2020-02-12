@@ -262,10 +262,7 @@ class BuildExtension(build_ext, object):
             # Test if we can use ninja. Fallback otherwise.
             msg = ('Attempted to use ninja as the BuildExtension backend but '
                    '{}. Falling back to using the slow distutils backend.')
-            if IS_WINDOWS:
-                warnings.warn(msg.format('we don\'t support this on windows yet'))
-                self.use_ninja = False
-            elif not _is_ninja_available():
+            if not _is_ninja_available():
                 warnings.warn(msg.format('we could not find ninja.'))
                 self.use_ninja = False
 
@@ -289,8 +286,11 @@ class BuildExtension(build_ext, object):
         def append_std14_if_no_std_present(cflags):
             # NVCC does not allow multiple -std to be passed, so we avoid
             # overriding the option if the user explicitly passed it.
-            if not any(flag.startswith('-std=') for flag in cflags):
-                cflags.append('-std=c++14')
+            cpp_format_prefix = '/{}:' if self.compiler.compiler_type == 'msvc' else '-{}='
+            cpp_flag_prefix = cpp_format_prefix.format('std')
+            cpp_flag = cpp_flag_prefix + 'c++14'
+            if not any(flag.startswith(cpp_flag_prefix) for flag in cflags):
+                cflags.append(cpp_flag)
 
         def unix_cuda_flags(cflags):
             return (COMMON_NVCC_FLAGS +
@@ -382,14 +382,18 @@ class BuildExtension(build_ext, object):
             # Return *all* object filenames, not just the ones we just built.
             return objects
 
-        def win_wrap_compile(sources,
-                             output_dir=None,
-                             macros=None,
-                             include_dirs=None,
-                             debug=0,
-                             extra_preargs=None,
-                             extra_postargs=None,
-                             depends=None):
+        def win_cuda_flags(cflags):
+            return (COMMON_NVCC_FLAGS +
+                    cflags + _get_cuda_arch_flags(cflags))
+
+        def win_wrap_single_compile(sources,
+                                    output_dir=None,
+                                    macros=None,
+                                    include_dirs=None,
+                                    debug=0,
+                                    extra_preargs=None,
+                                    extra_postargs=None,
+                                    depends=None):
 
             self.cflags = copy.deepcopy(extra_postargs)
             extra_postargs = None
@@ -426,7 +430,7 @@ class BuildExtension(build_ext, object):
                         else:
                             cflags = []
 
-                        cflags = COMMON_NVCC_FLAGS + cflags + _get_cuda_arch_flags(cflags)
+                        cflags = win_cuda_flags(cflags)
                         for flag in COMMON_MSVC_FLAGS:
                             cflags = ['-Xcompiler', flag] + cflags
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
@@ -447,14 +451,91 @@ class BuildExtension(build_ext, object):
             finally:
                 self.compiler.spawn = original_spawn
 
+        def win_wrap_ninja_compile(sources,
+                                   output_dir=None,
+                                   macros=None,
+                                   include_dirs=None,
+                                   debug=0,
+                                   extra_preargs=None,
+                                   extra_postargs=None,
+                                   depends=None):
+
+            if not self.compiler.initialized:
+                self.compiler.initialize()
+            output_dir = os.path.abspath(output_dir)
+            _, objects, extra_postargs, pp_opts, _ = \
+                self.compiler._setup_compile(output_dir, macros,
+                                             include_dirs, sources,
+                                             depends, extra_postargs)
+            common_cflags = extra_preargs or []
+            common_cflags.append('/c')
+            if debug:
+                common_cflags.extend(self.compiler.compile_options_debug)
+            else:
+                common_cflags.extend(self.compiler.compile_options)
+            common_cflags.extend(COMMON_MSVC_FLAGS)
+            cflags = common_cflags + pp_opts
+            with_cuda = any(map(_is_cuda_file, sources))
+
+            # extra_postargs can be either:
+            # - a dict mapping cxx/nvcc to extra flags
+            # - a list of extra flags.
+            if isinstance(extra_postargs, dict):
+                post_cflags = extra_postargs['cxx']
+            else:
+                post_cflags = list(extra_postargs)
+            append_std14_if_no_std_present(post_cflags)
+
+            cuda_post_cflags = None
+            cuda_cflags = None
+            if with_cuda:
+                cuda_cflags = []
+                for common_cflag in common_cflags:
+                    if common_cflag == '/c':
+                        cuda_cflags.append('-c')
+                    else:
+                        cuda_cflags.append('-Xcompiler')
+                        cuda_cflags.append(common_cflag)
+                cuda_cflags.extend(pp_opts)
+                if isinstance(extra_postargs, dict):
+                    cuda_post_cflags = extra_postargs['nvcc']
+                else:
+                    cuda_post_cflags = list(extra_postargs)
+                cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
+
+            from distutils.spawn import _nt_quote_args
+            cflags = _nt_quote_args(cflags)
+            post_cflags = _nt_quote_args(post_cflags)
+            if with_cuda:
+                cuda_cflags = _nt_quote_args(cuda_cflags)
+                cuda_post_cflags = _nt_quote_args(cuda_post_cflags)
+
+            _write_ninja_file_and_compile_objects(
+                sources=sources,
+                objects=objects,
+                cflags=cflags,
+                post_cflags=post_cflags,
+                cuda_cflags=cuda_cflags,
+                cuda_post_cflags=cuda_post_cflags,
+                build_directory=output_dir,
+                verbose=True,
+                with_cuda=with_cuda)
+
+            # Return *all* object filenames, not just the ones we just built.
+            return objects
+
         # Monkey-patch the _compile or compile method.
         # https://github.com/python/cpython/blob/dc0284ee8f7a270b6005467f26d8e5773d76e959/Lib/distutils/ccompiler.py#L511
         if self.compiler.compiler_type == 'msvc':
-            self.compiler.compile = win_wrap_compile
-        elif self.use_ninja:
-            self.compiler.compile = unix_wrap_ninja_compile
+            if self.use_ninja:
+                self.compiler.compile = win_wrap_ninja_compile
+            else:
+                self.compiler.compile = win_wrap_single_compile
         else:
-            self.compiler._compile = unix_wrap_single_compile
+            if self.use_ninja:
+                self.compiler.compile = unix_wrap_ninja_compile
+            else:
+                self.compiler._compile = unix_wrap_single_compile
 
         build_ext.build_extensions(self)
 
@@ -973,8 +1054,10 @@ def _write_ninja_file_and_compile_objects(
         verbose,
         with_cuda):
     verify_ninja_availability()
-    assert not IS_WINDOWS
-    compiler = os.environ.get('CXX', 'c++')
+    if IS_WINDOWS:
+        compiler = os.environ.get('CXX', 'cl')
+    else:
+        compiler = os.environ.get('CXX', 'c++')
     check_compiler_abi_compatibility(compiler)
     if with_cuda is None:
         with_cuda = any(map(_is_cuda_file, sources))
@@ -1433,6 +1516,7 @@ def _write_ninja_file(path,
         rule = 'cuda_compile' if is_cuda_source else 'compile'
         if IS_WINDOWS:
             source_file = source_file.replace(':', '$:')
+            object_file = object_file.replace(':', '$:')
         source_file = source_file.replace(" ", "$ ")
         build.append('build {}: {} {}'.format(object_file, rule, source_file))
 
