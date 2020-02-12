@@ -252,18 +252,15 @@ def generate_type_hints(fname, decls, is_tensor=False):
         render_kw_only_separator = True  # whether we add a '*' if we see a keyword only argument
         python_args = []
 
-        has_tensor_options = TOUtils.check_if_factory_method(decl['arguments'])
-
         for a in decl['arguments']:
-            if a['dynamic_type'] != 'TensorOptions':
-                if a.get('kwarg_only', False) and render_kw_only_separator:
-                    python_args.append('*')
-                    render_kw_only_separator = False
-                try:
-                    python_args.append(arg_to_type_hint(a))
-                except Exception:
-                    print("Error while processing function {}".format(fname))
-                    raise
+            if a.get('kwarg_only', False) and render_kw_only_separator:
+                python_args.append('*')
+                render_kw_only_separator = False
+            try:
+                python_args.append(arg_to_type_hint(a))
+            except Exception:
+                print("Error while processing function {}".format(fname))
+                raise
 
         if is_tensor:
             if 'self: Tensor' in python_args:
@@ -272,20 +269,19 @@ def generate_type_hints(fname, decls, is_tensor=False):
             else:
                 raise Exception("method without self is unexpected")
 
+        # This is a hack
+        # Please see [Add requires_grad to native_functions.yaml and potentially to TensorOptions object] in the
+        # tracking issue https://github.com/pytorch/pytorch/issues/30405
+        has_tensor_options = TOUtils.check_if_factory_method(decl['arguments'])
+        if has_tensor_options:
+            python_args.append('requires_grad: Optional[_bool]=None')
+
+
         if has_out:
             if render_kw_only_separator:
                 python_args.append('*')
                 render_kw_only_separator = False
             python_args.append('out: Optional[Tensor]=None')
-
-        if has_tensor_options and False:
-            if render_kw_only_separator:
-                python_args.append('*')
-                render_kw_only_separator = False
-            python_args += ["dtype: _dtype=None",
-                            "layout: _layout=strided",
-                            "device: Union[_device, str, None]=None",
-                            "requires_grad:_bool=False"]
 
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]
