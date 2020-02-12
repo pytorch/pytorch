@@ -867,7 +867,7 @@ bool Node::matches(const FunctionSchema& schema) const {
     return false;
   }
 
-    TypeEnv type_env;
+  TypeEnv type_env;
   for (size_t i = 0; i < formals.size(); ++i) {
     auto formal = formals[i].type();
     const MatchTypeReturn matched_type = matchTypeVariables(
@@ -984,8 +984,9 @@ const Operator& Node::getOperator() const {
 }
 
 Operation Node::getOperation() const {
-  // note: getOperatorFor ensures that getOperatorFor(node).matches(node) ==
-  // true so the call to selectVariant is always valid.
+  // note: some operators require the node to produce a runnable operation, which
+  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
+  // of the returned operator.
   return getOperator().getOperation(this);
 }
 

@@ -28,13 +28,23 @@ RRefContext& RRefContext::getInstance() {
   return *context;
 }
 
-void RRefContext::destroyInstance(bool ignoreRRefLeak) {
+std::vector<std::shared_ptr<RRef>> RRefContext::destroyInstance(
+    bool ignoreRRefLeak) {
   auto& ctx = RRefContext::getInstance();
   {
     std::lock_guard<std::mutex> lock(ctx.destroyedMutex_);
     ctx.destroyed_ = true;
   }
   ctx.checkRRefLeaks(ignoreRRefLeak);
+  std::vector<std::shared_ptr<RRef>> deletedRRefs;
+  for (auto& entry : ctx.owners_) {
+    auto rref = entry.second;
+    if (rref->isPyObj()) {
+      deletedRRefs.emplace_back(std::move(rref));
+    }
+  }
+  ctx.owners_.clear();
+  return deletedRRefs;
 }
 
 void RRefContext::handleException(
@@ -51,8 +61,9 @@ RRefContext::RRefContext(std::shared_ptr<RpcAgent> agent)
 
 RRefContext::~RRefContext() {
   if (!owners_.empty()) {
-    pybind11::gil_scoped_acquire ag;
-    owners_.clear();
+    VLOG(1) << "Destructing RRefContext with non-empty OwnerRRef set. "
+            << "This would likely cause Python deref error. "
+            << "Make sure destroyInstance() is invoked before destruction.";
   }
 }
 
@@ -146,11 +157,11 @@ void RRefContext::delUser(
 }
 
 std::shared_ptr<RRef> RRefContext::getOrCreateRRef(
-    const RRefForkData& rfd,
+    const RRefForkData& rrefForkData,
     const TypePtr& type) {
-  auto& ownerId = rfd.ownerId_;
-  auto& rrefId = rfd.rrefId_;
-  auto& forkId = rfd.forkId_;
+  auto& ownerId = rrefForkData.ownerId_;
+  auto& rrefId = rrefForkData.rrefId_;
+  auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
     auto ownerRRef = getOwnerRRef(rrefId);
     TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
@@ -206,7 +217,7 @@ std::shared_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
 }
 
 RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
-  auto rfd = rref->fork();
+  auto rrefForkData = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -218,7 +229,7 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     // ACK does not making any difference but only add complexity.
     // TODO: When adding failure retries and timeout, this fork needs to be
     // deleted if the owner does not receive the ACK within the timeout.
-    addForkOfOwner(rfd.rrefId_, rfd.forkId_);
+    addForkOfOwner(rrefForkData.rrefId_, rrefForkData.forkId_);
     // ensure that this RRef is in the owners_ list to keep it alive.
     // this is needed for OwnerRRefs that were created locally.
     {
@@ -229,17 +240,17 @@ RRefForkData RRefContext::prepareChildFork(const std::shared_ptr<RRef>& rref) {
     // Note [Useful Phantom Fork ID for User to Owner Call]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // If the callee of dist.remote or dist.rpc is the owner of this RRef, the
-    // callee will not create a fork using this rfd.forkId_, because the owner
-    // will only keep one `OwnerRRef` instance and will not create any
-    // `UserRRef` instances. However, this rfd.forkId_ is still necessary, as
-    // the caller user needs to keep this `UserRRef` alive until it gets the
-    // ACK from the callee owner. Otherwise, the delete message could arrive
-    // at the owner before this dist.rpc or dist.remote call, which could
-    // potentially trigger the `OwnerRRef` to be deleted before running the
-    // user code.
-    addPendingChild(rfd.forkId_, rref);
+    // callee will not create a fork using this rrefForkData.forkId_, because
+    // the owner will only keep one `OwnerRRef` instance and will not create any
+    // `UserRRef` instances. However, this rrefForkData.forkId_ is still
+    // necessary, as the caller user needs to keep this `UserRRef` alive until
+    // it gets the ACK from the callee owner. Otherwise, the delete message
+    // could arrive at the owner before this dist.rpc or dist.remote call, which
+    // could potentially trigger the `OwnerRRef` to be deleted before running
+    // the user code.
+    addPendingChild(rrefForkData.forkId_, rref);
   }
-  return rfd;
+  return rrefForkData;
 }
 
 void RRefContext::notifyOwnerAndParentOfFork(
@@ -250,7 +261,17 @@ void RRefContext::notifyOwnerAndParentOfFork(
     if (parent == agent_->getWorkerInfo().id_) {
       // Owner sending RRef to self, remove the forkId as it was added during
       // pickling
-      delForkOfOwner(rref->rrefId(), forkId);
+      auto deletedRRef = delForkOfOwner(rref->rrefId(), forkId);
+      if (deletedRRef) {
+        TORCH_INTERNAL_ASSERT(
+            deletedRRef->rrefId() == rref->rrefId(),
+            "Deleting a fork of ",
+            rref->rrefId(),
+            " triggered deleting the OwnerRRef of ",
+            deletedRRef->rrefId());
+        // NB: not necessary to reset deletedRRef as rref is another shared_ptr
+        // instance pointing to the same OwnerRRef.
+      }
     } else {
       // If the parent is the owner, this fork has already been added into the
       // forks_ map when the owner sends the message to the callee user. Hence,
@@ -363,7 +384,9 @@ void RRefContext::addForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
   rrefForks.insert(forkId);
 }
 
-void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
+std::shared_ptr<RRef> RRefContext::delForkOfOwner(
+    const RRefId& rrefId,
+    const ForkId& forkId) {
   std::shared_ptr<RRef> deletedRRef = nullptr;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -389,10 +412,7 @@ void RRefContext::delForkOfOwner(const RRefId& rrefId, const ForkId& forkId) {
       forks_.erase(rrefIter);
     }
   }
-  if (deletedRRef && deletedRRef->isPyObj()) {
-    pybind11::gil_scoped_acquire ag;
-    deletedRRef.reset();
-  }
+  return deletedRRef;
 }
 
 } // namespace rpc

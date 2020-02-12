@@ -1130,8 +1130,12 @@ struct to_ir {
             }
           }
         }
-        return CondValue(
-            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+        auto expr_out = emitToBool(emitExpr(expr));
+        c10::optional<bool> static_if = c10::nullopt;
+        if (expr_out->node()->kind() == aten::is_scripting) {
+          static_if = true;
+        }
+        return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }
   }
@@ -2227,11 +2231,10 @@ struct to_ir {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
     const auto lhs = Select(stmt.lhs());
-    const auto basename = Var(lhs.value()).name();
+    auto lhsObject = emitSugaredExpr(lhs.value(), 1);
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
                               ->asValue(stmt.rhs().range(), method);
-    auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+    lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {

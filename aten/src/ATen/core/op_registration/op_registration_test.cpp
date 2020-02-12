@@ -865,6 +865,25 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   EXPECT_FALSE(called_autograd);
 }
 
+TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::XLAPreAutograd)
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLATensorId, DispatchKey::XLAPreAutograd}));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPUTensorId));
+  EXPECT_TRUE(called_autograd);
+  EXPECT_FALSE(called_nonautograd);
+}
+
 /**
  * This is used to check that a given type works correctly when passed as input
  * to or as output from a kernel.
