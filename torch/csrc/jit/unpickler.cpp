@@ -2,6 +2,7 @@
 #include <ATen/core/Dict.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include "unpickler.h"
 #include <string>
 
@@ -455,6 +456,16 @@ void Unpickler::readGlobal(
                 "Found a tensor table reference but Unpickler"
                 " has no tensor table\n");
             stack_.emplace_back(tensor_table_->at(data.toInt()));
+      });
+    } else if (class_name == "restore_type_tag") {
+      globals_.emplace_back([this] {
+        auto data = stack_.back().toTuple()->elements();
+        stack_.pop_back();
+        TypePtr type = c10::parseType(data.at(1).toStringRef());
+        // TODO: Use lookahead to avoid creating the tuple and immediately
+        // destroying it here
+        restoreAccurateTypeTags(data.at(0), type);
+        stack_.emplace_back(data.at(0));
       });
     } else {
       TypePtr elem_type = nullptr;
