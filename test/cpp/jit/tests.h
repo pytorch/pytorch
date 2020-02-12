@@ -89,7 +89,8 @@ namespace jit {
   _(GPU_FusionMutator)           \
   _(GPU_FusionTopoSort)          \
   _(GPU_FusionRegister)          \
-  _(GPU_FusionTensor)             \
+  _(GPU_FusionTensor)            \
+  _(GPU_FusionTensorDomain)      \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

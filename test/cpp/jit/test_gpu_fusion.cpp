@@ -195,9 +195,20 @@ void testGPU_FusionTensor() {
   auto fuser_tensor  = new Tensor(tensor_type);
   TORCH_CHECK(fuser_tensor->hasContiguityInfo() == 1);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float); 
+  
   auto fuser_null_tensor  = new Tensor(DataType::Int);
   TORCH_CHECK(fuser_null_tensor->hasContiguityInfo() == 0);
   TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int); 
+}
+
+void testGPU_FusionTensorDomain() {
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const Tensor *t = Tensor::MakeDummyTensor(3);
+  std::cout << "A 3d tensor: " << t << std::endl;
+
 }
 
 void testGPU_Fusion() {}
