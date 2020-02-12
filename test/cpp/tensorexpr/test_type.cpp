@@ -1,6 +1,5 @@
 #include "test/cpp/tensorexpr/test_base.h"
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
+#include "torch/csrc/jit/tensorexpr/ir.h"
 
 namespace torch {
 namespace jit {
