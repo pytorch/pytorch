@@ -29,6 +29,7 @@
 //
 
 #include <type_traits>
+#include <tuple>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -161,7 +162,7 @@ using pointers = typename pointers_helper<T>::type;
 template<template<int i> typename func, int end, int current=0>
 struct static_unroll {
   template<typename... Args>
-  static inline __device__ __host__ void with_args(Args... args) {
+  static inline C10_HOST_DEVICE void with_args(Args... args) {
     func<current>::apply(args...);
     static_unroll<func, end, current+1>::with_args(args...);
   }
@@ -170,13 +171,13 @@ struct static_unroll {
 template<template<int i> typename func, int end>
 struct static_unroll<func, end, end> {
   template<typename... Args>
-  static inline __device__ __host__ void with_args(Args... args) {}
+  static inline C10_HOST_DEVICE void with_args(Args... args) {}
 };
 
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static __device__ __host__ void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
     using arg_t = std::tuple_element_t<i, typename traits::ArgsTuple>;
     result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
   }
