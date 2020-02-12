@@ -74,16 +74,16 @@ static inline Variable sequenceToVariable(c10::DispatchKey dispatch_key, PyObjec
   return torch::utils::indexing_tensor_from_data(dispatch_key, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value) {
+static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
   }
   at::AutoNonVariableTypeMode guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
-    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options);
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
   }
   if (PyFloat_Check(value)) {
-    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackDouble(value)), options);
+    return at::indexing::scalarToTensor(Scalar(THPUtils_unpackDouble(value)), options, device);
   }
   throw TypeError(
     "can't assign a %s to a %s",
@@ -133,7 +133,7 @@ static inline PyObject* convertToPythonInt(PyObject* obj) {
   return idx;
 }
 
-static inline Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices, bool is_tracing) {
+static inline Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices, bool is_tracing, const at::Device& self_device) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(index);
@@ -151,7 +151,7 @@ static inline Variable applySlicing(const Variable& self, PyObject* index, varia
       if (is_tracing && THPVariable_Check(obj)) {
         recordSelectTrace(THPVariable_Unpack(obj));
       }
-      result = at::indexing::applySelect(result, dim, THPUtils_unpackLong(obj), i);
+      result = at::indexing::applySelect(result, dim, THPUtils_unpackLong(obj), i, self_device);
     } else {
       auto tensor_index = ([&]() {
         if (THPUtils_checkLong(obj)) {
@@ -206,7 +206,8 @@ static inline Variable applySlicing(const Variable& self, PyObject* index, varia
         /*specified_dims_ptr=*/&specified_dims,
         /*real_dim=*/i,
         /*outIndices=*/outIndices,
-        /*is_tracing=*/is_tracing);
+        /*is_tracing=*/is_tracing,
+        /*original_tensor_device=*/self_device);
     }
   }
   return result;
@@ -267,6 +268,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
+  const at::Device& self_device = self_.device();
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices, ellipsis, none
@@ -278,7 +280,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_Wrap(at::indexing::applySelect(self_, 0, THPUtils_unpackLong(index)));
+    return THPVariable_Wrap(at::indexing::applySelect(self_, 0, THPUtils_unpackLong(index), 0, self_device));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     if (!THPUtils_unpackSlice(index, &start, &stop, &step)) {
@@ -296,14 +298,15 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       stop,
       step,
       /*ensure_view=*/true,
-      /*is_tracing=*/is_tracing));
+      /*is_tracing=*/is_tracing,
+      self_device));
   }
 
   // wrap index in a tuple if it's not already one
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing);
+  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_device);
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
@@ -329,14 +332,16 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
+  const at::Device& self_device = self_.device();
   Variable value;
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
-    value = valueToTensor(device(kCPU).dtype(kFloat), py_value);
+    value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
   } else {
-    value = valueToTensor(self_.options(), py_value);
+    value = valueToTensor(self_.options(), py_value, self_device);
   }
   bool is_tracing = torch::jit::tracer::isTracing();
+  
 
   // handle simple types: integers, slices, ellipsis, none, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -348,21 +353,24 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
       self_,
       at::indexing::TensorIndex(at::indexing::Ellipsis),
       value,
-      /*is_tracing=*/is_tracing);
+      is_tracing,
+      self_device);
     return 0;
   } else if (index == Py_None) {
     at::indexing::handleSimpleTypesInSingleDimIndexingSet(
       self_,
       at::indexing::TensorIndex(at::indexing::None),
       value,
-      /*is_tracing=*/is_tracing);
+      is_tracing,
+      self_device);
     return 0;
   } else if (index == Py_True) {
     at::indexing::handleSimpleTypesInSingleDimIndexingSet(
       self_,
       at::indexing::TensorIndex(true),
       value,
-      /*is_tracing=*/is_tracing);
+      is_tracing,
+      self_device);
     return 0;
   } else if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
@@ -372,7 +380,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
       self_,
       at::indexing::TensorIndex(THPUtils_unpackLong(index)),
       value,
-      /*is_tracing=*/is_tracing);
+      is_tracing,
+      self_device);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
@@ -388,7 +397,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
       self_,
       at::indexing::TensorIndex({start, stop, step}),
       value,
-      /*is_tracing=*/is_tracing);
+      is_tracing,
+      self_device);
     return 0;
   }
 
@@ -396,7 +406,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing);
+  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_device);
   if (variableIndices.empty()) {
     at::indexing::copy_to(sliced, value);
     return 0;

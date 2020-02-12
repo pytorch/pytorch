@@ -60,7 +60,7 @@ int64_t count_specified_dimensions(ArrayRef<TensorIndex> indices) {
 }
 
 // This mirrors `applySlicing` in torch/csrc/autograd/python_variable_indexing.cpp
-Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vector<Tensor>& outIndices) {
+Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vector<Tensor>& outIndices, const at::Device& self_device) {
   int64_t size = indices.size();
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(indices);
@@ -78,7 +78,8 @@ Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vect
       /*specified_dims=*/&specified_dims,
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
-      /*is_tracing=*/false);
+      /*is_tracing=*/false,
+      /*original_tensor_device=*/self_device);
   }
   return result;
 }
@@ -86,17 +87,18 @@ Tensor applySlicing(const Tensor& self, ArrayRef<TensorIndex> indices, std::vect
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
 Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   OptionalDeviceGuard device_guard(device_of(self));
+  const at::Device self_device = self.device();
 
   // handle simple types: integers, slices, ellipsis
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (!index.is_boolean() && !index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingGet(self, index, /*is_tracing=*/false);
+      return handleSimpleTypesInSingleDimIndexingGet(self, index, false, self_device);
     }
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices);
+  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
@@ -113,17 +115,18 @@ Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
 // for "the assigned value is a Tensor" case
 void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
   OptionalDeviceGuard device_guard(device_of(self));
+  const at::Device self_device = self.device();
 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (!index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingSet(self, index, value, /*is_tracing=*/false);
+      return handleSimpleTypesInSingleDimIndexingSet(self, index, value, false, self_device);
     }
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices);
+  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
@@ -151,9 +154,9 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
     at::AutoNonVariableTypeMode guard;
     // TODO: This qint special case looks very suspicious...
     if (isQIntType(self.scalar_type())) {
-      value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat));
+      value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
     } else {
-      value = at::indexing::scalarToTensor(v, self.options());
+      value = at::indexing::scalarToTensor(v, self.options(), self.device());
     }
   }
 

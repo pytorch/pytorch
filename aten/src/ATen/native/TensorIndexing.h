@@ -193,9 +193,8 @@ struct CAFFE2_API TensorIndex final {
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
-static inline int64_t getTensorSize(const Tensor& self, int64_t dim) {
-  auto device = self.device();
-  if (device == at::kCPU || device == at::kCUDA) {
+static inline int64_t getTensorSize(const Tensor& self, int64_t dim, const at::Device& self_device) {
+  if (self_device == at::kCPU || self_device == at::kCUDA) {
     return at::native::size(self, dim);
   } else {
     return self.size(dim);
@@ -209,26 +208,27 @@ static inline Tensor applySlice(
     int64_t stop,
     int64_t step,
     bool ensure_view,
-    bool is_tracing) {
+    bool is_tracing,
+    const at::Device& self_device) {
   // TODO: implement negative step
   TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
 
   // Skip this optimization if we are tracing, as the trace may be polymorphic
   // over the shape of the `self` tensor, and we still want to record
   // the slice.
-  if (!ensure_view && start == 0 && stop == getTensorSize(self, dim) && step == 1 && !is_tracing) {
+  if (!ensure_view && start == 0 && stop == getTensorSize(self, dim, self_device) && step == 1 && !is_tracing) {
     return self;
   }
   return self.slice(dim, start, stop, step);
 }
 
-static inline Tensor applySelect(const Tensor& self, int64_t dim, int64_t index, int64_t real_dim=0) {
+static inline Tensor applySelect(const Tensor& self, int64_t dim, int64_t index, int64_t real_dim, const at::Device& self_device) {
   TORCH_CHECK_INDEX(
     !(index == 0 && dim == 0 && self.dim() == 0),
     "invalid index of a 0-dim tensor. ",
     "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
-  int64_t size = getTensorSize(self, dim);
+  int64_t size = getTensorSize(self, dim, self_device);
   TORCH_CHECK_INDEX(
     index >= -size && index < size,
     "index ", index, " is out of bounds for dimension ", real_dim, " with size ", size);
@@ -257,9 +257,8 @@ static inline Tensor boolToIndexingTensorNonNativeDeviceType(const Tensor& self,
   }
 }
 
-static inline Tensor boolToIndexingTensor(const Tensor& self, bool value) {
-  auto device = self.options().device();
-  if (device == at::kCPU || device == at::kCUDA) {
+static inline Tensor boolToIndexingTensor(const Tensor& self, bool value, const at::Device& self_device) {
+  if (self_device == at::kCPU || self_device == at::kCUDA) {
     return boolToIndexingTensorCPUOrCUDA(self, value);
   } else {
     return boolToIndexingTensorNonNativeDeviceType(self, value);
@@ -274,9 +273,8 @@ static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOpt
   return at::scalar_tensor(v, options);
 }
 
-static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options) {
-  auto device = options.device();
-  if (device == at::kCPU || device == at::kCUDA) {
+static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
+  if (self_device == at::kCPU || self_device == at::kCUDA) {
     return scalarToTensorCPUOrCUDA(v, options);
   } else {
     return scalarToTensorNonNativeDeviceType(v, options);
@@ -315,9 +313,10 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
 static inline Tensor handleSimpleTypesInSingleDimIndexingGet(
     const Tensor& self,
     const TensorIndex& index,
-    bool is_tracing) {
+    bool is_tracing,
+    const at::Device& self_device) {
   if (index.is_integer()) {
-    return applySelect(self, 0, index.integer());
+    return applySelect(self, 0, index.integer(), 0, self_device);
   } else if (index.is_slice()) {
     return applySlice(
       self,
@@ -326,7 +325,8 @@ static inline Tensor handleSimpleTypesInSingleDimIndexingGet(
       index.slice().stop(),
       index.slice().step(),
       /*ensure_view=*/true,
-      /*is_tracing=*/is_tracing);
+      /*is_tracing=*/is_tracing,
+      self_device);
   } else if (index.is_none()) {
     return self.unsqueeze(0);
   } else if (index.is_ellipsis()) {
@@ -340,7 +340,8 @@ static inline void handleSimpleTypesInSingleDimIndexingSet(
     const Tensor& self,
     const TensorIndex& index,
     const Tensor& value,
-    bool is_tracing) {
+    bool is_tracing,
+    const at::Device& self_device) {
   if (index.is_boolean() && !index.boolean()) {
     // do nothing for false (technically we should check the size, but we don't have
     // real 0-sized shapes.
@@ -352,7 +353,7 @@ static inline void handleSimpleTypesInSingleDimIndexingSet(
     copy_to(self.unsqueeze(0), value);
     return;
   } else if (index.is_integer()) {
-    copy_to(applySelect(self, 0, index.integer()), value);
+    copy_to(applySelect(self, 0, index.integer(), 0, self_device), value);
     return;
   } else if (index.is_slice()) {
     copy_to(applySlice(
@@ -362,7 +363,8 @@ static inline void handleSimpleTypesInSingleDimIndexingSet(
       index.slice().stop(),
       index.slice().step(),
       /*ensure_view=*/false,
-      /*is_tracing=*/is_tracing), value);
+      /*is_tracing=*/is_tracing,
+      self_device), value);
     return;
   }
 }
@@ -375,9 +377,10 @@ static inline Tensor handleDimInMultiDimIndexing(
     int64_t* specified_dims_ptr,
     int64_t real_dim,
     std::vector<Tensor>& outIndices,
-    bool is_tracing) {
+    bool is_tracing,
+    const at::Device& original_tensor_device) {
   if (index.is_integer()) {
-    return applySelect(prev_dim_result, *dim_ptr, index.integer(), real_dim);
+    return applySelect(prev_dim_result, *dim_ptr, index.integer(), real_dim, original_tensor_device);
   } else if (index.is_slice()) {
     Tensor result = applySlice(
       prev_dim_result,
@@ -386,7 +389,8 @@ static inline Tensor handleDimInMultiDimIndexing(
       index.slice().stop(),
       index.slice().step(),
       /*ensure_view=*/false,
-      /*is_tracing=*/is_tracing);
+      /*is_tracing=*/is_tracing,
+      original_tensor_device);
     (*dim_ptr)++;
     return result;
   } else if (index.is_ellipsis()) {
@@ -398,7 +402,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     return result;
   } else if (index.is_boolean()) {
     Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
-    recordTensorIndex(boolToIndexingTensor(result, index.boolean()), outIndices, dim_ptr);
+    recordTensorIndex(boolToIndexingTensor(result, index.boolean(), original_tensor_device), outIndices, dim_ptr);
     return result;
   } else if (index.is_tensor()) {
     Tensor result = prev_dim_result;
@@ -406,13 +410,13 @@ static inline Tensor handleDimInMultiDimIndexing(
     auto scalar_type = tensor.scalar_type();
     if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
-        result = applySelect(result, *dim_ptr, tensor.item<int64_t>(), real_dim);
+        result = applySelect(result, *dim_ptr, tensor.item<int64_t>(), real_dim, original_tensor_device);
       } else {
         result = result.unsqueeze(*dim_ptr);
         if (scalar_type == at::kBool) {
-          recordTensorIndex(boolToIndexingTensor(result, tensor.item<bool>() != 0), outIndices, dim_ptr);
+          recordTensorIndex(boolToIndexingTensor(result, tensor.item<bool>() != 0, original_tensor_device), outIndices, dim_ptr);
         } else {
-          recordTensorIndex(boolToIndexingTensor(result, tensor.item<uint8_t>() != 0), outIndices, dim_ptr);
+          recordTensorIndex(boolToIndexingTensor(result, tensor.item<uint8_t>() != 0, original_tensor_device), outIndices, dim_ptr);
         }
       }
     } else {
