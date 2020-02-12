@@ -38,8 +38,6 @@ void record_function_exit(const at::Tensor& handle) {
       AT_ASSERT(current->parent() == &rec, "rec must be parent");
       AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
       current->end();
-    } else {
-      AT_ASSERT(current == &rec, "rec must be active");
     }
     rec.end();
   }
