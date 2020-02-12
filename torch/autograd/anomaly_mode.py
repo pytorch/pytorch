@@ -67,7 +67,7 @@ class detect_anomaly(object):
 
     def __init__(self):
         self.prev = torch.is_anomaly_enabled()
-        warnings.warn("Anomaly Detection has been enabled. Anomaly Detection has been enabled. Diagnostic tests will increase the runtime. This should only be enabled for debugging.")
+        warnings.warn("Anomaly Detection has been enabled. Diagnostic tests will increase the runtime. This should only be enabled for debugging.")
 
     def __enter__(self):
         torch.set_anomaly_enabled(True)
