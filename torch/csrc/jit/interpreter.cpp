@@ -523,7 +523,7 @@ struct CodeImpl {
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
-    operator_table_.emplace_back(getOperation(node));
+    operator_table_.emplace_back(node->getOperation());
   }
 
   void emitWait(Node* node) {

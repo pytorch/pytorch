@@ -549,7 +549,7 @@ static Value* emitBuiltinNode(
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
-  getOperation(n);
+  n->getOperation();
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }

@@ -40,7 +40,7 @@ bool needTrimGrad(Node* n) {
       "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"
   };
-  if (need_trim_grad_ops.find(n)) {
+  if (n->isMemberOf(need_trim_grad_ops)) {
     return true;
   }
   return false;
@@ -62,7 +62,7 @@ bool isDifferentiable(Node* n) {
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
 
-  if (differentiable_ops.find(n))
+  if (n->isMemberOf(differentiable_ops))
     return true;
 
   if (n->matches(

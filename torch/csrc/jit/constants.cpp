@@ -253,7 +253,7 @@ c10::optional<IValue> toIValue(const Value* v) {
     return c10::nullopt;
   }
   // use implementation of prim::Constant to compute the output IValue
-  auto op = getOperation(v->node());
+  auto op = v->node()->getOperation();
   Stack stack;
   op(stack);
   return stack.back();

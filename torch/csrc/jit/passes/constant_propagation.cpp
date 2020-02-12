@@ -25,7 +25,7 @@ c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
     }
   }
   try {
-    auto op = getOperation(node);
+    auto op = node->getOperation();
     op(stack);
     TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
   } catch (...) {
@@ -76,7 +76,7 @@ struct ConstantPropagator {
   }
 
   std::vector<IValue> runNode(Node* n) {
-    auto op = getOperation(n);
+    auto op = n->getOperation();
     Stack stack;
     for (auto input : n->inputs()) {
       stack.push_back(*toIValue(input));
