@@ -124,8 +124,9 @@ with compiling PyTorch from source.
                               !! WARNING !!
 '''
 ROCM_HOME = _find_rocm_home()
-CUDA_HOME = (ROCM_HOME if ROCM_HOME else _find_cuda_home())
-CUDNN_HOME = (_join_rocm_home('miopen') if ROCM_HOME else (os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')))
+MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
+CUDA_HOME = _find_cuda_home()
+CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
@@ -692,8 +693,8 @@ def include_paths(cuda=False):
     if cuda and ROCM_HOME:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
-        if CUDNN_HOME is not None:
-            paths.append(os.path.join(CUDNN_HOME, 'include'))
+        if MIOPEN_HOME is not None:
+            paths.append(os.path.join(MIOPEN_HOME, 'include'))
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
