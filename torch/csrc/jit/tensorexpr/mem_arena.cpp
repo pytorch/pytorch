@@ -16,8 +16,6 @@ KernelScopedObject::KernelScopedObject() {
   kernel.kernel_objects_.push_back(this);
 }
 
-KernelScopedObject::~KernelScopedObject() {}
-
 static std::vector<KernelArena*>& GetKernelArenaStack() {
   thread_local std::vector<KernelArena*> kernel_arena_stack;
   return kernel_arena_stack;
