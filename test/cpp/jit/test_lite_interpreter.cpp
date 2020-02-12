@@ -1,4 +1,3 @@
-#include <gtest/gtest.h>
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
@@ -188,7 +187,7 @@ void testLiteInterpreterLoadOrigJit() {
   )");
   std::stringstream ss;
   m.save(ss);
-  EXPECT_THROW(_load_for_mobile(ss), c10::Error);
+  ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
 }
 
 } // namespace jit
