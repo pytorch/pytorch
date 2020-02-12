@@ -373,13 +373,11 @@ auto Engine::thread_main(
     // ensure that it's not sleeping. If it has work, it might see that
     // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
     // it's a no-op anyway.
-    // This is not necessary if the owning thread is not a device thread or the
-    // current thread is the owning thread.
-    if (base_owner != NO_DEVICE && base_owner != worker_device &&
-        gt_completed) {
+    // This is not necessary if the current thread is the owning thread.
+    if (base_owner != worker_device && gt_completed) {
       // Synchronize outstanding_tasks_ with queue mutex
       std::atomic_thread_fence(std::memory_order_release);
-      ready_queue_by_index(graph_task, base_owner)
+      ready_queue_by_index(local_graph_task, base_owner)
           .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
     }
   }
@@ -805,6 +803,9 @@ std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
     //    backward call from that device.
     worker_device = CPU_DEVICE;
 
+    // set the graph_task owner to the current device
+    graph_task->owner_ = worker_device;
+
     // The owning thread start to drive the engine execution with the GraphTask
     // that has already been pushed to the current CPU thread's ready_queue
     lock.unlock();
@@ -953,7 +954,7 @@ auto Engine::ready_queue(const std::shared_ptr<GraphTask>& graph_task, at::Devic
 auto Engine::ready_queue_by_index(const std::shared_ptr<GraphTask>& graph_task, int device_index) -> ReadyQueue& {
   if (device_index == CPU_DEVICE) {
     if (graph_task == nullptr) {
-      // this must be the initial Engine::execute from CPU, return the thread local ready queue
+      // this must not be a re-entrant call, return the local ready queue
       return *local_ready_queue;
     }
     // return the cpu ready queue memorized in GraphTask
