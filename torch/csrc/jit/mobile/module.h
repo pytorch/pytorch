@@ -12,6 +12,7 @@ class CompilationUnit {
  public:
   void register_function(std::unique_ptr<Function> fn);
   std::vector<std::unique_ptr<Function>>& methods() {return methods_;}
+  Function* find_method_by_qn(const c10::QualifiedName& qn);
  private:
   std::vector<std::unique_ptr<Function>> methods_;
 };

@@ -32,6 +32,11 @@
 // This format and process need to be revisted and redesigned if we want to
 // support backward compatibility in future.
 
+namespace c10 {
+//std::string serializeType(const Type &t);
+TypePtr parseType(const std::string& pythonStr);
+}
+
 namespace torch {
 namespace jit {
 using caffe2::serialize::PyTorchStreamReader;
@@ -95,7 +100,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
     auto named_agg_size = comps[3].toTuple()->elements();
     auto size_name = named_agg_size[0].toString()->string();
     TORCH_CHECK(size_name == "register_size",
-                "register_size is expected, but get", ops_name);
+                "register_size is expected, but get", size_name);
     function->set_register_size(named_agg_size[1].toInt());
 
     mcu->register_function(std::move(function));
@@ -109,7 +114,8 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(c10::optional<at::Device> device);
 
  private:
-  c10::IValue readArchive(const std::string& archive_name);
+  c10::IValue readArchive(const std::string& archive_name,
+    std::shared_ptr<mobile::CompilationUnit> mcu);
   std::shared_ptr<script::CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
@@ -121,14 +127,15 @@ BytecodeDeserializer::BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> 
 
 mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
-  auto bvals = readArchive("bytecode").toTuple()->elements();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+  auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
   parseMethods(bvals, mcu);
 
-  return mobile::Module(readArchive("data").toObject(), mcu);
+  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
 
-c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
+c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
+    std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
@@ -161,16 +168,25 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
-    size_t n = cls->numAttributes();
-    auto dict = std::move(input).toGenericDict();
-    size_t ndict = dict.size();
-    auto obj = c10::ivalue::Object::create(type, ndict);
-    auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
-      obj->setSlot(i, it->value());
-      ++it;
+    c10::QualifiedName method_name(qn.value(), "__setstate__");
+    auto setstate = mcu->find_method_by_qn(method_name);
+    if (setstate) {
+      auto obj = c10::ivalue::Object::create(type, 0);
+      Stack stack({obj, input});
+      setstate->run(stack);
+      return obj;
     }
-    return obj;
+    else {
+      auto dict = std::move(input).toGenericDict();
+      size_t ndict = dict.size();
+      auto obj = c10::ivalue::Object::create(type, ndict);
+      auto it = dict.begin();
+      for (size_t i = 0; i < ndict; ++i) {
+        obj->setSlot(i, it->value());
+        ++it;
+      }
+      return obj;
+    }
   };
 
   auto read_record = [&](const std::string& name) {
