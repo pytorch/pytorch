@@ -141,14 +141,14 @@ class TestFunctionalBlocks(JitTestCase):
 
         def intermediary_use():
             a = [1, 2]
-            b = len(b)
+            b = len(a)
             a.append(3)
             return a
 
         fn = torch.jit.script(intermediary_use)
         graph = fn.graph
-        FileCheck().check("append")
+        FileCheck().check("append").run(graph)
         self.run_pass('remove_mutation', graph)
         # it is possible to remove the append here but don't currently have the logic for it
-        FileCheck().check("append")
+        FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
