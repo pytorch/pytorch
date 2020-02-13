@@ -83,7 +83,7 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t zero_point);
 using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
 
-using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, const int64_t, const int64_t, const uint8_t*, const float*, const float*, uint8_t*);
+using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, const int64_t, const int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
 
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);

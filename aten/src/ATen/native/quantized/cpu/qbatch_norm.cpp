@@ -49,8 +49,6 @@ Tensor q_batch_norm_impl(
     float output_scale,
     int64_t output_zero_point) {
 
-  TORCH_CHECK(qx.scalar_type() == kQUInt8, "QuantizedBatchNorm2d expects uint8 input.");
-
   if (qx.numel() == 0) {
     auto out = qx.clone();
     return out;
@@ -81,16 +79,12 @@ Tensor q_batch_norm_impl(
 
   auto oSizes = qx.sizes();
   auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
-  const uint8_t* qx_data =
-      reinterpret_cast<uint8_t*>(qx_nhwc.data_ptr<c10::quint8>());
   Tensor qy = at::_empty_affine_quantized(
       oSizes,
-      device(kCPU).dtype(kQUInt8),
+      at::device(kCPU).dtype(qx_nhwc.scalar_type()),
       output_scale,
       output_zero_point,
       MemoryFormat::ChannelsLast);
-
-  uint8_t* output_data = reinterpret_cast<uint8_t*>(qy.data_ptr<c10::quint8>());
 
   compute_fused_params(
       C,
@@ -111,10 +105,10 @@ Tensor q_batch_norm_impl(
       H * W,
       qx.q_zero_point(),
       output_zero_point,
-      qx_data,
-      alpha_data,
-      beta_data,
-      output_data);
+      qx_nhwc,
+      alpha,
+      beta,
+      qy);
   return qy;
 }
 
