@@ -245,30 +245,24 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   pip_install lark-parser
 
   # Bazel doesn't work with sccache gcc. https://github.com/bazelbuild/bazel/issues/3642
-  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-7 main"
+  sudo add-apt-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
   wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
   sudo apt-get -qq update
 
-  # Install clang-7 clang++-7 for xla
-  sudo apt-get -qq install clang-7 clang++-7
+  # Install clang-8 clang++-8 for xla
+  sudo apt-get -qq install clang-8 clang++-8
 
-  # Bazel dependencies
-  sudo apt-get -qq install pkg-config zip zlib1g-dev unzip
-  # XLA build requires Bazel
-  wget https://github.com/bazelbuild/bazel/releases/download/1.1.0/bazel-1.1.0-installer-linux-x86_64.sh
-  chmod +x bazel-*.sh
-  sudo ./bazel-*.sh
-  BAZEL="$(which bazel)"
-  if [ -z "${BAZEL}" ]; then
-    echo "Unable to find bazel..."
-    exit 1
-  fi
-
-  # Install bazels3cache for cloud cache
   sudo apt-get -qq install npm
   npm config set strict-ssl false
   curl -sL --retry 3 https://deb.nodesource.com/setup_6.x | sudo -E bash -
   sudo apt-get install -qq nodejs
+
+  # XLA build requires Bazel
+  # We use bazelisk to avoid updating Bazel version manually.
+  sudo npm install -g @bazel/bazelisk
+  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
+
+  # Install bazels3cache for cloud cache
   sudo npm install -g bazels3cache
   BAZELS3CACHE="$(which bazels3cache)"
   if [ -z "${BAZELS3CACHE}" ]; then
@@ -278,7 +272,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
 
   bazels3cache --bucket=${XLA_CLANG_CACHE_S3_BUCKET_NAME} --maxEntrySizeBytes=0
   pushd xla
-  export CC=clang-7 CXX=clang++-7
+  export CC=clang-8 CXX=clang++-8
   # Use cloud cache to build when available.
   sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
 

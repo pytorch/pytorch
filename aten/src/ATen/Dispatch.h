@@ -20,6 +20,21 @@
     return __VA_ARGS__();                                               \
   }
 
+// This macro should be used to skip bfloat16 dispatch on non-ROCm platforms and
+// should be removed once the bfloat16 bringup is complete on other platforms.
+// This is supposed to be used as a wrapper around the lambda function passed to the
+// dispatch macro and will conditionally dispatch ops with bfloat16 type only on ROCm.
+#if !defined(__HIP_PLATFORM_HCC__)
+#define AT_SKIP_BFLOAT16_IF_NOT_ROCM(SCALARTYPE, NAME, ...)                              \
+  if(std::is_same<SCALARTYPE, at::BFloat16>::value){                                     \
+    AT_ERROR(#NAME, " not implemented for '", toString(at::ScalarType::BFloat16), "'");  \
+  } else {                                                                               \
+    return __VA_ARGS__();                                                                       \
+  }
+#else
+#define AT_SKIP_BFLOAT16_IF_NOT_ROCM(SCALARTYPE, NAME, ...) return __VA_ARGS__()
+#endif
+
 namespace detail {
 
 inline at::ScalarType scalar_type(at::ScalarType s) {

@@ -2942,9 +2942,6 @@
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU: _s_where_cpu
-    CUDA: _s_where_cuda
 
 - func: norm_except_dim(Tensor v, int pow=2, int dim=0) -> Tensor
   variants: function
@@ -4920,8 +4917,8 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_dist
-    CUDA: legacy::cuda::_th_dist
+    CPU: dist
+    CUDA: dist_cuda
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
@@ -5263,13 +5260,13 @@
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_cat
+    CPU: _cat_cpu
     CUDA: legacy::cuda::_th_cat
     QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cat_out
+    CPU: _cat_out_cpu
     CUDA: legacy::cuda::_th_cat_out
     QuantizedCPU: quantized_cat_out
 
@@ -5560,10 +5557,18 @@
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_out
+    CUDA: leaky_relu_out
+    QuantizedCPU: quantized_leaky_relu_out
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: leaky_relu
+    CUDA: leaky_relu
+    QuantizedCPU: quantized_leaky_relu
 
 - func: leaky_relu_backward.grad_input(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5577,6 +5582,10 @@
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_
+    CUDA: leaky_relu_
+    QuantizedCPU: quantized_leaky_relu_
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

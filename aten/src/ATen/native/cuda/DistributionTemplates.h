@@ -3,6 +3,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/Half.h>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -168,10 +169,15 @@ namespace cuda {
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
-    if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
+    if ((
+      std::is_same<scalar_t, int64_t>::value ||
+      std::is_same<scalar_t, double>::value ||
+      std::is_same<scalar_t, float>::value ||
+      std::is_same<scalar_t, at::Half>::value) && range >= 1ULL << 32)
+    {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {
-        return static_cast<int64_t>(rand % range + base);
+        return static_cast<scalar_t>(static_cast<int64_t>(rand % range + base));
       };
       distribution_nullary_kernel<scalar_t, uint64_t, curand4_engine_calls/2>(iter,
         gen,
@@ -185,7 +191,7 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
         random_func);
     } else {
       auto random_func = [range, base] __device__ (uint32_t rand) {
-        return static_cast<int32_t>(rand % static_cast<uint32_t>(range) + static_cast<int32_t>(base));
+        return static_cast<scalar_t>(static_cast<int64_t>(rand % range + base));
       };
       distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
         gen,
@@ -256,7 +262,7 @@ struct RandomFromToKernel {
 template<typename RNG>
 void random_kernel(TensorIterator& iter, RNG* gen) {
   if (isFloatingType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_kernel_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_kernel_fp_cuda", [&] {
       if (std::is_same<scalar_t, double>::value) {
         auto random_func = [] __device__ (uint64_t rand) {
           return static_cast<int64_t>(rand % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
@@ -284,7 +290,7 @@ void random_kernel(TensorIterator& iter, RNG* gen) {
       }
     });
   } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
-    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_kernel_cpu", [&] {
+    AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_kernel_int_cuda", [&] {
       if (std::is_same<scalar_t, int64_t>::value) {
         auto random_func = [] __device__ (uint64_t rand) {
           return static_cast<int64_t>(rand % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));

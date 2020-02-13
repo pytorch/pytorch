@@ -80,7 +80,7 @@ void test_random_from_to(const at::Device& device) {
           T exp;
           uint64_t range;
           if (!to.has_value() && from == int64_min_val) {
-            exp = val;
+            exp = static_cast<int64_t>(val);
             full_64_bit_range_case_covered = true;
           } else {
             if (to.has_value()) {
@@ -101,8 +101,6 @@ void test_random_from_to(const at::Device& device) {
             ASSERT_TRUE(static_cast<int64_t>(exp) < *to);
           }
           const auto expected = torch::full_like(actual, exp);
-          std::cout << "actual = " << actual << std::endl;
-          std::cout << "expected = " << expected << std::endl;
           if (std::is_same<T, bool>::value) {
             ASSERT_TRUE(torch::allclose(actual.toType(torch::kInt), expected.toType(torch::kInt)));
           } else {
