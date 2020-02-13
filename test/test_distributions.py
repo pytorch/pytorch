@@ -3407,24 +3407,6 @@ class TestKL(TestCase):
                     'max error = {}'.format(torch.abs(actual - expected).max())
                 ]))
 
-    def test_kl_independent_normal_mvn(self):
-        batch_shapes = [(), (4,), (2, 3)]
-        size = 1
-        for batch_shape in batch_shapes:
-            loc = torch.randn(batch_shape + (size,))
-            scale = torch.randn(batch_shape + (size,)).exp()
-            p1 = Independent(Normal(loc, scale), size)
-            p2 = MultivariateNormal(loc, scale_tril=scale.diag_embed())
-
-            loc = torch.randn(batch_shape + (size,))
-            cov = torch.randn(batch_shape + (size, size))
-            cov = cov @ cov.transpose(-1, -2) + 0.01 * torch.eye(size)
-            q = MultivariateNormal(loc, covariance_matrix=cov)
-
-            actual = kl_divergence(p1, q)
-            expected = kl_divergence(p2, q)
-            self.assertEqual(actual, expected)
-    
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
             self.assertTrue((kl_divergence(p, q) == inf).all(),
@@ -3490,6 +3472,24 @@ class TestKL(TestCase):
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max())
                 ]))
+                
+    def test_kl_independent_normal_mvn(self):
+        batch_shapes = [(), (4,), (2, 3)]
+        size = 1
+        for batch_shape in batch_shapes:
+            loc = torch.randn(batch_shape + (size,))
+            scale = torch.randn(batch_shape + (size,)).exp()
+            p1 = Independent(Normal(loc, scale), size)
+            p2 = MultivariateNormal(loc, scale_tril=scale.diag_embed())
+
+            loc = torch.randn(batch_shape + (size,))
+            cov = torch.randn(batch_shape + (size, size))
+            cov = cov @ cov.transpose(-1, -2) + 0.01 * torch.eye(size)
+            q = MultivariateNormal(loc, covariance_matrix=cov)
+
+            actual = kl_divergence(p1, q)
+            expected = kl_divergence(p2, q)
+            self.assertEqual(actual, expected)
 
 
 class TestConstraints(TestCase):
