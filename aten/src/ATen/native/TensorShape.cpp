@@ -390,12 +390,12 @@ Tensor cat(TensorList tensors, int64_t dim) {
   return result;
 }
 
-Tensor block_diag_cpu(TensorList tensors) {
+Tensor block_diag(TensorList tensors) {
   Tensor result = at::empty({}, tensors[0].options());
-  return block_diag_out_cpu(result, tensors);
+  return at::block_diag_out(result, tensors);
 }
 
-Tensor& block_diag_out_cpu(Tensor& result, TensorList tensors) {
+Tensor& block_diag_out(Tensor& result, TensorList tensors) {
   if (tensors.size() == 0) {
     result.resize_({0});
     return result;
@@ -404,7 +404,6 @@ Tensor& block_diag_out_cpu(Tensor& result, TensorList tensors) {
   int64_t result_dim0 = 0;
   int64_t result_dim1 = 0;
   ScalarType scalar_type = tensors[0].scalar_type();
-
   std::vector<Tensor> tensors_2D(tensors.size());
 
   // Sum the dimensions of the tensors, check tensor sizes,
@@ -441,12 +440,10 @@ Tensor& block_diag_out_cpu(Tensor& result, TensorList tensors) {
   result.resize_({result_dim0, result_dim1});
   result.zero_();
 
-  // for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
-
-  // }
-
   int64_t cur_dim0 = 0;
   int64_t cur_dim1 = 0;
+
+  // Copy each tensor into the appropriate location in the result matrix
   for (auto iter = tensors_2D.begin(); iter != tensors_2D.end(); iter++) {
     Tensor tensor = *iter;
 
