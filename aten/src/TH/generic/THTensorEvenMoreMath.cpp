@@ -119,54 +119,6 @@ void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *
                    });
 }
 
-void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
-{
-  at::NoNamesGuard guard;
-  int64_t tensor_size = THTensor_(nElement)(tensor);
-  int tensor_contig = THTensor_(isContiguous)(tensor);
-  int mask_contig = THTensor_(isContiguous)(mask);
-  if (tensor_contig && mask_contig) {
-    TH_TENSOR_APPLY2_PARALLEL(tensor_size, tensor_contig, mask_contig,
-      scalar_t, tensor, unsigned char, mask,
-      if (*mask_data > 1) {
-        THError("Mask tensor can take 0 and 1 values only");
-      } else if (*mask_data == 1) {
-        *tensor_data = value;
-      },
-      TH_OMP_OVERHEAD_THRESHOLD);
-  } else {
-    TH_TENSOR_APPLY2(scalar_t, tensor, unsigned char, mask,
-      if (*mask_data > 1) {
-        THFree(mask_counter);
-        THFree(tensor_counter);
-        THError("Mask tensor can take 0 and 1 values only");
-      } else if (*mask_data == 1) {
-        *tensor_data = value;
-      });
-    }
-}
-
-void THTensor_(maskedFillBool)(THTensor *tensor, THBoolTensor *mask, scalar_t value)
-{
-  at::NoNamesGuard guard;
-  int64_t tensor_size = THTensor_(nElement)(tensor);
-  int tensor_contig = THTensor_(isContiguous)(tensor);
-  int mask_contig = THTensor_(isContiguous)(mask);
-  if (tensor_contig && mask_contig) {
-    TH_TENSOR_APPLY2_PARALLEL(tensor_size, tensor_contig, mask_contig,
-      scalar_t, tensor, bool, mask,
-      if (*mask_data) {
-        *tensor_data = value;
-      },
-      TH_OMP_OVERHEAD_THRESHOLD);
-  } else {
-    TH_TENSOR_APPLY2(scalar_t, tensor, bool, mask,
-      if (*mask_data) {
-        *tensor_data = value;
-      });
-    }
-}
-
 void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
 {
   THTensor *srct = THTensor_(newContiguous)(src);
