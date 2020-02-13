@@ -5263,7 +5263,7 @@ def foo(x):
 
     def test_nested_aug_assign(self):
         @torch.jit.script
-        class O(object):
+        class SomeClass(object):
             def __init__(self):
                 self.num = 99
 
@@ -5273,14 +5273,14 @@ def foo(x):
                 return self
 
             def __eq__(self, other):
-                # type: (O) -> bool
+                # type: (SomeClass) -> bool
                 return self.num == other.num
 
         class Child(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.x = 2
-                self.o = O()
+                self.o = SomeClass()
                 self.list = [1, 2, 3]
 
         class A(nn.Module):
