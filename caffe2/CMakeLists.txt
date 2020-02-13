@@ -424,7 +424,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/ir_emitter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp

@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 
 #include <queue>
 #include <unordered_map>

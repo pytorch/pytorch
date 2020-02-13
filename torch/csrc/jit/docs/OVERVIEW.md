@@ -508,11 +508,11 @@ The Parser uses the Lexer to build the AST for function definitions. `parseFunct
 
 The Parser is written as a [top-down precedence parser](https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing), or "Pratt" parser.  They are simpler and easier to understand than typical parser generators, while still being flexible enough to parse programming languages. For the most part parsing is done by recursive decent. To resolve operator precedence issues, the function to parse an expression is augmented with a precedent _p_ such that calling the function means _parse an expression whose operators all have precedence higher than p_.
 
-## Compiler ##
+## IR Emitter ##
 
-[script/compiler.h](../script/compiler.h)
+[script/ir_emitter.h](../script/ir_emitter.h)
 
-The file compiler.cpp translates Trees into Modules. Its name is slightly ambiguous because there are other compiler-like things in the system such as the FusionCompiler. The main entrypoint is `defineMethodsInModule` which takes a list of Def Tree Views representing function definitions and adds them as Methods to the module. During the lowering processing _semantic checking_ occurs. The compiler checks that all used variables are defined (sometimes called scope checking), and that all values have compatible types (type-checking). During this process it also emits the graph nodes corresponding to each statement in the Tree and generates a FunctionSchema for the whole definition.
+The file ir_emitter.cpp translates Trees into Modules. The main entrypoint is `defineMethodsInModule` which takes a list of Def Tree Views representing function definitions and adds them as Methods to the module. During the lowering processing _semantic checking_ occurs. The IR emitter checks that all used variables are defined (sometimes called scope checking), and that all values have compatible types (type-checking). During this process it also emits the graph nodes corresponding to each statement in the Tree and generates a FunctionSchema for the whole definition.
 
 A few helper objects exist in the lowering process.  SugaredValues are special values that represent objects that can appear during compilation but that are not first class values. For instance, in TorchScript methods `self` refers to the module, and `self.weight` refers to a Parameter of the module. Neither are first-class Types and have no corresponding Value in a graph. Resolver objects are std::functions that resolve externally-defined variables to SugaredValues. For instance, the identifier `torch` which contains most of our built-in ops is looked up through Resolver objects which interact with the python state of the program.
 
@@ -522,7 +522,7 @@ The Environment tracks the mapping between variable names and the SugaredValues 
 
 [script/sugared_value.h](../script/sugared_value.h)
 
-SugaredValues are how the compiler represents non-first class values during Graph creation. These values are things like the Module or a python function call that do not have corresponding Value objects in the Graph. The compiler _desugars_ the SugaredValue objects to instructions in the graph based on how they are used.  The SugaredValue class has a number of abstract methods on it such as `attr` or `call`. Consider the expression `self.foo`. For methods, `self` will resolve to a special SugaredValue subclass,  ModuleValue. When the compiler sees `self.foo`, it will then call the ModuleValue function `sv.attr("foo")`, asking the ModuleValue how it should desugar itself when the attribute `"foo"` accessed. If `foo` is a parameter, it would then ensure that the parameter was added to the Method being compiled, and return a `SimpleValue` sugared value that contains the Value object representing the parameter as an input. If `foo` were a sub-Module then it would return another SugaredModule. The method `call` is invoked when the compiler sees the value used as a function call.
+SugaredValues are how the IR emitter represents non-first class values during Graph creation. These values are things like the Module or a python function call that do not have corresponding Value objects in the Graph. The IR emitter _desugars_ the SugaredValue objects to instructions in the graph based on how they are used.  The SugaredValue class has a number of abstract methods on it such as `attr` or `call`. Consider the expression `self.foo`. For methods, `self` will resolve to a special SugaredValue subclass,  ModuleValue. When the emitter sees `self.foo`, it will then call the ModuleValue function `sv.attr("foo")`, asking the ModuleValue how it should desugar itself when the attribute `"foo"` accessed. If `foo` is a parameter, it would then ensure that the parameter was added to the Method being compiled, and return a `SimpleValue` sugared value that contains the Value object representing the parameter as an input. If `foo` were a sub-Module then it would return another SugaredModule. The method `call` is invoked when the emitter sees the value used as a function call.
 
 SugaredValues are also how we interact with Python runtime during the compilation process. For instance, `math.pi` is resolved to 3.1415... by first resolving `math` to a SugaredValue representing accesses to Python modules (PythonModuleValue) whose `attr` function turns python numbers into  `prim::Constant` Nodes in the graph.
 
@@ -530,19 +530,19 @@ Finally, normal Values are also represented by the SimpleValue SugaredValue in p
 
 ## Resolver ##
 
-[script/compiler.h](../script/compiler.h)
+[script/ir_emitter.h](../script/ir_emitter.h)
 
 Any undefined variable during compilation is resolved with a call to an externally-provided Resolver. When called from Python (e.g `torch.jit.script`) this resolver interacts with the Python runtime via pybind11 to resolve symbols like `torch` and `math` to their Python equivalents.
 
-*The combination of SugaredValue and Resolver decouples the implementation of the compiler from the pybind11 Python bindings that enable its interaction with the Python state.*
+*The combination of SugaredValue and Resolver decouples the implementation of the IR emitter from the pybind11 Python bindings that enable its interaction with the Python state.*
 
-This makes it possible to use most of the compiler functionality when python is not present.
+This makes it possible to use most of the IR emitter functionality when python is not present.
 
 ## Environment ##
 
-[script/compiler.cpp](../script/compiler.cpp)
+[script/ir_emitter.cpp](../script/ir_emitter.cpp)
 
-The Environment object tracks the assignment of variable names during compilation. It is local to the compiler file. A stack of environments exist, with a new environment being created for sub-blocks introduced by control flow. The Environment keeps two tables, one for values which are not first class in the type system (Sugared values) and a type table for values which are. When first class values are set, we emit a prim::Store, and when they are referenced we emit a prim::Load. Sugared values are not re-assignable. The graph is converted to SSA in the convertToSSA pass.
+The Environment object tracks the assignment of variable names during compilation. It is local to the IR emitter file. A stack of environments exist, with a new environment being created for sub-blocks introduced by control flow. The Environment keeps two tables, one for values which are not first class in the type system (Sugared values) and a type table for values which are. When first class values are set, we emit a prim::Store, and when they are referenced we emit a prim::Load. Sugared values are not re-assignable. The graph is converted to SSA in the convertToSSA pass.
 
 ## Conversion To SSA ##
 
