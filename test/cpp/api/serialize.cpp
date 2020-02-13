@@ -111,9 +111,10 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   step(optim2, model2);
   step(optim2_2, model2);
 
-  // Do 2 steps of model 3 while saving the optimizer
+  // Do 1 step of model 3
   step(optim3, model3);
 
+  // save the optimizer
   auto optim_tempfile = c10::make_tempfile();
   torch::save(optim3, optim_tempfile.name);
   torch::load(optim3_2, optim_tempfile.name);
@@ -138,7 +139,9 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
     is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim3_state);
   }
 
+  // Do step2 for model 3
   step(optim3_2, model3);
+
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
   param3 = model3->named_parameters();
@@ -152,6 +155,13 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   }
 }
 
+/// Utility function to save a value of `int64_t` type.
+void write_int_value(
+    torch::serialize::OutputArchive& archive,
+    const std::string& key,
+    const int64_t& value) {
+  archive.write(key, c10::IValue(value));
+}
 // Utility function to save a vector of buffers.
 template <typename BufferContainer>
 void write_tensors_to_archive(
@@ -501,25 +511,46 @@ TEST(SerializeTest, Optim_Adagrad) {
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
-TEST(SerializeTest, SerializationShouldPreserveIteration_SGD) {
-  std::vector<torch::Tensor> parameters = {
-      torch::randn({2, 2}), torch::randn({3, 3})};
+TEST(SerializeTest, Optim_SGD) {
+  test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
 
-  torch::optim::SGD optimizer(parameters, 1.0);
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::SGD(model1_params, torch::optim::SGDOptions(0.01).momentum(0.9));
 
-  optimizer.step();
-  optimizer.step();
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+  step(optim1, model1);
 
-  ASSERT_EQ(optimizer.iteration(), 2);
-
-  auto tempfile = c10::make_tempfile();
-  torch::save(optimizer, tempfile.name);
-
-  torch::optim::SGD optimizer_out(parameters, 1.0);
-  ASSERT_EQ(optimizer_out.iteration(), 0);
-
-  torch::load(optimizer_out, tempfile.name);
-  ASSERT_EQ(optimizer_out.iteration(), 2);
+  std::vector<at::Tensor> momentum_buffers;
+  int64_t iteration_{0};
+  const auto& params_ = optim1.param_groups()[0].params();
+  const auto& optim1_state = optim1.state();
+  for (size_t i = 0; i < params_.size(); i++) {
+    if(i != (params_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      const SGDParamState& curr_state_ = static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
+      momentum_buffers.emplace_back(curr_state_.momentum_buffer());
+    }
+  }
+  ASSERT_TRUE(momentum_buffers.size() == (params_.size() - 1));
+  // write momentum_buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
+  write_int_value(output_archive, "iteration_", iteration_);
+  output_archive.save_to(optim_tempfile_old_format.name);
+  auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, XOR_CUDA) {
