@@ -371,6 +371,13 @@ class InsertObserversHelper {
 
   void insertObservers(script::Module& module, const std::string& method_name);
 
+  void insertObserversForBoundaryVals(script::Module& module,
+                                      const std::string& method_name);
+
+  void clearGraphObserverMap() {
+    graph_observer_map_.clear();
+  }
+
  private:
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
@@ -382,6 +389,9 @@ class InsertObserversHelper {
       Value* v,
       script::Module& module,
       const script::Module& observer_module);
+
+  void insertObserverForBoundaryVal(
+      Value* v, script::Module module);
 
   void skipValuesInFirstModule(
       const script::Module& module,
@@ -424,6 +434,9 @@ class InsertObserversHelper {
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
+  std::unordered_map<Value*, script::Module> observer_for_boundary_value_;
+  // Map from values from callsite into the values in the CallMethod graph
+  std::unordered_map<Value*, Value*> boundary_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -568,6 +581,7 @@ bool isWeightOfConvOrLinear(Value* v) {
         v->uses().size() == 1,
         "We only support conv/linear weight being used by one node.");
   }
+  return result;
 }
 
 script::Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
@@ -862,6 +876,33 @@ void InsertObserversHelper::preprocess(
   // We need to call this before calling insertObservers for
   // invoked methods
   addIntermediateValuesToSkipObserver(module, method_name);
+
+  // Fill the boundary_value_map_
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  auto* self = graph->inputs()[0];
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == prim::CallMethod) {
+        auto* instance = n->inputs()[0];
+        auto path = getModuleAccessPath(instance, self);
+        auto m = findChildModule(module, path);
+        auto g = m.get_method(n->s(attr::name)).graph();
+        // add mapping from callsite value to value in called graph
+        for (auto i = 0; i < g->outputs().size(); ++i) {
+          auto* return_val = g->outputs()[i];
+          boundary_value_map_[n->outputs()[i]] = return_val;
+        }
+        for (auto i = 0; i < g->inputs().size(); ++i) {
+          auto* input_val = g->inputs()[i];
+          boundary_value_map_[n->inputs()[i]] = input_val;
+        }
+      }
+    }
+  }
+
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_method);
     const auto& invoked_method_name = std::get<1>(invoked_method);
@@ -927,10 +968,15 @@ void InsertObserversHelper::insertObservers(
   // prim::Param nodes do not belong to the graph. Hence the Insert
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
-  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
-    auto& v = graph->inputs()[idx];
+  for (auto* v : graph->inputs()) {
     if (valueNeedsToBeQuantized(v)) {
-      insertObserverFor(v, module, qconfig_opt);
+      observer_for_boundary_value_[v] = getObserverModuleFor(v, qconfig);
+    }
+  }
+
+  for (auto* v : graph->outputs()) {
+    if (valueNeedsToBeQuantized(v)) {
+      observer_for_boundary_value_[v] = getObserverModuleFor(v, qconfig);
     }
   }
 
@@ -946,7 +992,8 @@ void InsertObserversHelper::insertObservers(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeQuantized(v)) {
+        if (!observer_for_boundary_value_.count(v) &&
+            valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
       }
@@ -962,6 +1009,68 @@ void InsertObserversHelper::insertObservers(
     insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
   }
 }
+
+void InsertObserversHelper::insertObserverForBoundaryVal(
+    Value* v, script::Module module) {
+  Value* it = v;
+  while (true) {
+    if (observer_for_boundary_value_.count(it)) {
+      insertObserverFor(v, module, observer_for_boundary_value_.at(it));
+      observer_for_boundary_value_.erase(it);
+      break;
+    }
+    if (boundary_value_map_.count(it)) {
+      it = boundary_value_map_.at(it);
+    } else {
+      break;
+    }
+  }
+}
+
+void InsertObserversHelper::insertObserversForBoundaryVals(
+    script::Module& module,
+    const std::string& method_name) {
+
+  auto graph = module.get_method(method_name).graph();
+
+  if (graph_observer_map_.count(graph.get())) {
+    // instance clone of observer module and setAttr
+    for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
+      const auto& name = std::get<0>(observer_attrs);
+      const auto& observer = std::get<1>(observer_attrs);
+      module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
+    }
+  }
+
+  for (auto* v : graph->inputs()) {
+    insertObserverForBoundaryVal(v, module);
+  }
+
+  // parent graph need to be visited before child graphs since we
+  // want to observe at the outermost point
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  auto* self = graph->inputs()[0];
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      for (Value* v : n->outputs()) {
+        insertObserverForBoundaryVal(v, module);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+  for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_methods);
+    const auto& invoked_method_name = std::get<1>(invoked_methods);
+    insertObserversForBoundaryVals(invoked_module, invoked_method_name);
+  }
+}
+
 
 void insertDeQuantCall(Graph* graph,
                        Value* quantized_val,
@@ -1822,6 +1931,10 @@ TORCH_API script::Module InsertObservers(
   InsertObserversHelper helper(module_qconfig_map);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name);
+  GRAPH_DEBUG("after inserting observers");
+  helper.clearGraphObserverMap();
+  helper.insertObserversForBoundaryVals(module, method_name);
+  GRAPH_DEBUG("after inserting observers for boundary vals");
   return module;
 }
 
