@@ -1,4 +1,5 @@
 #include <ATen/native/cpu/TensorCompareKernel.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <numeric>
 #include <iterator>
@@ -101,9 +102,28 @@ static void min_kernel_impl(
   });
 }
 
+static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "where_cpu", [&] {
+    if (condition_type == at::ScalarType::Byte) {
+      at::native::cpu_kernel(
+        iter,
+        [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+          return cond_val ? self_val : other_val;
+        });
+    } else {
+      at::native::cpu_kernel(
+        iter,
+        [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
+          return cond_val ? self_val : other_val;
+        });
+    }
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_kernel, &max_kernel_impl);
 REGISTER_DISPATCH(min_kernel, &min_kernel_impl);
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 
 }} // namespace at::native
