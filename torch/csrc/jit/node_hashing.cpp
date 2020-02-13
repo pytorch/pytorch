@@ -19,14 +19,6 @@ bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
   return lhs.options().type_equal(rhs.options()) && lhs.equal(rhs);
 }
 
-bool tensorListEqual(
-    const std::vector<at::Tensor>& lhs,
-    const std::vector<at::Tensor>& rhs) {
-  if (lhs.size() != rhs.size())
-    return false;
-  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
-}
-
 bool typeListEqual(
     const std::vector<TypePtr>& lhs,
     const std::vector<TypePtr>& rhs) {
@@ -38,6 +30,77 @@ bool typeListEqual(
     }
   }
   return true;
+}
+
+template <typename attribute_type> // int64_t, bool, double
+bool attributesEqual(attribute_type a1, attribute_type a2) {
+  return a1 == a2;
+}
+
+bool attributesEqual(const at::Tensor& a1, const at::Tensor& a2) {
+  return tensorEqual(a1, a2);
+}
+
+bool ivaluesEqual(const IValue& a1, const IValue& a2);
+
+bool attributesEqual(
+    const std::vector<at::Tensor>& lhs,
+    const std::vector<at::Tensor>& rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
+}
+
+bool attributesEqual(at::ArrayRef<IValue> a1, at::ArrayRef<IValue> a2) {
+  if (a1.size() != a2.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a1.size(); ++i) {
+    if (!ivaluesEqual(a1[i], a2[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool attributesEqual(const IValue& a1, const IValue& a2) {
+  return ivaluesEqual(a1, a2);
+}
+
+// this is not a general-purpose comparison of IValues, it only covers the
+// ivalues that are allowed as attributes, and it does not check type
+// equivalence of containers.
+bool ivaluesEqual(const IValue& a1, const IValue& a2) {
+  if (a1.tagKind() != a2.tagKind()) {
+    return false;
+  }
+  if (a1.isInt()) {
+    return a1.toInt() == a2.toInt();
+  }
+  if (a1.isBool()) {
+    return a1.toBool() == a2.toBool();
+  }
+  if (a1.isDouble()) {
+    return a1.toDouble() == a2.toDouble();
+  }
+  if (a1.isTensor()) {
+    return attributesEqual(a1.toTensor(), a2.toTensor());
+  }
+  if (a1.isNone()) {
+    return true;
+  }
+  if (a1.isString()) {
+    return a1.toStringRef() == a2.toStringRef();
+  }
+  if (a1.isList()) {
+    return attributesEqual(a1.toListRef(), a2.toListRef());
+  }
+  if (a1.isTuple()) {
+    at::ArrayRef<IValue> a1_elem = a1.toTuple()->elements();
+    at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
+    return attributesEqual(a1_elem, a2_elem);
+  }
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 // Check whether two nodes have the same attributes in CSE.
@@ -64,10 +127,10 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
     if (lhs->kindOf(name) != rhs->kindOf(name))
       return false;
 
-#define COMPARE_ATTRIBUTEVALUE(selector)            \
-  case AttributeKind::selector: {                   \
-    if (lhs->selector(name) != rhs->selector(name)) \
-      return false;                                 \
+#define COMPARE_ATTRIBUTEVALUE(selector)                            \
+  case AttributeKind::selector: {                                   \
+    if (!attributesEqual(lhs->selector(name), rhs->selector(name))) \
+      return false;                                                 \
   } break;
 
     switch (lhs->kindOf(name)) {
@@ -77,16 +140,9 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
-      case AttributeKind::t: {
-        if (!tensorEqual(lhs->t(name), rhs->t(name)))
-          return false;
-        break;
-      }
-      case AttributeKind::ts: {
-        if (!tensorListEqual(lhs->ts(name), rhs->ts(name)))
-          return false;
-        break;
-      }
+      COMPARE_ATTRIBUTEVALUE(t)
+      COMPARE_ATTRIBUTEVALUE(ts)
+      COMPARE_ATTRIBUTEVALUE(ival)
       case AttributeKind::ty:
         if (*lhs->ty(name) != *rhs->ty(name)) {
           return false;
@@ -146,8 +202,6 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
     return false;
   for (size_t i = 0; i < lhs_outputs.size(); ++i) {
     if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
-      return false;
-    if (lhs_outputs[i]->type() == CapsuleType::get())
       return false;
   }
 

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 #include <algorithm>
 #include <iostream>
@@ -48,7 +49,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
 template <typename T>
 static std::ostream& printValueRefs(
     std::ostream& out,
-    const at::ArrayRef<T>& nodes) {
+    const at::ArrayRef<T> nodes) {
   size_t i = 0;
   for (auto n : nodes) {
     if (i++ > 0) {
@@ -64,11 +65,11 @@ static std::ostream& printValueRefs(
 
 std::ostream& operator<<(
     std::ostream& out,
-    const at::ArrayRef<const Value*>& nodes) {
+    const at::ArrayRef<const Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
-std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*>& nodes) {
+std::ostream& operator<<(std::ostream& out, const at::ArrayRef<Value*> nodes) {
   return printValueRefs(out, nodes);
 }
 
@@ -96,30 +97,42 @@ std::ostream& operator<<(
   return out;
 }
 
-template <typename T>
-static void printPrimList(std::ostream& out, const std::vector<T>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0) {
-      out << ", ";
+static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
+  // 1-elem tensors are usually boxed scalars, so print them like it
+  if (tensor.numel() == 1) {
+    auto scalar_tensor = tensor.view({}).item();
+    out << "{";
+    if (scalar_tensor.isFloatingPoint()) {
+      out << scalar_tensor.toDouble();
+    } else {
+      out << scalar_tensor.toLong();
     }
-    out << item;
+    out << "}";
+  } else if (tensor.numel() <= max_tensor_display_size) {
+    // TODO: This is awful code.  Also it doesn't work on Windows.
+    std::ostringstream tensor_ss;
+    tensor_ss << tensor;
+    std::string tensor_s{tensor_ss.str()};
+    // Remove newlines
+    std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+    out << tensor_s;
+  } else {
+    out << "<Tensor>";
   }
-  out << "]";
 }
 
-static void printStrList(
-    std::ostream& out,
-    const std::vector<std::string>& items) {
-  out << "[";
-  int i = 0;
-  for (auto& item : items) {
-    if (i++ > 0)
-      out << ", ";
-    c10::printQuotedString(out, item);
-  }
-  out << "]";
+static void printAttribute(std::ostream& out, const IValue& ival) {
+  const auto customFormatter = [](std::ostream& ss, const IValue& input) {
+    if (input.isTensor()) {
+      printAttribute(ss, input.toTensor());
+      return true;
+    } else if (input.isTensorList()) {
+      ss << "[<Tensors>]";
+      return true;
+    }
+    return false;
+  };
+  ival.repr(out, customFormatter);
 }
 
 static void printTypeList(
@@ -138,50 +151,31 @@ static void printTypeList(
 void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   switch (kindOf(name)) {
     case AttributeKind::f:
-      out << f(name);
+      printAttribute(out, f(name));
       break;
     case AttributeKind::fs:
-      printPrimList(out, fs(name));
+      printAttribute(out, fs(name));
       break;
     case AttributeKind::i:
-      out << i(name);
+      printAttribute(out, i(name));
       break;
     case AttributeKind::is:
-      printPrimList(out, is(name));
+      printAttribute(out, is(name));
       break;
     case AttributeKind::s:
-      c10::printQuotedString(out, s(name));
+      printAttribute(out, s(name));
       break;
     case AttributeKind::ss:
-      printStrList(out, ss(name));
+      printAttribute(out, ss(name));
       break;
-    case AttributeKind::t: {
-      at::Tensor tensor = t(name);
-      // 1-elem tensors are usually boxed scalars, so print them like it
-      if (tensor.numel() == 1) {
-        auto scalar_tensor = tensor.view({}).item();
-        out << "{";
-        if (scalar_tensor.isFloatingPoint()) {
-          out << scalar_tensor.toDouble();
-        } else {
-          out << scalar_tensor.toLong();
-        }
-        out << "}";
-      } else if (tensor.numel() <= max_tensor_display_size) {
-        // TODO: This is awful code.  Also it doesn't work on Windows.
-        std::ostringstream tensor_ss;
-        tensor_ss << tensor;
-        std::string tensor_s{tensor_ss.str()};
-        // Remove newlines
-        std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
-        out << tensor_s;
-      } else {
-        out << "<Tensor>";
-      }
+    case AttributeKind::t:
+      printAttribute(out, t(name));
       break;
-    }
     case AttributeKind::ts:
       out << "[<Tensors>]";
+      break;
+    case AttributeKind::ival:
+      printAttribute(out, ival(name));
       break;
     case AttributeKind::g:
       out << "<Graph>";
@@ -198,8 +192,8 @@ void Node::printAttrValue(std::ostream& out, const Symbol& name) const {
   }
 }
 
-void Node::printAttributes(std::ostream &out,
-                           bool ignore_subgraph = false) const {
+void Node::printAttributes(std::ostream& out, bool ignore_subgraph = false)
+    const {
   out << "[";
   auto names = attributeNames();
   int i = 0;
@@ -235,10 +229,14 @@ static std::ostream& indent(std::ostream& out, size_t level) {
   return out;
 }
 
-std::ostream &Node::print(std::ostream &out, size_t level,
-                          std::vector<const Node *> *groups,
-                          bool print_source_locations, bool print_attributes,
-                          bool print_scopes, bool print_body) const {
+std::ostream& Node::print(
+    std::ostream& out,
+    size_t level,
+    std::vector<const Node*>* groups,
+    bool print_source_locations,
+    bool print_attributes,
+    bool print_scopes,
+    bool print_body) const {
   auto outs = outputs();
   indent(out, level) << const_value_list_with_types(outs);
   out << " = ";
@@ -821,16 +819,19 @@ void Value::replaceAllUsesWith(Value* newValue) {
 }
 
 void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
-  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use &u) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
     if (u.user->isAfter(node)) {
       u.user->inputs_[u.offset] = newValue;
       newValue->uses_.push_back(u);
     }
   });
 
-  uses_.erase(std::remove_if(uses_.begin(), uses_.end(), [&node](const Use& u){
-    return u.user->isAfter(node);
-  }), uses_.end());
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
 }
 
 size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -853,10 +854,54 @@ Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
 
+bool Node::matches(const FunctionSchema& schema) const {
+  // wrong name
+  if (kind().toQualString() != schema.name()) {
+    return false;
+  }
+  at::ArrayRef<const Value*> actuals = inputs();
+  const auto& formals = schema.arguments();
+
+  // not enough inputs
+  if (actuals.size() < formals.size()) {
+    return false;
+  }
+
+  TypeEnv type_env;
+  for (size_t i = 0; i < formals.size(); ++i) {
+    auto formal = formals[i].type();
+    const MatchTypeReturn matched_type = matchTypeVariables(
+        formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
+      return false;
+    }
+
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
+
+    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      return false;
+    }
+  }
+
+  // too many inputs
+  if (!schema.is_vararg() && actuals.size() != formals.size()) {
+    return false;
+  }
+
+  return true;
+}
+
 bool Node::matches(
     const char* signature_literal,
     at::ArrayRef<Symbol> const_inputs) const {
-  if (!sig(signature_literal).matches(this)) {
+  if (!matches(getOperatorForLiteral(signature_literal)->schema())) {
     return false;
   }
   for (Symbol s : const_inputs) {
@@ -887,7 +932,7 @@ const FunctionSchema& Node::schema() const {
   if (op_) {
     return op_->schema();
   }
-  return getOperatorFor(this).schema();
+  return getOperator().schema();
 }
 
 const FunctionSchema* Node::maybeSchema() const {
@@ -897,20 +942,52 @@ const FunctionSchema* Node::maybeSchema() const {
   return nullptr;
 }
 
-const Operator& Node::getOperator() const {
-  if (!op_) {
-    op_ = &getOperatorFor(this);
-  }
-  return *op_;
-}
-
 const Operator* Node::maybeOperator() const {
   if (!op_) {
-    if (auto op = findOperatorFor(this)) {
-      op_ = op.get();
+    const auto& candidates = getAllOperatorsFor(kind());
+    for (const auto& candidate : candidates) {
+      if (matches(candidate->schema())) {
+        op_ = candidate.get();
+        break;
+      }
     }
   }
   return op_;
+}
+
+const Operator& Node::getOperator() const {
+  const Operator* maybe = maybeOperator();
+  if (maybe)
+    return *maybe;
+
+  auto er = script::ErrorReport(sourceRange());
+  er << "Schema not found for node. File a bug report.\n";
+  er << "Node: " << *this << "\n";
+  er << "Input types:";
+  for (size_t i = 0; i < inputs().size(); ++i) {
+    if (i > 0)
+      er << ", ";
+    er << *inputs()[i]->type();
+  }
+  const auto& candidates = getAllOperatorsFor(kind());
+  if (candidates.size() > 0) {
+    er << "\ncandidates were:\n";
+    for (auto& candidate : candidates) {
+      er << "  " << candidate->schema() << "\n";
+    }
+  } else {
+    er << "\nno candidates found\n";
+  }
+  er << "within the graph:\n";
+  er << *owningGraph() << "\n";
+  throw er;
+}
+
+Operation Node::getOperation() const {
+  // note: some operators require the node to produce a runnable operation, which
+  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
+  // of the returned operator.
+  return getOperator().getOperation(this);
 }
 
 bool Node::isNondeterministic() const {
@@ -941,7 +1018,7 @@ bool Node::isNondeterministic() const {
       "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
-  if (nondeterministic_ops.find(this) == nullptr) {
+  if (!isMemberOf(nondeterministic_ops)) {
     return false;
   }
   // Dropout with train = False is deterministic
@@ -1470,6 +1547,7 @@ Node* Graph::createTuple(at::ArrayRef<Value*> values, TupleTypePtr tuple_type) {
     tuple_type = TupleType::create(std::move(types));
   }
   auto n = create(prim::TupleConstruct, values);
+
   n->output()->setType(tuple_type);
   return n;
 }
@@ -1552,12 +1630,6 @@ Node* Graph::createNumToTensor(Value* value) {
   auto typ = value->type();
   Node* result = create(prim::NumToTensor, {value});
   result->output()->setType(TensorType::fromNumberType(std::move(typ)));
-  return result;
-}
-
-Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::ImplicitTensorToNum, {value});
-  result->output()->setType(type);
   return result;
 }
 
@@ -1849,5 +1921,29 @@ TypePtr NamedValue::type() const {
 }
 
 constexpr Symbol ProfileOp::Kind;
+
+
+OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
+  for (const char* sig : sig_literals) {
+    auto op = getOperatorForLiteral(sig);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
+  }
+}
+
+
+bool Node::isMemberOf(const OperatorSet& os) const {
+  auto it = os.ops.find(kind());
+  if (it == os.ops.end()) {
+    return false;
+  }
+  for (auto& op : it->second) {
+    if (matches(op->schema())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 } // namespace jit
 } // namespace torch

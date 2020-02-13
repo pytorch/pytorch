@@ -15,9 +15,9 @@ from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, Da
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
-from common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
-                          IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
-                          load_tests, TEST_WITH_TSAN)
+from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, PY3,
+                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm,
+                                                  load_tests, TEST_WITH_TSAN)
 
 try:
     import psutil
@@ -44,12 +44,12 @@ except ImportError:
         warnings.warn(err_msg)
 
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA from common_cuda here, because if we do that,
-# the TEST_CUDNN line from common_cuda will be executed multiple times
+# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
+# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
 # as well during the execution of this test suite, and it will cause
 # CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
@@ -1505,7 +1505,6 @@ class TestDataLoader(TestCase):
         check_len(DataLoader(self.dataset, batch_size=2), 50)
         check_len(DataLoader(self.dataset, batch_size=3), 34)
 
-    # FIXME: conversion from np.float64 to torch.DoubleTensor does not work
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_numpy_scalars(self):
         import numpy as np
@@ -1521,7 +1520,7 @@ class TestDataLoader(TestCase):
                 return 4
 
         dtypes = {
-            # np.float64: torch.DoubleTensor,
+            np.float64: torch.DoubleTensor,
             np.float32: torch.FloatTensor,
             np.float16: torch.HalfTensor,
             np.int64: torch.LongTensor,

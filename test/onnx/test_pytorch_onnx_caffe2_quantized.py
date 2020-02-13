@@ -189,5 +189,20 @@ class TestQuantizedOps(unittest.TestCase):
         x = np.random.rand(1, 2, 3, 4).astype("float32")
         self.generic_test(QSliceModule(), (x,), input_names=["x"])
 
+    def test_cat(self):
+        class QConcatModule(torch.nn.Module):
+            def __init__(self):
+                super(QConcatModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x, y):
+                res = torch.ops.quantized.cat([self.quant1(x), self.quant1(y)], dim=1, scale=1.0, zero_point=0)
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 3, 4).astype("float32")
+        y = np.random.rand(1, 4, 3, 4).astype("float32")
+        self.generic_test(QConcatModule(), (x, y,), input_names=["x", "y"])
+
 if __name__ == '__main__':
     unittest.main()

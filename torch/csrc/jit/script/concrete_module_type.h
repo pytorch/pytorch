@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/script/module.h>
+#include <aten/src/ATen/core/ivalue.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -71,6 +72,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   void addOverload(
       std::string methodName,
       std::vector<std::string> overloadedMethodNames);
+  void addBuiltinFunction(std::string name, std::string symbol_name);
   void addFailedAttribute(std::string name, std::string failureReason);
   void setIterableModuleKind(IterableModuleKind kind);
 
@@ -156,6 +158,10 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   // Any function attributes. These are special right now because functions are
   // not first-class in the type system.
   std::unordered_map<std::string, FunctionAttribute> functionAttributes_;
+  // Function attributes that are calls to builtin functions. These get de-sugared
+  // directly into the corresponding aten:: call.
+  // The map is attribute name -> aten symbol name
+  std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
 
@@ -183,10 +189,10 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   TypePtr getJitType() const;
   py::object getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
-  c10::optional<py::object> findConstant(const std::string& name) const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
   c10::optional<Function*> findFunctionAttribute(const std::string& name) const;
+  c10::optional<c10::Symbol> findBuiltinFunction(const std::string& name) const;
   std::shared_ptr<ConcreteModuleType> findSubmoduleConcreteType(
       const std::string& name) const;
   c10::optional<std::string> findFailedAttribute(const std::string& name) const;
@@ -196,7 +202,8 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   std::unordered_map<std::string, py::object> getConstantsPy() const;
   std::unordered_map<std::string, std::pair<TypePtr, bool>> getAttributesPy()
       const;
-  std::vector<std::pair<std::string, TypePtr>> getModulesPy() const;
+  std::vector<std::pair<std::string, std::shared_ptr<ConcreteModuleType>>>
+  getModulesPy() const;
 
   bool equals(const ConcreteModuleType& other) const {
     if (jitType_ == other.jitType_) {

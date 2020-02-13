@@ -108,6 +108,33 @@ def div(g, self, other):
     return g.op("Div", self, other)
 
 
+def floor_divide(g, self, other):
+    out = div(g, self, other)
+    # the correct operation is truncate, which is not supported in ONNX,
+    # we cannot call floor since it will behave differently for negative numbers
+    # (eg. -0.1 should become -0 )
+    # - if scalar_type information are not available, assume that
+    # we need to call floor (treat as float)
+    out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+
+    # Matching PyTorch's behavior:
+    # - if self is fp the output's type is self's type
+    # - if self is not fp and other is fp, the output is of type 'Float'
+    # - self is not fp and other is not fp, the output's type is self's output type
+    # - the output type defaults to Float
+    scalar_type = self.type().scalarType()
+    if scalar_type is not None:
+        if not sym_help._is_fp(self) and \
+           other.type().scalarType() is not None and \
+           sym_help._is_fp(other):
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+        else:
+            out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx[scalar_type])
+    else:
+        out = g.op("Cast", out, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    return out
+
+
 def reciprocal(g, self):
     return g.op("Div", torch.ones(1), self)
 
@@ -290,7 +317,7 @@ def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
 
 
-@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v')
+@parse_args('v', 'v', 'v', 'i', 'i', 'i', 'v', 'i')
 def embedding_bag(g,
                   embedding_matrix,
                   indices,
@@ -298,7 +325,8 @@ def embedding_bag(g,
                   scale_grad_by_freq,
                   mode,
                   sparse,
-                  per_sample_weights):
+                  per_sample_weights,
+                  include_last_offset):
     if not sym_help._is_none(per_sample_weights):
         raise RuntimeError('Unsupported: ONNX export of embedding_bag '
                            'with per_sample_weights')
@@ -310,7 +338,8 @@ def embedding_bag(g,
                 outputs=4,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
-                sparse_i=sparse)
+                sparse_i=sparse,
+                include_last_offset_i=include_last_offset)
 
 
 def size(g, self, dim):
@@ -624,6 +653,8 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
+        if not stride:
+            stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
@@ -742,12 +773,14 @@ replication_pad3d = replication_pad
 
 
 def _interpolate(name, dim, interpolate_mode):
-    def symbolic_fn(g, input, output_size, align_corners=None):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
         sym_help._interpolate_warning(interpolate_mode)
         align_corners = sym_help._maybe_get_scalar(align_corners)
         if align_corners:
             return _unimplemented(name, "align_corners == True")
-        scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
+        if scales is None:
+            scales = sym_help._interpolate_size_to_scales(g, input, output_size, dim)
         return g.op("Upsample", input, scales, mode_s=interpolate_mode)
     return symbolic_fn
 
@@ -760,10 +793,16 @@ upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Upsample", input, scales, mode_s=mode)
+
+@parse_args('v')
+def bitwise_not(g, inp):
+    if inp.type().scalarType() != 'Bool':
+        return _unimplemented("bitwise_not", "non-bool tensor")
+    return g.op("Not", inp)
 
 
 def wrap_logical_op_with_cast_to(to_type):
@@ -1722,14 +1761,14 @@ def rand(g, *shapes):
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
     return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
-def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def rand_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
@@ -1766,7 +1805,9 @@ def flatten(g, input, start_dim, end_dim):
         return g.op("Flatten", input, axis_i=end_dim + 1)
     # use Reshape for cases where the output shape is not 2D
     if not input.isCompleteTensor():
-        return _unimplemented("flatten", "input size not accessible")
+        return _unimplemented("flatten",
+                              "input size not accessible "
+                              "(consider using reshape op instead of flatten op to export to ONNX)")
     input_dims = input.type().sizes()
     output_dims = []
     for i in range(0, dim):
@@ -1951,7 +1992,9 @@ def index(g, self, index):
         indices = [index]
 
     def try_mask_to_index(index):
-        if not sym_help._is_none(index) and index.type().scalarType() == "Byte":
+        if not sym_help._is_none(index) and (index.type().scalarType() == "Byte" or index.type().scalarType() == "Bool"):
+            if sym_help._export_onnx_opset_version < 9:
+                raise RuntimeError("Exporting masked indices are only supported after ONNX opset 9.")
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
@@ -2153,7 +2196,7 @@ def _weight_norm(g, weight_v, weight_g, dim):
         # This conflicts the logic for negative axes to access dims backwards
         # TODO: Might need a fix in torch group_norm module
         axes = list(range(rank))
-        if dim:
+        if dim is not None:
             if dim < -1:
                 dim += rank
             if dim != -1:
@@ -2163,3 +2206,18 @@ def _weight_norm(g, weight_v, weight_g, dim):
         return g.op("Mul", div, weight_g)
     else:
         return g.op("ATen", weight_v, weight_g, dim_i=dim, operator_s="_weight_norm")
+
+def dim(g, self):
+    '''Implement the dim functionality available for a pytorch tensor in ONNX'''
+    # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
+    shape = g.op('Shape', self)
+    return g.op('Size', shape)
+
+def __getitem_(g, self, i):
+    return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
+
+def take(g, self, index):
+    self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    out = index_select(g, self_flattened, 0, index)
+    out = reshape_as(g, out, index)
+    return out

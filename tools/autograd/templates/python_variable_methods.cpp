@@ -27,12 +27,9 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
-
-#include "python_variable_methods_dispatch.h"
 
 #include <stdexcept>
 
@@ -80,9 +77,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   static PythonArgParser parser({
     "size(int64_t dim)",
     "size()",
-#ifdef BUILD_NAMEDTENSOR
     "size(Dimname dim)",
-#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -98,14 +93,12 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     // torch.Size and tuple in python.
     return THPSize_New(self_);
   }
-#ifdef BUILD_NAMEDTENSOR
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
       TORCH_INTERNAL_ASSERT(false, "NYI: Named tensors w/ JIT");
     }
     return wrap(self_.size(r.dimname(0)));
   }
-#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -116,9 +109,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   static PythonArgParser parser({
     "stride(int64_t dim)",
     "stride()",
-#ifdef BUILD_NAMEDTENSOR
     "stride(Dimname dim)",
-#endif
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<3> parsed_args;
@@ -132,11 +123,9 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // torch.Size and tuple in python
     return THPUtils_packInt64Array(strides.size(), strides.data());
   }
-#ifdef BUILD_NAMEDTENSOR
   else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
   }
-#endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -150,7 +139,6 @@ static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef BUILD_NAMEDTENSOR
 static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -158,7 +146,6 @@ static PyObject * THPVariable_has_names(PyObject* self_, PyObject* args)
   return wrap(self.has_names());
   END_HANDLE_TH_ERRORS
 }
-#endif
 
 // implemented on the python object to avoid dispatch overhead
 static PyObject * THPVariable_data_ptr(PyObject* self_, PyObject* args)
@@ -351,6 +338,11 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
   return self.to(self.options().device(device), non_blocking, copy, optional_memory_format);
+}
+
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  AutoNoGIL no_gil;
+  return self.to(self.options(), non_blocking, copy, optional_memory_format);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -580,8 +572,7 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
   }
-  void* data = self_.storage().data_ptr().get();
-  c10::cuda::CUDACachingAllocator::recordStream(data, at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
+  c10::cuda::CUDACachingAllocator::recordStream(self_.storage().data_ptr(), at::cuda::CUDAStream::unpack(((THCPStream*)arg)->cdata));
   Py_RETURN_NONE;
 #else
   throw std::runtime_error("PyTorch compiled without CUDA support");
@@ -693,7 +684,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::legacy_tensor_new(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_new(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -702,7 +693,7 @@ static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject*
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -711,7 +702,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_tensor(legacyExtractTypeId(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -747,9 +738,12 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   if (device && device->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
-  if (!device && !scalarType && !copy) {
+  if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
+  } else if (!device && !scalarType) {
+    return THPVariable_Wrap(
+        dispatch_to(self_, non_blocking, copy, opt_memory_format));
   } else if (!device) {
     return THPVariable_Wrap(dispatch_to(self_, *scalarType, non_blocking, copy, opt_memory_format));
   } else if (!scalarType) {
@@ -879,9 +873,7 @@ PyMethodDef variable_methods[] = {
   {"cuda", (PyCFunction)(void(*)(void))THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"data_ptr", (PyCFunction)THPVariable_data_ptr, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
-#ifdef BUILD_NAMEDTENSOR
   {"has_names", (PyCFunction)THPVariable_has_names, METH_NOARGS, NULL},
-#endif
   {"double", (PyCFunction)(void(*)(void))THPVariable_double, METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)(void(*)(void))THPVariable_float, METH_VARARGS | METH_KEYWORDS, NULL},

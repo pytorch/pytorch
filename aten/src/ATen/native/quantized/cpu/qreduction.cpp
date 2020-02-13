@@ -118,7 +118,6 @@ Tensor quantized_mean_cpu(
   return result;
 }
 
-#ifdef BUILD_NAMEDTENSOR
 Tensor quantized_mean_cpu(
     const Tensor& self,
     DimnameList dim,
@@ -137,7 +136,6 @@ Tensor& quantized_mean_out_cpu(
   return quantized_mean_out_cpu(
       result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
-#endif
 
 } // namespace native
 } // namespace at

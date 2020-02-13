@@ -52,10 +52,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
-#include <ATen/core/EnableNamedTensor.h>
-#ifdef BUILD_NAMEDTENSOR
 #include <torch/csrc/python_dimname.h>
-#endif
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -101,9 +98,13 @@ struct PythonArgParser {
   template<int N>
   inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
+  // Formatted strings of non-hidden signatures
+  std::vector<std::string> get_signatures() const;
+
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
+  void check_deprecated(const FunctionSignature & signature);
   PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -112,9 +113,27 @@ private:
   bool traceable;
 };
 
+struct PYBIND11_EXPORT FunctionSignature {
+  explicit FunctionSignature(const std::string& fmt, int index);
+
+  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
+
+  std::string toString() const;
+
+  std::string name;
+  std::vector<FunctionParameter> params;
+  std::vector<py::handle> overloaded_args;
+  ssize_t min_args;
+  ssize_t max_args;
+  ssize_t max_pos_args;
+  int index;
+  bool hidden;
+  bool deprecated;
+};
+
 struct PythonArgs {
-  PythonArgs(int idx, bool traceable, const FunctionSignature& signature, PyObject** args)
-    : idx(idx)
+  PythonArgs(bool traceable, const FunctionSignature& signature, PyObject** args)
+    : idx(signature.index)
     , traceable(traceable)
     , signature(signature)
     , args(args) {}
@@ -142,16 +161,15 @@ struct PythonArgs {
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
+  inline c10::optional<double> toDoubleOptional(int i);
   inline const THPLayout& layout(int i);
   inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
-#ifdef BUILD_NAMEDTENSOR
   inline at::Dimname dimname(int i);
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
-#endif
   inline at::MemoryFormat memoryformat(int i);
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
   inline at::QScheme toQScheme(int i);
@@ -170,23 +188,6 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
-};
-
-struct PYBIND11_EXPORT FunctionSignature {
-  explicit FunctionSignature(const std::string& fmt);
-
-  bool parse(PyObject* args, PyObject* kwargs, PyObject* dst[], bool raise_exception);
-
-  std::string toString() const;
-
-  std::string name;
-  std::vector<FunctionParameter> params;
-  std::vector<py::handle> overloaded_args;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
-  bool hidden;
-  bool deprecated;
 };
 
 struct FunctionParameter {
@@ -380,7 +381,7 @@ inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& de
 
 inline at::Device PythonArgs::device(int i) {
   if (!args[i]) {
-    return at::Device(backendToDeviceType(tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id())));
+    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
@@ -406,7 +407,6 @@ inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
   return device(i);
 }
 
-#ifdef BUILD_NAMEDTENSOR
 inline at::Dimname PythonArgs::dimname(int i) {
   TORCH_INTERNAL_ASSERT(args[i] != nullptr);
   return THPDimname_parse(args[i]);
@@ -439,7 +439,6 @@ inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
   }
   return parseDimnameList(arg);
 }
-#endif
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   if (!args[i]) return at::MemoryFormat::Contiguous;
@@ -492,6 +491,13 @@ inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
     return c10::nullopt;
   }
   return toBool(i);
+}
+
+inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
+  if (!args[i]) {
+    return c10::nullopt;
+  }
+  return toDouble(i);
 }
 
 inline double PythonArgs::toDouble(int i) {

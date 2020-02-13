@@ -102,9 +102,12 @@ def _load_attr_from_module(module, func_name):
 
 
 def _get_torch_home():
-    torch_home = os.path.expanduser(
-        os.getenv(ENV_TORCH_HOME,
-                  os.path.join(os.getenv(ENV_XDG_CACHE_HOME, DEFAULT_CACHE_DIR), 'torch')))
+    torch_home = hub_dir
+    if torch_home is None:
+        torch_home = os.path.expanduser(
+            os.getenv(ENV_TORCH_HOME,
+                      os.path.join(os.getenv(ENV_XDG_CACHE_HOME,
+                                             DEFAULT_CACHE_DIR), 'torch')))
     return torch_home
 
 
@@ -399,7 +402,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
 
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
-    # being overriden by a broken download.
+    # being overridden by a broken download.
     dst = os.path.expanduser(dst)
     dst_dir = os.path.dirname(dst)
     f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)

@@ -74,7 +74,12 @@ void DistAutogradContext::accumulateGrad(
     it->value().add_(grad);
   } else {
     // First grad for this variable.
-    accumulatedGrads_.insert(variable, grad);
+    if (grad.is_sparse()) {
+      accumulatedGrads_.insert(variable, grad.clone());
+    } else {
+      accumulatedGrads_.insert(
+          variable, grad.clone(at::MemoryFormat::Contiguous));
+    }
   }
 }
 
@@ -94,29 +99,70 @@ void DistAutogradContext::setGraphTask(
   graphTask_ = std::move(graphTask);
 }
 
+void DistAutogradContext::resetGraphTask() {
+  graphTask_ = nullptr;
+}
+
 void DistAutogradContext::addOutstandingRpc(
     const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::Message& message) {
-    if (message.type() == rpc::MessageType::EXCEPTION) {
-      // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err(
-          std::string(message.payload().begin(), message.payload().end()));
-      graphTask_->set_exception(std::make_exception_ptr(err), nullptr);
-    }
-  });
+  futureMessage->addCallback(
+      [this](
+          const rpc::Message& /* unused */,
+          const c10::optional<utils::FutureError>& futErr) {
+        if (futErr) {
+          // If we have an error, let the local autograd engine know about it.
+          std::runtime_error err((*futErr).what());
+          graphTask_->set_exception(err, nullptr);
+        }
+      });
   std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
 
-void DistAutogradContext::clearAndWaitForOutstandingRpcs() {
-  // Copy futures under lock, but wait for them outside the lock.
+std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+    clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
   lock.unlock();
 
-  for (const auto& outStandingRpc : outStandingRpcs) {
-    outStandingRpc->wait();
+  struct State {
+    explicit State(int32_t count)
+        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
+    std::shared_ptr<rpc::FutureMessage> future;
+    std::atomic<int32_t> remaining;
+    std::atomic<bool> alreadySentError{false};
+  };
+  auto state = std::make_shared<State>(outStandingRpcs.size());
+  if (outStandingRpcs.empty()) {
+    state->future->markCompleted(rpc::Message());
+  } else {
+    for (auto& rpc : outStandingRpcs) {
+      rpc->addCallback([state](
+                           const rpc::Message& /* unused */,
+                           const c10::optional<utils::FutureError>& err) {
+        if (err) {
+          // If there's an error, we want to setError() on the future, unless
+          // another error has already been sent - use a CAS to guard.
+          //
+          // Don't decrement num remaining here! (We don't need to, since memory
+          // handling is separate). If we simply don't decrement on errors,
+          // reaching 0 means that there were no errors - and hence, we can just
+          // markCompleted() without any other checking there.
+          bool expectedAlreadySent = false;
+          if (state->alreadySentError.compare_exchange_strong(
+                  expectedAlreadySent, true)) {
+            state->future->setError(err->what());
+          }
+          return;
+        }
+
+        if (--state->remaining == 0) {
+          state->future->markCompleted(rpc::Message());
+        }
+      });
+    }
   }
+  return state->future;
 }
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(

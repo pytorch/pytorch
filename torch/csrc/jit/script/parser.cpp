@@ -545,6 +545,12 @@ struct ParserImpl {
       case TK_DEF: {
         return parseFunction(/*is_method=*/in_class);
       }
+      case TK_DELETE: {
+        L.expect(TK_DELETE);
+        auto expr = parseExp();
+        L.expect(TK_NEWLINE);
+        return Delete::create(expr);
+      }
       default: {
         auto lhs = parseExpOrExpTuple();
         if (L.cur().kind != TK_NEWLINE) {
@@ -662,16 +668,30 @@ TreeRef parseClass() {
     auto name = parseIdent();
     auto decl = parseDecl();
 
-    // Handle type annotations specified in a type comment as the first line of
-    // the function.
-    L.expect(TK_INDENT);
-    if (L.cur().kind == TK_TYPE_COMMENT) {
-      auto type_annotation_decl = Decl(parseTypeComment());
-      L.expect(TK_NEWLINE);
-      decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
+    TreeRef stmts_list;
+    if (L.nextIf(TK_INDENT)) {
+      // Handle type annotations specified in a type comment as the first line
+      // of the function.
+      if (L.cur().kind == TK_TYPE_COMMENT) {
+        auto type_annotation_decl = Decl(parseTypeComment());
+        L.expect(TK_NEWLINE);
+        decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
+      }
+
+      stmts_list = parseStatements(false);
+    } else {
+      // Special case: the Python grammar allows one-line functions with a
+      // single statement.
+      if (L.cur().kind == TK_TYPE_COMMENT) {
+        auto type_annotation_decl = Decl(parseTypeComment());
+        decl = mergeTypesFromTypeComment(decl, type_annotation_decl, is_method);
+      }
+
+      TreeList stmts;
+      stmts.push_back(parseStmt(is_method));
+      stmts_list = create_compound(TK_LIST, L.cur().range, std::move(stmts));
     }
 
-    auto stmts_list = parseStatements(false);
     return Def::create(
         name.range(), Ident(name), Decl(decl), List<Stmt>(stmts_list));
   }

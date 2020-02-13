@@ -42,12 +42,12 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
-  _(ConstantPropagation)               \
   _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
   _(ClassParser)                       \
+  _(UnifyTypes)                        \
   _(Profiler)                          \
   _(InsertAndEliminateRedundantGuards) \
   _(InsertBailOuts)                    \
@@ -56,6 +56,7 @@ namespace jit {
   _(ThreadLocalDebugInfo)              \
   _(SubgraphMatching)                  \
   _(SubgraphRewriter)                  \
+  _(ModuleClone)                       \
   _(ModuleCloneInstance)               \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
@@ -66,6 +67,7 @@ namespace jit {
   _(DCE)                               \
   _(CustomFusionNestedBlocks)          \
   _(ClassDerive)                       \
+  _(SaveLoadTorchbind)                 \
   _(ModuleInterfaceSerialization)      \
   _(ClassTypeAddRemoveAttr)            \
   _(Inliner)                           \
@@ -74,7 +76,12 @@ namespace jit {
   _(LiteInterpreterInline)             \
   _(LiteInterpreterTuple)              \
   _(LiteInterpreterPrimOverload)       \
-  _(CommonAncestor)
+  _(LiteInterpreterUpsampleNearest2d)  \
+  _(CommonAncestor)                    \
+  _(AutogradSymbols)                   \
+  _(MobileTypeParser)                  \
+  _(LiteInterpreterPrim)               \
+  _(LiteInterpreterLoadOrigJit)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
@@ -94,6 +101,8 @@ TH_FORALL_TESTS_CUDA(DECLARE_JIT_TEST)
 // and python test runners), but is instead invoked manually by the
 // torch_python_test.cpp
 void testEvalModeForLoadedModule();
+void testSerializationInterop();
+void testTorchSaveError();
 
 } // namespace jit
 } // namespace torch

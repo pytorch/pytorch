@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/autodiff.h>
 
 #include <ATen/core/functional.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -8,9 +9,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <torch/csrc/jit/symbolic_script.h>
-#include <c10/util/Exception.h>
 
 #include <algorithm>
 #include <memory>
@@ -40,7 +40,7 @@ bool needTrimGrad(Node* n) {
       "aten::max_pool2d(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> Tensor",
       "aten::max_pool2d_with_indices(Tensor self, int[] kernel_size, int[] stride, int[] padding, int[] dilation, bool ceil_mode) -> (Tensor, Tensor)"
   };
-  if (need_trim_grad_ops.find(n)) {
+  if (n->isMemberOf(need_trim_grad_ops)) {
     return true;
   }
   return false;
@@ -62,7 +62,7 @@ bool isDifferentiable(Node* n) {
       n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
     return true;
 
-  if (differentiable_ops.find(n))
+  if (n->isMemberOf(differentiable_ops))
     return true;
 
   if (n->matches(
@@ -739,7 +739,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value* tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     // Note that we check the contents of the grad_map instead of
-    // tmp->requires_grad(), becuase it's actually a more faithful source.
+    // tmp->requires_grad(), because it's actually a more faithful source.
     // tmp->requires_grad() is really an overapproximation (i.e. it can have
     // false positives), while the gradients we will emit for this value can get
     // DCE-d in the optimization pass (because it has no influence on the real
@@ -792,24 +792,6 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
-
-  // if we actually profile we can rely on profiling information
-  // so we don't have to mark every gradient as possibly undefined
-  if (!getProfilingMode() && getExecutorMode()) {
-    for (size_t i = 0; i < grad_desc.df_input_vjps.size(); i++) {
-      auto tt = grad_desc.df->block()->inputs().at(i);
-      if (auto ttt = tt->type()->cast<TensorType>()) {
-        tt->setType(ttt->withPossiblyUndefined());
-      } else if (auto lt = tt->type()->cast<ListType>()) {
-        auto undef_type =
-            lt->getElementType()->expect<TensorType>()->withPossiblyUndefined();
-        tt->setType(ListType::create(undef_type));
-      } else {
-        // unexpected type
-        TORCH_INTERNAL_ASSERT(false);
-      }
-    }
-  }
 
   GRAPH_DUMP(" forward graph: ", &graph);
   GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));

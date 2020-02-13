@@ -19,8 +19,20 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 Conv1dImpl::Conv1dImpl(
-    ConvOptions<1> options_)
-    : ConvImpl(options_.transposed(false).output_padding(0)) {}
+    Conv1dOptions options_)
+    : ConvNdImpl(
+        detail::ConvNdOptions<1>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(false)
+          .output_padding(0)
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv1dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
@@ -44,8 +56,20 @@ Tensor Conv1dImpl::forward(const Tensor& input) {
 }
 
 Conv2dImpl::Conv2dImpl(
-    ConvOptions<2> options_)
-    : ConvImpl(options_.transposed(false).output_padding(0)) {}
+    Conv2dOptions options_)
+    : ConvNdImpl(
+        detail::ConvNdOptions<2>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(false)
+          .output_padding(0)
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv2dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
@@ -71,8 +95,20 @@ Tensor Conv2dImpl::forward(const Tensor& input) {
 }
 
 Conv3dImpl::Conv3dImpl(
-    ConvOptions<3> options_)
-    : ConvImpl(options_.transposed(false).output_padding(0)) {}
+    Conv3dOptions options_)
+    : ConvNdImpl(
+        detail::ConvNdOptions<3>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(false)
+          .output_padding(0)
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor Conv3dImpl::forward(const Tensor& input) {
   if (c10::get_if<enumtype::kCircular>(&options.padding_mode())) {
@@ -98,14 +134,14 @@ Tensor Conv3dImpl::forward(const Tensor& input) {
     options.groups());
 }
 
-template class ConvImpl<1, Conv1dImpl>;
-template class ConvImpl<2, Conv2dImpl>;
-template class ConvImpl<3, Conv3dImpl>;
+template class ConvNdImpl<1, Conv1dImpl>;
+template class ConvNdImpl<2, Conv2dImpl>;
+template class ConvNdImpl<3, Conv3dImpl>;
 
 // ============================================================================
 
 template <size_t D, typename Derived>
-std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
+std::vector<int64_t> ConvTransposeNdImpl<D, Derived>::_output_padding(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size,
     const ExpandingArray<D>& stride, const ExpandingArray<D>& padding,
     const ExpandingArray<D>& kernel_size) {
@@ -151,7 +187,20 @@ std::vector<int64_t> ConvTransposeImpl<D, Derived>::_output_padding(
 }
 
 ConvTranspose1dImpl::ConvTranspose1dImpl(
-    ConvTransposeOptions<1> options_) : ConvTransposeImpl(options_.transposed(true)) {}
+    ConvTranspose1dOptions options_)
+    : ConvTransposeNdImpl(
+        detail::ConvNdOptions<1>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(true)
+          .output_padding(options_.output_padding())
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor ConvTranspose1dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
@@ -168,7 +217,19 @@ Tensor ConvTranspose1dImpl::forward(
 }
 
 ConvTranspose2dImpl::ConvTranspose2dImpl(
-    ConvTransposeOptions<2> options_) : ConvTransposeImpl(options_.transposed(true)) {}
+    ConvTranspose2dOptions options_)
+    : ConvTransposeNdImpl(detail::ConvNdOptions<2>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(true)
+          .output_padding(options_.output_padding())
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor ConvTranspose2dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
@@ -185,7 +246,19 @@ Tensor ConvTranspose2dImpl::forward(
 }
 
 ConvTranspose3dImpl::ConvTranspose3dImpl(
-    ConvTransposeOptions<3> options_) : ConvTransposeImpl(options_.transposed(true)) {}
+    ConvTranspose3dOptions options_)
+    : ConvTransposeNdImpl(detail::ConvNdOptions<3>(
+          /*in_channels=*/options_.in_channels(),
+          /*out_channels=*/options_.out_channels(),
+          /*kernel_size=*/options_.kernel_size())
+          .stride(options_.stride())
+          .padding(options_.padding())
+          .dilation(options_.dilation())
+          .transposed(true)
+          .output_padding(options_.output_padding())
+          .groups(options_.groups())
+          .bias(options_.bias())
+          .padding_mode(options_.padding_mode())) {}
 
 Tensor ConvTranspose3dImpl::forward(
     const Tensor& input, const c10::optional<at::IntArrayRef>& output_size) {
@@ -201,9 +274,9 @@ Tensor ConvTranspose3dImpl::forward(
     output_padding, options.groups(), options.dilation());
 }
 
-template class ConvTransposeImpl<1, ConvTranspose1dImpl>;
-template class ConvTransposeImpl<2, ConvTranspose2dImpl>;
-template class ConvTransposeImpl<3, ConvTranspose3dImpl>;
+template class ConvTransposeNdImpl<1, ConvTranspose1dImpl>;
+template class ConvTransposeNdImpl<2, ConvTranspose2dImpl>;
+template class ConvTransposeNdImpl<3, ConvTranspose3dImpl>;
 
 } // namespace nn
 } // namespace torch

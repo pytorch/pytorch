@@ -251,11 +251,13 @@ class TestGatherRanges(serial.SerializedTestCase):
         workspace.RunOperatorOnce(getOpWithThreshold())
 
         workspace.RunOperatorOnce(
-            getOpWithThreshold(max_mismatched_ratio=0.4, min_observation=5)
+            getOpWithThreshold(max_mismatched_ratio=0.4, min_observation=50)
         )
 
         with self.assertRaises(RuntimeError):
-            workspace.RunOperatorOnce(getOpWithThreshold(max_mismatched_ratio=0.4))
+            workspace.RunOperatorOnce(
+                getOpWithThreshold(max_mismatched_ratio=0.4, min_observation=5)
+            )
 
 
 if __name__ == "__main__":

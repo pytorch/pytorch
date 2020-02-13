@@ -57,13 +57,7 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
                 }
                 return funcs;
               })
-          .def("_known_worker_ids", [](const ContextPtr& ctx) {
-            std::vector<rpc::worker_id_t> worker_ids;
-            for (const auto worker_id : ctx->getKnownWorkerIds()) {
-              worker_ids.push_back(worker_id);
-            }
-            return worker_ids;
-          });
+          .def("_known_worker_ids", &DistAutogradContext::getKnownWorkerIds);
 
   module.def(
       "_new_context",
@@ -102,20 +96,25 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
       [](int64_t worker_id) { DistAutogradContainer::init(worker_id); },
       py::call_guard<py::gil_scoped_release>());
 
+  module.def(
+      "_get_debug_info",
+      []() { return DistEngine::getInstance().getDebugInfo(); },
+      py::call_guard<py::gil_scoped_release>());
+
   py::options options;
   options.disable_function_signatures();
 
   module.def(
       "backward",
-      [](const std::vector<torch::Tensor>& roots) {
+      [](const std::vector<torch::Tensor>& roots, bool retainGraph = false) {
         torch::autograd::variable_list variables;
         for (const auto& root : roots) {
           variables.emplace_back(root);
         }
-        DistEngine::getInstance().execute(variables);
+        DistEngine::getInstance().execute(variables, retainGraph);
       },
       R"(
-backward(roots: List[Tensor]) -> None
+backward(roots: List[Tensor], retain_graph = False) -> None
 
 Kicks off the distributed backward pass using the provided roots. This
 currently implements the :ref:`fast-mode-algorithm` which
@@ -136,6 +135,11 @@ gradients using the :meth:`~torch.distributed.autograd.get_gradients` API.
 Arguments:
     roots (list): Tensors which represent the roots of the autograd
                   computation. All the tensors should be scalars.
+    retain_graph(bool, optional): If False, the graph used to compute the grad
+                  will be freed. Note that in nearly all cases setting this
+                  option to True is not needed and often can be worked around
+                  in a much more efficient way. Usually, you need to set this
+                  to True to run backward multiple times.
 
 Example::
 
@@ -146,6 +150,7 @@ Example::
     >>      dist_autograd.backward(loss)
 )",
       py::arg("roots"),
+      py::arg("retain_graph") = false,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

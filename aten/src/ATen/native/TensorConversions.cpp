@@ -21,7 +21,7 @@ static inline Device ensure_has_index(Device device) {
 
 static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Contiguous);
+      optional_memory_format.value_or(MemoryFormat::Preserve);
 
   if (self.dtype() == options.dtype() && self.layout() == options.layout() &&
       self.device() == options.device() && !copy &&

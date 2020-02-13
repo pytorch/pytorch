@@ -17,9 +17,9 @@ namespace impl {
 // Assume T is decayed
 template <typename T>
 using not_ok_to_box =
-  c10::guts::disjunction<
-    c10::guts::negation<
-      c10::guts::disjunction<
+  guts::disjunction<
+    guts::negation<
+      guts::disjunction<
         std::is_constructible<IValue, T>,
         // TensorOptions are not directly constructible into IValue,
         // but torch::jit::push knows how to handle them
@@ -27,35 +27,35 @@ using not_ok_to_box =
         // void returns are ok
         std::is_same<void, T>
       >>
-#ifdef BUILD_NAMEDTENSOR
     ,
     // some constructors are templated (and therefore pass
     // is_constructible), but do not actually work with all
     // template arguments, so we must blacklist them explicitly
     // TODO: The correct fix is to sfinae based on is_constructible of T
-    std::is_same<optional<ArrayRef<at::Dimname>>, T>
-#endif
+    std::is_same<optional<ArrayRef<at::Dimname>>, T>,
+    std::is_same<ArrayRef<at::Dimname>, T>
+
   >;
 
 // TODO boxing should be ok for all kernels. Then remove not_ok_to_box and supports_boxing.
 
 template <class Result, class... Args>
 using supports_boxing =
-  c10::guts::negation<c10::guts::disjunction<
+  guts::negation<guts::disjunction<
     std::is_lvalue_reference<Result>,
     not_ok_to_box<Result>,
     std::is_same<IntArrayRef, Result>,
-    not_ok_to_box<guts::decay_t<Args>>...
+    not_ok_to_box<std::decay_t<Args>>...
   >>;
 
 template<class Result, class... Args>
-Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, guts::enable_if_t<!supports_boxing<Result, Args...>::value, int> = 0) {
+Result boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args, std::enable_if_t<!supports_boxing<Result, Args...>::value, int> = 0) {
   TORCH_INTERNAL_ASSERT(false, "Tried to call KernelFunction::callUnboxed() for a kernel that only has a boxed kernel and doesn't support calling from an unboxed API yet.");
 }
 
 // SFINAE version for ops with returns
 template<class Result, class... Args>
-guts::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, Result>
+std::enable_if_t<supports_boxing<Result, Args...>::value && !std::is_same<void, Result>::value, Result>
 boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;
@@ -69,7 +69,7 @@ boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_fu
 
 // SFINAE version for ops without returns
 template<class Result, class... Args>
-guts::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, Result>
+std::enable_if_t<supports_boxing<Result, Args...>::value && std::is_same<void, Result>::value, Result>
 boxAndCallBoxedFunc(KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func, OperatorKernel* functor, const OperatorHandle& opHandle, Args... args) {
   // TODO Reuse stack vector instead of allocating?
   torch::jit::Stack stack;

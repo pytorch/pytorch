@@ -259,9 +259,9 @@ void initializeStreamsEvents(
     if (tensors[i].is_sparse()) {
       if (tensors[i].is_coalesced()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].indices().storage().data(), streams[i]);
+            tensors[i].indices().storage().data_ptr(), streams[i]);
         c10::cuda::CUDACachingAllocator::recordStream(
-            tensors[i].values().storage().data(), streams[i]);
+            tensors[i].values().storage().data_ptr(), streams[i]);
       } else {
         // We will need to coalesce first, which means new tensors will
         // be allocated on the streams we just allocated, and there
@@ -269,7 +269,7 @@ void initializeStreamsEvents(
       }
     } else {
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensors[i].storage().data(), streams[i]);
+          tensors[i].storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -315,7 +315,7 @@ void initializeStreamsEvents(
       // new streams in this Work to prevent being freed before the Work
       // finishes.
       c10::cuda::CUDACachingAllocator::recordStream(
-          tensor.storage().data(), streams[i]);
+          tensor.storage().data_ptr(), streams[i]);
     }
   }
 }
@@ -976,6 +976,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Copy back to input tensors.
     outputs.reserve(inputs.size());
     for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(output);
       if (output.is_sparse()) {
         outputs.push_back(output.clone());
       } else {
@@ -1209,6 +1210,12 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     for (size_t i = 0; i < inputs.size(); i++) {
       guard.set_index(inputs[i].device().index());
       events[i].block(at::cuda::getCurrentCUDAStream());
+    }
+
+    // Copy outputs back to inputs after synchronization, so that users can
+    // access all reduce results from input tensors
+    for (size_t i = 0; i < inputs.size(); i++) {
+      inputs[i].copy_(outputs[i]);
     }
   }
 
@@ -1824,6 +1831,14 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag);
   enqueue(work);
   return work;
+}
+
+std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in Gloo process group");
 }
 
 namespace {

@@ -7,6 +7,7 @@
               only:
                 - master
     jobs:
+      - docker_for_ecr_gc_build_job
       - docker_build_job:
           name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
           image_name: "pytorch-linux-bionic-clang9-thrift-llvmdev"
@@ -16,12 +17,6 @@
       - docker_build_job:
           name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
           image_name: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
-      - docker_build_job:
-          name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
-          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py2"
-      - docker_build_job:
-          name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
-          image_name: "pytorch-linux-xenial-cuda8-cudnn7-py3"
       - docker_build_job:
           name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
           image_name: "pytorch-linux-xenial-cuda9-cudnn7-py2"
@@ -46,6 +41,9 @@
       - docker_build_job:
           name: "pytorch-linux-xenial-py3.5"
           image_name: "pytorch-linux-xenial-py3.5"
+      - docker_build_job:
+          name: "pytorch-linux-xenial-py3.8"
+          image_name: "pytorch-linux-xenial-py3.8"
       - docker_build_job:
           name: "pytorch-linux-xenial-py3.6-clang7"
           image_name: "pytorch-linux-xenial-py3.6-clang7"

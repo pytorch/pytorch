@@ -511,38 +511,31 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_acc
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
+void batch_norm_cuda_template(Tensor& output_, Tensor& save_mean_, Tensor& save_invstd_, const Tensor& input_, const Tensor& weight_, const Tensor& bias_,
                                                             const Tensor& running_mean_, const Tensor& running_var_,
                                                             bool train, double momentum, double epsilon) {
 
-  TensorArg input_arg{ input_, "input", 1 },
-            weight_arg{ weight_, "weight", 2 },
-            bias_arg{ bias_, "bias", 3 },
-            run_mean_arg{ running_mean_, "running_mean", 4 },
-            run_var_arg{ running_var_, "running_var", 5 };
+  TensorArg output_arg{ output_, "output", 1 },
+            save_mean_arg{ save_mean_, "save_mean", 2 },
+            save_invstd_arg{ save_invstd_, "save_invstd", 3 },
+            input_arg{ input_, "input", 4 },
+            weight_arg{ weight_, "weight", 5 },
+            bias_arg{ bias_, "bias", 6 },
+            run_mean_arg{ running_mean_, "running_mean", 7 },
+            run_var_arg{ running_var_, "running_var", 8 };
   CheckedFrom c = "batch_norm_cuda";
-  checkAllSameGPU(c, {input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
+  checkAllSameGPU(c, {output_arg, save_mean_arg, save_invstd_arg, input_arg, weight_arg, bias_arg, run_mean_arg, run_var_arg});
 
   using stat_accscalar_t = at::acc_type<stat_scalar_t, true>;
-  int64_t n_input = input_.size(1);
-  Tensor save_mean_;
-  Tensor save_invstd_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
-  auto output_reshaped = at::empty_like(input_reshaped, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output_reshaped = output_.view({input_.size(0), input_.size(1), -1});
 
   auto bs = input_reshaped.size(0);
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
-  }
-  if (train) {
-    save_mean_ = at::empty({n_input}, input_options);
-    save_invstd_ = at::empty({n_input}, input_options);
-  } else {
-    save_mean_ = at::empty({0}, input_options);
-    save_invstd_ = at::empty({0}, input_options);
   }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto weight = packed_accessor_or_dummy<stat_scalar_t, 1, RestrictPtrTraits, index_t>(weight_);
@@ -579,7 +572,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda_template(const Tensor& input_
       (input, output, save_mean, save_invstd, weight, bias, epsilon);
   }
   THCudaCheck(cudaGetLastError());
-  return std::make_tuple(output_reshaped.view(input_.sizes()), save_mean_, save_invstd_);
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
@@ -648,7 +640,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_cuda_template(const Tensor& input_, 
   dummy_mean_ = at::empty({0}, input_options);
   dummy_var_ = at::empty({0}, input_options);
   // promote only mean_/invstd_ precision
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   mean_ = at::empty({n_input}, input_options);
@@ -682,7 +674,7 @@ void batch_norm_elemt_cuda_template(Tensor& output_, const Tensor& input_, const
   auto features = input_reshaped.size(2);
   auto input = input_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   auto output = output_reshaped.generic_packed_accessor<input_scalar_t, 3, RestrictPtrTraits, index_t>();
@@ -717,7 +709,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
 
   auto features = mean_.size(1);
   auto input_options = mean_.options();
-  if (mean_.scalar_type() == at::ScalarType::Half) {
+  if (mean_.scalar_type() == at::ScalarType::Half || mean_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   save_mean_ = at::empty({features}, input_options);
@@ -779,8 +771,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda_templ
   auto feature_size = input_reshaped.size(2);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/32);
-  int block_x = std::min<int>(getNumThreads(feature_size), MAX_BLOCK_SIZE/block_y);
+  int block_y = std::min<int>(lastPow2(batch_size), MAX_BLOCK_SIZE/C10_WARP_SIZE);
+  // We want block_x to be at least a warp width
+  int block_x = std::min<int>(std::max<int>(getNumThreads(feature_size), C10_WARP_SIZE), MAX_BLOCK_SIZE/block_y);
   const dim3 block(block_x, block_y);
   const dim3 grid(n_input);
 
@@ -841,7 +834,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda_template(
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1}); // internally we merge the feature dimensions
 
   auto input_options = input_.options();
-  if (input_.scalar_type() == at::ScalarType::Half) {
+  if (input_.scalar_type() == at::ScalarType::Half || input_.scalar_type() == at::ScalarType::BFloat16) {
     input_options = input_options.dtype(ScalarType::Float);
   }
   Tensor save_mean_ = at::empty({n_channels}, input_options);

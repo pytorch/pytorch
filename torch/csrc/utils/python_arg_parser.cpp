@@ -5,7 +5,6 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/ATen.h>
 
@@ -239,7 +238,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       }
       return false;
     }
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
       if (THPUtils_checkDimnameList(obj)) {
@@ -248,7 +246,6 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       // if a size is specified (e.g. DimnameList[1]) we also allow passing a single Dimname
       return size == 1 && THPUtils_checkDimname(obj);
     }
-#endif
     case ParameterType::TENSOR_LIST: return six::isTuple(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -291,10 +288,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::QSCHEME: return "torch.qscheme";
     case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
-#ifdef BUILD_NAMEDTENSOR
     case ParameterType::DIMNAME: return "name";
     case ParameterType::DIMNAME_LIST: return "tuple of names";
-#endif
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -397,10 +392,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
-FunctionSignature::FunctionSignature(const std::string& fmt)
+FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
+  , index(index)
   , hidden(false)
   , deprecated(false)
 {
@@ -664,8 +660,10 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
  : max_args(0)
  , traceable(traceable)
 {
+  int index = 0;
   for (auto& fmt : fmts) {
-    signatures_.emplace_back(fmt);
+    signatures_.emplace_back(fmt, index);
+    ++index;
   }
   for (auto& signature : signatures_) {
     if (signature.max_args > max_args) {
@@ -675,21 +673,45 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
   if (signatures_.size() > 0) {
     function_name = signatures_[0].name;
   }
+
+  // Check deprecated signatures last
+  std::stable_partition(signatures_.begin(), signatures_.end(),
+    [](const FunctionSignature & sig) {
+      return !sig.deprecated;
+    });
+}
+
+void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
+  if (signature.deprecated) {
+    auto msg = c10::str(
+      "This overload of ", signature.name, " is deprecated:\n\t",
+      signature.name, signature.toString());
+    auto signatures = get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n\t";
+        msg += signature.name;
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
+  }
 }
 
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
-    return PythonArgs(0, traceable, signature, parsed_args);
+    check_deprecated(signature);
+    return PythonArgs(traceable, signature, parsed_args);
   }
 
-  int i = 0;
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
-      return PythonArgs(i, traceable, signature, parsed_args);
+      check_deprecated(signature);
+      return PythonArgs(traceable, signature, parsed_args);
     }
-    i++;
   }
 
   print_error(args, kwargs, parsed_args);
@@ -711,15 +733,19 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
     signature.parse(args, kwargs, parsed_args, true);
   }
 
+  auto options = get_signatures();
+  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
+  throw TypeError("%s", msg.c_str());
+}
+
+std::vector<std::string> PythonArgParser::get_signatures() const {
   std::vector<std::string> options;
   for (auto& signature : signatures_) {
     if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }
-
-  auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  throw TypeError("%s", msg.c_str());
+  return options;
 }
 
 at::Tensor PythonArgs::tensor_slow(int i) {
@@ -736,9 +762,9 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
   } else if (THPUtils_checkLong(obj)) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
-  }else if (PyComplex_Check(obj)) {
+  } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  }else if (THPUtils_checkDouble(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
   } else {
     // NB: Are you here because you passed None to a Variable method,

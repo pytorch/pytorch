@@ -275,10 +275,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_H_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
   set(TORCH_GENERATED_CODE
@@ -307,12 +303,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
     "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
@@ -360,6 +352,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/argument_spec.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/unpickler.cpp
@@ -372,6 +365,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/type_hashing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
@@ -426,10 +420,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops_c10.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/ir_emitter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
@@ -446,6 +441,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/object.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/jit_exception.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/string_to_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/source_range_serialization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/hooks_for_testing.cpp
@@ -460,13 +456,14 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
     )
 
-  if (NOT INTERN_BUILD_MOBILE)
+  if (NOT INTERN_DISABLE_MOBILE_INTERP)
     set (MOBILE_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
         )
     list (APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
@@ -502,19 +499,22 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/autograd/utils.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/future_message.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/message.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/torchscript_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/types.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/utils.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/register_distributed_ops.cpp
       )
     endif()
   endif()
@@ -749,7 +749,7 @@ ENDIF()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h"
+  install(FILES "${TORCH_SRC_DIR}/script.h" "${TORCH_SRC_DIR}/extension.h" "${TORCH_SRC_DIR}/custom_class.h" "${TORCH_SRC_DIR}/custom_class_detail.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
 
 
@@ -1080,6 +1080,33 @@ if(USE_CUDA)
 
 endif()
 
+
+# Note [Global dependencies]
+# Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
+# and they assume that all of their symbols will be available in the global namespace.
+# On the other hand we try to be good citizens and avoid polluting the symbol
+# namespaces, so libtorch is loaded with all its dependencies in a local scope.
+# That usually leads to missing symbol errors at run-time, so to avoid a situation like
+# this we have to preload those libs in a global namespace.
+if (BUILD_SHARED_LIBS)
+  add_library(torch_global_deps SHARED ${TORCH_SRC_DIR}/csrc/empty.c)
+  set_target_properties(torch_global_deps PROPERTIES LINKER_LANGUAGE C)
+  if (USE_MPI)
+      target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
+  endif()
+  target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
+  # The CUDA libraries are linked here for a different reason: in some
+  # cases we load these libraries with ctypes, and if they weren't opened
+  # with RTLD_GLOBAL, we'll do the "normal" search process again (and
+  # not find them, because they're usually in non-standard locations)
+  if (USE_CUDA)
+    target_link_libraries(torch_global_deps ${TORCH_CUDA_LIBRARIES})
+    target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+    target_link_libraries(torch_global_deps torch::cudart)
+  endif()
+
+  install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)

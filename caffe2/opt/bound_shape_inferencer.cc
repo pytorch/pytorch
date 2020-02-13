@@ -23,7 +23,9 @@ std::vector<TensorBoundShape::DimType> setDimTypeWithFirst(
     uint32_t n) {
   std::vector<TensorBoundShape::DimType> dimTypes(
       n, TensorBoundShape_DimType_CONSTANT);
-  dimTypes[0] = firstDimType;
+  if (dimTypes.size() > 0) {
+    dimTypes[0] = firstDimType;
+  }
   return dimTypes;
 }
 
@@ -52,13 +54,22 @@ void BoundShapeInferencer::EnsureShapeNames(
   }
 }
 
+void BoundShapeInferencer::Initialize(
+    const ShapeInfoMap& info,
+    bool extract_feature_len) {
+  shape_info_ = info;
+  extract_feature_len_ = extract_feature_len;
+}
+
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
     caffe2::Workspace* /* ws */) {
   if (op.type() == "SparseLengthsSum" ||
       op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSum" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsSumFused4BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
     InferSparseLengthsSum(op);
   } else if (
       op.type() == "FC" || op.type() == "FCTransposed" ||
@@ -85,12 +96,11 @@ void BoundShapeInferencer::InferOps(
 
 void BoundShapeInferencer::InferBoundShapeAndType(
     const NetDef& net,
-    const std::unordered_map<std::string, ShapeInfo>& info,
+    const ShapeInfoMap& info,
     caffe2::Workspace* ws,
     bool extract_feature_len) {
   const static std::unordered_set<std::string> unsupported{"Tile"};
-  shape_info_ = info;
-  extract_feature_len_ = extract_feature_len;
+  Initialize(info, extract_feature_len);
 
   bool inferFinished = false;
 
@@ -154,7 +164,11 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
   }
   if (!rt.second) {
     // Check shape consistency
-    CAFFE_ENFORCE_EQ(shape.dims_size(), bound_dims.size());
+    CAFFE_ENFORCE_EQ(
+        shape.dims_size(),
+        bound_dims.size(),
+        "Dim size inconsistency found in tensor ",
+        name);
     // For shapes that was provided as a hint at the input of the net, fix the
     // batch size first.
     if ((!shape_info.dimTypeIsSet() ||
@@ -248,9 +262,13 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       "needs to be 2D");
 
   int weight = (op.type() == "SparseLengthsWeightedSum" ||
-                op.type() == "SparseLengthsWeightedSumFused8BitRowwise")
+                op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+                op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
       ? 1
       : 0;
+
+  const bool is4bit = op.type() == "SparseLengthsSumFused4BitRowwise" ||
+      op.type() == "SparseLengthsWeightedSumFused4BitRowwise";
 
   if (weight) {
     CAFFE_ENFORCE_EQ(
@@ -282,11 +300,19 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   current_dim_type_ = TensorBoundShape_DimType_BATCH;
   current_max_batch_size_ = spec_.max_batch_size;
   auto output_dim1 = it->second.shape.dims(1);
-  // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 for
-  // scale and 4 byte for bias (https://fburl.com/t6dp9tsc)
+  // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 bytes
+  // for fp32 scale and 4 bytes for fp32 bias (https://fburl.com/t6dp9tsc)
   if (op.type() == "SparseLengthsSumFused8BitRowwise" ||
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
     output_dim1 -= 8;
+  }
+  // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
+  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we pack
+  // 2 entries into 1 uint8 element of the embedding table.
+  // (https://fburl.com/diffusion/stmsyz74)
+  else if (is4bit) {
+    output_dim1 -= 4;
+    output_dim1 *= 2;
   }
   CAFFE_ENFORCE_GE(
       it->second.getDimType().size(), 2, "input(0): ", op.input(0));

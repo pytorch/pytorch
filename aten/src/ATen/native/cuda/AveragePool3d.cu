@@ -5,6 +5,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 
@@ -242,7 +243,7 @@ __global__ void avg_pool3d_cuda_update_grad_input_atomic(
       {
         for (int iCol = wstart; iCol < wend; ++iCol)
         {
-          atomicAdd(&gradInput[slice][iFrame][iRow][iCol], val);
+          gpuAtomicAdd(&gradInput[slice][iFrame][iRow][iCol], val);
         }
       }
     }
@@ -542,7 +543,7 @@ void avg_pool3d_backward_out_cuda_template(
 
 
   // Optimizing for stride 1 is probably only of limited value, but this
-  // specialization yields 3x speedup over the atomicAdd implementation.
+  // specialization yields 3x speedup over the gpuAtomicAdd implementation.
   // Padding must be 0, otherwise, pool size may change.
   if (dT == 1 && dH == 1 && dW == 1 && padT == 0 && padH == 0 && padW == 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),

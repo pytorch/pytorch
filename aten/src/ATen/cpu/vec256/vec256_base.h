@@ -84,7 +84,7 @@ public:
   // a constexpr variable if we never odr-use it.  But it seems that some
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
-  // a variable is odr-used or not.  So best to just cut the probem at the root.
+  // a variable is odr-used or not.  So best to just cut the problem at the root.
   static constexpr int size() {
     return 32 / sizeof(T);
   }
@@ -95,7 +95,7 @@ public:
     }
   }
   template<typename... Args,
-           typename = c10::guts::enable_if_t<(sizeof...(Args) == size())>>
+           typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vec256(Args... vals) {
     values = { vals... };
   }
@@ -164,6 +164,16 @@ public:
   }
   T& operator[](int idx) {
     return values[idx];
+  }
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    int mask = 0;
+    for (int i = 0; i < size(); ++ i) {
+      if (values[i] == static_cast<T>(0)) {
+        mask |= (1 << i);
+      }
+    }
+    return mask;
   }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;
@@ -608,7 +618,7 @@ inline T fmadd(const T& a, const T& b, const T& c) {
 }
 
 template <int64_t scale = 1, typename T = void>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
 inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
   static constexpr int size = Vec256<T>::size();
   int_same_size_t<T> index_arr[size];
@@ -621,7 +631,7 @@ inline gather(T const* base_addr, const Vec256<int_same_size_t<T>>& vindex) {
 }
 
 template <int64_t scale = 1, typename T = void>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<T>>
 inline mask_gather(const Vec256<T>& src, T const* base_addr,
                    const Vec256<int_same_size_t<T>>& vindex, Vec256<T>& mask) {
   static constexpr int size = Vec256<T>::size();
@@ -687,7 +697,7 @@ inline Vec256<int_same_size_t<T>> convert_to_int_of_same_size(const Vec256<T>& s
 //       returns:            Vec256<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
 //                           Vec256<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 template <typename T>
-inline c10::guts::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
+inline std::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
 deinterleave2(const Vec256<T>& a, const Vec256<T>& b) {
   static constexpr int size = Vec256<T>::size();
   static constexpr int half_size = size / 2;
@@ -713,7 +723,7 @@ deinterleave2(const Vec256<T>& a, const Vec256<T>& b) {
 //       returns:            Vec256<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
 //                           Vec256<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
 template <typename T>
-inline c10::guts::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
+inline std::enable_if_t<Vec256<T>::size() % 2 == 0, std::pair<Vec256<T>, Vec256<T>>>
 interleave2(const Vec256<T>& a, const Vec256<T>& b) {
   static constexpr int size = Vec256<T>::size();
   static constexpr int half_size = size / 2;

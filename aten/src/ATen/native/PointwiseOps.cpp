@@ -5,7 +5,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <ATen/NamedTensorUtils.h>
 

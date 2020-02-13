@@ -15,13 +15,13 @@ if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
   pip_install unittest-xml-reporting
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
-    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.2.13-1+cuda9.0 libnccl2=2.2.13-1+cuda9.0
+    sudo apt-get -qq install --allow-downgrades --allow-change-held-packages libnccl-dev=2.5.6-1+cuda10.1 libnccl2=2.5.6-1+cuda10.1
   fi
 
-  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda8-* ]] || [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9-cudnn7-py2* ]]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
@@ -48,8 +48,9 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
 
-  # TODO: move this to Docker
-  pip_install --user hypothesis
+  # TODO: Please move this to Docker
+  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
@@ -74,22 +75,44 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
+    # Suppress vptr violations arising from multiple copies of pybind11
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-    # We suppress the vptr volation, since we have separate copies of
-    # libprotobuf in both libtorch.so and libcaffe2.so, and it causes
-    # the following problem:
-    #    test_cse (__main__.TestJit) ... torch/csrc/jit/export.cpp:622:38:
-    #        runtime error: member call on address ... which does not point
-    #        to an object of type 'google::protobuf::MessageLite'
-    #        ...: note: object is of type 'onnx_torch::ModelProto'
-    #
-    # This problem should be solved when libtorch.so and libcaffe2.so are
-    # merged.
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
+    export TORCH_USE_RTLD_GLOBAL=1
+    # NB: We load libtorch.so with RTLD_GLOBAL for UBSAN, unlike our
+    # default behavior.
+    #
+    # The reason for this is that without RTLD_GLOBAL, if we load multiple
+    # libraries that depend on libtorch (as is the case with C++ extensions), we
+    # will get multiple copies of libtorch in our address space.  When UBSAN is
+    # turned on, it will do a bunch of virtual pointer consistency checks which
+    # won't work correctly.  When this happens, you get a violation like:
+    #
+    #    member call on address XXXXXX which does not point to an object of
+    #    type 'std::_Sp_counted_base<__gnu_cxx::_Lock_policy::_S_atomic>'
+    #    XXXXXX note: object is of type
+    #    'std::_Sp_counted_ptr<torch::nn::LinearImpl*, (__gnu_cxx::_Lock_policy)2>'
+    #
+    # (NB: the textual types of the objects here are misleading, because
+    # they actually line up; it just so happens that there's two copies
+    # of the type info floating around in the address space, so they
+    # don't pointer compare equal.  See also
+    #   https://github.com/google/sanitizers/issues/1175
+    #
+    # UBSAN is kind of right here: if we relied on RTTI across C++ extension
+    # modules they would indeed do the wrong thing;  but in our codebase, we
+    # don't use RTTI (because it doesn't work in mobile).  To appease
+    # UBSAN, however, it's better if we ensure all the copies agree!
+    #
+    # By the way, an earlier version of this code attempted to load
+    # libtorch_python.so with LD_PRELOAD, which has a similar effect of causing
+    # it to be loaded globally.  This isn't really a good idea though, because
+    # it depends on a ton of dynamic libraries that most programs aren't gonna
+    # have, and it applies to child processes.
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
@@ -108,22 +131,22 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
 fi
 
 test_python_nn() {
-  time python test/run_test.py --include nn --verbose
+  time python test/run_test.py --include test_nn --verbose
   assert_git_not_dirty
 }
 
 test_python_ge_config_simple() {
-  time python test/run_test.py --include jit_simple --verbose
+  time python test/run_test.py --include test_jit_simple --verbose
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include jit_legacy jit_fuser_legacy --verbose
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude nn jit_simple jit_legacy jit_fuser_legacy --verbose --bring-to-front quantization quantized quantized_tensor quantized_nn_mods
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods
   assert_git_not_dirty
 }
 
@@ -180,7 +203,6 @@ test_custom_script_ops() {
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
     python test_custom_ops.py -v
-    python test_custom_classes.py -v
     python model.py --export-script-module=model.pt
     # Run tests C++-side and load the exported script module.
     build/test_custom_ops ./model.pt
@@ -191,7 +213,9 @@ test_custom_script_ops() {
 
 test_xla() {
   export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  export XRT_WORKERS="localservice:0;grpc://localhost:40934"
+  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
+  XLA_PORT=`shuf -i 40701-40999 -n 1`
+  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
   pushd xla
   echo "Running Python Tests"
   ./test/run_tests.sh

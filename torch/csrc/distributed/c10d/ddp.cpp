@@ -166,7 +166,7 @@ std::tuple<std::shared_ptr<ProcessGroup::Work>, at::Tensor> queueReduction(
     // freed before their worker stream ops finish.
     for (at::Tensor& grad : gradsBatch[devIdx]) {
       c10::cuda::CUDACachingAllocator::recordStream(
-          grad.storage().data(), workerStreams.back());
+          grad.storage().data_ptr(), workerStreams.back());
     }
   }
 
@@ -212,7 +212,7 @@ void syncReduction(
   // before their worker stream ops finish.
   for (at::Tensor& grad : gradsBatch) {
     c10::cuda::CUDACachingAllocator::recordStream(
-        grad.storage().data(), workerStream);
+        grad.storage().data_ptr(), workerStream);
   }
 
   at::cuda::CUDAStreamGuard cudaGuard(workerStream);

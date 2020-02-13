@@ -12,8 +12,6 @@ namespace script {
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
 // if it returns nullopt, then failure_messages contains a good error report
-// set convert_tensor_to_num to true if ImplicitTensorToNums should be inserted
-// to match the schema
 
 struct MatchedSchema {
   std::vector<Value*> inputs;
@@ -54,7 +52,7 @@ TORCH_API c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs);
 
-// applies implict conversion from value trying to turn it into type
+// applies implicit conversion from value trying to turn it into type
 // concrete_type it succeeds if the return_value->isSubtypeOf(concrete_type)
 TORCH_API Value* tryConvertToType(
     const SourceRange& loc,

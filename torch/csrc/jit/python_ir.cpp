@@ -235,6 +235,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool strip_doc_string,
              bool keep_initializers_as_inputs,
+             const std::map<std::string, int>& custom_opsets,
              bool add_node_names) {
             std::string graph;
             RawDataExportMap export_map;
@@ -247,6 +248,7 @@ void initPythonIRBindings(PyObject* module_) {
                 operator_export_type,
                 strip_doc_string,
                 keep_initializers_as_inputs,
+                custom_opsets,
                 add_node_names);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
@@ -270,6 +272,7 @@ void initPythonIRBindings(PyObject* module_) {
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("strip_doc_string") = true,
           py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"),
           py::arg("add_node_names") = true)
       .def(
           "_pretty_print_onnx",
@@ -280,6 +283,7 @@ void initPythonIRBindings(PyObject* module_) {
              ::torch::onnx::OperatorExportTypes operator_export_type,
              bool google_printer,
              bool keep_initializers_as_inputs,
+             const std::map<std::string, int>& custom_opsets,
              bool add_node_names) {
             return pretty_print_onnx(
                 g,
@@ -289,6 +293,7 @@ void initPythonIRBindings(PyObject* module_) {
                 operator_export_type,
                 google_printer,
                 keep_initializers_as_inputs,
+                custom_opsets,
                 add_node_names);
           },
           py::arg("initializers"),
@@ -298,6 +303,7 @@ void initPythonIRBindings(PyObject* module_) {
               ::torch::onnx::OperatorExportTypes::ONNX,
           py::arg("google_printer") = false,
           py::arg("keep_initializers_as_inputs") = true,
+          py::arg("custom_opsets"),
           py::arg("add_node_names") = true)
       .def(
           "inputs",
@@ -682,7 +688,10 @@ void initPythonIRBindings(PyObject* module_) {
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
             return self->isSubtypeOf(other);
-          });
+          })
+      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
+        return self->cast<InterfaceType>() != nullptr;
+      });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
@@ -700,6 +709,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &StringType::get);
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
+      m, "PyObjectType")
+      .def_static("get", &PyObjectType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
