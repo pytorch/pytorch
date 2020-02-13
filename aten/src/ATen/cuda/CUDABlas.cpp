@@ -123,9 +123,11 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
     return "CUBLAS_STATUS_NOT_SUPPORTED";
   }
+#ifdef CUBLAS_STATUS_LICENSE_ERROR
   if (error == CUBLAS_STATUS_LICENSE_ERROR) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
   }
+#endif
   return "<unknown>";
 }
 
