@@ -16,6 +16,7 @@ namespace native {
 
 DEFINE_DISPATCH(qrelu_stub);
 DEFINE_DISPATCH(qrelu6_stub);
+DEFINE_DISPATCH(qrelu_leaky_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_relu(Tensor input) {
@@ -107,6 +108,25 @@ Tensor& quantized_relu_(Tensor& qx) {
         [&](Vec value) -> Vec { return value.relu(zero_point_vec); });
   });
   return qx;
+}
+
+Tensor& quantized_leaky_relu_out(Tensor& result, const Tensor& self,
+                                 Scalar negval) {
+  qrelu_leaky_stub(self.device().type(), result, self, negval);
+  return result;
+}
+
+Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
+  const auto qx = self.contiguous();
+  auto qy = at::_empty_affine_quantized(qx.sizes(), self.options(),
+                                        qx.q_scale(), qx.q_zero_point());
+  qrelu_leaky_stub(self.device().type(), qy, qx, negval);
+  return qy;
+}
+
+Tensor& quantized_leaky_relu_(Tensor& self, Scalar negval) {
+  qrelu_leaky_stub(self.device().type(), self, self, negval);
+  return self;
 }
 
 namespace {
