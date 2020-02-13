@@ -70,7 +70,7 @@ class detect_anomaly(object):
         warnings.warn('Anomaly Detection has been enabled. '
                       'This mode will increase the runtime '
                       'and should only be enabled for debugging.')
-        
+
     def __enter__(self):
         torch.set_anomaly_enabled(True)
 
