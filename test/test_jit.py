@@ -16533,6 +16533,21 @@ a")
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
             self.assertEqual(m("c"), torch.tensor([103]))
 
+    def test_module_none_attrs(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self, table):
+                super(M, self).__init__()
+                self.optional_value = None
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.optional_value
+
+        graph = M().forward().graph
+        FileCheck().check("prim::GetAttr").run(graph)
+        self.run_pass('peephole', tf.graph)
+        FileCheck().check_not("prim::GetAttr").run(graph)
+
     def test_tensor_import_export(self):
         @torch.jit.script
         def foo(x):
