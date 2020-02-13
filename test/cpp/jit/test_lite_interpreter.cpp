@@ -176,5 +176,27 @@ void testLiteInterpreterPrim() {
   auto refi = ref.toInt();
   AT_ASSERT(resi == refi);
 }
-} // namespace torch
+
+void testLiteInterpreterQuant() {
+
+  auto m = torch::jit::load("/Users/myuan/data/lstm/linear.pt");
+
+  std::vector<IValue> inputs;
+  auto minput = torch::ones({1, 2});
+  inputs.emplace_back(minput);
+//  auto ref = m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 1; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+//  auto resi = res.toInt();
+//  auto refi = ref.toInt();
+//  AT_ASSERT(resi == refi);
+}} // namespace torch
 } // namespace jit

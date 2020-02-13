@@ -159,6 +159,9 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name) {
   };
 
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
+    auto cls = type.type_->expect<at::ClassType>();
+    auto qn = cls->name();
+    size_t n = cls->numAttributes();
     auto dict = std::move(input).toGenericDict();
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
