@@ -52,7 +52,7 @@ def _floats_wrapper(*args, **kwargs):
 def floats(*args, **kwargs):
     if 'width' not in kwargs:
         kwargs['width'] = 32
-    return st.floats(*args, **kwargs)
+    return _floats_wrapper(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
@@ -317,7 +317,11 @@ hypothesis_version = hypothesis.version.__version_info__
 current_settings = settings._profiles[settings._current_profile].__dict__
 current_settings['deadline'] = None
 if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
-    current_settings['timeout'] = hypothesis.unlimited
+    if hypothesis_version < (4, 8, 0):
+        current_settings['timeout'] = -1
+    else:
+        current_settings['timeout'] = hypothesis.unlimited
+
 def assert_deadline_disabled():
     if hypothesis_version < (3, 27, 0):
         import warnings
