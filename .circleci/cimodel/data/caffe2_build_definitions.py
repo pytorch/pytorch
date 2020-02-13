@@ -34,6 +34,7 @@ class Conf:
 
         omit = self.language == "onnx_py2" \
             or self.language == "onnx_py3.6_lower_opsets" \
+            or self.language == "onnx_py3.6_higher_opsets" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
@@ -62,8 +63,8 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "py2",
-            "onnx_py3.6_lower_opsets": "py3.6-lower-opsets",
-            "onnx_py3.6_higher_opsets": "py3.6-higher-opsets",
+            "onnx_py3.6_higher_opsets": "py3.6",
+            "onnx_py3.6_lower_opsets": "py3.6",
             "cmake": "py2",
         }
 

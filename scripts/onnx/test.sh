@@ -67,7 +67,7 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
     "$top_dir/test/onnx/test_models_onnxruntime.py"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *higher_opsets* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *higher-opsets* ]]; then
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset10" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset11" \
