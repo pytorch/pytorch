@@ -63,6 +63,26 @@ TORCH_API const Val* binary_op(BinaryOpType type, const Val* v1, const Val* v2){
   return out;
 }
 
+TORCH_API const Val* add(const Val* v1, const Val* v2){
+  return binary_op(BinaryOpType::Add, v1, v2);
+}
+
+TORCH_API const Val* sub(const Val* v1, const Val* v2){
+  return binary_op(BinaryOpType::Sub, v1, v2);
+}
+
+TORCH_API const Val* mul(const Val* v1, const Val* v2){
+  return binary_op(BinaryOpType::Mul, v1, v2);
+}
+
+TORCH_API const Val* div(const Val* v1, const Val* v2){
+  return binary_op(BinaryOpType::Div, v1, v2);
+}
+
+TORCH_API const Val* mod(const Val* v1, const Val* v2){
+  return binary_op(BinaryOpType::Mod, v1, v2);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

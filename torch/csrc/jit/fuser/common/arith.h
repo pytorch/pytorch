@@ -26,4 +26,10 @@ TORCH_API const Val* cast_op(DataType dtype, const Val* v1);
 TORCH_API const Val* unary_op(UnaryOpType type, const Val* v1);
 TORCH_API const Val* binary_op(BinaryOpType type, const Val* v1, const Val* v2);
 
+TORCH_API const Val* add(const Val* v1, const Val* v2);
+TORCH_API const Val* sub(const Val* v1, const Val* v2);
+TORCH_API const Val* mul(const Val* v1, const Val* v2);
+TORCH_API const Val* div(const Val* v1, const Val* v2);
+TORCH_API const Val* mod(const Val* v1, const Val* v2);
+
 }}}
