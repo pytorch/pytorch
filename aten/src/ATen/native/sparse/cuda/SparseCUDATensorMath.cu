@@ -986,8 +986,10 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           ));
         }
       );
+      TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
+      TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
+      TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
       mat_el_begin_idx = mat_el_end_idx;
-
     } else {
       workspace_buffers[cur_mat_num] = nullptr;
     }
