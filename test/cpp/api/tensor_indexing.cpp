@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-// TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
+// yf225 TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
 // is ready to ship.
 #include <ATen/native/TensorIndexing.h>
 #include <torch/torch.h>
@@ -130,7 +130,7 @@ TEST(TensorIndexingTest, TestAdvancedIndexingWithArrayRefOfTensor) {
   }
 }
 
-// TODO: I will remove the Python tests in the comments once the PR is approved.
+// yf225 TODO: I will remove the Python tests in the comments once the PR is approved.
 
 /*
 class TestIndexing(TestCase):
