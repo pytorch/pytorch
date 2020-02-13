@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
+#include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
@@ -98,7 +99,16 @@ namespace detail {
 struct CAFFE2_API DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
-    return DispatchKeyExtractor(schema.arguments().size());
+    TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS,
+        "The function schema has ", schema.arguments().size(),
+        " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS);
+    c10::utils::bitset dispatch_arg_indices_reverse;
+    for (size_t index = 0; index < schema.arguments().size(); ++index) {
+      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {
+        dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
+      }
+    }
+    return DispatchKeyExtractor(dispatch_arg_indices_reverse);
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
@@ -106,7 +116,8 @@ public:
     //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
 
     DispatchKeySet ks;
-    for (const auto& ivalue : torch::jit::last(*stack, num_args_)) {
+    dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
         // no safe toTensorRef method, alas)
@@ -116,7 +127,7 @@ public:
           ks = ks | tensor.key_set();
         }
       }
-    }
+    });
     return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
   }
 
@@ -149,16 +160,19 @@ private:
     return impl::dispatchTypeId(ks, backendsWithoutFallthrough | operatorHasKernelForBackend_);
   }
 
-  explicit DispatchKeyExtractor(size_t num_args)
-  : num_args_(num_args)
+  explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
+  : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
   , operatorHasKernelForBackend_() {}
 
-  // this is caching the index so we don't have to parse the schema inputs
-  // again and again for each dispatcher lookup.
-  // num_args_ is allowed to be zero; that just means you must do the
+  // this is a bitset that has ones for each argument index which has to be
+  // considered for dispatch. This avoids having to iterate over the stack
+  // to find all the tensors. The bits are stored in reverse order, i.e.
+  // dispatch_arg_indices_reverse_[i] == true, then the i-th argument from
+  // the top of the stack (i.e. the i-th last argument of the function)
+  // is relevant for dispatch.
+  // dispatch_arg_indices_reverse_ is allowed to have zero bits set; that just means you must do the
   // fallthrough
-  // TODO: a potential optimization is to store a bitfield of arg locations,
-  size_t num_args_;
+  c10::utils::bitset dispatch_arg_indices_reverse_;
 
   // Set of backends for which the operator has explicitly registered a kernel.
   DispatchKeySet operatorHasKernelForBackend_;
