@@ -31,6 +31,7 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
+      domain(nullptr),
       contiguity_(infer_contiguity_from_tensor_type(tensor_type)) {}
 
 Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
