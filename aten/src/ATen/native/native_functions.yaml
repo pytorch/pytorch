@@ -4900,7 +4900,7 @@
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_equal
+    CPU: cpu_equal
     CUDA: legacy::cuda::_th_equal
     QuantizedCPU: quantized_equal_cpu
 
