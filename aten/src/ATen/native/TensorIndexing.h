@@ -209,7 +209,8 @@ static inline Tensor applySlice(
   // Skip this optimization if we are tracing, as the trace may be polymorphic
   // over the shape of the `self` tensor, and we still want to record
   // the slice.
-  if (!ensure_view && start == 0 && stop == self_sizes[dim] && step == 1 && !is_tracing) {
+  int64_t length = (self_device == at::kCPU || self_device == at::kCUDA) ? self_sizes[dim] : self.size(dim);
+  if (!ensure_view && start == 0 && stop == length && step == 1 && !is_tracing) {
     return self;
   }
   return self.slice(dim, start, stop, step);
