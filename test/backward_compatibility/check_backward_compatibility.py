@@ -29,6 +29,7 @@ white_list = [
     ('aten::_ncf_view', datetime.date(2020, 3, 1)),
     ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
     ('prim::Load', datetime.date(2020, 3, 1)),
+    ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
 ]
 
 

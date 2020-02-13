@@ -12,10 +12,10 @@ namespace mobile {
 Function::Function(c10::QualifiedName name)
     : name_(name), code_(std::make_shared<Code>()) {}
 
-void Function::append_instruction(OpCode op, int X, int N) {
+void Function::append_instruction(OpCode op, int X, int N, int flags) {
   TORCH_CHECK(isOpSupportedInMobile(op), toString(op),
               " is not supported in mobile module.");
-  code_->instructions_.emplace_back(op, X, N, 0);
+  code_->instructions_.emplace_back(op, X, N, flags);
 }
 
 void Function::append_operator(const std::string& name,
@@ -30,28 +30,20 @@ void Function::append_operator(const std::string& name,
   }
   auto op = c10::Dispatcher::singleton().findSchema(opname);
   TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
-  code_->operators_.emplace_back(op);
-}
-
-void Function::build_vararg_operator_table() {
-  for (auto& ins : code_->instructions_) {
-    if (ins.op == OPN) {
-      auto opname = code_->op_names_[ins.X];
-      if (opname.name == "prim::TupleConstruct") {
-        code_->vararg_operators_.emplace_back(tupleConstruct);
-      } else if (opname.name == "aten::format") {
-        code_->vararg_operators_.emplace_back(format);
-      }
-      else {
-        AT_ERROR("OPN operator ", opname.name, " is not supported.");
-      }
-      ins.X = code_->vararg_operators_.size() - 1;
-    }
-  }
+  // TODO: operator.h now does not depend on Node* so we can also look up operators from
+  // that registry for use in mobile as a way to share implementations.
+  auto fn = [op](Stack& stack) {
+    c10::Dispatcher::singleton().callBoxed(*op, &stack);
+  };
+  code_->operators_.emplace_back(fn);
 }
 
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
+}
+
+void Function::append_type(const at::TypePtr& type) {
+  code_->types_.push_back(type);
 }
 
 void Function::set_register_size(size_t size) {

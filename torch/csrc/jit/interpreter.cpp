@@ -1413,6 +1413,10 @@ const std::vector<Node*>& Code::instructions_source() const {
   return pImpl->instructions_source();
 }
 
+const std::vector<TypePtr>& Code::type_table() const {
+  return pImpl->type_table_;
+}
+
 size_t Code::register_size() const {
   return pImpl->register_size_;
 }
