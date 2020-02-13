@@ -54,23 +54,16 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
 # ---[ ATen specific
 if (INTERN_BUILD_ATEN_OPS)
   IF(MSVC)
-	SET(OPT_FLAG 
-		$<$<CONFIG:Debug>:"${CMAKE_CXX_FLAGS_DEBUG}">
-		$<$<CONFIG:Release>:"${CMAKE_CXX_FLAGS_RELEASE}">
-		$<$<CONFIG:RelWithDebInfo>:"${CMAKE_CXX_FLAGS_RELWITHDEBINFO}">
-		$<$<CONFIG:MinSizeRel>:"${CMAKE_CXX_FLAGS_MINSIZEREL}">
-		" /fp:strict ")
-	SET(VCOMP_LIB "vcomp$<$<CONFIG:Debug>:${CMAKE_DEBUG_POSTFIX}>")
-	message(STATUS "OPT: ${OPT_FLAG}")
-	message(STATUS "COM: ${VCOMP_LIB}")
-  ELSE()
-	SET(OPT_FLAG "-O3 ")
-	SET(VCOMP_LIB "vcomp")
-	IF("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-	  SET(OPT_FLAG " ")
-	  SET(VCOMP_LIB "vcompd")
-	ENDIF()
-  ENDIF()
+    SET(OPT_FLAG "/fp:strict ")
+    SET(VCOMP_LIB "vcomp$<$<CONFIG:Debug>:${CMAKE_DEBUG_POSTFIX}>")
+  ELSE(MSVC)
+    SET(OPT_FLAG "-O3 ")
+    SET(VCOMP_LIB "vcomp")
+    IF("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+      SET(OPT_FLAG " ")
+      SET(VCOMP_LIB "vcompd")
+    ENDIF()
+  ENDIF(MSVC)
 
   IF(C_AVX_FOUND)
     IF(MSVC)
