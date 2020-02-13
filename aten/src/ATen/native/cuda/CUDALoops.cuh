@@ -241,8 +241,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
 }
 
 template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
-__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+__device__ inline void elementwise_kernel_impl(int N, func_t f, array_t data) {
   using return_t = typename function_traits<func_t>::result_type;
   using policies = memory::policies<num_threads, thread_work_size>;
   int remaining = N - policies::common::block_work_size * blockIdx.x;
@@ -254,8 +253,28 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 }
 
+template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void elementwise_kernel(int N, func_t f, array_t data) {
+  elementwise_kernel_impl<vec_size, num_threads, thread_work_size>(N, f, data);
+}
+
+template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void elementwise_kernel_with_index(int N, func_t f, array_t data) {
+  int counter = 0;
+  int base = num_threads * thread_work_size * blockIdx.x + threadIdx.x;
+  auto f = [&counter, base]() GPU_LAMBDA {
+    int index = base + (counter++) * num_threads ;
+    return f(index);
+  }
+  elementwise_kernel_impl<vec_size, num_threads, thread_work_size>(N, f, data);
+}
+
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
+template<int nt, int vt, typename func_t, typename array_t,
+  template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t> elementwise_kernel = elementwise_kernel,
+  std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
@@ -281,9 +300,45 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
+template<int nt, int vt, typename func_t, typename array_t,
+  template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t> elementwise_kernel = elementwise_kernel,
+  std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 } // namespace modern
+
+template <typename func_t>
+void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+
+
+  // Note:
+  // `gpu_kernel_with_index` was originally implemented in PR #28175 with support
+  // of having an arbitrary number of tensors as arguments. This support was removed
+  // during the process of refactoring Loops.cuh to support vectorized memory access
+  // in PR #32777 (See also issue #31975). The removal of this support is soly because
+  // at that time, there is no operator using that functionality. If you need this
+  // functionality, feel free to add it back.
+  static_assert(traits::arity == 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
+
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 1);
+
+  using ptrs_t = at::detail::Array<char*, 1>;
+  ptrs_t data;
+  data[0] = (char*)iter.data_ptr(0);
+
+  int64_t numel = iter.numel();
+  if (iter.is_trivial_1d() && iter.has_contiguous_first_dim()) {
+    modern::launch_kernel<C10_WARP_SIZE * 2, 4, func_t, ptrs_t, elementwise_kernel_with_index>(numel, f, data);
+  } else {
+    auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
+    legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      auto offsets = offset_calc.get(idx);
+      arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
+      *out = f(idx);
+    });
+  }
+}
 
 }} // namespace at::native
