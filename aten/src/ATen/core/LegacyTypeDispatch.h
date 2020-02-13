@@ -25,7 +25,12 @@ class CAFFE2_API LegacyTypeDispatch {
     // problem is that you may get a DispatchKeySet with
     // VariableTensorId set; should you initialize the "underlying"
     // type in that case?  Hard to say.
-    auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
+    auto key = legacyExtractDispatchKey(ts);
+    initForDispatchKey(key);
+  }
+
+  void initForDispatchKey(DispatchKey key) {
+    auto b = dispatchKeyToBackend(key);
     auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;

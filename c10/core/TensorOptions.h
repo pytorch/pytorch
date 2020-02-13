@@ -6,11 +6,11 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/DefaultTensorOptions.h>
 
 #include <c10/util/Optional.h>
 #include <c10/util/C++17.h>
 #include <c10/macros/Macros.h>
-
 #include <cstddef>
 #include <iosfwd>
 #include <utility>
@@ -342,7 +342,11 @@ struct C10_API TensorOptions {
     return DispatchKeySet(computeDispatchKey()).add(DispatchKey::BackendSelect);
   }
 
-  inline static DispatchKey computeDispatchKey(ScalarType dtype, Layout layout, Device device) {
+  inline static DispatchKey computeDispatchKey(c10::optional<ScalarType> inDtype, c10::optional<Layout> inLayout, c10::optional<Device> inDevice) {
+    auto dtype = inDtype.value_or(typeMetaToScalarType(getDefaultTensorOptions().dtype()));
+    auto layout = inLayout.value_or(getDefaultTensorOptions().layout());
+    auto device = inDevice.value_or(getDefaultTensorOptions().device());
+
     switch (layout) {
       case Layout::Strided:
         switch (device.type()) {

@@ -222,6 +222,8 @@ static inline ${return_type} _${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
+    auto dispatchKey = TensorOptions::computeDispatchKey(dtype, layout, device);
+    globalLegacyTypeDispatch().initForDispatchKey(dispatchKey);
     static c10::OperatorHandle op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
     return op.callUnboxed<${formals_types_with_return}>(${native_actuals});
