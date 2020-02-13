@@ -59,7 +59,7 @@ struct PeepholeOptimizeImpl {
         // initialized as None.
         for (Value* output : node->outputs()) {
           if (output->type()->cast<NoneType>()) {
-            output->replaceAllUsesWith(graph_->insertConstant(IValue());
+            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
           }
         }
       }
