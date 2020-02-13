@@ -188,6 +188,7 @@ void testLiteInterpreterQuant() {
 
   std::stringstream ss;
   m._save_for_mobile(ss);
+  m._save_for_mobile("/Users/myuan/data/lstm/linear.bc");
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 1; ++i) {
