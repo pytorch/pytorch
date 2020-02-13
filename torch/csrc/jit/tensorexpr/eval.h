@@ -170,11 +170,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMax:
-          if (option) {
+          if (lhs.dtype() == kFloat32 && rhs.dtype() == kFloat32 && option) {
             // Propagate NaNs
-            if (std::isnan(lhs_v[i])) {
+            if (std::isnan((float)lhs_v[i])) {
               result_v[i] = lhs_v[i];
-            } else if (std::isnan(rhs_v[i])) {
+            } else if (std::isnan((float)rhs_v[i])) {
               result_v[i] = rhs_v[i];
             }
           } else {
@@ -182,11 +182,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           }
           break;
         case IRNodeType::kMin:
-          if (option) {
+          if (lhs.dtype() == kFloat32 && rhs.dtype() == kFloat32 && option) {
             // Propagate NaNs
-            if (std::isnan(lhs_v[i])) {
+            if (std::isnan((float)lhs_v[i])) {
               result_v[i] = lhs_v[i];
-            } else if (std::isnan(rhs_v[i])) {
+            } else if (std::isnan((float)rhs_v[i])) {
               result_v[i] = rhs_v[i];
             }
           } else {
