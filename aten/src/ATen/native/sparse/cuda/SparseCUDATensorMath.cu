@@ -987,9 +987,8 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
   result.resize_({self.size(0), mat2.size(2), self.size(1)});
-  result.zero_();
 
-  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  auto cusparse_handle = at::cuda::getCurrentCUDASparseHandle();
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
@@ -1092,7 +1091,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           scalar_t beta_val = beta.to<scalar_t>();
 
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
-            handle,
+            cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
             (void*)&alpha_val,
@@ -1112,7 +1111,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           }
 
           TORCH_CUDASPARSE_CHECK(cusparseSpMM(
-            handle,
+            cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
             CUSPARSE_OPERATION_TRANSPOSE,
             (void*)&alpha_val,
