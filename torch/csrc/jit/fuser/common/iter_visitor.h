@@ -9,13 +9,21 @@ namespace jit {
 namespace fuser {
 
 struct Statement;
+struct Val;
+struct Expr;
+
+struct TensorDomain;
+struct TensorView;
+struct IterDomain;
 struct Tensor;
 struct Float;
 struct Int;
+
 struct UnaryOp;
 struct BinaryOp;
-struct Val;
-struct Expr;
+struct Split;
+struct Merge;
+struct Reorder;
 
 struct FusionGurad;
 struct Fusion;
@@ -38,13 +46,23 @@ public:
   std::vector<const Statement*> next(const Val* const v);
 
   virtual void handle(const Statement* const stmt);
-  virtual void handle(const Expr* const expr);
-  virtual void handle(const Val* const val);
-  virtual void handle(const Float* const f);
-  virtual void handle(const Tensor* const t);
-  virtual void handle(const Int* const i);
-  virtual void handle(const UnaryOp* const uop);
-  virtual void handle(const BinaryOp* const bop);
+  
+  virtual void handle(const Expr* const);
+  virtual void handle(const Val* const);
+  
+  virtual void handle(const TensorDomain* const);
+  virtual void handle(const TensorView* const);
+  virtual void handle(const IterDomain* const);
+  virtual void handle(const Tensor* const);
+
+  virtual void handle(const Float* const);
+  virtual void handle(const Int* const);
+  
+  virtual void handle(const UnaryOp* const);
+  virtual void handle(const BinaryOp* const);
+  virtual void handle(const Split* const);
+  virtual void handle(const Merge* const);
+  virtual void handle(const Reorder* const);
 
   void traverse(const Fusion* const _fusion,  bool from_outputs_only, bool breadth_first);
 

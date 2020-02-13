@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/fusion.h>
 
 namespace torch {
 namespace jit {
@@ -43,6 +44,44 @@ bool Tensor::hasContiguityInfo() {
 
 const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() {
   return contiguity_;
+}
+
+/*
+ * Split, Merge, Reorder constructors
+ */ 
+
+Split::Split(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , int _axis
+  , const Int* _factor)
+  : Expr(ExprType::Split) , out_{_out} , in_{_in}, axis_{_axis}, factor_{_factor}
+{
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+Merge::Merge(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , int _axis)
+  : Expr(ExprType::Merge) , out_{_out} , in_{_in}, axis_{_axis}
+{
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+Reorder::Reorder(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , std::vector<int> _pos2axis)
+  : Expr(ExprType::Reorder) , out_{_out} , in_{_in}, pos2axis_{_pos2axis}
+{
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 }}}

@@ -236,8 +236,7 @@ void testGPU_FusionTensorDomain() {
 
   const TensorView *tv = new TensorView(t, new TensorDomain(view_size));
   std::cout<<"Modified view: "<<tv<<std::endl;
-  //  std::cout<<"Fusion: "<<fusion<<std::endl;
-
+  std::cout<<"Fusion: "<<fusion<<std::endl;
 
 }
 

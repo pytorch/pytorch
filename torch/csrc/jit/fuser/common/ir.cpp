@@ -100,9 +100,18 @@ template <typename T>
 void Statement::dispatch(T handler) const {
   if (isVal()) {
     switch (*getValType()) {
-      case ValType::Tensor:
+      case ValType::TensorDomain:
         ptr(handler)->handle(static_cast<const Tensor*>(this));
         return;
+      case ValType::TensorView:
+        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        return;
+      case ValType::IterDomain:
+        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        return;
+      case ValType::Tensor:
+        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        return;        
       case ValType::Scalar:
         switch (*getDataType()) {
           case DataType::Float:
@@ -173,7 +182,7 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
 
           case DataType::Int:
             return ptr(mutator)->mutate(static_cast<const Int*>(this));
-            
+
           default:
             break;
         }

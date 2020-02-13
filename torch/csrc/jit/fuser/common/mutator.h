@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/fuser/common/ir.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <iostream>
 
@@ -23,10 +24,21 @@ struct TORCH_API BaseMutator {
 
   void mutate(Fusion* fusion);
   const Statement* mutate(const Statement* const statement);
-  const Statement* mutate(const Float* const f);
-  const Statement* mutate(const Int* const i);
-  const Statement* mutate(const UnaryOp* const uop);
-  const Statement* mutate(const BinaryOp* const bop);
+
+  const Statement* mutate(const UnaryOp* const);
+  const Statement* mutate(const BinaryOp* const);
+  const Statement* mutate(const Split* const);
+  const Statement* mutate(const Merge* const);
+  const Statement* mutate(const Reorder* const);
+
+  const Statement* mutate(const TensorDomain* const);
+  const Statement* mutate(const TensorView* const);
+  const Statement* mutate(const IterDomain* const);
+  const Statement* mutate(const Tensor* const);
+
+  const Statement* mutate(const Float* const);
+  const Statement* mutate(const Int* const);
+  
 
 };
 

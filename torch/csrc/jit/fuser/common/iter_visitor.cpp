@@ -46,15 +46,27 @@ void IterVisitor::handle(const Val* const val) {
   val->dispatch(this);
 }
 
-void IterVisitor::handle(const Float* const f) {}
+void IterVisitor::handle(const TensorDomain* const t) {}
+
+void IterVisitor::handle(const TensorView* const t) {}
+
+void IterVisitor::handle(const IterDomain* const t) {}
 
 void IterVisitor::handle(const Tensor* const t) {}
+
+void IterVisitor::handle(const Float* const f) {}
 
 void IterVisitor::handle(const Int* const i) {}
 
 void IterVisitor::handle(const UnaryOp* const uop) {}
 
 void IterVisitor::handle(const BinaryOp* const bop) {}
+
+void IterVisitor::handle(const Split* const split) {}
+
+void IterVisitor::handle(const Merge* const merge) {}
+
+void IterVisitor::handle(const Reorder* const reoder) {}
 
 void IterVisitor::traverse(const Fusion* const fusion, bool from_outputs_only, bool breadth_first) {
   if(breadth_first)

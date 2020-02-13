@@ -1,3 +1,5 @@
+#pragma once
+
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
@@ -120,6 +122,93 @@ struct TORCH_API TensorView : public Val {
   const Tensor* tensor;
   const TensorDomain* view;
 
+};
+
+/*
+ * Split an axis, by factor factor
+ * TODO: Implement split by nparts
+ */
+struct TORCH_API Split : public Expr{
+  ~Split() = default;
+  Split(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , int _axis
+  , const Int* _factor);
+
+  const Val* out() const noexcept { return out_; }
+  const Val* in()  const noexcept { return in_; }
+  const int axis()  const noexcept { return axis_; }
+  const Val* factor()  const noexcept { return factor_; }
+
+  Split(const Split& other) = delete;
+  Split& operator=(const Split& other) = delete;
+
+  Split(Split&& other) = delete;
+  Split& operator=(Split&& other) = delete;
+
+private:
+  const TensorDomain* out_;
+  const TensorDomain* in_;
+  const int axis_;
+  const Int* factor_;
+};
+
+/*
+ * Merge axis _axis with the following axis. Both axis must be of the same
+ * iter or reduction axis, as well as the same parallelization strategy if
+ * there is one.
+ * TODO: Should this be a unary op type?
+ */
+struct TORCH_API Merge : public Expr{
+  ~Merge() = default;
+  Merge(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , int _axis);
+
+  Merge(const Merge& other) = delete;
+  Merge& operator=(const Merge& other) = delete;
+
+  Merge(Merge&& other) = delete;
+  Merge& operator=(Merge&& other) = delete;
+
+  const Val* out() const noexcept { return out_; }
+  const Val* in()  const noexcept { return in_; }
+  const int axis()  const noexcept { return axis_; }
+  
+
+private:
+  const TensorDomain* out_;
+  const TensorDomain* in_;
+  const int axis_;
+};
+
+/*
+ * Reorder axis of a tensor domain with the map
+ * pos2axis[new_position] = old_position
+ */
+struct TORCH_API Reorder : public Expr{
+  ~Reorder() = default;
+  Reorder(
+    const TensorDomain* _out
+  , const TensorDomain* _in
+  , std::vector<int> _pos2axis);
+
+  Reorder(const Reorder& other) = delete;
+  Reorder& operator=(const Reorder& other) = delete;
+
+  Reorder(Reorder&& other) = delete;
+  Reorder& operator=(Reorder&& other) = delete;
+
+  const Val* out() const noexcept { return out_; }
+  const Val* in()  const noexcept { return in_; }
+  const std::vector<int> pos2axis() const noexcept { return pos2axis_;}
+
+private:
+  const TensorDomain* out_;
+  const TensorDomain* in_;
+  const std::vector<int> pos2axis_;
 };
 
 }}}

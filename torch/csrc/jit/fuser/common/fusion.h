@@ -308,12 +308,6 @@ struct TORCH_API Fusion : public IRInputOutput {
   std::unordered_map<const Val*, std::set<const Expr*>> uses_;
 };
 
-/// Convenience methods to be able to print fusions and vals.
-TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& fusion);
-TORCH_API std::ostream& operator<<(
-    std::ostream& os,
-    const std::deque<const Val*>& vals);
-
 } // namespace fuser
 } // namespace jit
 } // namespace torch

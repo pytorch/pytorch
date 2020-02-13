@@ -45,7 +45,12 @@ std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
 
 std::ostream& operator<<(std::ostream& os, const Val* const val) {
   switch (*(val->getValType())) {
-
+    case ValType::TensorDomain:
+      return os << static_cast<const TensorDomain* const>(val);
+    case ValType::TensorView:
+      return os << static_cast<const TensorView* const>(val);
+    case ValType::IterDomain:
+      return os << static_cast<const IterDomain* const>(val);      
     case ValType::Tensor:
       return os << static_cast<const Tensor* const>(val);
 
@@ -71,6 +76,12 @@ std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
       return os << static_cast<const UnaryOp*>(expr);
     case ExprType::BinaryOp:
       return os << static_cast<const BinaryOp*>(expr);
+    case ExprType::Split:
+      return os << static_cast<const Split*>(expr);
+    case ExprType::Merge:
+      return os << static_cast<const Merge*>(expr);
+    case ExprType::Reorder:
+      return os << static_cast<const Reorder*>(expr);
   }
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
@@ -147,6 +158,18 @@ std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
 
 std::ostream& operator<<(std::ostream& os, const Fusion& f) {
   return os << &f;
+}
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const split){
+  return os << "Split: " << split->in() << " axis " << split->axis() << " by factor " << split->factor() << " -> " << split->out();
+}
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const merge){
+  return os << "Merge: " << merge->in() << " axis " << merge->axis() << " with the following -> " << merge->out();
+}
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const reorder){
+  return os << "Reorder: " << reorder->in() << " -> " << reorder->out();
 }
 
 } // namespace fuser
