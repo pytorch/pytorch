@@ -217,7 +217,8 @@ NetDef TvmTransformer::applyTvmTransform(
         "DotProduct", "Transpose",
         "Mul",        "Tanh",
         "Logit",      "Cast",
-        "Copy",       "ReplaceNaN"};
+        "Copy",       "ReplaceNaN",
+        "Clip"};
 
     try {
       // If the op position is black listed, return false
