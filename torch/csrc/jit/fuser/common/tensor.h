@@ -19,6 +19,19 @@ struct TORCH_API IterDomain : public Val {
   , parallel_method_(_parallel_method)
   , reduction_domain_(_reduction_domain) { }
   
+  IterDomain(
+    const Val* int_size
+  , ParallelType _parallel_method = ParallelType::Serial
+  , bool _reduction_domain = false)
+  : Val(ValType::IterDomain, DataType::Int)
+  , size_(static_cast<const Int*> (int_size) )
+  , parallel_method_(_parallel_method)
+  , reduction_domain_(_reduction_domain) {
+    assert(int_size->isVal());
+    assert(int_size->getDataType() == DataType::Int);
+  }
+  
+
   bool isReduction() const noexcept{return reduction_domain_;}
   ParallelType parallel_method() const noexcept{return parallel_method_;}
   const Int* size() const noexcept {return size_;}

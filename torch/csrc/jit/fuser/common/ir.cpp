@@ -157,12 +157,23 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
       case ValType::Tensor:
         return ptr(mutator)->mutate(static_cast<const Tensor*>(this));
 
+      case ValType::TensorDomain:
+        return ptr(mutator)->mutate(static_cast<const TensorDomain*>(this));
+
+      case ValType::TensorView:
+        return ptr(mutator)->mutate(static_cast<const TensorView*>(this));
+
+      case ValType::IterDomain:
+        return ptr(mutator)->mutate(static_cast<const IterDomain*>(this));
+
       case ValType::Scalar:
         switch(*getDataType()){
           case DataType::Float:
             return ptr(mutator)->mutate(static_cast<const Float*>(this));
+
           case DataType::Int:
             return ptr(mutator)->mutate(static_cast<const Int*>(this));
+            
           default:
             break;
         }
@@ -171,6 +182,7 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
     }
     throw std::runtime_error("Unknown valtype in dispatch_mutator!");
   }
+
 
   if (isExpr()) {
     switch (*getExprType()) {
