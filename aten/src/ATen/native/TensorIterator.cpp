@@ -895,7 +895,7 @@ int TensorIterator::get_dim_to_split() const {
 }
 
 bool TensorIterator::fast_set_up() {
-  // This function trys to do a fast setup to avoid needless reordering of dimensions and tracking output strides
+  // This function tries to do a fast setup to avoid needless reordering of dimensions and tracking output strides
   // Return true if it can do fast setup or false otherwise
   // TODO enable fast handling for reductions
   FastSetupType setup_type = compute_fast_setup_type();
@@ -929,9 +929,9 @@ bool TensorIterator::fast_set_up() {
         }
         break;
       }
-    case FastSetupType::NON_CONTIGUOUS:
+    case FastSetupType::NON_OVERLAPPING_DENSE:
       {
-        // find the index of a defined tensor in operands_
+        // find the index of a defined tensor in operands_ start from input tensor
         int i_defined;
         for (i_defined = ntensors() - 1; i_defined >= 0; --i_defined) {
           if (operands_[i_defined].tensor.defined()) break;
@@ -943,6 +943,12 @@ bool TensorIterator::fast_set_up() {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
             op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
             op.current_dtype = op.target_dtype;
+          }
+          else if (op.is_output && resize_outputs_ && !op.is_read_write) {
+            // Check whether output tensor needs restride, output's stride can be different than input tensors
+            if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
+              op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
+            }
           }
         }
         break;
@@ -995,9 +1001,9 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
-    bool restride_output = false;
-    // iterate from back to favor input's strides since we will restride the output tensor
-    // if only output's stride is not the same as input and all inputs' stride are the same
+    // iterate from back to favor inputs' strides, then we check output strides.
+    // if only the output's strides is inconstent but all inputs' strides are equal,
+    // it is still a NON_OVERLAPPING_DENSE case and output will be restrided in fast_set_up()
     for (int64_t i = ntensors() - 1; i >= 0; --i) {
       const auto& op = operands_[i];
       if (op.tensor.defined()) {
@@ -1009,21 +1015,10 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
           if (!resize_outputs_ || !op.is_output || op.is_read_write) {
             return FastSetupType::NONE;
           }
-          if (!restride_output) {
-            restride_output = true;
-          }
         }
       }
     }
-    if (restride_output) {
-      const auto& op = operands_[prev];
-      for (int64_t i = 0; i < num_outputs_; ++i) {
-        if (prev != i) {
-          operands_[i].tensor.as_strided_(op.tensor.sizes(), op.tensor.strides());
-        }
-      }
-    }
-    return FastSetupType::NON_CONTIGUOUS;
+    return FastSetupType::NON_OVERLAPPING_DENSE;
   }
   return FastSetupType::NONE;
 }

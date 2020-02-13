@@ -136,7 +136,7 @@ enum class FastSetupType : uint8_t {
   NONE,
   CONTIGUOUS,
   CHANNELS_LAST,
-  NON_CONTIGUOUS
+  NON_OVERLAPPING_DENSE
 };
 
 enum class CommonDTypeStrategy : uint8_t {
