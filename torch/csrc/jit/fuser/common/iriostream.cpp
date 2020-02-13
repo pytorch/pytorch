@@ -132,7 +132,7 @@ std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
 std::ostream& operator<<(
     std::ostream& os,
     const TensorContiguity* const t) {
-  os << "format_tag: " << t->getContiguityTag();
+  return os << "format_tag: " << t->getContiguityTag();
 }
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {

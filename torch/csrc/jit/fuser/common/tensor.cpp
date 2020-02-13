@@ -99,11 +99,13 @@ const TensorView* split(const Tensor* tensor, int axis, int factor) {
 
       // outer loop IterDomain
       const IterDomain* ido = new IterDomain(so);
+      new_domain.push_back(ido);
+
       // inner loop IterDomain
       const IterDomain* idi = new IterDomain(fact);
+      new_domain.push_back(idi);
     }
   }
-  // const TensorView* tv = ;
   return new TensorView(tensor, new TensorDomain(new_domain));
 }
 
