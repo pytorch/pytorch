@@ -63,7 +63,8 @@ class OutputMinMaxNetObserver final : public NetObserver {
   explicit OutputMinMaxNetObserver(
       NetBase* subject,
       const std::string& out_file_name,
-      int dump_freq = -1);
+      int dump_freq = -1,
+      string delimiter = " ");
   ~OutputMinMaxNetObserver();
 
  private:
@@ -74,6 +75,7 @@ class OutputMinMaxNetObserver final : public NetObserver {
 
   int dump_freq_, cnt_;
   const std::string out_file_name_;
+  std::string delimiter_;
   std::vector<std::shared_ptr<OutputMinMaxObserver::OperatorInfo>>
       min_max_infos_;
 };
@@ -135,7 +137,9 @@ class HistogramNetObserver final : public NetObserver {
       const std::string& out_file_name,
       int nbins,
       int dump_freq = -1,
-      bool mul_nets = false);
+      bool mul_nets = false,
+      string op_filter = "",
+      string delimiter = " ");
   ~HistogramNetObserver();
 
  private:
@@ -150,6 +154,9 @@ class HistogramNetObserver final : public NetObserver {
    * files for the nets will be appended with netbase addresses.
    */
   bool mul_nets_;
+  string net_name_;
+  string op_filter_;
+  string delimiter_;
   const std::string out_file_name_;
   std::vector<std::shared_ptr<HistogramObserver::Info>> hist_infos_;
 };
@@ -162,7 +169,8 @@ class OutputColumnMaxHistogramNetObserver final : public NetObserver {
       const std::vector<std::string>& observe_column_max_for_blobs,
       int nbins,
       int dump_freq = -1,
-      bool mul_nets = false);
+      bool mul_nets = false,
+      string delimiter = " ");
   ~OutputColumnMaxHistogramNetObserver();
 
  private:
@@ -173,6 +181,7 @@ class OutputColumnMaxHistogramNetObserver final : public NetObserver {
   int dump_freq_, cnt_;
   bool mul_nets_;
   const std::string out_file_name_;
+  std::string delimiter_;
   std::unordered_set<std::string> col_max_blob_names_;
 
   // {op_idx: {output_index: col_hists}}

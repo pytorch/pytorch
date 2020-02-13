@@ -1164,7 +1164,7 @@ softplus(input, beta=1, threshold=20) -> Tensor
 Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
 
 For numerical stability the implementation reverts to the linear function
-for inputs above :attr:`threshold` (default ``20``).
+when :math:`input \times \beta > threshold`.
 
 See :class:`~torch.nn.Softplus` for more details.
 """)
@@ -2498,7 +2498,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         be used to infer new scales for the interpolation. This is the current
         default behavior when recompute_scale_factor is not specified.
         The default behavior for recompute_scale_factor will change to False
-        in 1.5.0, and scale_factor will be used in the interpolation
+        in 1.6.0, and scale_factor will be used in the interpolation
         calculation.
 
     .. include:: cuda_deterministic_backward.rst
@@ -2520,7 +2520,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
             if is_float_scale_factor:
                 warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
                               "instead of relying on the computed output size. "
                               "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")
