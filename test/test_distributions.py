@@ -144,19 +144,6 @@ EXAMPLES = [
         {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
          'total_count': torch.tensor(0.)},
     ]),
-    Example(MixtureSameFamily, [
-        {
-            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
-                                             torch.rand(5, requires_grad=True)),
-        },
-        {
-            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
-            'component_distribution': MultivariateNormal(
-                loc=torch.randn(5, 2, requires_grad=True),
-                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
-        },     
-    ]),
     Example(Multinomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
@@ -443,7 +430,20 @@ EXAMPLES = [
             'scale': torch.randn(5, 5).abs().requires_grad_(),
             'concentration': torch.randn(1).abs().requires_grad_()
         }
-    ])
+    ]),
+    Example(MixtureSameFamily, [
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+                                             torch.rand(5, requires_grad=True)),
+        },
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': MultivariateNormal(
+                loc=torch.randn(5, 2, requires_grad=True),
+                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
+        },     
+    ]) 
 ]
 
 BAD_EXAMPLES = [
