@@ -266,14 +266,21 @@ class MyScriptClass:
         self.a = 10
 
 
+@torch.jit.interface
+class MyModuleInterface(torch.nn.Module):
+    def forward(self):
+        # type: () -> Tensor
+        pass
+
 class MyScriptModule(torch.jit.ScriptModule):
     def __init__(self):
         super().__init__()
-        self.a = 10
+        self.a = torch.randn(5)
 
     @torch.jit.script_method
-    def my_method(self):
-        self.a = 11
+    def forward(self):
+        # type: () -> Tensor
+        return self.a
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -881,14 +888,14 @@ class RpcTest(RpcAgentTestFixture):
         ):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
+                _qualified_name(MyScriptModule().forward),
                 args=(),
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
             ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule().my_method, args=()
+                "worker{}".format(dst_rank), MyScriptModule().forward, args=()
             )
 
     @dist_init
@@ -1745,3 +1752,19 @@ class RpcJitTest(RpcAgentTestFixture):
 
         res = rref_tensor_is_owner(rref_var)
         self.assertEqual(res, False)
+
+    @dist_init
+    def test_local_rref_with_script_module(self):
+        # create a local RRef that hold a ScriptModule
+        script_mod = MyScriptModule()
+        rref_module = rpc.RRef(script_mod._c)
+
+        @torch.jit.script
+        def rref_script_module(rref_module):
+            # type: (RRef[MyModuleInterface]) -> Tensor
+            return rref_module.to_here().forward()
+
+        # pass the local created RRef module to jit
+        res = rref_script_module(rref_module)
+
+        self.assertEqual(res, script_mod.forward())

@@ -176,8 +176,10 @@ inline InferredType tryToInferType(py::handle input) {
   if (py::isinstance<script::Object>(input)) {
     auto object = py::cast<script::Object>(input);
     return InferredType(object.type());
+  } else if (auto mod = script::as_module(py::cast<py::object>(input))) {
+    // if obj is already a torch.jit.ScriptModule, return its cpp_module's type
+    return InferredType(mod.value().type());
   }
-
   // Try container types
   return tryToInferContainerType(input);
 }
