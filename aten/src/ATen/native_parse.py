@@ -226,6 +226,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
+    
     # add explicit support for what is needed for tril_indices / triu_indices
     supported_topt_arguments.append(
         [
@@ -237,9 +238,24 @@ def parse_arguments(args, func_variants, declaration, func_return):
              'default': 'c10::nullopt', 'is_nullable': True},
             {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
              'default': 'c10::nullopt', 'is_nullable': True},
+        ])
+    supported_topt_arguments.append(
+        [
+            {'type': 'ScalarType', 'name': 'dtype', 'is_nullable': True, 'annotation': None, 'kwarg_only': True}, 
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True, 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True, 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True, 'default': False, 'is_nullable': True},
         ]
     )
-
+    supported_topt_arguments.append(
+        [
+            {'type': 'ScalarType', 'name': 'dtype', 'is_nullable': True, 'annotation': None, 'kwarg_only': True}, 
+            {'type': 'Layout', 'name': 'layout', 'is_nullable': True, 'annotation': None, 'kwarg_only': True}, 
+            {'type': 'Device', 'name': 'device', 'is_nullable': True, 'annotation': None, 'kwarg_only': True}, 
+            {'type': 'bool', 'name': 'pin_memory', 'is_nullable': True, 'annotation': None, 'default': False, 'kwarg_only': True}
+        ]
+    )
+    
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
     ]
@@ -250,12 +266,20 @@ def parse_arguments(args, func_variants, declaration, func_return):
     corresponding_topts.append(
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
             matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
             if matches:
                 return corresponding_topts[idx]
+            else:
+                print("\n\n\n")
+                print(topt_representation)
+                print("\nVS")
+                print(supported_topt)
         return None
 
     def is_tensor_option(argument):
@@ -274,7 +298,11 @@ def parse_arguments(args, func_variants, declaration, func_return):
                     break
                 topt_representation.append(argument)
                 idx += 1
+            
             if len(topt_representation) == number_of_arguments:
+                if declaration['name'] == '_cudnn_init_dropout_state':
+                    print("\n\n\n")
+                    print(topt_representation)
                 merged_argument = check_topt_representation(topt_representation)
                 assert merged_argument, \
                     "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\

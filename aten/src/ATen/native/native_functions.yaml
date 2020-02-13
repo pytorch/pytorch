@@ -146,7 +146,7 @@
   dispatch:
     CUDA: _cudnn_rnn_backward
 
-- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- func: _cudnn_init_dropout_state(float dropout, bool train, int dropout_seed, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False) -> Tensor
   dispatch:
     CUDA: _cudnn_init_dropout_state
 
