@@ -52,6 +52,18 @@ struct PeepholeOptimizeImpl {
         run(sub_block);
       }
 
+      if (node->kind() != prim::Constant) {
+        WithInsertPoint guard(node);
+        // Any Value whose type is None should be replaced with a Constant
+        // This can occur if a module has an optional attribute, and it is
+        // initialized as None.
+        for (Value* output : node->outputs()) {
+          if (output->type()->cast<NoneType>()) {
+            output->replaceAllUsesWith(graph_->insertConstant(IValue()));
+          }
+        }
+      }
+
       // XXX: remember that if you want to simplify an expression by combining
       // multiple nodes into a different one, then you need to check that they
       // all belong to the given block
