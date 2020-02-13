@@ -721,9 +721,6 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  // Fuse the dequant - op - quant patterns into quantized ops
-  QuantFusion(graph);
-
   FuseGraph(graph);
 
   // Run custom passes that different backends can register.

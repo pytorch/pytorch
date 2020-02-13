@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/passes/quantization.h>
 
 namespace torch {
 namespace jit {
@@ -76,6 +77,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     return;
   }
 
+  QuantFusion(copy);
   InsertGuards(copy);
   LowerGradOf(*copy);
   EliminateRedundantGuards(copy);
