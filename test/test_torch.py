@@ -368,7 +368,7 @@ class _TestTorchMixin(object):
             input = torch.linspace((d - 2) / 2, 10, 10)
             torch.mvlgamma(input, d)
 
-        with self.assertRaisesRegex(RuntimeError, "Condition for computing multivariate log-gamma not met"):
+        with self.assertRaisesRegex(RuntimeError, r"All elements must be greater than \(p-1\)/2"):
             run_test(3)
 
     def test_msnpu_error(self):
