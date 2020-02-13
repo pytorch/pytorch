@@ -55,7 +55,7 @@ RegisterOperators reg_rpc_ops({
         "aten::is_owner(RRef(t) self) -> bool",
         [](Stack& stack) {
           auto rref = pop(stack).toRRef();
-          push(stack, std::move(rref->isOwner()));
+          push(stack, rref->isOwner());
           return 0;
         },
         aliasAnalysisFromSchema()),
