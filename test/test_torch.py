@@ -13739,17 +13739,20 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.max(), ub - 1)
 
     def test_random_bool(self, device):
-        t = torch.empty(200, dtype=torch.bool, device=device)
+        size = 2000
+        t = torch.empty(size, dtype=torch.bool, device=device)
 
         t.fill_(False)
         t.random_()
         self.assertEqual(t.min(), False)
         self.assertEqual(t.max(), True)
+        self.assertTrue(0.4 < (t == True).to(torch.int).sum().item() / size < 0.6)
 
         t.fill_(True)
         t.random_()
         self.assertEqual(t.min(), False)
         self.assertEqual(t.max(), True)
+        self.assertTrue(0.4 < (t == True).to(torch.int).sum().item() / size < 0.6)
 
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half)  # , torch.bfloat16
     def test_random_full_range(self, device, dtype):

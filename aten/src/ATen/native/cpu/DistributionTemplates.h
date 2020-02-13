@@ -46,7 +46,7 @@ void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
         return static_cast<int64_t>(generator->random64()); // use all 64 bits and cast it to signed(!!!) int64_t and only after that to scalar_t implicitly
       });
     } else {
-      TORCH_CHECK(false, "random_full_64_range_kernel handles only int64, double and float");
+      TORCH_CHECK(false, "random_full_64_range_kernel_cpu handles only int64, double and float");
     }
   });
 }

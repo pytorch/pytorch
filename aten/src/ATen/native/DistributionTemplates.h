@@ -67,8 +67,12 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         range = 2;
       } else {
         const auto t_max_val = std::numeric_limits<scalar_t>::max();
-        const auto int64_max_val = std::numeric_limits<int64_t>::max();
+        const auto int64_max_val = static_cast<int64_t>(static_cast<scalar_t>(std::numeric_limits<int64_t>::max()));
         const int64_t max_val = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
+        AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_update_from_to", [&] {
+          from = update_from<scalar_t>(from);
+          TORCH_CHECK(from <= max_val, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " > to=", max_val);
+        });
         range = max_val - from + 1;
       }
     });

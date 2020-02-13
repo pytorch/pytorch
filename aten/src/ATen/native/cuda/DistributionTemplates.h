@@ -225,26 +225,8 @@ void random_full_64_range_kernel(TensorIterator& iter, RNG* gen) {
           return ret;
         },
         random_func);
-    } else if (std::is_same<scalar_t, bool>::value) {
-      auto random_func = [] __device__ (uint32_t rand) {
-        return static_cast<scalar_t>(rand & 1);
-      };
-      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand4(state);
-        },
-        random_func);
     } else {
-      auto random_func = [] __device__ (uint32_t rand) {
-        return static_cast<scalar_t>(rand);
-      };
-      distribution_nullary_kernel<scalar_t, uint32_t, curand4_engine_calls>(iter,
-        gen,
-        [] __device__ (curandStatePhilox4_32_10_t* state) {
-          return curand4(state);
-        },
-        random_func);
+      TORCH_CHECK(false, "random_full_64_range_kernel_cuda handles only int64, double and float");
     }
   });
 }
