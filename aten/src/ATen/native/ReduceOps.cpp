@@ -186,6 +186,88 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
 }
 
+template<typename scalar_t, typename func_t>
+void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
+    int64_t dim, scalar_t init_v, func_t && op) {
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  TORCH_CHECK((0 <= wrap_dim && wrap_dim < self.dim())
+              || (0 == wrap_dim && wrap_dim == self.dim()) , "invaild dim to reduce");
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
+  if (self.numel() == 0) {
+    return;
+  }
+  const auto input_shape = self.sizes();
+  const auto input_ndim = self.dim();
+
+  if (input_ndim == 0) {
+    result.fill_(self);
+    return;
+  }
+
+  auto temp_tensor = result;
+  if (!result.is_contiguous()) {
+    temp_tensor = temp_tensor.contiguous();
+  }
+
+  auto n = input_shape[wrap_dim];
+  const int64_t M = std::accumulate(
+      input_shape.cbegin(),
+      input_shape.cbegin() + wrap_dim,
+      1LL,
+      std::multiplies<int64_t>()
+      );
+  const int64_t N = std::accumulate(
+      input_shape.cbegin() + wrap_dim + 1,
+      input_shape.cend(),
+      1LL,
+      std::multiplies<int64_t>()
+      );
+
+  auto self_ptr = self.data_ptr<scalar_t>();
+  auto out_ptr = temp_tensor.data_ptr<scalar_t>();
+  auto offset = N * n;
+  parallel_for(0, M, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
+    auto s_index =  offset * begin;
+    for (int64_t f = begin; f < end; ++f) {
+      for (auto j = 0; j < N; j++ ) {
+        scalar_t cum_number = init_v;
+        auto index = s_index;
+        for (auto k =0; k < n; k++) {
+          cum_number = op(cum_number, self_ptr[index + j]);
+          out_ptr[index + j] = cum_number;
+          index += N;
+        }
+      }
+      s_index += offset;
+    }
+  });
+
+  if (!result.is_contiguous()) {
+    result.copy_(temp_tensor);
+  }
+}
+
+Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  return at::native::_cumsum_out_cpu(result, self, dim);
+}
+
+Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumsum_out_cpu", [&] {
+    _cumop_out_cpu_template<scalar_t>(result,
+        self.contiguous(),
+        dim,
+        0,
+        [&](scalar_t a, scalar_t b) -> scalar_t {
+          return a + b;
+        }
+    );
+  });
+  return result;
+}
+
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -212,69 +294,6 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
   return result;
 }
 
-template<typename scalar_t>
-void _cumprod_out_cpu_template(Tensor& result, const Tensor& self, int64_t dim) {
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  TORCH_CHECK((0 <= wrap_dim && wrap_dim < self.dim())
-              || (0 == wrap_dim && wrap_dim == self.dim()) , "invaild dim to reduce");
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return;
-  }
-  const auto input_shape = self.sizes();
-  const auto input_ndim = self.dim();
-
-  if (input_ndim == 0) {
-    result.copy_(self);
-    return;
-  }
-
-  auto temp_tensor = result;
-  if (!result.is_contiguous()) {
-    temp_tensor = temp_tensor.contiguous();
-  }
-
-  auto n = input_shape[wrap_dim];
-  const int64_t M = std::accumulate(
-      input_shape.cbegin(),
-      input_shape.cbegin() + wrap_dim,
-      1LL,
-      std::multiplies<int64_t>()
-      );
-  const int64_t N = std::accumulate(
-      input_shape.cbegin() + wrap_dim + 1,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>()
-      );
-
-  auto self_ptr = self.data_ptr<scalar_t>();
-  auto out_ptr = temp_tensor.data_ptr<scalar_t>();
-  auto offset = N * n;
-  // grain_size = 200 is ok?
-  parallel_for(0, M, 200, [&](int64_t begin, int64_t end) {
-    auto s_index =  offset * begin;
-    for (int64_t f = begin; f < end; ++f) {
-      for (auto j = 0; j < N; j++ ) {
-        scalar_t cumprod = 1;
-        auto index = s_index;
-        for (auto k =0; k < n; k++) {
-          cumprod *= self_ptr[index + j];
-          out_ptr[index + j] = cumprod;
-          index += N;
-        }
-      }
-      s_index += offset;
-    }
-  });
-
-  if (!result.is_contiguous()) {
-    result.copy_(temp_tensor);
-  }
-}
-
 Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
   return at::native::_cumprod_out_cpu(result, self, dim);
@@ -282,7 +301,14 @@ Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
 
 Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumprod_out_cpu", [&] {
-    _cumprod_out_cpu_template<scalar_t>(result, self.contiguous(), dim);
+    _cumop_out_cpu_template<scalar_t>(result,
+        self.contiguous(),
+        dim,
+        1,
+        [&](scalar_t a, scalar_t b) -> scalar_t {
+          return a * b;
+        }
+    );
   });
   return result;
 }
