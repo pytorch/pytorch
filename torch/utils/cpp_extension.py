@@ -660,8 +660,6 @@ def CUDAExtension(name, sources, *args, **kwargs):
     kwargs['language'] = 'c++'
 
     define_macros = kwargs.get('define_macros', [])
-    if ROCM_HOME:
-        define_macros += [('__HIP_PLATFORM_HCC__', 1)]
     kwargs['define_macros'] = define_macros
 
     return setuptools.Extension(name, sources, *args, **kwargs)
