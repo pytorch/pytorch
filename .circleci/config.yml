@@ -2203,11 +2203,11 @@ workflows:
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2_7m_cu90_devtoolset7_static-without-deps_build
-      - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - setup
+#      - binary_mac_build:
+#          name: binary_macos_wheel_3_6_cpu_build
+#          build_environment: "wheel 3.6 cpu"
+#          requires:
+#            - setup
       - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_build
           build_environment: "conda 2.7 cpu"
@@ -2215,15 +2215,15 @@ workflows:
             - setup
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
-      - binary_mac_build:
-          name: binary_macos_libtorch_2_7_cpu_build
-          build_environment: "libtorch 2.7 cpu"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
+#      - binary_mac_build:
+#          name: binary_macos_libtorch_2_7_cpu_build
+#          build_environment: "libtorch 2.7 cpu"
+#          requires:
+#            - setup
+#          filters:
+#            branches:
+#              only:
+#                - master
       - binary_linux_test:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
           build_environment: "manywheel 2.7mu cpu devtoolset7"
