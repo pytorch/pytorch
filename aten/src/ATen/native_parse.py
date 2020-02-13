@@ -226,7 +226,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
-
     # add explicit support for what is needed for tril_indices / triu_indices
     supported_topt_arguments.append(
         [
@@ -293,7 +292,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
                     break
                 topt_representation.append(argument)
                 idx += 1
-
             if len(topt_representation) == number_of_arguments:
                 merged_argument = check_topt_representation(topt_representation)
                 assert merged_argument, \
