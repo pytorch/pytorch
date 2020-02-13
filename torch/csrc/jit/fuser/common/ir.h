@@ -262,7 +262,7 @@ struct TORCH_API Int : public Val {
   , maybe_value_{c10::nullopt} { }
 
   Int(
-    const float _value)
+    const int _value)
   : Val(ValType::Scalar, DataType::Int)
   , maybe_value_{_value} { }
 
