@@ -236,7 +236,7 @@ void checkAliasAnnotation(
   const auto inputsDeepCopy = deepCopy(stack);
 
   // Run the op
-  getOperation(node)(stack);
+  node->getOperation()(stack);
 
   const auto outputs = std::move(stack);
 
