@@ -4,27 +4,15 @@
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/type.h>
 
-<<<<<<< HEAD
-namespace torch {
-namespace jit {
-namespace fuser {
-// Return new value of type that v1 and v2 promotes to
-TORCH_API Val* promote_new(Val* v1, Val* v2) {
-  TORCH_CHECK(v1->isVal() && v2->isVal());
-  TORCH_CHECK(
-      v1->getDataType() != DataType::Null &&
-      v2->getDataType() != DataType::Null);
-
-  ValType out_vtype =
-      promote_type(v1->getValType().value(), v2->getValType().value());
-  DataType out_dtype =
-      promote_type(v1->getDataType().value(), v2->getDataType().value());
-
-  switch (out_vtype) {
+namespace torch{
+namespace jit{
+namespace fuser{
+TORCH_API const Val* new_val(ValType vtype, DataType dtype){
+  switch (vtype) {
     case (ValType::Tensor):
-      return new Tensor(out_dtype); // TODO add dtype here.
+      return new Tensor(dtype); // TODO add dtype here.
     case (ValType::Scalar):
-      switch (out_dtype) {
+      switch (dtype) {
         case (DataType::Float):
           return new Float();
         case (DataType::Int):
@@ -35,29 +23,27 @@ TORCH_API Val* promote_new(Val* v1, Val* v2) {
     default:
       break;
   }
-  std::runtime_error("Did not recognize out type.");
-  return new Int(-1);
+  throw std::runtime_error("Cannot promote types."); //Todo print val and data types in the error
+}
+
+TORCH_API const Val* promote_new(const Val* v1, const Val* v2) {
+  TORCH_CHECK(v1->isVal() && v2->isVal());
+  TORCH_CHECK(
+      v1->getDataType() != DataType::Null &&
+      v2->getDataType() != DataType::Null);
+
+  ValType out_vtype =
+      promote_type(v1->getValType().value(), v2->getValType().value());
+  DataType out_dtype =
+      promote_type(v1->getDataType().value(), v2->getDataType().value());
+
+  return new_val(out_vtype, out_dtype);
 }
 
 TORCH_API Val* add(Val* v1, Val* v2) {
   Val* out = promote_new(v1, v2);
   Statement* expr = new Add(out, v1, v2);
   return out;
-=======
-namespace torch{
-namespace jit{
-namespace fuser{
-TORCH_API Val* new_val(ValType type){
-    switch(type){
-        case(ValType::Tensor):
-            return new Tensor();
-        case(ValType::Float):
-            return new Float();
-        case(ValType::Int):
-            return new Int();
-    }
-    std::runtime_error("Did not recognize out type.");
-    return new Int(-1);
 }
 
 TORCH_API Val* cast_op(const DataType dtype, Val* v1){
@@ -71,18 +57,16 @@ TORCH_API Val* cast_op(const DataType dtype, Val* v1){
   return out;
 }
 
-TORCH_API Val* unary_op(UnaryOpType type, Val* v1){
-    Val* out = new_val(v1->getValType().value());
-    Statement* expr = new UnaryOp(type, out, v1);
-    return out;
+TORCH_API const Val* unary_op(UnaryOpType type, Val* v1){
+  const Val* out = new_val(v1->getValType().value(), v1->getDataType().value());
+  Statement* expr = new UnaryOp(type, out, v1);
+  return out;
 }
 
-TORCH_API Val* binary_op(BinaryOpType type, Val* v1, Val* v2){
-    ValType out_type = promote_scalar(v1->getValType().value(), v2->getValType().value());
-    Val* out = new_val(out_type);
-    Statement* expr = new BinaryOp(type, out, v1, v2);
-    return out;
->>>>>>> Create BinaryOp and UnaryOp Exprs.
+TORCH_API const Val* binary_op(BinaryOpType type, const Val* v1, const Val* v2){
+  const Val* out = promote_new(v1, v2);
+  Statement* expr = new BinaryOp(type, out, v1, v2);
+  return out;
 }
 
 } // namespace fuser

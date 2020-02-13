@@ -112,8 +112,8 @@ void testGPU_FusionRegister() {
   FusionGuard fg(&fusion);
   Float* v1 = new Float{1.f};
   Float* v2 = new Float{2.f};
-  Val* v3 = binary_op(BinaryOpType::Add, v1, v2);
-  Val* v4 = binary_op(BinaryOpType::Add, v1, v2);
+  const Val* v3 = binary_op(BinaryOpType::Add, v1, v2);
+  const Val* v4 = binary_op(BinaryOpType::Add, v1, v2);
   TORCH_CHECK(v1->name()+1 == v2->name());
   TORCH_CHECK(v2->name()+1 == v3->name());
   TORCH_CHECK(v3->name()+1 == v4->name());
@@ -220,6 +220,24 @@ void testGPU_FusionTensorDomain() {
 
   const Tensor *t = Tensor::MakeDummyTensor(3);
   std::cout << "A 3d tensor: " << t << std::endl;
+  std::vector<const IterDomain*> view_size;
+  view_size.push_back(t->domain->domain[0]);
+  view_size.push_back(t->domain->domain[1]);
+  const Val* d2 = static_cast<const Int*>(
+    binary_op( BinaryOpType::Div, t->domain->domain[2]->size(), new Int(2) )
+  );
+
+  const Val* d3 = static_cast<const Int*>(
+    binary_op( BinaryOpType::Mod, t->domain->domain[2]->size(), new Int(2) )
+  );
+
+  view_size.push_back( new IterDomain(d2) );
+  view_size.push_back( new IterDomain(d3) );
+
+  const TensorView *tv = new TensorView(t, new TensorDomain(view_size));
+  std::cout<<"Modified view: "<<tv<<std::endl;
+  //  std::cout<<"Fusion: "<<fusion<<std::endl;
+
 
 }
 
