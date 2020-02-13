@@ -381,7 +381,7 @@ class InsertObserversHelper {
   void insertObserverFor(
       Value* v,
       script::Module& module,
-      const c10::optional<QConfig>& qconfig);
+      const script::Module& observer_module);
 
   void skipValuesInFirstModule(
       const script::Module& module,
@@ -570,6 +570,11 @@ bool isWeightOfConvOrLinear(Value* v) {
   }
 }
 
+script::Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
+  return
+    isWeightOfConvOrLinear(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
+}
+
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
   std::string convolution = R"(
 graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
@@ -657,19 +662,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 void InsertObserversHelper::insertObserverFor(
     Value* v,
     script::Module& module,
-    const c10::optional<QConfig>& qconfig_opt) {
-  if (!qconfig_opt) {
-    return;
-  }
-
-  const auto& qconfig = *qconfig_opt;
-  script::Module observer_module;
-  if (isWeightOfConvOrLinear(v)) {
-    observer_module = std::get<1>(qconfig);
-  } else {
-    observer_module = std::get<0>(qconfig);
-  }
-
+    const script::Module& observer_module) {
   script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
@@ -922,6 +915,10 @@ void InsertObserversHelper::insertObservers(
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
+  if (!qconfig_opt) {
+    return;
+  }
+  auto qconfig = *qconfig_opt;
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -962,7 +959,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    insertObserverFor(v, module, qconfig_opt);
+    insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
   }
 }
 
