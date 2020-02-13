@@ -5,8 +5,7 @@ from cimodel.lib.conf_tree import Ver
 CONFIG_TREE_DATA = [
     (Ver("ubuntu", "16.04"), [
         ([Ver("gcc", "5")], [XImportant("onnx_py2")]),
-        ([Ver("clang", "7")], [XImportant("onnx_py3.6_higher")]),
-        ([Ver("clang", "7")], [XImportant("onnx_py3.6_lower")])
+        ([Ver("clang", "7")], [XImportant("onnx_py3.6"), XImportant("onnx_py3.6_part2")]),
     ]),
 ]
 
@@ -28,8 +27,8 @@ class TreeConfigNode(ConfigNode):
         return [self.child_constructor()(self, k, v) for (k, v) in self.subtree]
 
     def is_build_only(self):
-        if (str(self.find_prop("language_version")) == "onnx_py3.6_higher") or \
-                (str(self.find_prop("language_version")) == "onnx_py3.6_lower"):
+        if (str(self.find_prop("language_version")) == "onnx_py3.6") or \
+                (str(self.find_prop("language_version")) == "onnx_py3.6_part2"):
             return False
         return set(str(c) for c in self.find_prop("compiler_version")).intersection({
             "clang3.8",
