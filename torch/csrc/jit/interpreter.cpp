@@ -342,8 +342,6 @@ struct BailoutBlock {
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
 
-enum { IS_LIST_FLAG = 0x1, IS_TUPLE_FLAG = 0x2 };
-
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
