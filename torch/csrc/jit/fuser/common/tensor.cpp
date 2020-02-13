@@ -38,11 +38,11 @@ Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
 : Tensor(jit_value->type()->cast<c10::TensorType>()) {
 }
 
-bool Tensor::hasContiguityInfo() {
+bool Tensor::hasContiguityInfo() const {
   return contiguity_.has_value();
 }
 
-const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() {
+const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
   return contiguity_;
 }
 

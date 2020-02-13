@@ -12,15 +12,11 @@ namespace fuser {
 namespace {
 
 template<typename T>
-std::ostream& operator<<(std::ostream& os, const c10::optional<std::vector<T>>& data) {
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
   os << "(";
-  if (data.has_value()) {
-    for (auto i = data.value().begin(); i != data.value().end(); i++) {
-      os << (*i);
-      os << " ";
-    }
-  } else {
-    os << "?";
+  for (auto i = data.begin(); i != data.end(); i++) {
+    os << (*i);
+    os << " ";
   }
   return os << ")";
 }
@@ -123,11 +119,20 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id)
 }
 
 std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
-  os << "%T" << t->name();
+  os << "%T" << t->name(); 
+  if(t->getDataType().has_value())
+    os << " scalar_type: " << *(t->getDataType());
   if(t->domain != nullptr)
     os << " " << t->domain;
-  
+  if(t->hasContiguityInfo())
+    os << " " << &t->getContiguityInfo().value();
   return os;
+}
+
+std::ostream& operator<<(
+    std::ostream& os,
+    const TensorContiguity* const t) {
+  os << "format_tag: " << t->getContiguityTag();
 }
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {

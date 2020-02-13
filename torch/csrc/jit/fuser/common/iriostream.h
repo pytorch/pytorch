@@ -17,6 +17,8 @@ struct Tensor;
 struct TensorDomain;
 struct TensorView;
 
+struct TensorContiguity;
+
 struct IterDomain;
 
 struct Float;
@@ -33,6 +35,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Expr* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const Tensor* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const);
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const TensorContiguity* const);
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const);
 
