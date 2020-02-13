@@ -794,7 +794,7 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   }
 }
 
-variable_list Engine::graph_task_exec_post_processing(
+const variable_list& Engine::graph_task_exec_post_processing(
     const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
@@ -828,7 +828,6 @@ variable_list Engine::graph_task_exec_post_processing(
 
   return graph_task->captured_vars_;
 }
-
 
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine

@@ -27,7 +27,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     at::Tensor variable_grad,
     at::Tensor new_grad,
     bool has_post_hooks,
-    std::function<void(at::Tensor)> upgrad_grad_fn) {
+    std::function<void(at::Tensor&&)> update_grad_fn) {
   for (auto& hook : impl::hooks(variable)) {
     new_grad = (*hook)({new_grad})[0];
   }
@@ -36,20 +36,22 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
         new_grad.is_contiguous() &&
-        new_grad.use_count() <= 1 + has_post_hooks) {
+        new_grad.use_count() <= 2 + has_post_hooks) {
       // first check it is in first-order grad only mode
       // then check not sparse before is_contiguous
       // then check contiguous, otherwise later in place accumulation may fail
       // and lastly, check it is the last reference before we grab it.
       // If the function has post hooks (for example, a DDP allreduce hook),
-      // call_function in Engine.cpp will temporarily bump the refcount by one, hence the
-      // addition of !post_hooks().empty().
-      upgrad_grad_fn(new_grad.detach());
+      // call_function in Engine.cpp will temporarily bump the refcount by one,
+      // hence the addition of has_post_hooks.
+      // We use 2 + has_post_hooks instead of 1 + has_post_hooks since calling
+      // this function bumps the ref count.
+      update_grad_fn(new_grad.detach());
     } else {
       if (new_grad.is_sparse()) {
-        upgrad_grad_fn(new_grad.clone());
+        update_grad_fn(new_grad.clone());
       } else {
-        upgrad_grad_fn(new_grad.clone(at::MemoryFormat::Contiguous));
+        update_grad_fn(new_grad.clone(at::MemoryFormat::Contiguous));
       }
     }
   } else if (!GradMode::is_enabled()) {
@@ -61,7 +63,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // store the result. However, changing the TensorImpl type of a tensor requires
       // changing the tensor itself, and thus in this case we have to change the grad
       // tensor.
-      upgrad_grad_fn(new_grad + variable_grad);
+      update_grad_fn(new_grad + variable_grad);
     } else {
       // In this case we can avoid changing the grad tensor. There are three scenarios
       // when we'll hit this case:
@@ -76,7 +78,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       variable_grad += new_grad;
     }
   } else {
-    upgrad_grad_fn(variable_grad + new_grad);
+    update_grad_fn(variable_grad + new_grad);
   }
 }
 
@@ -99,7 +101,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       grad,
       new_grad,
       !post_hooks().empty(),
-      [&grad](at::Tensor grad_update) { grad = grad_update; });
+      [&grad](at::Tensor&& grad_update) { grad = grad_update; });
 
   return variable_list();
 }

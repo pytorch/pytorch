@@ -86,7 +86,7 @@ void DistAutogradContext::accumulateGrad(
       old_grad,
       grad,
       /* has_post_hooks */ false,
-      [this, &variable](at::Tensor grad_update) {
+      [this, &variable](at::Tensor&& grad_update) {
         accumulatedGrads_.insert(variable, grad_update);
       });
 }
