@@ -100,22 +100,15 @@ void createObject(Stack& stack, at::ClassTypePtr type) {
 
 void isinstance(
     Stack& stack,
-    at::ArrayRef<at::TypePtr> types,
-    bool is_list,
-    bool is_tuple) {
+    at::ArrayRef<at::TypePtr> types) {
   at::TypePtr ty = pop(stack).type();
-  if ((is_list && ty->kind() == at::ListType::Kind) ||
-      (is_tuple && ty->kind() == at::TupleType::Kind)) {
-    push(stack, true);
-    return;
-  } else {
-    for (const at::TypePtr& candidate : types) {
-      if (ty->isSubtypeOf(candidate)) {
-        push(stack, true);
-        return;
-      }
+  for (const at::TypePtr& candidate : types) {
+    if (ty->isSubtypeOf(candidate)) {
+      push(stack, true);
+      return;
     }
   }
+
   push(stack, false);
 }
 

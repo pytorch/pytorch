@@ -64,13 +64,12 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
-      TORCH_CHECK(ins_item.size() == 4,
+      TORCH_CHECK(ins_item.size() == 3,
                   "There should be three parts in an instruction.");
       OpCode op_code = parseOpCode(ins_item[0].toString()->string().c_str());
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
-      int flags = ins_item[3].toInt();
-      function->append_instruction(op_code, X, N, flags);
+      function->append_instruction(op_code, X, N);
     }
 
     for (const auto& op : ops_list) {

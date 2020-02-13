@@ -6,7 +6,7 @@
 namespace torch {
 namespace jit {
 // instruction look like:
-// op_code X, N, f
+// op_code X, N
 // meaning of X, N depend on the op:
 // O - index into operator table
 // R - index into register table
@@ -17,8 +17,6 @@ namespace jit {
 // T - index into the type table, used for guard instructions
 // S - index into object slots
 // C - index into code table
-//
-// f is a bitfield used in some ops
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -49,8 +47,7 @@ namespace jit {
   _(LIST_CONSTRUCT, "TI") /* construct a list of type X, using N inputs */  \
   _(DICT_CONSTRUCT, "TI") /* construct a dict of type X, using N inputs */  \
   _(CREATE_OBJECT, "T") /* create an object of type X */                    \
-  _(ISINSTANCE, "TIf") /* check object is one of  types[X:X+N] or is a list \
-                          (flag 0x1) or tuple (flag 0x2) */                 \
+  _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */           \
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                             \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */    \
   _(WARN, "") /* emit a warning with line information */
@@ -63,12 +60,12 @@ enum OpCode : uint8_t {
 
 struct Instruction {
   OpCode op;
-  uint8_t flags;
+  uint8_t unused;
   uint16_t N;
   int32_t X;
   // TODO: check for overflow
-  Instruction(OpCode op, int32_t X, uint16_t N, uint8_t flags)
-      : op(op), flags(flags), N(N), X(X) {}
+  Instruction(OpCode op, int32_t X, uint16_t N)
+      : op(op), unused(0), N(N), X(X) {}
 };
 
 bool isOpSupportedInMobile(OpCode op);
