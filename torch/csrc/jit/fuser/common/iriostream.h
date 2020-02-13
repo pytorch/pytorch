@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 
 namespace torch {
@@ -36,8 +38,13 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const);
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const Float* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const Int* const);
+
 TORCH_API std::ostream& operator<<(std::ostream& os, const UnaryOp* const);
 TORCH_API std::ostream& operator<<(std::ostream& os, const BinaryOp* const);
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const);
+TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const);
+TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const);
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& f);
 

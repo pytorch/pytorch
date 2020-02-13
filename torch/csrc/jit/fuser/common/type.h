@@ -42,10 +42,11 @@ enum class TORCH_API ExprType {
 =======
     UnaryOp
   , BinaryOp
+  , Split
+  , Merge
+  , Reorder
 // , Loop
 // , Swap
-// , Merge
-// , Split
 // , Index
 };
 
