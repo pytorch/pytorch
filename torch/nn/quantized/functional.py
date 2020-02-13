@@ -11,6 +11,31 @@ from torch.nn.modules.utils import _pair, _triple
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.
 
+def avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
+               count_include_pad=True):
+    r"""
+    Applies 1D average-pooling operation in :math:`k` window by step size
+    :math:`s` steps. The number of output features is equal to the number of
+    input planes.
+
+    .. note:: The input quantization parameters propagate to the output.
+
+    Args:
+        input: quantized input tensor :math:`(\text{minibatch} , \text{in\_channels} ,\text{L\_in})`
+        kernel_size: length of the pooling window.
+        stride: stride of the pooling operation. Default: :attr:`kernel_size`
+        padding: implicit zero paddings on both sides of the input. Default: 0
+        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+            to compute the output shape. Default: ``False``
+        count_include_pad: when True, will include the zero-padding in the
+            averaging calculation. Default: ``True``
+
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.avg_pool1d' must be quantized!")
+    return torch.nn.functional.avg_pool1d(input, kernel_size, stride, padding,
+                                          ceil_mode, count_include_pad)
+
 def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
                count_include_pad=True, divisor_override=None):
     r"""

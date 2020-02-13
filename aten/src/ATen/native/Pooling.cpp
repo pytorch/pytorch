@@ -79,7 +79,7 @@ std::tuple<Tensor, Tensor> max_pool1d_with_indices(
   return std::make_tuple(output, indices);
 }
 
-Tensor avg_pool1d(
+Tensor avg_pool1d_cpu(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,

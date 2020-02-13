@@ -418,5 +418,24 @@ Tensor quantized_avg_pool2d(
   return output;
 }
 
+Tensor quantized_avg_pool1d(
+    const Tensor& input,
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    bool ceil_mode,
+    bool count_include_pad) {
+  // TODO: Add the channel last check, ready for 1d case?
+  auto output = quantized_avg_pool2d(
+      input.unsqueeze(2),
+      {1, kernel_size[0]},
+      {1, stride[0]},
+      {0, padding[0]},
+      ceil_mode,
+      count_include_pad);
+  return output.squeeze(2);
+}
+
+
 } // namespace native
 } // namespace at

@@ -613,6 +613,54 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          message="ops.quantized.max_pool2d results are off")
 
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=3,
+                                              min_side=5, max_side=10),
+                       qparams=hu.qparams(dtypes=torch.quint8)),
+           kernel=st.sampled_from((3, 5)),
+           stride=st.sampled_from((None, 1, 2)),
+           padding=st.integers(0, 2),
+           ceil_mode=st.sampled_from((True, False)),
+           count_include_pad=st.sampled_from((True, False)))
+    def test_avg_pool1d(self, X, kernel, stride, padding, ceil_mode, count_include_pad):
+        import pdb
+        pdb.set_trace()
+
+        X, (scale, zero_point, torch_type) = X
+
+        assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
+
+        iL = X.shape[-1]
+        oL = pool_output_shape(iL, kernel, padding, stride, dilation=1)
+        assume(oL > 0)
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        X = qX.dequantize()
+        # Run reference on float tensor and then quantize the result for comparison
+        X_ref = torch.nn.functional.avg_pool1d(
+            X, kernel_size=kernel, stride=stride, padding=padding,
+            ceil_mode=ceil_mode, count_include_pad=count_include_pad)
+
+        ops_under_test = {
+            "nn.functional": torch.nn.functional.avg_pool1d,
+            "nn.quantized.functional": torch.nn.quantized.functional.avg_pool1d
+        }
+        error_message = r"Results are off for {}:\n\tExpected:\n{}\n\tGot:\n{}"
+        for name, op in ops_under_test.items():
+            qX_hat = op(qX, kernel_size=kernel, stride=stride, padding=padding, ceil_mode=ceil_mode,
+                        count_include_pad=count_include_pad)
+            qX_ref = torch.quantize_per_tensor(X_ref, scale=qX_hat.q_scale(), zero_point=qX_hat.q_zero_point(),
+                                               dtype=torch_type)
+
+            self.assertEqual(qX_ref.int_repr().to(torch.double), qX_hat.int_repr().to(torch.double), prec=1.0,
+                             message=error_message.format(name, qX_hat.int_repr(), qX_ref.int_repr()))
+            self.assertEqual(scale, qX_hat.q_scale(),
+                             message=error_message.format(name + '.scale', scale, qX_hat.q_scale()))
+            self.assertEqual(zero_point, qX_hat.q_zero_point(),
+                             message=error_message.format(name + '.zero_point', scale,
+                                                          qX_hat.q_zero_point()))
+
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=5, max_side=10),
                        qparams=hu.qparams(dtypes=torch.quint8)),
