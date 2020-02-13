@@ -472,11 +472,14 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 }
 
 void Pickler::pushDict(const IValue& ivalue) {
-  startTypeTag();
+  auto dict_items = iterationOrder(ivalue.toGenericDict());
+
+  if (dict_items.size() > 0) {
+    startTypeTag();
+  }
 
   push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
 
-  auto dict_items = iterationOrder(ivalue.toGenericDict());
   if (dict_items.size() == 0) {
     return;
   }
