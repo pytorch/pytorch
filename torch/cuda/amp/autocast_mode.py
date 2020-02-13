@@ -16,7 +16,7 @@ class autocast(object):
     :class:`autocast` should be used to wrap the forward pass of your model::
 
         # Creates model in default precision (torch.float32)
-        model = Net()
+        model = Net().cuda()
 
         for input, target in data:
             optimizer.zero_grad()
@@ -28,12 +28,12 @@ class autocast(object):
 
             # Exits the context manager before backward()
             # Running backward() under autocast is not necessary or recommended.
-            # Autograd correctly handles any casts that occurred during the forward pass.
+            # Backward ops run in the same precision that was specified in the forward pass.
             loss.backward()
             optimizer.step()
 
     :class:`autocast` is nestable.  If you want to force particular ops to run in ``torch.float32``,
-    you can nest autocast-disabled regions within a surrounding autocast-enabled region::
+    you can nest ``autocast(enabled=False)`` regions within a surrounding autocast-enabled region::
 
         mat0 = torch.rand((8,8), device="cuda", dtype.torch.float32)
         mat1 = torch.rand((8,8), device="cuda", dtype.torch.float32)
@@ -55,7 +55,7 @@ class autocast(object):
             # No manual casts are required when re-entering the autocast-enabled region.
             fp16_result = torch.mm(fp32_tensor, mat3)
 
-    Autocast-enabled regions transparently handle ops with mismatched floating-point types::
+    Ops in autocast-enabled regions transparently handle inputs with mismatched floating-point types::
 
         mat0 = torch.rand((8,8), device="cuda", dtype.torch.float16)
         mat1 = torch.rand((8,8), device="cuda", dtype.torch.float32)
@@ -67,12 +67,20 @@ class autocast(object):
         enabled(bool, optional, default=True):  Whether autocasting should be enabled within this region.
 
     .. note::
-        Tensors produced within an autocast-enabled region may be ``torch.float16``.  After returning to an
+        Tensors produced in an autocast-enabled region may be ``torch.float16``.  After returning to an
         autocast-disabled region, using them along with ``torch.float32`` tensors may cause type mismatch errors.
         If so, simply call ``.float()`` on the offending tensor(s).
 
         Type mismatch errors *within* an autocast-enabled region are a bug; if this is what you observe,
         please file an issue.
+
+    .. note::
+        Autocast only affects GPU operations (operations running on CUDA Tensors).
+
+    .. note::
+        Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
+        regions, but won't be autocasted (e.g., ``torch.addmm`` is guaranteed to run in ``float16``, but ``torch.addmm_``
+        may not).  For best performance and accuracy, prefer out-of-place ops if possible.
     """
     def __init__(self, enabled=True):
         self._enabled = enabled
