@@ -13754,9 +13754,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t == True).to(torch.int).sum().item() / size < 0.6)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half)  # , torch.bfloat16
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
-        if device == 'cpu' and dtype == torch.half:
+        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
             return
 
         size = 2000
@@ -13767,18 +13767,22 @@ class TestTorchDeviceType(TestCase):
         if dtype in [torch.float, torch.double, torch.half]:
             from_ = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
             to_inc_ = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
+        elif dtype == torch.bfloat16:
+            from_ = -42
+            to_inc_ = 42
         else:
             from_ = int(max(torch.iinfo(dtype).min, torch.iinfo(torch.int64).min))
             to_inc_ = int(min(torch.iinfo(dtype).max, torch.iinfo(torch.int64).max))
         range_ = to_inc_ - from_ + 1
 
         t.random_(from_, None)
-        self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
-        self.assertTrue((to_inc_ - alpha * range_) < t.max() <= to_inc_)
+        if dtype != torch.bfloat16:
+            self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
+            self.assertTrue((to_inc_ - alpha * range_) < t.max() <= to_inc_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half)  # , torch.bfloat16
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
-        if device == 'cpu' and dtype == torch.half:
+        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
             return
 
         size = 2000
@@ -13794,6 +13798,9 @@ class TestTorchDeviceType(TestCase):
             max_val = torch.iinfo(dtype).max
             froms = [min_val, 42]
             tos = [42, max_val]
+        elif dtype == torch.bfloat16:
+            froms = [24]
+            tos = [42]
         else:
             min_val = torch.iinfo(dtype).min
             max_val = torch.iinfo(dtype).max
@@ -13806,12 +13813,13 @@ class TestTorchDeviceType(TestCase):
                     range_ = to_ - from_
                     t = torch.empty(size, dtype=dtype, device=device)
                     t.random_(from_, to_)
-                    self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
-                    self.assertTrue((to_ - alpha * range_) < t.max() < to_)
+                    if dtype != torch.bfloat16:
+                        self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
+                        self.assertTrue((to_ - alpha * range_) < t.max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half)  # , torch.bfloat16
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
-        if device == 'cpu' and dtype == torch.half:
+        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
             return
 
         size = 2000
@@ -13820,6 +13828,8 @@ class TestTorchDeviceType(TestCase):
         if dtype in [torch.float, torch.double, torch.half]:
             max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
             tos = [42, max_val]
+        elif dtype == torch.bfloat16:
+            tos = [42]
         else:
             max_val = torch.iinfo(dtype).max
             tos = [42, max_val]
@@ -13827,12 +13837,13 @@ class TestTorchDeviceType(TestCase):
         for to_ in tos:
             t = torch.empty(size, dtype=dtype, device=device)
             t.random_(to_)
-            self.assertTrue(0 <= t.min() < alpha * to_)
-            self.assertTrue((to_ - alpha * to_) < t.max() < to_)
+            if dtype != torch.bfloat16:
+                self.assertTrue(0 <= t.min() < alpha * to_)
+                self.assertTrue((to_ - alpha * to_) < t.max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half)  # , torch.bfloat16
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):
-        if device == 'cpu' and dtype == torch.half:
+        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
             return
 
         size = 2000
@@ -13844,13 +13855,16 @@ class TestTorchDeviceType(TestCase):
             to_inc = 1 << 53
         elif dtype == torch.half:
             to_inc = 1 << 11
+        elif dtype == torch.bfloat16:
+            to_inc = 1 << 8
         else:
             to_inc = torch.iinfo(dtype).max
 
         t = torch.empty(size, dtype=dtype, device=device)
         t.random_()
-        self.assertTrue(0 <= t.min() < alpha * to_inc)
-        self.assertTrue((to_inc - alpha * to_inc) < t.max() <= to_inc)
+        if dtype != torch.bfloat16:
+            self.assertTrue(0 <= t.min() < alpha * to_inc)
+            self.assertTrue((to_inc - alpha * to_inc) < t.max() <= to_inc)
 
     @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)
