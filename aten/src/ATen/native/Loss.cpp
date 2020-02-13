@@ -117,7 +117,7 @@ Tensor& binary_cross_entropy_out_cpu(Tensor& loss, const Tensor& input, const Te
     iter.add_input(at::squeeze(target));
     iter.build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(loss.scalar_type(), "binary_cross_entropy", [&] {
+    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
         at::native::cpu_kernel(
             iter,
             [] (scalar_t input_val, scalar_t target_val) {
@@ -159,7 +159,7 @@ Tensor& binary_cross_entropy_backward_out_cpu(Tensor& grad_input, const Tensor& 
     iter.add_input(at::squeeze(target));
     iter.build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
         at::native::cpu_kernel(
             iter,
             [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {

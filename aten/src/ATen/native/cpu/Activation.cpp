@@ -296,7 +296,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void softshrink_kernel(TensorIterator& iter, Scalar lambd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
       return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
@@ -320,7 +320,7 @@ void shrink_backward_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     cpu_kernel_vec(
