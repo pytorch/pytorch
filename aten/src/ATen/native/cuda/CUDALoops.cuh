@@ -264,11 +264,11 @@ C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel_with_index(int N, func_t f, array_t data) {
   int counter = 0;
   int base = num_threads * thread_work_size * blockIdx.x + threadIdx.x;
-  auto f = [&counter, base]() GPU_LAMBDA {
+  auto ff = [&counter, base]() GPU_LAMBDA {
     int index = base + (counter++) * num_threads ;
     return f(index);
   }
-  elementwise_kernel_impl<vec_size, num_threads, thread_work_size>(N, f, data);
+  elementwise_kernel_impl<vec_size, num_threads, thread_work_size>(N, ff, data);
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
