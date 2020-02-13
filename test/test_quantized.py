@@ -1074,7 +1074,7 @@ class TestQuantizedOps(TestCase):
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=1, max_side=32),
-                       qparams=hu.qparams(dtypes=torch.quint8)),
+                       qparams=hu.qparams()),
            Y_scale=st.floats(0.2, 2.6),
            Y_zero_point=st.integers(0, 5),
            qengine=st.sampled_from(("qnnpack", "fbgemm")))
@@ -1093,12 +1093,12 @@ class TestQuantizedOps(TestCase):
             weight = torch.rand(c).float()
             bias = torch.rand(c).float()
             eps = 0.001
-            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, torch.quint8)
+            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
             qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
 
             float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
                                      running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
-            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, torch.quint8)
+            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
             self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,

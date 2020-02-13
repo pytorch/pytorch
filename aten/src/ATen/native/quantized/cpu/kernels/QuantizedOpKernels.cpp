@@ -968,60 +968,64 @@ void q_batch_norm_kernel(
     int64_t HxW,
     const int64_t in_zero_point,
     const int64_t out_zero_point,
-    const uint8_t* X,
-    const float* alpha,
-    const float* beta,
-    uint8_t* Y) {
+    const Tensor& input,
+    const Tensor& a,
+    const Tensor& b,
+    Tensor& output) {
 
-  constexpr int kVLen = 8;
-  const int64_t outer_size = N * HxW;
-  using Vec = Vec256<quint8>;
-  // Hoisted variables
-  auto in_zp_vec = Vec256<float>(static_cast<float>(in_zero_point));
-  auto fake_scale = Vec256<float>(1.0f);
-  auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
-  auto out_zero_point_v = Vec(c10::quint8(out_zero_point));
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
+    float* alpha = a.data_ptr<float>();
+    float* beta = b.data_ptr<float>();
+    scalar_t::underlying* X =
+        reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
+    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
 
-  // TODO replace with TensorIterator implementation once #33166 is fixed.
-  for (int64_t i = 0; i < outer_size; ++i) {
-    int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
-    int64_t r = C % (Vec::float_num_vecs() * kVLen);
-    const uint8_t* X_ptr = X + i * C;
-    uint8_t* Y_ptr = Y + i * C;
+    constexpr int kVLen = 8;
+    const int64_t outer_size = N * HxW;
+    using Vec = Vec256<scalar_t>;
+    // Hoisted variables
+    auto in_zp_vec = Vec256<float>(static_cast<float>(in_zero_point));
+    auto fake_scale = Vec256<float>(1.0f);
+    auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
+    auto out_zero_point_v = Vec(scalar_t(out_zero_point));
 
-    for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
-      auto vals_q = Vec::loadu(X_ptr + j);
-      // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
-      auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
-      for (size_t idx = 0; idx < vals_dq.size(); ++idx) {
-        auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
-        auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
-        vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+    // TODO replace with TensorIterator implementation once #33166 is fixed.
+    for (int64_t i = 0; i < outer_size; ++i) {
+      int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
+      int64_t r = C % (Vec::float_num_vecs() * kVLen);
+      auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
+      auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
+
+      for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
+        auto vals_q = Vec::loadu(X_ptr + j);
+        // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
+        auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
+        for (size_t idx = 0; idx < vals_dq.size(); ++idx) {
+          auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
+          auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
+          vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+        }
+        // Fake scale again
+        auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+        if (ReluFused) {
+          outputs_q = outputs_q.relu(out_zero_point_v);
+        }
+        outputs_q.store(Y_ptr + j);
       }
-      // Fake scale again
-      auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
-      if (ReluFused) {
-        outputs_q = outputs_q.relu(out_zero_point_v);
+
+      for (int64_t j = 0; j < r; ++j) {
+        long quantized_down = out_zero_point +
+            lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
+                        beta[n + j]);
+        if (ReluFused) { // static if
+          quantized_down = std::max<long>(quantized_down, out_zero_point);
+        }
+        Y_ptr[n + j] = std::min<long>(
+            std::max<long>(quantized_down, std::numeric_limits<scalar_t::underlying>::min()),
+            std::numeric_limits<scalar_t::underlying>::max());
       }
-      outputs_q.store(Y_ptr + j);
     }
-
-    for (int64_t j = 0; j < r; ++j) {
-      long quantized_down = out_zero_point +
-          std::lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
-                      beta[n + j]);
-      if (ReluFused) { // static if
-        quantized_down = std::max<long>(quantized_down, out_zero_point);
-      }
-#ifdef USE_FBGEMM
-      Y_ptr[n + j] = fbgemm::clamp<long, uint8_t>(quantized_down, 8);
-#else
-      Y_ptr[n + j] = std::min<long>(
-          std::max<long>(quantized_down, std::numeric_limits<uint8_t>::min()),
-          std::numeric_limits<uint8_t>::max());
-#endif
-  }
-}
+});
 
 }
 
