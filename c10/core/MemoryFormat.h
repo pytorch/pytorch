@@ -24,7 +24,7 @@
 
 
 namespace c10 {
-enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast };
+enum class MemoryFormat : int8_t { Contiguous, Preserve, ChannelsLast, ChannelsLast3d };
 
 // If you are seeing this, it means that this call site was not checked if
 // the memory format could be preserved, and it was switched to old default
@@ -45,6 +45,8 @@ inline std::ostream& operator<<(
       return stream << "Contiguous";
     case MemoryFormat::ChannelsLast:
       return stream << "ChannelsLast";
+    case MemoryFormat::ChannelsLast3d:
+      return stream << "ChannelsLast3d";
     default:
       AT_ERROR("Unknown memory format");
   }
@@ -62,12 +64,12 @@ inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
 
 // Note [Ambiguous is_channels_last_strides]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// The flaw of carrying memory_format implicitly through strides is very hard 
+// The flaw of carrying memory_format implicitly through strides is very hard
 // to WAR properly. issue #24090
 // Without the history of permutation, we can't infer the memory_format of a
 // tensor from the snapshot of its size & stride
 // e.g.
-// 
+//
 // 1. We can NOT specify the memory_format of N111 tensor through strides in a
 //  meaningful way;
 //
@@ -79,7 +81,7 @@ inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
 //
 // Due to the limitations, our temporary WAR `is_channels_last_strides` does the
 // best effort to infer whether the original memory_format of a tensor is
-// at::MemoryFormat::ChannelsLast. The two objectives of this function (ordered 
+// at::MemoryFormat::ChannelsLast. The two objectives of this function (ordered
 // by their importance):
 //   1. Ensure that normal shape manipulation does not accidentally change the
 //      MemoryFormat of an existing tensor.

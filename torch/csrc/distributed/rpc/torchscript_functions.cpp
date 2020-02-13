@@ -115,13 +115,7 @@ std::shared_ptr<RRef> remoteTorchscript(
     // necessary to introduce python dependency in this file.
     fm->addCallback([](const Message& message,
                        const c10::optional<utils::FutureError>& futErr) {
-      RRefContext::handleException(futErr);
-      auto rr = RemoteRet::fromMessage(message);
-      TORCH_INTERNAL_ASSERT(
-          rr->rrefId() == rr->forkId(),
-          "Expecting an OwnerRRef as RemoteRet but got a fork.");
-      auto& refCtx = RRefContext::getInstance();
-      refCtx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+      callback::finishCreatingOwnerRRef(message, futErr);
     });
     return ownerRRefPtr;
   }

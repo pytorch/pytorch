@@ -121,6 +121,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       if (rrefId != forkId) {
+        // Caller is a user and callee is the owner, add fork
+        //
+        // NB: rrefId == forkId is true if and only if calling remote to self.
+        // In that case both the caller and the callee will access the
+        // OwnerRRef. Hence, on the callee side (here), it should not call
+        // addForkOfOwner as it is not a fork. To allow callee to distinguish
+        // when this request is sent to self, the caller will set forkId using
+        // rrefId (OwnerRRef does not have a forkId anyway).
         ctx.addForkOfOwner(rrefId, forkId);
       }
       return wrap(RemoteRet(rrefId, forkId).toMessage());
@@ -312,7 +320,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // Now execute the autograd graph using the "distributed engine."
       auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
-          autogradContext, sendFunction);
+          autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(
