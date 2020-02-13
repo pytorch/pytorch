@@ -5,7 +5,9 @@
 #include <exception>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #endif
 #include "tbb/tbb.h"
 
