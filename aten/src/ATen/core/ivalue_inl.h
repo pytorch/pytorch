@@ -640,15 +640,15 @@ inline c10::List<bool> IValue::toBoolList() const & {
   return c10::List<bool>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() && {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  AT_ASSERT(isList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(moveToIntrusivePtr<c10::detail::ListImpl>());
 }
 inline c10::List<at::Tensor> IValue::toTensorList() const & {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  AT_ASSERT(isList(), "Expected TensorList but got ", tagKind());
   return c10::List<at::Tensor>(toIntrusivePtr<c10::detail::ListImpl>());
 }
 inline std::vector<at::Tensor> IValue::toTensorVector() const {
-  AT_ASSERT(isTensorList(), "Expected TensorList but got ", tagKind());
+  AT_ASSERT(isList(), "Expected TensorList but got ", tagKind());
   return createVectorFromList<at::Tensor>(static_cast<const c10::detail::ListImpl*>(payload.as_intrusive_ptr));
 }
 inline c10::List<IValue> IValue::toList() && {

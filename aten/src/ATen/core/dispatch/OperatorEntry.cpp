@@ -17,9 +17,9 @@ namespace {
   }
 }
 
-OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options)
+OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor)
 : schema_(std::move(schema))
-, dispatchTable_(schema_)
+, dispatchTable_(schema_, std::move(dispatchKeyExtractor))
 , kernels_()
 , catchAllKernels_()
 , options_(std::move(options)) {

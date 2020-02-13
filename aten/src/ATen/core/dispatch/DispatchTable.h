@@ -35,7 +35,7 @@ public:
   C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
     TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
     auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
-    SetKernelResult result;;
+    SetKernelResult result;
     if (slot.isValid()) {
       result = SetKernelResult::OVERWROTE_EXISTING_KERNEL;
     } else {
@@ -70,6 +70,15 @@ public:
     return kernelCount_;
   }
 
+  template<class Func>
+  void forEachRegisteredDispatchKey(const Func& func) {
+    for (uint8_t key = 0; key < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++key) {
+      if (kernels_[key].isValid()) {
+        func(static_cast<DispatchKey>(key));
+      }
+    }
+  }
+
 private:
   std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
   size_t kernelCount_;
@@ -87,10 +96,11 @@ private:
  */
 class DispatchTable final {
  public:
-  explicit DispatchTable(const FunctionSchema& schema)
+  explicit DispatchTable(const FunctionSchema& schema, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor)
   : kernels_()
   , catchallKernel_()
-  , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
+  , dispatchKeyExtractor_(dispatchKeyExtractor.has_value() ? std::move(*dispatchKeyExtractor) : DispatchKeyExtractor::make(schema))
+  , dispatchKeyExtractorIsSet_(dispatchKeyExtractor.has_value())
   , operatorName_(toString(schema.operator_name())) {}
 
   /**
@@ -106,6 +116,17 @@ class DispatchTable final {
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
       TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+    }
+  }
+
+  void setDispatchKeyExtractorIfNotSet(c10::optional<DispatchKeyExtractor> dispatchKeyExtractor) {
+    if (dispatchKeyExtractor.has_value() && !dispatchKeyExtractorIsSet_) {
+      dispatchKeyExtractor_ = std::move(*dispatchKeyExtractor);
+      dispatchKeyExtractorIsSet_ = true;
+
+      kernels_.forEachRegisteredDispatchKey([&] (DispatchKey dispatchKey) {
+        dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
+      });
     }
   }
 
@@ -217,6 +238,7 @@ private:
   impl::KernelFunctionTable kernels_;
   KernelFunction catchallKernel_;
   DispatchKeyExtractor dispatchKeyExtractor_;
+  bool dispatchKeyExtractorIsSet_;
   std::string operatorName_;
 
   // This manuallyBoxedKernel_ member is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed

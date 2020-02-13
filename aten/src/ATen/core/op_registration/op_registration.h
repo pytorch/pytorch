@@ -145,6 +145,8 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>();
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
@@ -196,6 +198,8 @@ public:
       static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to register a kernel functor using the kernel<Functor>() API, but it doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
       static_assert(std::is_constructible<KernelFunctor, ConstructorParameters...>::value, "Wrong argument list for constructor of kernel functor. The arguments to kernel<Functor>(arguments...) must match one of the constructors of Functor.");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>();
+
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedFunctorFactory<KernelFunctor>(detail::KernelFactory<KernelFunctor, std::decay_t<ConstructorParameters>...>(std::forward<ConstructorParameters>(constructorParameters)...)),
@@ -222,6 +226,8 @@ public:
     std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> kernel(DispatchKey dispatch_key) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
@@ -251,6 +257,8 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
+
       return std::move(*this).kernel(
         c10::nullopt,
         KernelFunction::makeFromUnboxedFunction<FuncType, kernel_func>(),
@@ -265,6 +273,8 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedRuntimeFunction(kernel_func),
@@ -278,6 +288,8 @@ public:
     std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> catchAllKernel(FuncType* kernel_func) && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       TORCH_INTERNAL_ASSERT(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
 
       return std::move(*this).kernel(
         c10::nullopt,
@@ -294,6 +306,8 @@ public:
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedOnlyRuntimeFunction(kernel_func),
@@ -307,6 +321,8 @@ public:
     std::enable_if_t<guts::is_function_type<FuncType>::value, Options&&> impl_unboxedOnlyCatchAllKernel() && {
       static_assert(!std::is_same<FuncType, KernelFunction::BoxedKernelFunction>::value, "Tried to register a stackbased (i.e. internal) kernel function using the public kernel<...>() API. Please either use the internal kernel(...) API or also implement the kernel function as defined by the public API.");
       static_assert(kernel_func != nullptr, "Kernel function cannot be nullptr");
+
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<FuncType>::parameter_types>();
 
       return std::move(*this).kernel(
         c10::nullopt,
@@ -347,6 +363,8 @@ public:
       // issues this causes), let's just forbid stateful lambdas altogether.
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
 
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::parameter_types>();
+
       return std::move(*this).kernel(
         std::move(dispatch_key),
         KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(functor)),
@@ -386,6 +404,8 @@ public:
       // If a kernel really needs global state, they can just have regular global state
       // in their .cpp file next to the kernel lambda.
       static_assert(guts::is_stateless_lambda<std::decay_t<Lambda>>::value, "The kernel(x) API for registering a kernel only works for stateless lambdas (i.e. lambdas without captures). If you need a cache, please use the functor based API kernel<Functor>() instead.");
+
+      dispatchKeyExtractor_ = DispatchKeyExtractor::makeFromArgTypeList<typename guts::infer_function_traits_t<std::decay_t<Lambda>>::parameter_types>();
 
       return std::move(*this).kernel(
         c10::nullopt,
@@ -432,10 +452,12 @@ public:
     };
 
     c10::optional<c10::either<OperatorName, FunctionSchema>> schemaOrName_;
+    c10::optional<DispatchKeyExtractor> dispatchKeyExtractor_;
 
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
+
   };
 
   /**
@@ -574,7 +596,7 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const Options& options);
   void registerOp_(Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor);
   void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
   static OperatorOptions makeOperatorOptions_(const Options& options);
 

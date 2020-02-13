@@ -12,8 +12,8 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
+  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor)
+  : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions), std::move(dispatchKeyExtractor))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
       if (dispatch_key.has_value()) {
@@ -135,7 +135,7 @@ void RegisterOperators::registerOp_(Options&& options) {
     registerSchemaOnly_(std::move(schema), std::move(operatorOptions));
   } else {
     for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel), std::move(operatorOptions));
+      registerSchemaAndKernel_(schema, std::move(kernel), OperatorOptions(operatorOptions), options.dispatchKeyExtractor_);
     }
   }
 
@@ -150,14 +150,14 @@ OperatorOptions RegisterOperators::makeOperatorOptions_(const RegisterOperators:
   return result;
 }
 
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions) {
+void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel, OperatorOptions&& operatorOptions, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor) {
   TORCH_INTERNAL_ASSERT(kernel.func.isValid(), "Kernel must be set");
 
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, std::move(kernel.func));
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), kernel.dispatch_key, std::move(kernel.func), std::move(dispatchKeyExtractor));
 }
 
 void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& operatorOptions) {
-  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, c10::nullopt);
+  registrars_.emplace_back(std::move(schema), std::move(operatorOptions), c10::nullopt, c10::nullopt, c10::nullopt);
 }
 
 RegisterOperators::RegisterOperators() = default;

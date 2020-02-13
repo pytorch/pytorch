@@ -81,6 +81,65 @@ namespace detail {
   DispatchKeySet multi_dispatch_key_set(const Args&... args) {
     return MultiDispatchKeySet().apply(args...).ts;
   }
+
+  template<class Type> inline void add_dispatch_key_to_set(DispatchKeySet* s, const IValue* v) {
+    // base case for non-dispatch-relevant type
+  }
+  template<>
+  inline void add_dispatch_key_to_set<at::Tensor>(DispatchKeySet* ks, const IValue* v) {
+    if (C10_UNLIKELY(v->isNone())) return;
+    //TORCH_INTERNAL_ASSERT(v->isTensor(), "Expected Tensor but found ", v->tagKind());
+    *ks = *ks | v->unsafeToTensorImpl()->key_set();
+  }
+  template<>
+  inline void add_dispatch_key_to_set<at::ArrayRef<at::Tensor>>(DispatchKeySet* ks, const IValue* v) {
+    //TORCH_INTERNAL_ASSERT(v->isList(), "Expected TensorList but found ", v->tagKind());
+    //TORCH_INTERNAL_ASSERT(v->isTensorList(), "Expected TensorList/GenericList but found List of ", v->toList().elementType()->str());
+    for (const at::Tensor& tensor : v->toTensorList()) {
+      if (tensor.defined()) {
+        *ks = *ks | tensor.key_set();
+      }
+    }
+  }
+  template<>
+  inline void add_dispatch_key_to_set<torch::List<at::Tensor>>(DispatchKeySet* ks, const IValue* v) {
+    //TORCH_INTERNAL_ASSERT(v->isList(), "Expected TensorList but found ", v->tagKind());
+    //TORCH_INTERNAL_ASSERT(v->isTensorList(), "Expected TensorList/GenericList but found List of ", v->toList().elementType()->str());
+    for (const at::Tensor& tensor : v->toTensorList()) {
+      if (tensor.defined()) {
+        *ks = *ks | tensor.key_set();
+      }
+    }
+  }
+  // TODO
+  // template<>
+  // inline void add_dispatch_key_to_set<TensorOptions>(DispatchKeySet* ks, const IValue* v) {
+  //   for (const at::Tensor& tensor : v->toTensorList()) {
+  //       *ks = *ks | tensor.key_set();
+  //   }
+  // }
+  // TODO Generator?
+
+  template<class ArgTypeList>
+  struct get_dispatch_key_boxed final {};
+  template<class... Args>
+  struct get_dispatch_key_boxed<c10::guts::typelist::typelist<Args...>> final {
+    static DispatchKeySet call(const torch::jit::Stack* stack) {
+      return get_dispatch_key_boxed_(stack, std::index_sequence_for<Args...>());
+    }
+  private:
+    template<size_t... Indices>
+    static DispatchKeySet get_dispatch_key_boxed_(const torch::jit::Stack* stack, std::index_sequence<Indices...>) {
+      DispatchKeySet ks;
+      constexpr size_t num_args = sizeof...(Indices);
+
+      std::initializer_list<int>{ (
+        add_dispatch_key_to_set<std::decay_t<Args>>(&ks, &torch::jit::peek(*stack, Indices, num_args))
+      , 0)... };
+
+      return ks;
+    }
+  };
 }
 
 /**
@@ -97,6 +156,8 @@ namespace detail {
  *    fallthrough with custom behavior.
  */
 struct CAFFE2_API DispatchKeyExtractor final {
+private:
+  using BoxedGetDispatchKeyFn = DispatchKeySet(const torch::jit::Stack* stack);
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
     TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS,
@@ -108,27 +169,38 @@ public:
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }
-    return DispatchKeyExtractor(dispatch_arg_indices_reverse);
+    return DispatchKeyExtractor(nullptr, dispatch_arg_indices_reverse);
+  }
+
+  template<class ArgTypeList>
+  static DispatchKeyExtractor makeFromArgTypeList() {
+    constexpr BoxedGetDispatchKeyFn* boxed_get_dispatch_key_fn = &detail::get_dispatch_key_boxed<ArgTypeList>::call;
+    c10::utils::bitset dispatch_arg_indices_reverse; // TODO Have this be c10::either instead?
+    return DispatchKeyExtractor(boxed_get_dispatch_key_fn, dispatch_arg_indices_reverse);
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
 
-    DispatchKeySet ks;
-    dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
-      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-      if (C10_LIKELY(ivalue.isTensor())) {
-        // NB: Take care not to introduce a refcount bump (there's
-        // no safe toTensorRef method, alas)
-        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-      } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor& tensor : ivalue.toTensorList()) {
-          ks = ks | tensor.key_set();
+    if (C10_LIKELY(boxed_get_dispatch_key_fn_ != nullptr)) {
+      return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, (*boxed_get_dispatch_key_fn_)(stack));
+    } else {
+      DispatchKeySet ks;
+      dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+        const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+        if (C10_LIKELY(ivalue.isTensor())) {
+          // NB: Take care not to introduce a refcount bump (there's
+          // no safe toTensorRef method, alas)
+          ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+        } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+          for (const at::Tensor& tensor : ivalue.toTensorList()) {
+            ks = ks | tensor.key_set();
+          }
         }
-      }
-    });
-    return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
+      });
+      return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
+    }
   }
 
   template<class... Args>
@@ -160,9 +232,12 @@ private:
     return impl::dispatchTypeId(ks, backendsWithoutFallthrough | operatorHasKernelForBackend_);
   }
 
-  explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
-  : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
+  explicit DispatchKeyExtractor(BoxedGetDispatchKeyFn* boxed_get_dispatch_key_fn, c10::utils::bitset dispatch_arg_indices_reverse)
+  : boxed_get_dispatch_key_fn_(boxed_get_dispatch_key_fn)
+  , dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
   , operatorHasKernelForBackend_() {}
+
+  BoxedGetDispatchKeyFn* boxed_get_dispatch_key_fn_;
 
   // this is a bitset that has ones for each argument index which has to be
   // considered for dispatch. This avoids having to iterate over the stack

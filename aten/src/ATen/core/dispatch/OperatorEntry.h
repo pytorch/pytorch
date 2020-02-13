@@ -16,7 +16,7 @@ namespace impl {
 // and its dispatch table. This is not part of the public API.
 class OperatorEntry final {
 public:
-  explicit OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options);
+  explicit OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -50,6 +50,10 @@ public:
   // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
   void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
     dispatchTable_.setManuallyBoxedKernel_(func);
+  }
+
+  void setDispatchKeyExtractorIfNotSet(c10::optional<DispatchKeyExtractor> dispatchKeyExtractor) {
+    dispatchTable_.setDispatchKeyExtractorIfNotSet(std::move(dispatchKeyExtractor));
   }
 
 private:

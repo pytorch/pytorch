@@ -101,7 +101,7 @@ class Registerer final {
 public:
   Registerer&& op(const std::string& schema, KernelFunction::InternalBoxedKernelFunction* boxed_kernel_wrapper) && {
     static auto& dispatcher = c10::Dispatcher::singleton();
-    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(parseSchema(schema), atenOperatorOptions());
+    std::pair<RegistrationHandleRAII, OperatorHandle> registration = dispatcher.registerSchema(parseSchema(schema), atenOperatorOptions(), c10::nullopt);
     registrationHandles_.push_back(std::move(registration.first));
     dispatcher.setManuallyBoxedKernelFor_(registration.second, boxed_kernel_wrapper);
     return std::move(*this);

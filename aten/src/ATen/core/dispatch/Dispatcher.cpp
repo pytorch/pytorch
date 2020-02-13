@@ -57,12 +57,13 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return findSchema({name, overload_name}).value();
 }
 
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options) {
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, OperatorOptions&& options, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
       TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", found->schema());
     }
+    found->operatorIterator_->op.setDispatchKeyExtractorIfNotSet(std::move(dispatchKeyExtractor));
     if (options.isDefaultAliasAnalysisKind()) {
       // just do nothing and let it pass.
     } else if (found->options().isDefaultAliasAnalysisKind()) {
@@ -76,7 +77,7 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   }
 
   OperatorName op_name = schema.operator_name();
-  operators_.emplace_back(std::move(schema), std::move(options));
+  operators_.emplace_back(std::move(schema), std::move(options), std::move(dispatchKeyExtractor));
   OperatorHandle handle(--operators_.end());
   operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
     operatorLookupTable.emplace(op_name, handle);
@@ -85,13 +86,13 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema, Operat
   return handle;
 }
 
-std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options) {
+std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema, OperatorOptions options, c10::optional<DispatchKeyExtractor> dispatchKeyExtractor) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
   OperatorName op_name = schema.operator_name();
 
-  auto op = findOrRegisterSchema_(std::move(schema), std::move(options));
+  auto op = findOrRegisterSchema_(std::move(schema), std::move(options), std::move(dispatchKeyExtractor));
 
   ++op.operatorIterator_->refcount;
   if (1 == op.operatorIterator_->refcount) {
