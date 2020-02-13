@@ -189,6 +189,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
 
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_ = false;
+
   bool is_view_;
 
   // The "output number" of this variable; e.g., if this variable
