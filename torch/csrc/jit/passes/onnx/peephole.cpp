@@ -663,9 +663,8 @@ static void fuseUnbindListUnpack(Block *b) {
 
 // Traced Split with list of sizes is being converted to ONNX as SplitToSequence + SequenceAt.
 // Example IR
-//  %2 : int = prim::Constant[value=0]
-//  %3 : Tensor[] = aten::split_with_sizes(%input, %split_list, %2)
-//  %4 : Float(), %5 : Float() = prim::ListUnpack(%3)
+//  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
+//  %3 : Float(), %4 : Float() = prim::ListUnpack(%2)
 //
 // Translates to ONNX:
 //  %2 : Tensor[] = onnx::SplitToSequence[axis=0](%input, %split_list)
