@@ -16,7 +16,7 @@ from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, enableScriptTest
-from test_pytorch_common import skipIfNoLapack, skipIfNotOnnxIRv3
+from test_pytorch_common import skipIfNoLapack
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -125,9 +125,10 @@ class TestONNXRuntime(unittest.TestCase):
             _run_test(script_model)
         _run_test(model)
 
-    def run_large_model_test(self, model, input, rtol=0.001, atol=1e-7,
-                             example_outputs=None, do_constant_folding=True,
-                             dynamic_axes=None, input_names=None, output_names=None):
+    def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
+                                          example_outputs=None, do_constant_folding=True,
+                                          dynamic_axes=None, input_names=None, output_names=None,
+                                          ort_optim_on=True):
         import os
         import tempfile
 
@@ -154,15 +155,19 @@ class TestONNXRuntime(unittest.TestCase):
                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                   dynamic_axes=dynamic_axes,
                                   input_names=input_names, output_names=output_names,
-                                  use_large_model_format=True)
-                # compute onnxruntime output prediction
-                ort_sess = onnxruntime.InferenceSession(model_file_name)
+                                  use_external_data_format=True)
+                # compute onnxruntime output prediction                
+                ort_sess_opt = onnxruntime.SessionOptions()
+                ort_sess_opt.graph_optimization_level = \
+                    onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED if ort_optim_on else \
+                    onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+                ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt)                
                 input_copy = copy.deepcopy(input)
                 ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
 
 
-    @skipIfUnsupportedMinOpsetVersion(9)  # Because large model format was released with Opset 9.
-    def test_large_model_export_embed(self):
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_model_with_external_embedding(self):
         class LargeModel(torch.nn.Module):
             def __init__(self):
                 super(LargeModel, self).__init__()
@@ -180,14 +185,17 @@ class TestONNXRuntime(unittest.TestCase):
 
         model = LargeModel()
         x = torch.tensor([2], dtype=torch.long)
-        self.run_large_model_test(model, x)
+        self.run_model_test_with_external_data(model, x)
 
-    @skipIfUnsupportedMinOpsetVersion(9)  # Because large model format was released with Opset 9.
-    @skipIfNotOnnxIRv3()
-    def test_large_model_export_mobilenet_v2(self):
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_mobilenet_v2_with_external_data(self):
         model = torchvision.models.mobilenet_v2(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
-        self.run_large_model_test(model, x, rtol=1e-3, atol=1e-5)
+        # We are turning off Onnx Runtime optimization off in this test,
+        # because external data format is not supported to in ORT optimizer.
+        # Once that support is added, we can set ort_optim_on=True (default).
+        self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5, 
+                                               ort_optim_on=False)
 
     # Export Torchvision models
 
