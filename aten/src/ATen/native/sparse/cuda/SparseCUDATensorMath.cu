@@ -888,7 +888,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   int64_t dim_k = mat2_contig.size(2);
 
   Scalar beta = 0;
-  Tensor t;
   Scalar alpha = 1;
 
   int64_t mat_el_begin_idx = 0;
