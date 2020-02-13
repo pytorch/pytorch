@@ -58,7 +58,7 @@ pytest "${args[@]}" \
 
 # onnxruntime only support py3
 # "Python.h" not found in py2, needed by TorchScript custom op compilation.
-if [[ "$BUILD_ENVIRONMENT" == *py3-part1* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py3.6-part1* ]]; then
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset7" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset8" \
@@ -66,7 +66,7 @@ if [[ "$BUILD_ENVIRONMENT" == *py3-part1* ]]; then
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py"
 fi
-if [[ "$BUILD_ENVIRONMENT" == *py3-part2* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py3.6-part2* ]]; then
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset10" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset11" \
