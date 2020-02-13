@@ -40,7 +40,18 @@ TORCH_API const Val* promote_new(const Val* v1, const Val* v2) {
   return new_val(out_vtype, out_dtype);
 }
 
-TORCH_API const Val* unary_op(UnaryOpType type, Val* v1){
+TORCH_API const Val* cast_op(const DataType dtype, const Val* v1){
+  if( !is_cast_legal(v1->getDataType().value(), dtype) ) {
+	std::stringstream err;
+	err << "Illegal Cast of DataTypes From: " << v1->getDataType().value() << " To: " << dtype;
+    throw std::runtime_error(err.str());
+  }
+  const Val* out = new_val(v1->getValType().value(), dtype);
+  Statement* expr = new UnaryOp(UnaryOpType::Cast, out, v1);
+  return out;
+}
+
+TORCH_API const Val* unary_op(UnaryOpType type, const Val* v1){
   const Val* out = new_val(v1->getValType().value(), v1->getDataType().value());
   Statement* expr = new UnaryOp(type, out, v1);
   return out;

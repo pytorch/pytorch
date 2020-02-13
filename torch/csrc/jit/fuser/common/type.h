@@ -65,6 +65,7 @@ enum class ParallelType {
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
+bool is_cast_legal(const DataType& t1, const DataType& t2);
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type);
 

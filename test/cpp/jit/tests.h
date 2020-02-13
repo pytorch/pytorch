@@ -91,6 +91,7 @@ namespace jit {
   _(GPU_FusionRegister)          \
   _(GPU_FusionTensor)            \
   _(GPU_FusionTensorDomain)      \
+  _(GPU_FusionCastOp)			 \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();
