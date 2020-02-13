@@ -268,7 +268,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
     if (listenLoopException_) {
-      guard.unlock();
       std::rethrow_exception(listenLoopException_);
     }
   }
