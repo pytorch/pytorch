@@ -68,12 +68,12 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
       } else {
         const auto t_max_val = std::numeric_limits<scalar_t>::max();
         const auto int64_max_val = static_cast<int64_t>(static_cast<scalar_t>(std::numeric_limits<int64_t>::max()));
-        const int64_t max_val = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
+        const int64_t to_inc = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
         AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_update_from_to", [&] {
           from = update_from<scalar_t>(from);
-          TORCH_CHECK(from <= max_val, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " > to=", max_val);
+          TORCH_CHECK(to_inc >= from, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " > to=", to_inc);
         });
-        range = max_val - from + 1;
+        range = to_inc - from + 1;
       }
     });
     random_from_to_kernel<RNG>()(iter, range, from, gen);
