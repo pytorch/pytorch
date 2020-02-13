@@ -56,6 +56,11 @@ class PackedSequence(PackedSequence_):
         (i.e., they only pass in tensors conforming to this constraint).
 
     """
+    def __new__(cls, data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
+        return super(PackedSequence, cls).__new__(
+            cls,
+            *_packed_sequence_init_args(data, batch_sizes, sorted_indices,
+                                        unsorted_indices))
 
     # NOTE [ device and dtype of a PackedSequence ]
     #
@@ -144,8 +149,8 @@ class PackedSequence(PackedSequence_):
 
 # TorchScript doesn't support constructors on named tuples, so we use this helper
 # method to construct PackedSequence
-def _packed_sequence_init(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
-    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor])
+def _packed_sequence_init_args(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -155,6 +160,7 @@ def _packed_sequence_init(data, batch_sizes=None, sorted_indices=None, unsorted_
 
     # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
     if batch_sizes is not None:
+        # TODO: Re-enable this check (.type isn't supported in TorchScript)
         if batch_sizes.device.type != 'cpu':
             raise ValueError(
                 "batch_sizes should always be on CPU. "
@@ -162,12 +168,18 @@ def _packed_sequence_init(data, batch_sizes=None, sorted_indices=None, unsorted_
                 "They should be instantiated by functions like pack_sequence "
                 "and pack_padded_sequences in nn.utils.rnn. "
                 "https://pytorch.org/docs/stable/nn.html#torch.nn.utils.rnn.pack_sequence")
-        return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)
+        return data, batch_sizes, sorted_indices, unsorted_indices
 
     # support being called as `PackedSequence((data, batch_sizes), *, sorted_indices)`
     else:
         assert isinstance(data, (list, tuple)) and len(data) == 2
-        return PackedSequence(data[0], data[1], sorted_indices, unsorted_indices)
+        return data[0], data[1], sorted_indices, unsorted_indices
+
+
+def _packed_sequence_init(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
+    data, batch_sizes, sorted_indices, unsorted_indices = _packed_sequence_init_args(
+        data, batch_sizes, sorted_indices, unsorted_indices)
+    return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)
 
 
 def invert_permutation(permutation):
