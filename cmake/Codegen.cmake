@@ -55,7 +55,7 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
 if (INTERN_BUILD_ATEN_OPS)
   IF(MSVC)
     SET(OPT_FLAG "/fp:strict ")
-	# debug 'd' is added using <CONFIG> where ${VCOMP_LIB} gets referenced when using MSVC
+    # debug 'd' is added using <CONFIG> where ${VCOMP_LIB} gets referenced when using MSVC
     SET(VCOMP_LIB "vcomp")
   ELSE(MSVC)
     SET(OPT_FLAG "-O3 ")
