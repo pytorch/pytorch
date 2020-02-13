@@ -638,7 +638,7 @@ const std::vector<std::string> functions = {
         def rsub_0(self,
                    other,
                    alpha: number):
-            result = torch.rsub(self, other, alpha)
+            result = torch.rsub(self, other, alpha=alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             other_size = torch._size_if_not_equal(other.size(), result.size())
             def backward(grad_output):
