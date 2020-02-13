@@ -8,6 +8,7 @@ namespace jit {
 using ClassResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
+// Input is qualified name string or type str, output is JIT typePtr
 using TypeResolver =
     std::function<c10::TypePtr(const std::string&)>;
 
@@ -22,7 +23,11 @@ class Unpickler {
   TH_DISALLOW_COPY_AND_ASSIGN(Unpickler);
 
  public:
-  // tensors inside the pickle are references to the tensor_table
+  // tensors inside the pickle are references to the tensor_table.
+  // class_resolver is to resolve strong class type, type_resolver_ is
+  // to resolve any JIT type. class_resolver and type_resolver are not merged
+  // here because some use cases need to get strong class type that
+  // type_resolver_ can not return.
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
       ClassResolver class_resolver,

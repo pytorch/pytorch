@@ -11,6 +11,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// Input is qualified name string or type str, output is JIT typePtr
+// Same as jit::TypeResolver, did not import jit::TypeResolver to here
+// because it could instroduce cyclic dependencies.
 using TypeResolver = std::function<c10::TypePtr(const std::string&)>;
 
 struct RpcBackendOptions {
