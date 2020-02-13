@@ -78,6 +78,9 @@ class AliasDb {
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
 
+  // Does the node write to any of its inputs
+  TORCH_API bool writeOccursAtNode(Node* n) const;
+
   // Do any nodes write to `v`s memory location?
   TORCH_API bool hasWriters(const Value* v) const;
 

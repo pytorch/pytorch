@@ -156,6 +156,12 @@ MemoryLocations AliasDb::getWrites(Node* n) const {
   return writes;
 }
 
+bool AliasDb::writeOccursAtNode(Node* n) const {
+  MemoryLocations writes;
+  getWritesImpl(n, writes);
+  return !writes.empty();
+}
+
 void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
