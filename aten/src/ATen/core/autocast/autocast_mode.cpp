@@ -30,11 +30,11 @@ void AutocastMode::clear_cache() {
 }
 
 int AutocastMode::increment_nesting() {
-  at::autocast::increment_nesting();
+  return at::autocast::increment_nesting();
 }
 
 int AutocastMode::decrement_nesting() {
-  at::autocast::decrement_nesting();
+  return at::autocast::decrement_nesting();
 }
 
 #else
