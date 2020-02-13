@@ -28,6 +28,22 @@ class InstructionSet {
     return CPU_Rep.f_7_EBX_[16];
   }
 
+  static bool AVX512CD(void) {
+    return CPU_Rep.f_7_EBX_[28];
+  }
+
+  static bool AVX512BW(void) {
+    return CPU_Rep.f_7_EBX_[30];
+  }
+
+  static bool AVX512DQ(void) {
+    return CPU_Rep.f_7_EBX_[17];
+  }
+
+  static bool AVX512VL(void) {
+    return CPU_Rep.f_7_EBX_[31];
+  }
+
  private:
   static const InstructionSet_Internal CPU_Rep;
 
