@@ -71,7 +71,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         const int64_t to_inc = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
         AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_update_from_to", [&] {
           from = update_from<scalar_t>(from);
-          TORCH_CHECK(to_inc >= from, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " > to=", to_inc);
+          TORCH_CHECK(!(from > to_inc), "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " > to=", to_inc);
         });
         range = to_inc - from + 1;
       }
