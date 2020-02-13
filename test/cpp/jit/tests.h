@@ -102,14 +102,13 @@ namespace jit {
   _(GPU_FusionMutator)           \
   _(GPU_FusionTopoSort)          \
   _(GPU_FusionRegister)          \
-<<<<<<< HEAD
   _(GPU_FusionTensor)            \
   _(GPU_FusionTensorContiguity)  \
-  _(GPU_FusionTensorDomain)      \
-=======
   _(GPU_FusionCastOp)            \
   _(GPU_FuserTensor)             \
->>>>>>> Add cast_op container function
+  _(GPU_FusionTDMerge)           \
+  _(GPU_FusionTDSplit)           \
+  _(GPU_FusionCastOp)     			 \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

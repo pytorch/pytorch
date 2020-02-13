@@ -263,23 +263,36 @@ void testGPU_FusionTensorContiguity() {
   }
 }
 
-void testGPU_FusionTensorDomain() {
+void testGPU_FusionTDSplit() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   const Tensor *t = Tensor::MakeDummyTensor(3);
   std::cout << "A 3d tensor: " << t << std::endl;
-  std::vector<const IterDomain*> view_size;
-  view_size.push_back(t->domain->axis(0));
-  view_size.push_back(t->domain->axis(1));
 
   const TensorView *tv = split(t, 2, 2);
 
-  std::cout<<"Modified view: "<<tv<<std::endl;
-  std::cout<<"Split view: "<<fusion<<std::endl;
+  std::cout<<"Split view: "<<tv<<std::endl;
+  std::cout<<"Fusion code: "<<fusion<<std::endl;
   
 }
+
+void testGPU_FusionTDMerge() {
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const Tensor *t = Tensor::MakeDummyTensor(3);
+  std::cout << "A 3d tensor: " << t << std::endl;
+
+  const TensorView *tv = merge(t, 1);
+
+  std::cout<<"Merged view: "<<tv<<std::endl;
+  std::cout<<"Fusion code: "<<fusion<<std::endl;
+  
+}
+
 
 void testGPU_Fusion() {}
 
