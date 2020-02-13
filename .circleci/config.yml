@@ -1493,9 +1493,7 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install pillow==7.0.0 --progress-bar off
-            #install the latest version of PyTorch and TorchVision
-            pip install torch "torchvision>=0.5.0" --progress-bar off
+            pip install torch torchvision --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
@@ -2079,14 +2077,14 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
-#      - pytorch_ios_build:
-#          name: pytorch_ios_11_2_1_x86_64_build
-#          context: org-member
-#          build_environment: "pytorch-ios-11.2.1-x86_64_build"
-#          ios_arch: "x86_64"
-#          ios_platform: "SIMULATOR"
-#          requires:
-#            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_x86_64_build
+          context: org-member
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
+          ios_arch: "x86_64"
+          ios_platform: "SIMULATOR"
+          requires:
+            - setup
       - pytorch_ios_build:
           name: pytorch_ios_11_2_1_arm64_build
           context: org-member
@@ -2205,11 +2203,11 @@ workflows:
           docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
       # TODO we should test a libtorch cuda build, but they take too long
       # - binary_linux_libtorch_2_7m_cu90_devtoolset7_static-without-deps_build
-      - binary_mac_build:
-          name: binary_macos_wheel_3_6_cpu_build
-          build_environment: "wheel 3.6 cpu"
-          requires:
-            - setup
+#      - binary_mac_build:
+#          name: binary_macos_wheel_3_6_cpu_build
+#          build_environment: "wheel 3.6 cpu"
+#          requires:
+#            - setup
       - binary_mac_build:
           name: binary_macos_conda_2_7_cpu_build
           build_environment: "conda 2.7 cpu"
@@ -2217,15 +2215,15 @@ workflows:
             - setup
       # This job has an average run time of 3 hours o.O
       # Now only running this on master to reduce overhead
-      - binary_mac_build:
-          name: binary_macos_libtorch_2_7_cpu_build
-          build_environment: "libtorch 2.7 cpu"
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
+#      - binary_mac_build:
+#          name: binary_macos_libtorch_2_7_cpu_build
+#          build_environment: "libtorch 2.7 cpu"
+#          requires:
+#            - setup
+#          filters:
+#            branches:
+#              only:
+#                - master
       - binary_linux_test:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
           build_environment: "manywheel 2.7mu cpu devtoolset7"
