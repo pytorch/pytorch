@@ -78,6 +78,13 @@ struct ConstantPropagator {
   std::vector<IValue> runNode(Node* n) {
     auto op = n->getOperation();
     Stack stack;
+
+    if (n->kind() == prim::shape) {
+      const auto& tt = n->input(0)->type()->cast<TensorType>();
+      auto sizes = tt->sizes().concrete_sizes();
+      return { *sizes };
+    }
+
     for (auto input : n->inputs()) {
       stack.push_back(*toIValue(input));
     }
@@ -260,6 +267,11 @@ struct ConstantPropagator {
   // for non-forwarding ops because that Tuple could contain an ivalue that is
   // not allowed as a constant, for instance, a Tensor with a gradient.
   bool runnableInputs(Node* n) {
+    if (n->kind() == prim::shape) {
+      if (n->input(0)->isCompleteTensor()) {
+        return true;
+      }
+    }
     if (std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
           return v->node()->kind() == prim::Constant;
         })) {
@@ -275,6 +287,10 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
+    if (n->kind() == prim::shape) {
+      return true;
+    }
+
     bool no_mutation;
     if (aliasDb_) {
       no_mutation = !aliasDb_->hasWriters(n);
