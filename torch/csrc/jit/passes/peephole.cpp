@@ -231,12 +231,13 @@ struct PeepholeOptimizeImpl {
         }
       } else if (
           node->kind() == aten::Float || node->kind() == aten::Int ||
-          node->kind() == prim::ImplicitTensorToNum) {
+          node->kind() == aten::FloatImplicit || node->kind() == aten::IntImplicit ||
+          node->kind() == aten::ScalarImplicit) {
         Node* input_node = node->input()->node();
         if (input_node->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
               *node,
-              " (x.NumToTensor().ImplicitTensorToNum() == x.NumToTensor()) is replaced with ",
+              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed_ = true;
