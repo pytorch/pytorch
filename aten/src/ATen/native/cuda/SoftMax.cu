@@ -345,7 +345,7 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < C10_WARP_SIZE; ++i) {
         warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
-#ifdef CUDA_VERSION
+#ifndef __HIP_PLATFORM_HCC__
       __syncwarp(mask);
 #endif
       smem[lane] = warpVal;
