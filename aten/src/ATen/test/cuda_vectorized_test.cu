@@ -4,7 +4,9 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
+using namespace at::native;
 using namespace at::native::memory;
+
 __managed__ double4 buffer1[1024];
 __managed__ double4 buffer2[1024];
 
