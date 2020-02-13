@@ -1164,7 +1164,7 @@ softplus(input, beta=1, threshold=20) -> Tensor
 Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
 
 For numerical stability the implementation reverts to the linear function
-for inputs above :attr:`threshold` (default ``20``).
+when :math:`input \times \beta > threshold`.
 
 See :class:`~torch.nn.Softplus` for more details.
 """)
@@ -1651,6 +1651,24 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
     return ret
 
 
+def _verify_batch_size(size):
+    # type: (List[int]) -> None    
+    # XXX: JIT script does not support the reduce from functools, and mul op is a
+    # builtin, which cannot be used as a value to a func yet, so rewrite this size
+    # check to a simple equivalent for loop
+    #
+    # TODO: make use of reduce like below when JIT is ready with the missing features:
+    # from operator import mul
+    # from functools import reduce
+    #
+    #   if reduce(mul, size[2:], size[0]) == 1
+    size_prods = size[0]
+    for i in range(len(size) - 2):
+        size_prods *= size[i + 2]
+    if size_prods == 1:
+        raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor], Optional[Tensor], bool, float, float) -> Tensor  # noqa
@@ -1660,21 +1678,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
-        size = input.size()
-        # XXX: JIT script does not support the reduce from functools, and mul op is a
-        # builtin, which cannot be used as a value to a func yet, so rewrite this size
-        # check to a simple equivalent for loop
-        #
-        # TODO: make use of reduce like below when JIT is ready with the missing features:
-        # from operator import mul
-        # from functools import reduce
-        #
-        #   if reduce(mul, size[2:], size[0]) == 1
-        size_prods = size[0]
-        for i in range(len(size) - 2):
-            size_prods *= size[i + 2]
-        if size_prods == 1:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+        _verify_batch_size(input.size())
 
     return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
@@ -1691,6 +1695,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+    _verify_batch_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
         use_input_stats, momentum, eps, torch.backends.cudnn.enabled
@@ -1713,6 +1718,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    _verify_batch_size(input.size())
     return torch.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
@@ -2492,7 +2498,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         be used to infer new scales for the interpolation. This is the current
         default behavior when recompute_scale_factor is not specified.
         The default behavior for recompute_scale_factor will change to False
-        in 1.5.0, and scale_factor will be used in the interpolation
+        in 1.6.0, and scale_factor will be used in the interpolation
         calculation.
 
     .. include:: cuda_deterministic_backward.rst
@@ -2514,7 +2520,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             is_float_scale_factor = any(not float(scale).is_integer() for scale in _ntuple(dim)(scale_factor))
             if is_float_scale_factor:
                 warnings.warn("The default behavior for interpolate/upsample with float scale_factor will change "
-                              "in 1.5.0 to align with other frameworks/libraries, and use scale_factor directly, "
+                              "in 1.6.0 to align with other frameworks/libraries, and use scale_factor directly, "
                               "instead of relying on the computed output size. "
                               "If you wish to keep the old behavior, please set recompute_scale_factor=True. "
                               "See the documentation of nn.Upsample for details. ")

@@ -16,10 +16,10 @@ enum class DispatchKey : uint8_t {
   //
   //    using DispatchKey = optional<RealDispatchKey>
   //
-  // and UndefinedTensorId == nullopt.  We didn't actually represent
+  // and Undefined == nullopt.  We didn't actually represent
   // it this way because optional<RealDispatchKey> would take two
   // words, when DispatchKey fits in eight bits.
-  UndefinedTensorId = 0,
+  Undefined = 0,
 
   // This pool of IDs is not really ordered, but it is merged into
   // the hierarchy for convenience and performance
@@ -47,12 +47,30 @@ enum class DispatchKey : uint8_t {
   SparseCPUTensorId, // PyTorch only
   SparseCUDATensorId, // PyTorch only
 
-  // WARNING! If you add more "wrapper" style tensor ids (tensor
-  // ids which don't get kernels directly defined in native_functions.yaml;
-  // examples are tracing or profiling) here, you need to also adjust
-  // legacyExtractDispatchKey in c10/core/DispatchKeySet.h to mask them out.
+  // Custom pseudorandom number generator dispatch key.
+  // To enable PyTorch users to have custom PRNGs, we added support for
+  // dispatching on at::Generator* parameters.
+  // This key must be used in two places:
+  //  1) as a second parameter of at::Generator constructor call in
+  //     the user-defined PRNG class.
+  //  2) as a dispatch key while registering custom kernels
+  //     (templatized kernels specialized for user-defined PRNG class)
+  CustomRNGKeyId,
 
   VariableTensorId,
+
+  // Pre-autograd backend keys allow backends to override the autograd behavior
+  // (aka VariableTensorId) for operators which have a Variable kernel
+  // already registered.  For example, XLA wants to define autograd for
+  // einsum directly.  Registering a custom autograd implementation at the
+  // XLATensorId key won't work because we process VariableTensorId
+  // before XLATensorId.  This key has higher priority and gets processed
+  // first.  You generally should NOT redispatch after handling autograd
+  // here (since that would result in execution of the VariableTensorId
+  // operator, which you're trying to skip).  In PreAutograd implementations,
+  // you are responsible for handling autograd yourself, or deferring to other
+  // operators which support autograd.
+  XLAPreAutograd,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single

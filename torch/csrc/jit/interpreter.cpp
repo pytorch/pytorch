@@ -413,8 +413,8 @@ struct CodeImpl {
     auto count = index;
     for (size_t instr_index = 0; instr_index < instructions_.size();
          instr_index++) {
-      if (instructions_[instr_index].op == GUARD) {
-        if (count == 0) {
+      if (instructions_[instr_index].op == GUARD || instructions_[instr_index].op == FAIL_GUARD) {
+        if (count-- == 0) {
           // patching GUARD to FAIL_GUARD
           instructions_[instr_index] =
               Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
@@ -425,7 +425,6 @@ struct CodeImpl {
               instr_index);
           break;
         }
-        count--;
       }
     }
   }
@@ -619,6 +618,7 @@ struct CodeImpl {
     // the rest of args follow
     emitLoadInputs(node->inputs().slice(1, 1));
     insertInstruction(GUARD, type_table_.size());
+
     type_table_.emplace_back(node->outputs().at(0)->type());
     insertInstruction(JF, 0 /* to be patched */);
 
@@ -1076,9 +1076,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
             ++af.pc;
           } break;
           case TAIL_CALL: {
