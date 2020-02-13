@@ -545,7 +545,7 @@ class TORCH_API Module : public std::enable_shared_from_this<Module> {
   friend class Cloneable;
 
   template <typename ModuleType, typename... ArgumentTypes>
-  friend class AnyModuleHolder;
+  friend struct AnyModuleHolder;
 
   /// Pretty prints the given `Module` into the `ostream`.
   TORCH_API friend std::ostream& operator<<(

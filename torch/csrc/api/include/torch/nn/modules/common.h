@@ -69,7 +69,7 @@
 /// ```
 #define FORWARD_HAS_DEFAULT_ARGS(...) \
   template <typename ModuleType, typename... ArgumentTypes> \
-  friend class torch::nn::AnyModuleHolder; \
+  friend struct torch::nn::AnyModuleHolder; \
   bool _forward_has_default_args() override { \
     return true; \
   } \
