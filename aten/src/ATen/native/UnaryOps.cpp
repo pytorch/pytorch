@@ -31,6 +31,35 @@
 namespace at {
 namespace native {
 
+static inline ScalarType promoteIntToFloats(ScalarType a) {
+  // These promotion rules are for Unary Ops Int to Float conversions
+  // Based on NumPy's conversion rules
+  // For discussion: https://github.com/pytorch/pytorch/issues/28703
+  ScalarType dtype;
+
+  switch(self.scalar_type()) {
+    case kChar:
+      dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+      break;
+    case kShort:
+      dtype = kFloat;
+      break;
+    case kInt:
+      dtype = kDouble;
+      break;
+    case kLong:
+      dtype = kDouble;
+      break;
+    case kBool:
+      dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+    default:
+      dtype = ScalarType::Undefined;
+      break;
+  }
+
+  return dtype;
+}
+
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -49,8 +78,17 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
-  Tensor result = at::empty({0}, self.options());
-  return out_impl(result, self);
+  // This enables int-to-float implicit dtype conversions
+  ScalarType promoted_dtype = promoteIntToFloats(self.scalar_type());
+
+  // dtype is set to Undefined if no int-to-float conversion
+  if (dtype != ScalarType::Undefined) {
+    Tensor result = at::empty({0}, self.options().dtype(promoted_dtype));
+    return out_impl(result, self.to(promoted_dtype));
+  } else {
+    Tensor result = at::empty({0}, self.options());
+    return out_impl(result, self);
+  }
 }
 
 template <typename OutImpl>
