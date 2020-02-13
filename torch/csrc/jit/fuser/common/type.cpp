@@ -15,6 +15,7 @@ DataType promote_type(const DataType& t1, const DataType& t2){
 
 //Return highest on list (smallest enum val)
 ValType promote_type(const ValType& t1, const ValType& t2){
+  TORCH_CHECK(t1 >= ValType::Tensor && t2 >= ValType::Tensor);
   //Check that it's a promotable type (with dtype)
   //static_assert??
   return t1 < t2 ? t1 : t2;
@@ -31,11 +32,11 @@ static std::unordered_map<DataType, std::string> data_type_string_map {
   {DataType::Int,   "Int"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
-  {ValType::Tensor, "Tensor"},
-  {ValType::TensorView, "TensorView"},
+  {ValType::Tensor,       "Tensor"},
+  {ValType::TensorView,   "TensorView"},
   {ValType::TensorDomain, "TensorDomain"},
-  {ValType::IterDomain, "IterDomain"},
-  {ValType::Scalar, "Scalar"}
+  {ValType::IterDomain,   "IterDomain"},
+  {ValType::Scalar,       "Scalar"}
 };
 
 static std::unordered_map<ExprType, std::string> expr_type_string_map {
@@ -55,15 +56,15 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
-    {ParallelType::BIDz, "BIDz"},
-    {ParallelType::BIDy, "BIDy"},
-    {ParallelType::BIDx, "BIDx"},
-    {ParallelType::TIDz, "TIDz"},
-    {ParallelType::TIDy, "TIDy"},
-    {ParallelType::TIDx, "TIDx"},
+    {ParallelType::BIDz,      "BIDz"},
+    {ParallelType::BIDy,      "BIDy"},
+    {ParallelType::BIDx,      "BIDx"},
+    {ParallelType::TIDz,      "TIDz"},
+    {ParallelType::TIDy,      "TIDy"},
+    {ParallelType::TIDx,      "TIDx"},
     {ParallelType::Vectorize, "Vectorize"},
-    {ParallelType::Unroll, "Unroll"},
-    {ParallelType::Serial, "Serial"}
+    {ParallelType::Unroll,    "Unroll"},
+    {ParallelType::Serial,    "Serial"}
 };
 
 static std::unordered_map<at::ScalarType, DataType> at_type_map {
