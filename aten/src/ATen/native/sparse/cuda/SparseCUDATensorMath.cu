@@ -723,31 +723,8 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 }
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
-  Tensor result = at::zeros({self.size(0), mat2.size(2), self.size(1)}, mat2.options());
+  Tensor result = at::empty({}, mat2.options());
   return bmm_out_sparse_cuda(result, self, mat2);
-}
-
-// Search a sorted array for the rightmost instance of a value.
-// Array must be sorted from lowest to highest
-template<typename scalar_t>
-scalar_t binary_search_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t length, bool* found) {
-  // Since upper_bound finds the first value greater than our
-  // target value, we need to subtract its result by 1 to get
-  // the value we actually want
-  scalar_t* val_ptr = std::upper_bound(sorted_arr, sorted_arr+length, search_val) - 1;
-
-  // If our pointer is now less than the array pointer, then
-  // the first value encountered was too large, and the array
-  // does not contain the target. Or if upper_bound reached the
-  // end without finding the value, our pointer will not be
-  // pointing to the target value.
-  if ((val_ptr < sorted_arr) || (*val_ptr != search_val)) {
-    *found = false;
-    return -1;
-  } else {
-    *found = true;
-    return (val_ptr - sorted_arr);
-  }
 }
 
 __global__ void search_end_matrix_indices_cuda_kernel(
@@ -757,41 +734,25 @@ __global__ void search_end_matrix_indices_cuda_kernel(
   const int64_t num_elements
 ){
   const int64_t target_mat_num = blockIdx.x * blockDim.x + threadIdx.x;
-
   if (target_mat_num >= num_matrices) return;
-
 
   const int64_t* indices_1D = indices_1D_ti.data;
   const int64_t indices_1D_stride = indices_1D_ti.strides[0];
-
-  // mat_el_end_indices[thread_idx] = num_matrices-thread_idx-1;
-
   int64_t start_idx = 0;
   int64_t end_idx = num_elements - 1;
-
   int64_t mid_idx = (start_idx + end_idx) >> 1;
-
   int64_t mid_val = indices_1D[mid_idx*indices_1D_stride];
   bool found;
 
   while (
-    // (! (found=
-    //   (mid_val == target_mat_num)
-    //   && (
-    //     (mid_idx == (num_elements-1))
-    //     || (indices_1D[mid_idx+1] != target_mat_num)
-    //   )
-    // )) && (start_idx < end_idx)
     start_idx <= end_idx
   ) {
     bool trim_right = mid_val > target_mat_num;
-
     int64_t mid_idx_minus_1 = mid_idx - 1;
     int64_t mid_idx_plus_1 = mid_idx + 1;
 
     end_idx = trim_right ? mid_idx_minus_1 : end_idx;
     start_idx = trim_right ? start_idx : mid_idx_plus_1;
-
     mid_idx = (start_idx + end_idx) >> 1;
     mid_val = indices_1D[mid_idx*indices_1D_stride];
   }
@@ -803,41 +764,20 @@ __global__ void search_end_matrix_indices_cuda_kernel(
     );
 
   mat_el_end_indices[target_mat_num] = found ? mid_idx : -1;
-
-  /*
-  if (target_mat_num == 0) {
-    for (int64_t i = 0; i < num_elements; i++) {
-      printf("%d\n", indices_1D[i * indices_1D_stride]);
-    }
-  }
-  */
 }
 
 // Search through a 1D tensor of sorted sparse matrix
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const LongTensor& indices_1D) {
-
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
-  // TODO: If we don't clone the 1D indices tensor, we won't have everything contiguous because data from
-  // the original 3D tensor will be included. However, it would be better to just account for this in
-  // the cuda kernel so that we don't have to copy all this data
-  // auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D.clone().detach());
   auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);
   int64_t grid_size = (num_matrices / 64)+1;
   int64_t block_size = 64;
   int64_t num_elements = indices_1D.size(0);
 
-  /*
-  std::cout << "indices: " << std::endl << indices_1D << std::endl;
-
-  std::cout << "num_elements = " << num_elements << std::endl;
-  std::cout << "num_matrices = " << num_matrices << std::endl;
-  std::cout << "grid_size = " << grid_size << std::endl;
-  std::cout << "block_size = " << block_size << std::endl;
-  */
   search_end_matrix_indices_cuda_kernel<<<grid_size, block_size, 0, stream>>>(
     mat_el_end_indices,
     num_matrices,
@@ -849,21 +789,18 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
 
 cudaDataType getTensorCudaDataType(Tensor self) {
   cudaDataType cuda_data_type;
-  // = std::is_same<scalar_t,double>::value ? CUDA_R_64F : CUDA_R_32F;
 
   switch (self.scalar_type()) {
     case ScalarType::Float:
-      // std::cout << "FLOAT!!!" << std::endl;
       cuda_data_type = CUDA_R_32F;
       break;
 
     case ScalarType::Double:
-      // std::cout << "DOUBLE!!!" << std::endl;
       cuda_data_type = CUDA_R_64F;
       break;
 
     default:
-      TORCH_CHECK(false, "ATen tensor scalar type cannot be converted to CUDA data type");
+      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
       break;
   }
 
@@ -873,8 +810,8 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 cusparseSpMatDescr_t sparseMatrixToCusparseSpMatDescr(
   int64_t rows,
   int64_t cols,
-  LongTensor row_indices,
-  LongTensor col_indices,
+  Tensor row_indices,
+  Tensor col_indices,
   Tensor values
 ) {
   TORCH_CHECK(row_indices.dim() == 1, "row_indices must be 1-D");
@@ -893,6 +830,8 @@ cusparseSpMatDescr_t sparseMatrixToCusparseSpMatDescr(
 
   TORCH_CHECK(row_indices.size(0) == nnz, "row_indices size must match values size");
   TORCH_CHECK(col_indices.size(0) == nnz, "col_indices size must match values size");
+  TORCH_CHECK(row_indices.dtype() == ScalarType::Int, "row_indices must be int32")
+  TORCH_CHECK(col_indices.dtype() == ScalarType::Int, "col_indices must be int32")
 
   cudaDataType cuda_data_type = getTensorCudaDataType(values);
   void* row_indices_ptr = row_indices.data_ptr();
@@ -909,7 +848,7 @@ cusparseSpMatDescr_t sparseMatrixToCusparseSpMatDescr(
     row_indices_ptr,
     col_indices_ptr,
     values_ptr,
-    CUSPARSE_INDEX_64I,
+    CUSPARSE_INDEX_32I,
     CUSPARSE_INDEX_BASE_ZERO,
     cuda_data_type
   ));
@@ -966,8 +905,8 @@ void printCusparseDnMat(cusparseDnMatDescr_t dense_descr) {
 
 void printCusparseSpMat(cusparseSpMatDescr_t sparse_descr) {
   double* values_dev;
-  int64_t* row_indices_dev;
-  int64_t* col_indices_dev;
+  int32_t* row_indices_dev;
+  int32_t* col_indices_dev;
   int64_t rows;
   int64_t cols;
   int64_t nnz;
@@ -992,15 +931,15 @@ void printCusparseSpMat(cusparseSpMatDescr_t sparse_descr) {
   );
 
   float* values_host = new float[nnz];
-  int64_t* row_indices_host = new int64_t[nnz];
-  int64_t* col_indices_host = new int64_t[nnz];
+  int32_t* row_indices_host = new int32_t[nnz];
+  int32_t* col_indices_host = new int32_t[nnz];
 
   // std::cout << "cudaMemcpy() values" << std::endl;
   cudaMemcpy(values_host, values_dev, nnz*sizeof(float), cudaMemcpyDeviceToHost);
   // std::cout << "cudaMemcpy() rows" << std::endl;
-  cudaMemcpy(row_indices_host, row_indices_dev, nnz*sizeof(int64_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(row_indices_host, row_indices_dev, nnz*sizeof(int32_t), cudaMemcpyDeviceToHost);
   // std::cout << "cudaMemcpy() cols" << std::endl;
-  cudaMemcpy(col_indices_host, col_indices_dev, nnz*sizeof(int64_t), cudaMemcpyDeviceToHost);
+  cudaMemcpy(col_indices_host, col_indices_dev, nnz*sizeof(int32_t), cudaMemcpyDeviceToHost);
 
   for (int64_t i = 0; i < nnz; i++) {
     std::cout << "(" << row_indices_host[i]
@@ -1037,6 +976,7 @@ void printCusparseSpMat(cusparseSpMatDescr_t sparse_descr) {
 }
 
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
 
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -1046,13 +986,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
+  result.resize_({self.size(0), mat2.size(2), self.size(1)});
+  result.zero_();
+
   auto handle = at::cuda::getCurrentCUDASparseHandle();
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
-  SparseTensor self_coalesced;
-
-  self_coalesced = coalesce_sparse_cuda(self);
+  SparseTensor self_coalesced = coalesce_sparse_cuda(self);
 
   int64_t nnz =        self_coalesced._nnz();
   LongTensor indices = self_coalesced._indices();
@@ -1060,13 +1001,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   int64_t num_matrices = self_coalesced.size(0);
 
   LongTensor indices_dim0 = indices[0];
-  LongTensor indices_dim1 = indices[1];
-  LongTensor indices_dim2 = indices[2];
-  LongTensor indices_dim1_dim2 = indices.slice(0, 1, 3);
+
+  // Need to convert dim1 and dim2 indices to 32-bit since cusparseSpMM
+  // only supports 32-bit indices
+  Tensor indices_dim1 = indices[1].to(ScalarType::Int);
+  Tensor indices_dim2 = indices[2].to(ScalarType::Int);
+
   int64_t* mat_el_end_indices;
-
   cudaMallocManaged(&mat_el_end_indices, num_matrices*sizeof(int64_t));
-
   search_end_matrix_indices(mat_el_end_indices, num_matrices, indices_dim0);
 
   int64_t dim_i = self_coalesced.size(1);
@@ -1097,26 +1039,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
       Tensor dense_matrix = mat2[cur_mat_num];
       int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
       Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
-
-
-      /*
-      LongTensor sparse_indices = indices_dim1_dim2.slice(1, mat_el_begin_idx, mat_el_end_idx);
-      Tensor result_matrix = result[cur_mat_num];
-
-      AT_DISPATCH_FLOATING_TYPES(
-          sparse_values.scalar_type(), "addmm_sparse_cuda", [&] {
-            s_addmm_out_sparse_dense_cuda_worker<scalar_t>(
-              sparse_nnz,
-              dim_i, dim_j, dim_k,
-              result_matrix,
-              beta, t, alpha,
-              sparse_indices, sparse_values,
-              dense_matrix
-            );
-          }
-      );
-      */
-      
       Tensor sparse_row_indices = indices_dim1.slice(0, mat_el_begin_idx, mat_el_end_idx);
       Tensor sparse_col_indices = indices_dim2.slice(0, mat_el_begin_idx, mat_el_end_idx);
 
@@ -1127,8 +1049,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
         sparse_col_indices,
         sparse_values
       );
-      // std::cout << "sparse input:" << std::endl;
-      // printCusparseSpMat(sparse_descr);
 
       cudaDataType cuda_data_type = getTensorCudaDataType(dense_matrix);
 
@@ -1153,9 +1073,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
         CUSPARSE_ORDER_COL
       ));
 
-      // std::cout << "dense input:" << std::endl;
-      // printCusparseDnMat(dense_descr);
-
       Tensor result_matrix = result[cur_mat_num];
 
       cusparseDnMatDescr_t result_descr;
@@ -1168,17 +1085,12 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
         cuda_data_type,
         CUSPARSE_ORDER_COL
       ));
-      cudaDeviceSynchronize();
-
-
 
       AT_DISPATCH_FLOATING_TYPES(
         values.scalar_type(), "addmm_sparse_cuda", [&] {
           scalar_t alpha_val = alpha.to<scalar_t>();
           scalar_t beta_val = beta.to<scalar_t>();
-          
 
-          // std::cout << "determining buffer size req" << std::endl;
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -1189,12 +1101,9 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG1,
+            CUSPARSE_COOMM_ALG2,
             &bufferSizes[cur_mat_num]
           ));
-          cudaDeviceSynchronize();
-
-          // std::cout << "need buffer size " << bufferSizes[cur_mat_num] << std::endl;
 
           if (bufferSizes[cur_mat_num] > 0) {
             cudaMallocManaged(&(buffers[cur_mat_num]), bufferSizes[cur_mat_num]);
@@ -1202,9 +1111,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             buffers[cur_mat_num] = nullptr;
           }
 
-          cudaDeviceSynchronize();
-
-          // std::cout << "multiplying" << std::endl;
           TORCH_CUDASPARSE_CHECK(cusparseSpMM(
             handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -1215,29 +1121,24 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG1,
+            CUSPARSE_COOMM_ALG2,
             buffers[cur_mat_num]
           ));
-          // cudaDeviceSynchronize();
         }
       );
-
-      // std::cout << "dense output:" << std::endl;
-      // printCusparseDnMat(result_descr);
-      // std::cout << std::endl;
-
       mat_el_begin_idx = mat_el_end_idx;
 
     } else {
       buffers[cur_mat_num] = nullptr;
     }
   }
-  cudaDeviceSynchronize();
-
+  // Need to transpose the result matrices since cusparse stores
+  // them in column-major order in memory
   result.transpose_(1,2);
-
   cudaFree(mat_el_end_indices);
 
+  // The overall operation is significantly faster if all the
+  // workspace buffers are freed at the end
   for (int64_t mat_num = 0; mat_num < num_matrices; mat_num++) {
     if (buffers[mat_num] != nullptr) {
       cudaFree(buffers[mat_num]);
