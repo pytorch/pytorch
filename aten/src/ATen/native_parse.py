@@ -226,7 +226,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
-    
+
     # add explicit support for what is needed for tril_indices / triu_indices
     supported_topt_arguments.append(
         [
@@ -255,7 +255,7 @@ def parse_arguments(args, func_variants, declaration, func_return):
             {'type': 'bool', 'name': 'pin_memory', 'is_nullable': True, 'annotation': None, 'default': False, 'kwarg_only': True}
         ]
     )
-    
+
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
     ]
@@ -275,11 +275,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
             matches = all(topt_representation[i] == topt for i, topt in enumerate(supported_topt))
             if matches:
                 return corresponding_topts[idx]
-            else:
-                print("\n\n\n")
-                print(topt_representation)
-                print("\nVS")
-                print(supported_topt)
         return None
 
     def is_tensor_option(argument):
@@ -298,11 +293,8 @@ def parse_arguments(args, func_variants, declaration, func_return):
                     break
                 topt_representation.append(argument)
                 idx += 1
-            
+
             if len(topt_representation) == number_of_arguments:
-                if declaration['name'] == '_cudnn_init_dropout_state':
-                    print("\n\n\n")
-                    print(topt_representation)
                 merged_argument = check_topt_representation(topt_representation)
                 assert merged_argument, \
                     "Unsupported combination of TensorOptions {}, the only currently supported combinations are {}"\

@@ -1142,7 +1142,7 @@
   device_guard: False
   supports_named_tensor: True
 
-- func: empty_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: empty_like.dtype(Tensor self, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
   supports_named_tensor: True
 
@@ -1312,7 +1312,7 @@
 - func: full_like(Tensor self, Scalar fill_value, *, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
-- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: full_like.dtype(Tensor self, Scalar fill_value, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -2089,7 +2089,7 @@
 - func: ones_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
-- func: ones_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: ones_like.dtype(Tensor self, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: pairwise_distance(Tensor x1, Tensor x2, float p=2, float eps=1e-06, bool keepdim=False) -> Tensor
@@ -2975,7 +2975,7 @@
 - func: zeros_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
-- func: zeros_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: zeros_like.dtype(Tensor self, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
