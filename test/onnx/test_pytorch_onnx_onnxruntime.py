@@ -64,14 +64,16 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
         input_copy = copy.deepcopy(input)
-        output = model(*input_copy)
+        model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+        output = model_copy(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
 
         # export the model to ONNX
         f = io.BytesIO()
         input_copy = copy.deepcopy(input)
-        torch.onnx._export(model, input_copy, f,
+        model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+        torch.onnx._export(model_copy, input_copy, f,
                            opset_version=self.opset_version,
                            example_outputs=output,
                            do_constant_folding=do_constant_folding,
@@ -92,7 +94,8 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if isinstance(test_input, torch.Tensor):
                     test_input = (test_input,)
                 test_input_copy = copy.deepcopy(test_input)
-                output = model(*test_input_copy)
+                model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+                output = model_copy(*test_input_copy)
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_test_with_input(ort_sess, test_input, output, rtol, atol)
@@ -113,7 +116,7 @@ class TestONNXRuntime(unittest.TestCase):
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
                  input_names=None, output_names=None, fixed_batch_size=False):
-        model_ = model.copy() if hasattr(model, 'copy') else model
+        model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
 
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
