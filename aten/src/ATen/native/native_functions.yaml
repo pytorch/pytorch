@@ -2190,9 +2190,9 @@
 
 - func: randint_like.low(Tensor self, int low, int high, *, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.dtype(Tensor self, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.dtype(Tensor self, int high, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
-- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randint_like.low_dtype(Tensor self, int low, int high, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
 
 - func: randn(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -2211,7 +2211,7 @@
 - func: randn_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
-- func: randn_like.dtype(Tensor self, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
+- func: randn_like.dtype(Tensor self, *, ScalarType? dtype, Layout? layout, Device? device, bool? pin_memory=False, MemoryFormat? memory_format=None) -> Tensor
   supports_named_tensor: True
 
 - func: randperm(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor

@@ -1415,9 +1415,9 @@ class ShapePropagator {
             "aten::full_like(Tensor self, Scalar fill_value, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
             "aten::ones_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
             "aten::rand_like(Tensor self, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randint_like(Tensor self, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randn_like(Tensor self, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=None) -> Tensor",
             "aten::zeros_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
