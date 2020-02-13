@@ -1797,22 +1797,17 @@ struct to_ir {
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
   Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
-    if (type->cast<ListType>()) { // Lists also have in-place ops.
-      switch (stmt.aug_op()) {
-        case '+':
-          return aten::add_;
-      }
-    }
-    bool isTensor = type->isSubtypeOf(TensorType::get());
+    bool use_inplace_op = type->isSubtypeOf(TensorType::get()) ||
+        type->kind() == TypeKind::ListType;
     switch (stmt.aug_op()) {
       case '+':
-        return isTensor ? aten::add_ : aten::add;
+        return use_inplace_op ? aten::add_ : aten::add;
       case '-':
-        return isTensor ? aten::sub_ : aten::sub;
+        return use_inplace_op ? aten::sub_ : aten::sub;
       case '/':
-        return isTensor ? aten::div_ : aten::div;
+        return use_inplace_op ? aten::div_ : aten::div;
       case '*':
-        return isTensor ? aten::mul_ : aten::mul;
+        return use_inplace_op ? aten::mul_ : aten::mul;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1890,8 +1885,7 @@ struct to_ir {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
       auto magic_method_name = getAugMagicMethod(stmt);
-      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()))
-                           .value(*method.graph());
+      const auto rhs = emitExpr(stmt.rhs());
 
       // Insert call to magic method
       auto sugared_magic_method = makeMagic(
@@ -1913,7 +1907,7 @@ struct to_ir {
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          {rhs, lhsValue},
+          {lhsValue, rhs},
           {},
           /*self=*/c10::nullopt);
       lhsSugaredVar->setAttr(

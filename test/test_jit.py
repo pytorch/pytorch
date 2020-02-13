@@ -5266,6 +5266,7 @@ def foo(x):
                 super().__init__()
                 self.x = 2
                 self.o = O()
+                self.list = [1, 2, 3]
 
         class A(nn.Module):
             def __init__(self):
@@ -5275,9 +5276,17 @@ def foo(x):
             def forward(self):
                 self.child.x += 1
                 self.child.o += 5
-                return self.child.x, self.child.o
+                self.child.list += [4, 5, 6]
+                return self.child.x, self.child.o, self.child.list
 
-        self.checkModule(A(), [])
+        a = A()
+        sa = torch.jit.script(A())
+        eager_result = a()
+        script_result = sa()
+        self.assertEqual(eager_result, script_result)
+        self.assertEqual(a.child.x, sa.child.x)
+        self.assertEqual(a.child.o, sa.child.o)
+        self.assertEqual(a.child.list, sa.child.list)
 
     def test_nested_list_construct(self):
         def foo():
