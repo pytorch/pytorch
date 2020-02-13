@@ -31,13 +31,13 @@
 namespace at {
 namespace native {
 
-static inline ScalarType promoteIntToFloats(ScalarType a) {
+static inline ScalarType promoteIntToFloats(ScalarType in_dtype) {
   // These promotion rules are for Unary Ops Int to Float conversions
   // Based on NumPy's conversion rules
   // For discussion: https://github.com/pytorch/pytorch/issues/28703
   ScalarType dtype;
 
-  switch(self.scalar_type()) {
+  switch(in_dtype) {
     case kChar:
       dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
       break;
