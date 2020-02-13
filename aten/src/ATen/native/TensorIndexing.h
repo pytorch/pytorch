@@ -193,14 +193,6 @@ struct CAFFE2_API TensorIndex final {
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
-static inline int64_t getTensorSize(const Tensor& self, int64_t dim, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
-    return at::native::size(self, dim);
-  } else {
-    return self.size(dim);
-  }
-}
-
 static inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
