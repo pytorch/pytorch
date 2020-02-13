@@ -13754,11 +13754,9 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t == True).to(torch.int).sum().item() / size < 0.6)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
-        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
-            return
-
         size = 2000
         alpha = 0.1
 
@@ -13780,11 +13778,9 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
             self.assertTrue((to_inc_ - alpha * range_) < t.max() <= to_inc_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
-        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
-            return
-
         size = 2000
         alpha = 0.1
 
@@ -13817,11 +13813,9 @@ class TestTorchDeviceType(TestCase):
                         self.assertTrue(from_ <= t.min() < (from_ + alpha * range_))
                         self.assertTrue((to_ - alpha * range_) < t.max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
-        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
-            return
-
         size = 2000
         alpha = 0.1
 
@@ -13841,11 +13835,9 @@ class TestTorchDeviceType(TestCase):
                 self.assertTrue(0 <= t.min() < alpha * to_)
                 self.assertTrue((to_ - alpha * to_) < t.max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):
-        if device == 'cpu' and (dtype == torch.half or torch.bfloat16):
-            return
-
         size = 2000
         alpha = 0.1
 
