@@ -271,23 +271,14 @@ void testGPU_FusionTensorDomain() {
   const Tensor *t = Tensor::MakeDummyTensor(3);
   std::cout << "A 3d tensor: " << t << std::endl;
   std::vector<const IterDomain*> view_size;
-  view_size.push_back(t->domain->domain[0]);
-  view_size.push_back(t->domain->domain[1]);
-  const Val* d2 = static_cast<const Int*>(
-    binary_op( BinaryOpType::Div, t->domain->domain[2]->size(), new Int(2) )
-  );
+  view_size.push_back(t->domain->axis(0));
+  view_size.push_back(t->domain->axis(1));
 
-  const Val* d3 = static_cast<const Int*>(
-    binary_op( BinaryOpType::Mod, t->domain->domain[2]->size(), new Int(2) )
-  );
+  const TensorView *tv = split(t, 2, 2);
 
-  view_size.push_back( new IterDomain(d2) );
-  view_size.push_back( new IterDomain(d3) );
-
-  const TensorView *tv = new TensorView(t, new TensorDomain(view_size));
   std::cout<<"Modified view: "<<tv<<std::endl;
-  std::cout<<"Fusion: "<<fusion<<std::endl;
-
+  std::cout<<"Split view: "<<fusion<<std::endl;
+  
 }
 
 void testGPU_Fusion() {}
