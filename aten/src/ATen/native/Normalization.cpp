@@ -11,7 +11,7 @@
 
 #include <vector>
 
-static const int MIOPEN_DIM_MAX = 4;
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
