@@ -108,11 +108,6 @@ std::shared_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         nullptr);
 
-    // The callback is the same as finishCreatingOwnerRRef() in
-    // python_functions.py, the difference is that ownerRRefPtr created here
-    // always holds an IValue, no need to explicitly hold GIL and clear
-    // deletedRRef. Not calling finishCreatingOwnerRRef() because it is not
-    // necessary to introduce python dependency in this file.
     fm->addCallback([](const Message& message,
                        const c10::optional<utils::FutureError>& futErr) {
       callback::finishCreatingOwnerRRef(message, futErr);
