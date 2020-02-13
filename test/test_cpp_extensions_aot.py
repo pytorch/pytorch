@@ -55,6 +55,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(IS_WINDOWS, "Flaky on Windows, see issue #33270")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
 
