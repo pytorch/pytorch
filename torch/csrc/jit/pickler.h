@@ -144,8 +144,6 @@ class Pickler {
 
  private:
   void pushIValueImpl(const IValue& ivalue);
-  void startTypeTag();
-  void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
