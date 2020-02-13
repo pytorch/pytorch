@@ -147,23 +147,6 @@ bool nodeQuantizable(Node* n) {
     });
 }
 
-bool valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get())) {
-    return false;
-  }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
-  }
-  // Check whether user is quantizable
-  for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) && !isBiasOfConvOrLinear(v)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 script::Module findChildModule(
     const script::Module& module,
     const std::vector<std::string>& path) {
@@ -392,6 +375,8 @@ class InsertObserversHelper {
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
       const std::string& method_name);
+
+  bool valueNeedsToBeQuantized(Value* v);
 
   void insertObserverFor(
       Value* v,
@@ -891,6 +876,24 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      values_to_skip_.count(v)) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use : v->uses()) {
+    if (nodeQuantizable(use.user) && !isBiasOfConvOrLinear(v)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -929,7 +932,7 @@ void InsertObserversHelper::insertObservers(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+    if (valueNeedsToBeQuantized(v)) {
       insertObserverFor(v, module, qconfig_opt);
     }
   }
@@ -946,7 +949,7 @@ void InsertObserversHelper::insertObservers(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
       }
