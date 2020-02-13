@@ -360,13 +360,13 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
 def _fractional_max_pool2d(input, kernel_size, output_size=None,
                            output_ratio=None, return_indices=False,
                            _random_samples=None):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 fractional_max_pool2d, (input,), input, kernel_size,
                 output_size=output_size, output_ratio=output_ratio,
                 return_indices=return_indices, _random_samples=_random_samples)
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
     return fractional_max_pool2d_with_indices(input, kernel_size, output_size,
                                               output_ratio, return_indices,
                                               _random_samples)[0]
@@ -482,13 +482,13 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 max_pool1d, (input,), input, kernel_size,
                 stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
                 return_indices=return_indices)
-    # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool1d(
@@ -525,13 +525,13 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 max_pool2d, (input,), input, kernel_size,
                 stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
                 return_indices=return_indices)
-    # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool2d(
@@ -569,12 +569,12 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
+    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 max_pool3d, (input,), input, kernel_size, stride=stride, padding=padding,
                 dilation=dilation, ceil_mode=ceil_mode, return_indices=return_indices)
-    # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool3d(
