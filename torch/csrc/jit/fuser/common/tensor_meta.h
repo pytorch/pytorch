@@ -18,123 +18,60 @@ namespace fuser {
    1. strides for trivial dimensions (size-1 dimension);
    2. memory overlap / interleave;
  */
-struct TensorContiguity {
+struct TORCH_API TensorContiguity {
 
   TensorContiguity(
       const std::vector<int64_t>& size, 
       const std::vector<int64_t>& stride);
 
   // gives broadcast information per axis;
-  bool isBroadcastDim(int axis);
+  bool isBroadcastDim(int axis) const;
 
   // returns all axes that requires broadcast;
-  std::vector<int> getBroadcastDims();
+  std::vector<int> getBroadcastDims() const;
 
   // gives contiguity information per axis;
-  bool canCollapseLeft(int axis);
-
-  // returns all axes that can collapse to its immediate left axes;
-  std::vector<int> getCollapseLeftDims();
+  // This basically calls to canCollapseLowerHigher(axis, axis+1);
+  bool canCollapseToHigher(int axis) const;
 
   // return the rank of the tensor;
-  int rank();
+  int rank() const;
 
-  // TODO: we probably won't need this until much later, but let's try solve
-  // the problem that doesn't exist yet;
-  bool canCollapseLowerToHigher(int lower_axis, int higher_axis);
-  int getAxisByStride(int order);
-  std::vector<int> getAxesOrderedByStride();
+
+/*******************************************************************************
+ * Future proof support
+ *   we don't need these yet.
+ * TODO: we probably won't need this until much later, but let's try solve
+ * the problem that doesn't exist yet;
+ ******************************************************************************/
+
+  // [NOTE] the order of the argument matters:
+  // canCollapseLowerHigher(x, y) differs from canCollapseLowerHigher(y, x)
+  bool canCollapseLowerHigher(int lower_axis, int higher_axis) const;
+
+  // FCD: Fast changing dimension, the dimension with smallest stride (>0).
+  //   returns -1 if FCD doesn't exist (e.g. fully broadcast)
+  int getFCD() const;
+  // Check if FCD exist and has stride == 1.
+  bool contiguousFCD() const;
+
+  // This is used to support rational binding;
+  int getAxisByStride(int order) const;
+  std::vector<int> getAxesOrderedByStride() const;
+
+  // TODO: we should encode this to a single integer with restricted rank.
+  std::vector<int> getContiguityTag() const;
+  std::vector<int> getSortedAxesTag() const;
+
+  // TODO: merge two contiguity info;
+  void merge(const TensorContiguity& tc);
 
 protected:
-  // Implementation details:
-  //   contiguity flag: stores contiguity, memory permutation as well as
-  // broadcast;
+  // contiguity_  : contiguity and broadcast;
   std::vector<int> contiguity_;
-};
 
-struct TensorMeta {
-
-TensorMeta(
-  const c10::DeviceType _device_type)
-: device_type_{_device_type} { }
-
-TensorMeta(
-  const c10::DeviceType _device_type
-, std::vector<int64_t>&& _sizes
-, std::vector<int64_t>&& _strides)
-: device_type_{_device_type}
-, sizes_{_sizes}
-, strides_{_strides} { }
-
-TensorMeta(
-  const std::shared_ptr<c10::TensorType>& tensor
-, const RankType expand_to = 0) {
-  TORCH_CHECK(tensor->isComplete(), "Trying to create TensorMeta from incomplete tensor!");
-
-  device_type_ = getDeviceType(tensor);
-
-  sizes_ = extractSizes(tensor);
-  strides_ = extractStrides(tensor);
-
-  while (expand_to > sizes_.size()) {
-    sizes_.insert(sizes_.begin(), 1);
-    strides_.insert(strides_.begin(), 0);
-  }
-}
-
-// Getters
-RankType rank() const { return sizes_.size(); }
-
-std::vector<int64_t>& sizes() { return sizes_; }
-const std::vector<int64_t>& sizes() const { return sizes_; }
-
-std::vector<int64_t>& strides() { return strides_; }
-const std::vector<int64_t>& strides() const { return strides_; }
-
-// Removes the specified dimension
-void removeDim(const RankType dim) {
-  TORCH_CHECK(dim < rank(), "Trying to remove dim greater than rank!");
-
-  sizes_.erase(sizes_.begin() + dim);
-  strides_.erase(strides_.begin() + dim);
-}
-
-bool canCollapse(const RankType dim) {
-  TORCH_CHECK(dim < (rank() - 1), "Checking whether a dim greater than (rank - 1) is collapsible!");
-
-  // Dimensions of size 1 are always collapisble and can always be collapsed into
-  if (sizes_[dim] == 1 || sizes_[dim + 1] == 1) {
-    return true;
-  }
-
-  // If neither dimension of size 1, then the outer dimension is collapsible
-  // into the inner dimension if the dims are contiguous
-  if (strides_[dim] == (sizes_[dim + 1] * strides_[dim + 1])) {
-    return true;
-  }
-
-  return false;
-}
-
-// Merges the dim specified by dim with dim + 1
-void collapse(const RankType dim) {
-  TORCH_CHECK(dim < rank(), "Trying to collapse dim greater than rank!");
-
-  if (sizes_[dim] == 1) {
-    removeDim(dim);
-    return;
-  }
-
-  TORCH_CHECK(canCollapse(dim), "Request to collapse non-collapsible dim!");
-
-  sizes_[dim + 1] *= sizes_[dim];
-  removeDim(dim);
-}
-
-c10::DeviceType device_type_;
-std::vector<int64_t> sizes_;
-std::vector<int64_t> strides_;
-
+  // sorted_axes_ : axes ordered by strides (slow dimension to fast dimension).
+  std::vector<int> sorted_axes_;
 };
 
 }}} // namespace torch::jit::fuser

@@ -12,7 +12,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct TensorMeta;
 using RankType = std::vector<int64_t>::size_type;
 
 /*
@@ -105,21 +104,6 @@ TORCH_API bool haveSameStrides(
 TORCH_API bool haveSameShape(
   const std::shared_ptr<c10::TensorType>& lhs
 , const std::shared_ptr<c10::TensorType>& rhs
-);
-
-/*
- * Functions for acquiring and working with TensorMetas
-*/
-
-// TODO: assumes only one output
-TORCH_API std::vector<TensorMeta> getLoopMetas(
-  const at::ArrayRef<const Value*> outputs
-, const at::ArrayRef<const Value*> inputs
-);
-
-TORCH_API void printMeta(
-  std::ostream& stream
-, const TensorMeta& meta
 );
 
 }}} // namespace torch::jit::fuser

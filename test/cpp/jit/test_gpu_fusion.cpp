@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
 #include <iostream>
 
@@ -199,7 +200,8 @@ void testGPU_FusionTopoSort() {
 }
 
 void testGPU_FusionTensor() {
-  auto tensor = at::randn({20, 20}, at::kCUDA);
+  auto tensor = at::randn({2, 3, 4, 5}, at::kCUDA);
+  auto sizes = tensor.sizes().vec();
   auto tensor_type = TensorType::create(tensor);
 
   Fusion fusion;
@@ -207,10 +209,57 @@ void testGPU_FusionTensor() {
   auto fuser_tensor  = new Tensor(tensor_type);
   TORCH_CHECK(fuser_tensor->hasContiguityInfo() == 1);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float); 
+
+  std::cout << fuser_tensor << std::endl;
   
   auto fuser_null_tensor  = new Tensor(DataType::Int);
   TORCH_CHECK(fuser_null_tensor->hasContiguityInfo() == 0);
   TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int); 
+}
+
+void testGPU_FusionTensorContiguity() {
+  {
+    // NCHW memory layout
+    auto tensor = at::randn({2, 3, 4, 5});
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK(t_c.rank() == 4);
+    TORCH_CHECK(t_c.getBroadcastDims().size() == 0);
+    for (int i = 0; i < 4; i++) {
+      TORCH_CHECK(!t_c.isBroadcastDim(i));
+      if (i < 3) {
+        TORCH_CHECK(t_c.canCollapseToHigher(i));
+      }
+    }
+  }
+
+  {
+    // NHWC memory layout
+    TensorContiguity t_c({2, 3, 4, 5}, {60, 1, 15, 3});
+    TORCH_CHECK(t_c.rank() == 4);
+    TORCH_CHECK(t_c.getBroadcastDims().size() == 0);
+    for (int i = 0; i < 4; i++) {
+      TORCH_CHECK(!t_c.isBroadcastDim(i));
+      if (i < 3) {
+        TORCH_CHECK((t_c.canCollapseToHigher(i) ^ (i!=2)));
+      }
+    }
+  }
+  
+  {
+    // NHWC memory layout with broadcast
+    TensorContiguity t_c({2, 3, 4, 5}, {120, 0, 30, 3});
+    TORCH_CHECK(t_c.rank() == 4);
+    auto b_dims = t_c.getBroadcastDims();
+    TORCH_CHECK(b_dims.size() == 1 && b_dims[0] == 1);
+    for (int i = 0; i < 4; i++) {
+      TORCH_CHECK(!(t_c.isBroadcastDim(i)) ^ (i==1));
+      if (i < 3) {
+        TORCH_CHECK(!(t_c.canCollapseToHigher(i)));
+      }
+    }
+  }
 }
 
 void testGPU_FusionTensorDomain() {

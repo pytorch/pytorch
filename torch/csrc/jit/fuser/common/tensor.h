@@ -85,9 +85,9 @@ struct TORCH_API Tensor : public Val {
 
   Tensor(const std::shared_ptr<Value>& jit_value);
   
-  bool hasContiguityInfo();
+  bool hasContiguityInfo() const;
 
-  const c10::optional<TensorContiguity>& getContiguityInfo();
+  const c10::optional<TensorContiguity>& getContiguityInfo() const;
 
   static const Tensor* MakeDummyTensor(int ndims){
     std::vector<const IterDomain*> sizes;

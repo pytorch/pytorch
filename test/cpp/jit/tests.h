@@ -90,6 +90,7 @@ namespace jit {
   _(GPU_FusionTopoSort)          \
   _(GPU_FusionRegister)          \
   _(GPU_FusionTensor)            \
+  _(GPU_FusionTensorContiguity)  \
   _(GPU_FusionTensorDomain)      \
   _(GPU_FusionCastOp)			 \
 
