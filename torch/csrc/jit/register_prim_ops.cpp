@@ -599,6 +599,28 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::type(Device self) -> str",
+         [](Stack& stack) {
+           auto d = pop(stack);
+           push(
+               stack,
+               DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::index(Device self) -> int?",
+         [](Stack& stack) {
+           auto d = pop(stack).toDevice();
+           if (d.has_index()) {
+             push(stack, d.index());
+           } else {
+             push(stack, IValue());
+           }
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          // TODO return generator object when torchscript supports RNG
          // first-class
          "aten::manual_seed(int seed) -> ()",
