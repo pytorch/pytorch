@@ -954,7 +954,7 @@ bool TensorIterator::fast_set_up() {
         break;
       }
     default:
-      TORCH_CHECK(false, "Unsupported fast setup type", std::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
