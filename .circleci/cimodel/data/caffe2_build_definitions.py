@@ -76,8 +76,8 @@ class Conf:
         parameters = OrderedDict()
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
-            "onnx_py3.6_higher": "onnx-py3.6",
-            "onnx_py3.6_lower": "onnx-py3.6",
+            "onnx_py3.6_higher": "onnx-py3.6-higher",
+            "onnx_py3.6_lower": "onnx-py3.6-lower",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
