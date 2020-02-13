@@ -88,7 +88,7 @@ TEST_F(RNGTest, Random) {
   test_random<TestCPUGenerator, torch::kFloat64, double>(device);
 }
 
-TEST_F(RNGTest, Cauchy) { 
+TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
   auto gen = new TestCPUGenerator(42.0);

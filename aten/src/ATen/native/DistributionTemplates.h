@@ -47,7 +47,7 @@ at::Tensor& random_impl(at::Tensor& self, at::Generator* generator) {
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator* generator) {
   auto gen = (RNG*)generator;
-  uint64_t range;
+  uint64_t range = 0;
   auto iter = at::TensorIterator::nullary_op(self);
   if (to_opt.has_value()) {
     int64_t to = *to_opt;
