@@ -561,7 +561,7 @@ inline IValue toIValue(
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       }
-    }
+    } break;
     case TypeKind::PyObjectType:
       // convert a py::handle to the IValue that holds the py::object
       return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
