@@ -1,10 +1,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/edit_distance.h>
-#include <torch/csrc/jit/script/error_report.h>
 
 #include <queue>
 #include <utility>
@@ -131,7 +128,131 @@ OperatorRegistry& getRegistry() {
   static OperatorRegistry r;
   return r;
 }
+
+bool printerHasSpecialCaseFor(Symbol sym) {
+  using namespace at;
+  // WARNING: by adding a value to this set, you are asserting
+  // that you have also added special handling of this symbol to
+  // the python_print.cpp. Not adding handling will cause import and export
+  // of modules with this new operator to fail. This is only required
+  // for operators without schema. Prefer registering your operator with
+  // schema to editing this list here. These cases should only be things
+  // that require special handling because they do not fit normal schema
+  const static std::unordered_set<Symbol> handled = {
+      prim::Constant,
+      prim::Uninitialized,
+      prim::fork,
+      prim::ListConstruct,
+      prim::DictConstruct,
+      prim::ListUnpack,
+      prim::Print,
+      prim::PythonOp,
+      prim::TupleConstruct,
+      prim::TupleIndex,
+      prim::TupleSlice,
+      prim::TupleUnpack,
+      prim::CreateObject,
+      prim::GetAttr,
+      prim::SetAttr,
+      prim::CallFunction,
+      prim::isinstance,
+      prim::unchecked_cast,
+  };
+
+  // WARNING: by adding a value to this set, you are asserting that your
+  // primitive is only ever added during optimization and does not need
+  // to be correctly printed for export (a process that happens before
+  // optimization passes run)
+  const static std::unordered_set<Symbol> unneeded = {
+      c10::onnx::Reshape, // only used in onnx
+      c10::onnx::Shape, // only used in onnx
+      prim::AutogradZero, // temporarily inserted by autograd
+      prim::AutogradAnyNonZero, // temporarily inserted by autograd
+      prim::AutogradAdd, // temporarily inserted by autograd
+      prim::ConstantChunk, // optimization pass adds it
+      prim::DifferentiableGraph, // optimization pass adds it
+      prim::BroadcastSizes, // optimization pass (fuser) adds it
+      prim::ChunkSizes, // optimization pass (fuser) adds it
+      prim::Drop, // used in interpreter only
+      prim::FusedConcat, // optimization pass adds it
+      prim::FusionGroup, // optimization pass adds it
+      prim::Load, // used in interpreter only
+      prim::MMTreeReduce, // used as an optimization
+      prim::MMBatchSide, // used as an optimization
+      prim::Store, // used in interpreter only
+      prim::profile, // used in interpreter only
+
+  };
+
+  // These namespaces are required to have Python printers unless
+  // otherwise noted in unneeded.
+  const static std::unordered_set<Symbol> required_namespaces = {
+      c10::namespaces::prim,
+      c10::namespaces::aten,
+      c10::namespaces::onnx,
+  };
+
+  return handled.count(sym) || unneeded.count(sym) ||
+      !required_namespaces.count(sym.ns());
+}
+
 } // anonymous namespace
+
+bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
+  using namespace at;
+  // WARNING: by adding a case to this list, you are asserting that you have
+  // added a case for the unschematized node in AliasDb::analyze
+  const static std::unordered_set<Symbol> handled = {
+      prim::If,
+      prim::Loop,
+      prim::FusionGroup,
+      prim::DifferentiableGraph,
+      prim::Constant,
+      prim::Uninitialized,
+      prim::DictConstruct,
+      prim::ListConstruct,
+      prim::TupleConstruct,
+      prim::AutogradZero,
+      prim::FusedConcat,
+      prim::GradOf,
+      prim::MMTreeReduce,
+      prim::MMBatchSide,
+      prim::BroadcastSizes,
+      prim::ChunkSizes,
+      prim::Function,
+      prim::TupleUnpack,
+      prim::TupleIndex,
+      prim::TupleSlice,
+      prim::ListUnpack,
+      prim::PythonOp,
+      prim::ConstantChunk,
+      prim::BroadcastingChunk,
+      prim::fork,
+      prim::CreateObject,
+      prim::AutogradAdd,
+      prim::GetAttr,
+      prim::SetAttr,
+      prim::profile,
+      prim::Print,
+      prim::CallFunction,
+      prim::CallMethod,
+      aten::wait,
+      prim::isinstance,
+      prim::unchecked_cast,
+  };
+
+  // Operators that should not be used by alias analysis
+  const static std::unordered_set<Symbol> purposefully_not_handled = {
+      prim::Load,
+      prim::Store,
+      prim::Drop,
+      at::onnx::Reshape,
+      at::onnx::Shape,
+      prim::AutogradAdd,
+  };
+
+  return handled.count(symbol) || purposefully_not_handled.count(symbol);
+}
 
 void registerOperator(Operator&& op) {
   if (op.schema().is_varret()) {
@@ -170,12 +291,21 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
+std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {
+  for (const auto& op : getRegistry().getOperators(Symbol::fromQualString(full_name.name))) {
+    if (op->schema().overload_name() == full_name.overload_name) {
+      return op;
+    }
+  }
+  return nullptr;
+}
+
 std::vector<Symbol> findSimilarOperators(Symbol input_op) {
   return getRegistry().findSimilarOperators(input_op);
 }
 
-Operator& sig(const char* signature) {
-  return *getRegistry().lookupByLiteral(signature);
+std::shared_ptr<Operator> getOperatorForLiteral(const char* signature) {
+  return getRegistry().lookupByLiteral(signature);
 }
 
 std::string canonicalSchemaString(const FunctionSchema& schema) {
@@ -211,107 +341,5 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
   return out.str();
 }
 
-bool Operator::matches(const Node* node) const {
-  // wrong name
-  if (node->kind().toQualString() != schema().name()) {
-    return false;
-  }
-  at::ArrayRef<const Value*> actuals = node->inputs();
-  const auto& formals = schema().arguments();
-
-  // not enough inputs
-  if (actuals.size() < formals.size()) {
-    return false;
-  }
-
-  TypeEnv type_env;
-  for (size_t i = 0; i < formals.size(); ++i) {
-    auto formal = formals[i].type();
-    const MatchTypeReturn matched_type = matchTypeVariables(
-        formal, actuals[i]->type(), type_env);
-    if (!matched_type.success()) {
-      return false;
-    }
-
-    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
-    if (resolved) {
-      formal = resolved;
-    }
-    // note: it is possible at this point that type variable matching has
-    // not resolved all type variables, e.g. if None was matched to Optional[T]
-    // we will not succeed at matching T. However None <: Optional[T] so this
-    // check can still succeed.
-
-    if (!actuals[i]->type()->isSubtypeOf(formal)) {
-      return false;
-    }
-  }
-
-  // too many inputs
-  if (!schema().is_vararg() && actuals.size() != formals.size()) {
-    return false;
-  }
-
-  return true;
-}
-
-std::shared_ptr<Operator> findOperatorFor(const Node* node) {
-  const auto& candidates = getAllOperatorsFor(node->kind());
-  for (const auto& candidate : candidates) {
-    if (candidate->matches(node)) {
-      return candidate;
-    }
-  }
-  return nullptr;
-}
-
-const Operator& getOperatorFor(const Node* node) {
-  auto op = findOperatorFor(node);
-  if (op)
-    return *op;
-
-  auto er = script::ErrorReport(node->sourceRange());
-  er << "Schema not found for node. File a bug report.\n";
-  er << "Node: " << *node << "\n";
-  er << "Input types:";
-  for (size_t i = 0; i < node->inputs().size(); ++i) {
-    if (i > 0)
-      er << ", ";
-    er << *node->inputs()[i]->type();
-  }
-  const auto& candidates = getAllOperatorsFor(node->kind());
-  if (candidates.size() > 0) {
-    er << "\ncandidates were:\n";
-    for (auto& candidate : candidates) {
-      er << "  " << candidate->schema() << "\n";
-    }
-  } else {
-    er << "\nno candidates found\n";
-  }
-  er << "within the graph:\n";
-  er << *node->owningGraph() << "\n";
-  throw er;
-}
-
-OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
-  auto& registry = getRegistry();
-  for (const char* sig : sig_literals) {
-    auto op = registry.lookupByLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
-  }
-}
-
-Operator* OperatorSet::find(const Node* n) const {
-  auto it = ops.find(n->kind());
-  if (it == ops.end()) {
-    return nullptr;
-  }
-  for (auto& op : it->second) {
-    if (op->matches(n)) {
-      return op.get();
-    }
-  }
-  return nullptr;
-}
 } // namespace jit
 } // namespace torch

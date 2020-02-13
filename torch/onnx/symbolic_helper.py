@@ -101,7 +101,7 @@ def _maybe_get_scalar(value):
 
 
 def _get_const(value, desc, arg_name):
-    if _is_value(value) and value.node().kind() != 'onnx::Constant':
+    if _is_value(value) and value.node().kind() not in ('onnx::Constant', 'prim::Constant'):
         raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`".format(arg_name, value))
     return _parse_arg(value, desc)
 
