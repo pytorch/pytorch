@@ -28,7 +28,8 @@ class TreeConfigNode(ConfigNode):
         return [self.child_constructor()(self, k, v) for (k, v) in self.subtree]
 
     def is_build_only(self):
-        if str(self.find_prop("language_version")) == "onnx_py3.6_higher_opsets" or str(self.find_prop("language_version")) == "onnx_py3.6_lower_opsets":
+        if (str(self.find_prop("language_version")) == "onnx_py3.6_higher_opsets") or \
+                (str(self.find_prop("language_version")) == "onnx_py3.6_lower_opsets"):
             return False
         return set(str(c) for c in self.find_prop("compiler_version")).intersection({
             "clang3.8",
