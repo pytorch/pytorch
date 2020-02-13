@@ -233,7 +233,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
     if (idx + num_threads * i < N) {
-      *(result_base + i * nt) = results[i];
+      *(result_base + i * num_threads) = results[i];
     }
   }
 }
