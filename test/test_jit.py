@@ -5246,6 +5246,39 @@ def foo(x):
             return y[0][1]
         self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
+    def test_nested_aug_assign(self):
+        @torch.jit.script
+        class O(object):
+            def __init__(self):
+                self.num = 99
+
+            def __iadd__(self, x):
+                # type: (int)
+                self.num += x
+                return self
+
+            def __eq__(self, other):
+                # type: (O) -> bool
+                return self.num == other.num
+
+        class Child(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 2
+                self.o = O()
+
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self):
+                self.child.x += 1
+                self.child.o += 5
+                return self.child.x, self.child.o
+
+        self.checkModule(A(), [])
+
     def test_nested_list_construct(self):
         def foo():
             return [[4]] + [[4, 5]]

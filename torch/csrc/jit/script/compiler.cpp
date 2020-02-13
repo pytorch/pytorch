@@ -1819,6 +1819,22 @@ struct to_ir {
     }
   }
 
+  const char* getAugMagicMethod(const AugAssign& stmt) {
+    switch (stmt.aug_op()) {
+      case '+':
+        return "__iadd__";
+      case '-':
+        return "__isub__";
+      case '/':
+        return "__itruediv__";
+      case '*':
+        return "__imul__";
+      default:
+        throw ErrorReport(stmt)
+            << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
+    }
+  }
+
   // Emit nodes for augmented assignments like `+=`
   void emitAugAssignment(const AugAssign& stmt) {
     switch (stmt.lhs().kind()) {
@@ -1854,8 +1870,7 @@ struct to_ir {
   // in place op, and throw error for other unsupported types
   void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
     const auto lhs = Select(stmt.lhs());
-    const auto lhsSugaredVar =
-        environment_stack->getSugaredVar(Var(lhs.value()).name());
+    auto lhsSugaredVar = emitSugaredExpr(lhs.value(), 1);
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
@@ -1871,11 +1886,38 @@ struct to_ir {
           {rhs},
           {},
           self);
+    } else if (lhsValue->type()->kind() == TypeKind::ClassType) {
+      // Call `__iadd__` so updates happen in place on class types
+      // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
+      auto magic_method_name = getAugMagicMethod(stmt);
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()))
+                           .value(*method.graph());
 
+      // Insert call to magic method
+      auto sugared_magic_method = makeMagic(
+          magic_method_name,
+          std::make_shared<BuiltinFunction>(
+              getAugOp(stmt, lhsValue->type()), at::nullopt));
+
+      auto result = sugared_magic_method
+                        ->call(stmt.range(), method, {lhsValue, rhs}, {}, 0)
+                        ->asValue(stmt.range(), method);
+      // x += y is equivalent to x == x.__iadd__(y), so set the value to the
+      // function's return value
+      lhsSugaredVar->setAttr(
+          stmt.range(), method, lhs.selector().name(), result);
     } else {
-      throw ErrorReport(stmt.lhs())
-          << "left-hand side of augmented assignment to module "
-          << "parameters/buffers can only be tensor types";
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()))
+                           .value(*method.graph());
+      auto rhsValue = emitBuiltinCall(
+          stmt.range(),
+          *method.graph(),
+          getAugOp(stmt, lhsValue->type()),
+          {rhs, lhsValue},
+          {},
+          /*self=*/c10::nullopt);
+      lhsSugaredVar->setAttr(
+          stmt.range(), method, lhs.selector().name(), rhsValue);
     }
   }
 
