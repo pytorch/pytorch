@@ -102,13 +102,19 @@ public:
     TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS,
         "The function schema has ", schema.arguments().size(),
         " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS);
-    c10::utils::bitset dispatch_arg_indices_reverse;
+    c10::utils::bitset tensor_arg_indices_reverse;
     for (size_t index = 0; index < schema.arguments().size(); ++index) {
-      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {
-        dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
+      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get())) {
+        tensor_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }
-    return DispatchKeyExtractor(dispatch_arg_indices_reverse);
+    c10::utils::bitset tensorlist_arg_indices_reverse;
+    for (size_t index = 0; index < schema.arguments().size(); ++index) {
+      if (schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {
+        tensorlist_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
+      }
+    }
+    return DispatchKeyExtractor(tensor_arg_indices_reverse, tensorlist_arg_indices_reverse);
   }
 
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
@@ -116,16 +122,16 @@ public:
     //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428
 
     DispatchKeySet ks;
-    dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+    tensor_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-      if (C10_LIKELY(ivalue.isTensor())) {
-        // NB: Take care not to introduce a refcount bump (there's
-        // no safe toTensorRef method, alas)
-        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-      } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor& tensor : ivalue.toTensorList()) {
-          ks = ks | tensor.key_set();
-        }
+      // NB: Take care not to introduce a refcount bump (there's
+      // no safe toTensorRef method, alas)
+      ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+    });
+    tensorlist_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+      for (const at::Tensor& tensor : ivalue.toTensorList()) {
+        ks = ks | tensor.key_set();
       }
     });
     return dispatchKeySetToDispatchKey_(backendsWithoutFallthrough, ks);
@@ -160,8 +166,9 @@ private:
     return impl::dispatchTypeId(ks, backendsWithoutFallthrough | operatorHasKernelForBackend_);
   }
 
-  explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
-  : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
+  explicit DispatchKeyExtractor(c10::utils::bitset tensor_arg_indices_reverse, c10::utils::bitset tensorlist_arg_indices_reverse)
+  : tensor_arg_indices_reverse_(tensor_arg_indices_reverse)
+  , tensorlist_arg_indices_reverse_(tensorlist_arg_indices_reverse)
   , operatorHasKernelForBackend_() {}
 
   // this is a bitset that has ones for each argument index which has to be
@@ -172,7 +179,8 @@ private:
   // is relevant for dispatch.
   // dispatch_arg_indices_reverse_ is allowed to have zero bits set; that just means you must do the
   // fallthrough
-  c10::utils::bitset dispatch_arg_indices_reverse_;
+  c10::utils::bitset tensor_arg_indices_reverse_;
+  c10::utils::bitset tensorlist_arg_indices_reverse_;
 
   // Set of backends for which the operator has explicitly registered a kernel.
   DispatchKeySet operatorHasKernelForBackend_;
