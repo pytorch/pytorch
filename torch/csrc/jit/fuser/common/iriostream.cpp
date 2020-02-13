@@ -84,9 +84,9 @@ std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const td){
   os << "[ ";
-  for(std::vector<const IterDomain*>::size_type i = 0; i<td->domain.size(); i++){
-    os<<td->domain[i];
-    if(i!=td->domain.size()-1)
+  for(std::vector<const IterDomain*>::size_type i = 0; i<td->size(); i++){
+    os<<td->axis(i);
+    if(i!=td->size()-1)
       os<<", ";
   }
   return os<<" ]";
@@ -165,16 +165,23 @@ std::ostream& operator<<(std::ostream& os, const Fusion& f) {
   return os << &f;
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const split){
-  return os << "Split: " << split->in() << " axis " << split->axis() << " by factor " << split->factor() << " -> " << split->out();
+/*
+ * Avoid using lowercase instances of expressions, as they will be used for
+ * arith version of the expressions. For example
+ * Split is an IR node
+ * split is a function that generates an IR node and returns a const TensorView*.
+ */
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const s){
+  return os << "Split: " << s->in() << " axis " << s->axis() << " by factor " << s->factor() << " -> " << s->out();
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const merge){
-  return os << "Merge: " << merge->in() << " axis " << merge->axis() << " with the following -> " << merge->out();
+TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const m){
+  return os << "Merge: " << m->in() << " axis " << m->axis() << " with the following -> " << m->out();
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const reorder){
-  return os << "Reorder: " << reorder->in() << " -> " << reorder->out();
+TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const ro){
+  return os << "Reorder: " << ro->in() << " -> " << ro->out();
 }
 
 } // namespace fuser
