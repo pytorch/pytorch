@@ -360,8 +360,7 @@ class BuildExtension(build_ext, object):
                     if ROCM_HOME:
                         cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
                     else:
-                        cflags = COMMON_NVCC_FLAGS + ['--compiler-options',
-                                                  "'-fPIC'"] + cflags + _get_cuda_arch_flags(cflags)
+                        cflags = unix_cuda_flags(cflags)
                 elif ROCM_HOME:
                     if isinstance(cflags, dict):
                         cflags = cflags['cxx']
