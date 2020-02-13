@@ -1881,7 +1881,7 @@ private:
 };
 
 // the common supertype of all tuples,
-// Tuple[T...] <: AnyList for all T
+// Tuple[T...] <: AnyTuple for all T
 struct AnyTupleType;
 using AnyTupleTypePtr = std::shared_ptr<AnyTupleType>;
 struct CAFFE2_API AnyTupleType : public Type {

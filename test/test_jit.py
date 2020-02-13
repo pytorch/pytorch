@@ -4343,6 +4343,21 @@ def foo(x):
         cu.define(dedent(inspect.getsource(ok)))
         check(cu.ok)
 
+    def _test_device_type(self, dest):
+        def fn(x):
+            # type: (Device) -> Tuple[str, Optional[int]]
+            return x.type, x.index
+
+        device = torch.ones(2).to(dest).device
+        self.checkScript(fn, [device])
+
+    def test_device_type(self):
+        self._test_device_type('cpu')
+
+    @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
+    def test_device_type_cuda(self):
+        self._test_device_type('cuda')
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))
