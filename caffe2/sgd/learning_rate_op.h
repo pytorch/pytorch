@@ -27,7 +27,7 @@ class LearningRateOp final : public Operator<Context> {
   bool RunOnDevice() override {
     int64_t iter =
         OperatorBase::Input<Tensor>(0, CPU).template data<int64_t>()[0];
-    T learning_rate = cur_base_lr_ * (*functor_)(iter);
+    T learning_rate = base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
     output->Resize(vector<int64_t>());
@@ -39,17 +39,10 @@ class LearningRateOp final : public Operator<Context> {
  private:
   unique_ptr<LearningRateFunctor<T>> functor_;
   T base_lr_;
-  T base_lr_scale_;
-  T cur_base_lr_;
 
   LearningRateFunctor<T>* createLearningRateFunctor(
       const string& policy,
       const string& arg_prefix = "") {
-    if (policy != "composite") {
-      base_lr_scale_ =
-          this->template GetSingleArgument<float>(arg_prefix + "lr_scale", 1.0);
-      cur_base_lr_ = base_lr_scale_ * base_lr_;
-    }
     if (policy == "fixed") {
       return new FixedLearningRate<T>();
     } else if (policy == "alter") {
@@ -134,6 +127,15 @@ class LearningRateOp final : public Operator<Context> {
           this->template GetSingleArgument<int>(arg_prefix + "num_iter", 0);
       DCHECK_GT(multiplier, 0);
       return new ConstantWarmupLearningRate<T>(multiplier, num_iter);
+    } else if (policy == "pieceWarmup") {
+      T m1 = this->template GetSingleArgument<float>(arg_prefix + "m1", 0.5);
+      int64_t n1 =
+          this->template GetSingleArgument<int64_t>(arg_prefix + "n1", 0);
+      T m2 = this->template GetSingleArgument<float>(arg_prefix + "m2", 0.5);
+      int64_t n2 =
+          this->template GetSingleArgument<int64_t>(arg_prefix + "n2", 0);
+      T m3 = this->template GetSingleArgument<float>(arg_prefix + "m3", 0.5);
+      return new PieceWarmupLearningRate<T>(m1, n1, m2, n2, m3);
     } else if (policy == "composite") {
       std::vector<int> sub_policy_num_iters =
           this->template GetRepeatedArgument<int>("sub_policy_num_iters");
@@ -142,7 +144,7 @@ class LearningRateOp final : public Operator<Context> {
           sub_policy_num_iters.size(),
           0,
           "Must specify at least one sub learning rate policy.");
-      for (int i = 0; i < sub_policy_num_iters.size(); ++i) {
+      for (size_t i = 0; i < sub_policy_num_iters.size(); ++i) {
         CAFFE_ENFORCE_GT(
             sub_policy_num_iters[i],
             0,
@@ -157,11 +159,99 @@ class LearningRateOp final : public Operator<Context> {
               "Defining composite LR policy as a subpolicy of composite LR "
               "policy is not allowed.");
         }
+        const float scale_lr = this->template GetSingleArgument<float>(
+            sub_policy_arg_prefix_str + "lr_scale", 1.0);
         sub_policies.push_back(CompositeLearningRateItem<T>(
             sub_policy_num_iters[i],
+            scale_lr,
             createLearningRateFunctor(sub_policy, sub_policy_arg_prefix_str)));
       }
       return new CompositeLearningRate<T>(sub_policies);
+    } else if (policy == "cyclical") {
+      T max_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "max_lr", 0.005);
+      int stepsize =
+          this->template GetSingleArgument<int>(arg_prefix + "stepsize", 0);
+      T decay =
+          this->template GetSingleArgument<int>(arg_prefix + "decay", 1.0);
+      DCHECK_GT(stepsize, 0);
+      DCHECK_GE(max_lr, base_lr_);
+      return new CyclicalLearningRate<T>(base_lr_, max_lr, stepsize, decay);
+    } else if (policy == "constantThenLinearWarmup") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      return new ConstantThenLinearWarmupLearningRate<T>(
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter);
+    } else if (policy == "compositeCyclical") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      T cyclical_max_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cyclical_max_lr", 0.05);
+      int cyclical_step_size = this->template GetSingleArgument<int>(
+          arg_prefix + "cyclical_step_size", 1000000);
+      T cyclical_decay = this->template GetSingleArgument<float>(
+          arg_prefix + "cyclical_decay", 1.0);
+      DCHECK_GE(cyclical_max_lr, base_lr_);
+      return new CompositeCyclicalLearningRate<T>(
+          base_lr_,
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter,
+          cyclical_max_lr,
+          cyclical_step_size,
+          cyclical_decay);
+    } else if (policy == "cosine") {
+      T max_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "max_lr", 0.5);
+      T min_lr =
+          this->template GetSingleArgument<float>(arg_prefix + "min_lr", 0.1);
+      int64_t period =
+          this->template GetSingleArgument<int>(arg_prefix + "period", 50);
+      T t_mult =
+          this->template GetSingleArgument<float>(arg_prefix + "t_mult", 1.0);
+      T lr_shrink = this->template GetSingleArgument<float>(
+          arg_prefix + "lr_shrink", 0.99);
+      DCHECK_GE(max_lr, min_lr);
+      return new CosineLearningRate<T>(
+          min_lr, max_lr, period, t_mult, lr_shrink);
+    } else if (policy == "compositeCosine") {
+      T start_warmup_multiplier = this->template GetSingleArgument<float>(
+          arg_prefix + "start_warmup_multiplier", 0.1);
+      int64_t constant_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "constant_warmup_num_iter", 10000000);
+      int64_t linear_warmup_num_iter = this->template GetSingleArgument<int>(
+          arg_prefix + "linear_warmup_num_iter", 10000000);
+      T cosine_max_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_max_lr", 0.5);
+      T cosine_min_lr = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_min_lr", 0.1);
+      int64_t cosine_period = this->template GetSingleArgument<int>(
+          arg_prefix + "cosine_period", 50);
+      T cosine_t_mult = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_t_mult", 1.0);
+      T cosine_lr_shrink = this->template GetSingleArgument<float>(
+          arg_prefix + "cosine_lr_shrink", 0.99);
+
+      DCHECK_GE(cosine_max_lr, cosine_min_lr);
+      return new CompositeCosineLearningRate<T>(
+          start_warmup_multiplier,
+          constant_warmup_num_iter,
+          linear_warmup_num_iter,
+          cosine_min_lr,
+          cosine_max_lr,
+          cosine_period,
+          cosine_t_mult,
+          cosine_lr_shrink);
     } else {
       CAFFE_THROW("Unknown learning rate policy: ", policy);
       return NULL;

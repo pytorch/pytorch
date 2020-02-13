@@ -29,30 +29,59 @@ if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
 fi
 
 # Pick docker image
-if [[ "$PACKAGE_TYPE" == conda ]]; then
-  export DOCKER_IMAGE="soumith/conda-cuda"
-elif [[ "$DESIRED_CUDA" == cpu ]]; then
-  export DOCKER_IMAGE="soumith/manylinux-cuda80"
-else
-  export DOCKER_IMAGE="soumith/manylinux-cuda${DESIRED_CUDA:2}"
+export DOCKER_IMAGE=${DOCKER_IMAGE:-}
+if [[ -z "$DOCKER_IMAGE" ]]; then
+  if [[ "$PACKAGE_TYPE" == conda ]]; then
+    export DOCKER_IMAGE="pytorch/conda-cuda"
+  elif [[ "$DESIRED_CUDA" == cpu ]]; then
+    export DOCKER_IMAGE="pytorch/manylinux-cuda100"
+  else
+    export DOCKER_IMAGE="pytorch/manylinux-cuda${DESIRED_CUDA:2}"
+  fi
 fi
 
-# Upload to parallel folder for gcc abis
-if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
-  export PIP_UPLOAD_FOLDER='nightly/devtoolset7/'
-  if [[ "$PACKAGE_TYPE" == 'conda' ]]; then
-    echo "We don't handle conda builds with gcc ABI of 1, since we don't"
-    echo "want to add a new package name to the conda builds"
-    exit 1
-  fi
-else
+# Upload to parallel folder for devtoolsets
+# All nightlies used to be devtoolset3, then devtoolset7 was added as a build
+# option, so the upload was redirected to nightly/devtoolset7 to avoid
+# conflicts with other binaries (there shouldn't be any conflicts). Now we are
+# making devtoolset7 the default.
+if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' || "$DESIRED_DEVTOOLSET" == *"cxx11-abi"* || "$(uname)" == 'Darwin' ]]; then
   export PIP_UPLOAD_FOLDER='nightly/'
+else
+  # On linux machines, this shouldn't actually be called anymore. This is just
+  # here for extra safety.
+  export PIP_UPLOAD_FOLDER='nightly/devtoolset3/'
 fi
 
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-export PYTORCH_BUILD_VERSION="1.2.0.dev$DATE"
+if [[ "$(uname)" == 'Darwin' ]] || [[ "$DESIRED_CUDA" == "cu101" ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE"
+else
+  export PYTORCH_BUILD_VERSION="1.5.0.dev$DATE+$DESIRED_CUDA"
+fi
 export PYTORCH_BUILD_NUMBER=1
+
+
+JAVA_HOME=
+BUILD_JNI=OFF
+if [[ "$PACKAGE_TYPE" == libtorch ]]; then
+  POSSIBLE_JAVA_HOMES=()
+  POSSIBLE_JAVA_HOMES+=(/usr/local)
+  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
+  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
+  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
+    if [[ -e "$JH/include/jni.h" ]] ; then
+      echo "Found jni.h under $JH"
+      JAVA_HOME="$JH"
+      BUILD_JNI=ON
+      break
+    fi
+  done
+  if [ -z "$JAVA_HOME" ]; then
+    echo "Did not find jni.h"
+  fi
+fi
 
 cat >>"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
@@ -67,15 +96,18 @@ export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 export DESIRED_DEVTOOLSET="$DESIRED_DEVTOOLSET"
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.2.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.5.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
 
-export TORCH_PACKAGE_NAME='torch-nightly'
+# TODO: We don't need this anymore IIUC
+export TORCH_PACKAGE_NAME='torch'
 export TORCH_CONDA_BUILD_FOLDER='pytorch-nightly'
 
-export NO_FBGEMM=1
+export USE_FBGEMM=1
+export JAVA_HOME=$JAVA_HOME
+export BUILD_JNI=$BUILD_JNI
 export PIP_UPLOAD_FOLDER="$PIP_UPLOAD_FOLDER"
 export DOCKER_IMAGE="$DOCKER_IMAGE"
 

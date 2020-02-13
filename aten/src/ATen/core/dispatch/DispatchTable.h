@@ -1,12 +1,13 @@
 #pragma once
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/LeftRight.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/either.h>
+#include <c10/core/DispatchKey.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/dispatch/KernelFunction.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/DispatchKeyExtractor.h>
 
 #include <array>
 #include <atomic>
@@ -19,87 +20,57 @@
 
 namespace c10 {
 
+namespace impl {
 /**
- * The type of a user-supplied function to initialize the kernel cache.
- * this is stored together with the KernelFunction in the DispatchTable
- * so we can create a new cache instance when a kernel is looked up
- * from the dispatch table.
+ * A KernelFunctionTable is a map from DispatchKey to a KernelFunction.
+ * It can store zero or one KernelFunctions for each DispatchKey.
  */
-using KernelCacheCreatorFunction = std::function<std::unique_ptr<c10::KernelCache> ()>;
-/**
- * The dispatch table stores a pointer to a kernel function and a pointer
- * to a function initializing a cache for the kernel. If the kernel wants
- * to use the cache, they supply the state initializer when the kernel
- * is registered. When a kernel is looked up from the dispatcher, a new
- * cache instance is created for it and each call to that kernel will get
- * this same cache instance.
- */
-struct DispatchTableEntry final {
-  /*not-nullable*/ KernelFunction* kernel_func;
-  /*not-nullable*/ KernelCacheCreatorFunction cache_creator_func;
-};
+class KernelFunctionTable final {
+public:
+  explicit KernelFunctionTable()
+  : kernels_()
+  , kernelCount_(0) {}
 
-namespace detail {
-inline std::string dispatch_key_to_string(TensorTypeId id) {
-   // TODO Find better way to stringify tensor type ids without relying on backend
-   std::string name = "";
-   try {
-     name = toString(tensorTypeIdToBackend(id));
-   } catch (const std::exception&) {
-     // This can fail if the tensor type id is not one of the preregistered backends.
-     // However, dispatch_key_to_string is used to generate error reports, that
-     // means an error already has happened when entering this function.
-     // We don't want inner errors during generation of a report for an
-     // outer error. Just report an empty name instead.
-   }
-   return name + "[" + toString(id) + "]";
-}
-
-class KernelTable_ final {
- public:
-  void set(TensorTypeId key, const DispatchTableEntry& value, const std::string& operator_name) {
-    auto emplaced = map_.emplace(key, value);
-    if (!emplaced.second) {
-      // Element already existed. Overwrite it.
-      emplaced.first->second = value;
-      TORCH_WARN("Registered a kernel for operator ", operator_name," with dispatch key ", detail::dispatch_key_to_string(key), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
-    }
-  }
-
-  void removeIfExists(TensorTypeId key, const std::string& operator_name) {
-    auto num_removed = map_.erase(key);
-    assert(num_removed <= 1); // This is not a multi-map
-  }
-
-  const DispatchTableEntry* lookup(TensorTypeId key) const {
-    auto found = map_.find(key);
-    if (found != map_.end()) {
-      return &found->second;
+  enum class SetKernelResult : uint8_t {ADDED_NEW_KERNEL, OVERWROTE_EXISTING_KERNEL};
+  C10_NODISCARD SetKernelResult setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    TORCH_INTERNAL_ASSERT(dispatchKey != DispatchKey::Undefined);
+    auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
+    SetKernelResult result;;
+    if (slot.isValid()) {
+      result = SetKernelResult::OVERWROTE_EXISTING_KERNEL;
     } else {
-      return nullptr;
+      result = SetKernelResult::ADDED_NEW_KERNEL;
+      ++kernelCount_;
     }
+    slot = std::move(kernel);
+    return result;
+  }
+
+  enum class RemoveKernelIfExistsResult : uint8_t {REMOVED_KERNEL, KERNEL_DIDNT_EXIST};
+  RemoveKernelIfExistsResult removeKernelIfExists(DispatchKey dispatchKey) {
+    auto& slot = kernels_[static_cast<uint8_t>(dispatchKey)];
+    if (slot.isValid()) {
+      --kernelCount_;
+      slot = {};
+      return RemoveKernelIfExistsResult::REMOVED_KERNEL;
+    } else {
+      return RemoveKernelIfExistsResult::KERNEL_DIDNT_EXIST;
+    }
+  }
+
+  const KernelFunction& operator[](DispatchKey dispatchKey) const {
+    return kernels_[static_cast<uint8_t>(dispatchKey)];
   }
 
   size_t size() const {
-    return map_.size();
+    return kernelCount_;
   }
 
-  std::string list_all_dispatch_keys() const {
-    if (map_.size() == 0) {
-      return "";
-    }
-    std::ostringstream str;
-    str << detail::dispatch_key_to_string(map_.begin()->first);
-    for (auto iter = ++map_.begin(); iter != map_.end(); ++iter) {
-      str << ", " << detail::dispatch_key_to_string(iter->first);
-    }
-    return str.str();
-  }
-
- private:
-   ska::flat_hash_map<TensorTypeId, DispatchTableEntry> map_;
+private:
+  std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> kernels_;
+  size_t kernelCount_;
 };
-} // namespace detail
+}
 
 /**
  * Per-operator dispatch table.
@@ -112,23 +83,23 @@ class KernelTable_ final {
  */
 class DispatchTable final {
  public:
-  DispatchTable(const FunctionSchema& schema)
-  : kernels_(make_left<detail::KernelTable_, DispatchTableEntry>())
-  , dispatch_strategy_(get_dispatch_strategy_(schema))
-  , operator_name_(schema.name()) {}
+  explicit DispatchTable(const FunctionSchema& schema)
+  : kernels_()
+  , catchallKernel_()
+  , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
+  , operatorName_(toString(schema.operator_name())) {}
 
   /**
    * Register a kernel in the table at some dispatch key.
    * @param dispatch_key Dispatch key to define when this kernel is selected.
    * @param kernel Concrete kernel function implementation to register
    */
-  void setKernel(
-      TensorTypeId dispatch_key,
-      const DispatchTableEntry& kernel) {
-    TORCH_INTERNAL_ASSERT(dispatch_key != TensorTypeIds::undefined());
-    TORCH_CHECK(dispatch_strategy_.is_valid_, "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, " that doesn't have tensor arguments.");
-    TORCH_CHECK(kernels_.is_left(), "Tried to register a kernel with dispatch key ", detail::dispatch_key_to_string(dispatch_key)," for operator ", operator_name_, ", which already has a catch-all kernel registered. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
-    kernels_.left().set(dispatch_key, kernel, operator_name_);
+  void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
+    if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
+      TORCH_WARN("Registered a kernel for operator ", operatorName_, " with dispatch key ", toString(dispatchKey), " that overwrote a previously registered kernel with the same dispatch key for the same operator.");
+    }
   }
 
   /**
@@ -136,9 +107,9 @@ class DispatchTable final {
    *
    * @param dispatch_key Dispatch key to unregister.
    */
-  void removeKernelIfExists(TensorTypeId dispatch_key) {
-    TORCH_INTERNAL_ASSERT(kernels_.is_left(), "Tried to remove the kernel for dispatch key ", detail::dispatch_key_to_string(dispatch_key), " for operator ", operator_name_, ", which only has a catch-all kernel.");
-    kernels_.left().removeIfExists(dispatch_key, operator_name_);
+  void removeKernelIfExists(DispatchKey dispatchKey) {
+    kernels_.removeKernelIfExists(dispatchKey);
+    dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, false);
   }
 
   /**
@@ -147,126 +118,82 @@ class DispatchTable final {
    * a catch-all kernel or a set of kernels with concrete
    * dispatch keys, not both.
    */
-  void setCatchallKernel(const DispatchTableEntry& kernel) {
-    if (kernels_.is_right()) {
-      TORCH_WARN("Registered a catch-all kernel for operator ", operator_name_," that overwrote a previously registered catch-all kernel for the same operator.");
-    } else {
-      TORCH_CHECK(0 == kernels_.left().size(), "Tried to register a catch-all kernel for operator ", operator_name_, " which already has kernels with dispatch keys. An operator can only have either a catch-all kernel or kernels with dispatch keys.");
+  void setCatchallKernel(KernelFunction kernel) {
+    if (catchallKernel_.isValid()) {
+      TORCH_WARN("Registered a catch-all kernel for operator ", operatorName_," that overwrote a previously registered catch-all kernel for the same operator.");
     }
-    kernels_ = make_right<detail::KernelTable_, DispatchTableEntry>(kernel);
+    catchallKernel_ = std::move(kernel);
   }
 
   /**
    * Remove the catch-all kernel.
    */
   void removeCatchallKernel() {
-    TORCH_INTERNAL_ASSERT(kernels_.is_right(), "Tried to remove the catch-all kernel for operator ", operator_name_," but there is no catch-all kernel registered.");
-    kernels_ = make_left<detail::KernelTable_, DispatchTableEntry>();
+    TORCH_INTERNAL_ASSERT(catchallKernel_.isValid(), "Tried to remove the catch-all kernel for operator ", operatorName_," but there is no catch-all kernel registered.");
+    catchallKernel_ = {};
   }
 
-  /**
-   * Perform a dynamic dispatch on this table and find the kernel to call
-   * for the given arguments.
-   *
-   * @param args Arguments to invoke the function with
-   * @return Kernel function pointing to the right kernel for the given arguments.
-   */
-   const DispatchTableEntry& lookup(const Stack* stack) const {
-     return kernels_.map<const DispatchTableEntry&>(
-       [&] (const detail::KernelTable_& table) -> const DispatchTableEntry& {
-         // We have a dispatch table. Find the correct kernel for the inputs and return it.
+  bool isEmpty() const {
+    return !catchallKernel_.isValid() && kernels_.size() == 0;
+  }
 
-         TORCH_INTERNAL_ASSERT(dispatch_strategy_.is_valid_, "Operator ", operator_name_, " has an invalid dispatch key but kernels registered.");
+  std::string listAllDispatchKeys() const {
+    std::ostringstream str;
+    str << "[";
 
-         TensorTypeId dispatch_key = dispatch_strategy_.get_dispatch_key(stack, operator_name_);
-         auto found = table.lookup(dispatch_key);
+    bool has_kernels = false;
+    for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+      if (!kernels_[static_cast<DispatchKey>(iter)].isValid()) {
+        continue;
+      }
+      if (has_kernels) {
+        str << ", ";
+      }
+      str << toString(static_cast<DispatchKey>(iter));
+      has_kernels = true;
+    }
 
-         TORCH_CHECK(nullptr != found, "Didn't find kernel to dispatch to for operator '", operator_name_,
-                  "'. Tried to look up kernel for dispatch key '", detail::dispatch_key_to_string(dispatch_key),
-                  "'. Registered dispatch keys are: ", listAllDispatchKeys());
+    if (catchallKernel_.isValid()) {
+      if (has_kernels) {
+        str << ", ";
+      }
+      str << "CATCH-ALL";
+    }
+    str << "]";
+    return str.str();
+  }
 
-         return *found;
-       },
-       [] (const DispatchTableEntry& entry) -> const DispatchTableEntry& {
-         // We have a catch-all kernel. Just return it.
-         return entry;
-       }
-     );
-   }
+  const KernelFunction* lookup(DispatchKey dispatchKey) const {
+    auto& slot = kernels_[dispatchKey];
+    if (slot.isValid()) {
+      return &slot;
+    } else {
+      return nullptr;
+    }
+  }
 
-   bool isEmpty() const {
-     return kernels_.map<bool>(
-       [] (const detail::KernelTable_& table) {return 0 == table.size();},
-       [] (const DispatchTableEntry&) {return false;}
-     );
-   }
+  const KernelFunction* lookupCatchallKernel() const {
+    if (!catchallKernel_.isValid()) {
+      return nullptr;
+    }
 
-   std::string listAllDispatchKeys() const {
-     return kernels_.map<std::string>(
-       [] (const detail::KernelTable_& table) {return table.list_all_dispatch_keys();},
-       [] (const DispatchTableEntry&) {return "ANY";}
-     );
-   }
+    return &catchallKernel_;
+  }
+
+  const DispatchKeyExtractor& dispatchKeyExtractor() const {
+    return dispatchKeyExtractor_;
+  }
+
+  const std::string& operatorName() const {
+    return operatorName_;
+  }
 
 private:
-  struct DispatchStrategy final {
-    // this is caching the index so we don't have to parse the schema inputs
-    // again and again for each dispatcher lookup.
-    // reverse_index means this is the distance from the first tensor argument
-    // to argument_list.end(), i.e. from the top of the stack.
-    // Since it is distance to end(), this means it's 1-indexed,
-    // i.e. '1' is the last argument.
-    size_t reverse_index_of_first_tensor_arg_;
-    bool first_tensor_arg_is_tensor_list_;
 
-    // An invalid dispatch strategy means we can't dispatch any kernels.
-    // You're able to create a dispatch table with an invalid dispatch strategy,
-    // but adding kernels to it will fail.
-    // This is used to allow creating operators with empty argument lists
-    // as long as they only have fallback kernels and no dispatched kernels.
-    bool is_valid_;
-
-    TensorTypeId get_dispatch_key(const Stack* stack, const std::string& operator_name) const {
-      const IValue& first_tensor_arg = torch::jit::peek(
-        *stack,
-        0,
-        reverse_index_of_first_tensor_arg_
-      );
-      if (C10_UNLIKELY(first_tensor_arg_is_tensor_list_)) {
-        const auto& tensor_list = first_tensor_arg.toTensorListRef();
-        if (tensor_list.size() == 0) {
-          throw std::runtime_error("Tried to dispatch operator " + operator_name + " based on an empty tensor list. When the first tensor argument of an operator is a tensor list, then it must not be empty.");
-        }
-        return tensor_list[0].type_id();
-      } else {
-        return first_tensor_arg.unsafeToTensorImpl()->type_id();
-      }
-    }
-  };
-
-  static DispatchStrategy get_dispatch_strategy_(const FunctionSchema& schema) {
-    for (size_t i = 0; i < schema.arguments().size(); ++i) {
-      const auto& type = schema.arguments()[i].type();
-      if (type->isSubtypeOf(TensorType::get())) {
-        return {schema.arguments().size() - i, false, true};
-      }
-      if (type->isSubtypeOf(ListType::ofTensors())) {
-        return {schema.arguments().size() - i, true, true};
-      }
-    }
-
-    // The function schema doesn't have tensor arguments.
-    // Return an invalid dispatch strategy.
-    return {0, false, false};
-  }
-
-  // kernels_ either contains a dispatch table or
-  // a single catch-all kernel that is called for every backend
-  // The empty state (i.e. no kernels registered) is represented
-  // as an empty table.
-  either<detail::KernelTable_, DispatchTableEntry> kernels_;
-  DispatchStrategy dispatch_strategy_;
-  std::string operator_name_;
+  impl::KernelFunctionTable kernels_;
+  KernelFunction catchallKernel_;
+  DispatchKeyExtractor dispatchKeyExtractor_;
+  std::string operatorName_;
 };
 
 } // namespace c10

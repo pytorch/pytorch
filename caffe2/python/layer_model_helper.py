@@ -40,8 +40,14 @@ class LayerModelHelper(model_helper.ModelHelper):
     """
 
     def __init__(self, name, input_feature_schema, trainer_extra_schema,
-                 keep_blobs=False):
+                 keep_blobs=False,
+                 use_attribution=True):
         ''' TODO(amalevich): more documnetation on input args
+
+        use_attribution:
+            if True, will generate the atrribution net for feature importance
+            calculation; Need to turn it to false when FC is quantized as FP16
+            This attribute access will be consistent with MTML model.
         '''
 
         super(LayerModelHelper, self).__init__(name=name)
@@ -70,7 +76,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._breakdown_map = None
 
         # Connect Schema to self.net. That particular instance of schmea will be
-        # use for generation of the Layers accross the network and would be used
+        # use for generation of the Layers across the network and would be used
         # for connection with Readers.
         self._input_feature_schema = schema.NewRecord(
             self.net,
@@ -92,6 +98,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         # TODO(xlwang): it's hack!
         self.ad_hoc_diagnose_blobs_and_operations = []
         self.ad_hoc_plot_blobs = []
+        self.use_attribution = use_attribution
 
     def clear_output_schema(self):
         self._output_schema = None
@@ -365,6 +372,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
             self.params.append(param.parameter)
             if isinstance(param, layers.LayerParameter):
+                logger.info("Add parameter regularizer {0}".format(param.parameter))
                 self.param_to_reg[param.parameter] = param.regularizer
             elif isinstance(param, ParameterInfo):
                 # TODO:
@@ -613,12 +621,15 @@ class LayerModelHelper(model_helper.ModelHelper):
         train_init_net,
         blob_to_device=None,
     ):
+        logger.info("apply regularizer on loss")
         for param, regularizer in viewitems(self.param_to_reg):
             if regularizer is None:
                 continue
+            logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
             assert isinstance(regularizer, Regularizer)
             added_loss_blob = regularizer(train_net, train_init_net, param, grad=None,
                                           by=RegularizationBy.ON_LOSS)
+            logger.info(added_loss_blob)
             if added_loss_blob is not None:
                 self.add_loss(
                     schema.Scalar(blob=added_loss_blob),
@@ -632,6 +643,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        logger.info("apply regularizer after optimizer")
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
@@ -639,6 +651,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
+            logger.info("add regularizer {0} for param {1} to optimizer".format(regularizer, param))
             device = get_param_device(
                 param,
                 grad_map.get(str(param)),

@@ -14,7 +14,7 @@ add_library(caffe2_observers
     "${CMAKE_CURRENT_SOURCE_DIR}/observer_config.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/perf_observer.cc"
     )
-target_link_libraries(caffe2_observers PUBLIC caffe2_library)
+target_link_libraries(caffe2_observers PUBLIC torch_library)
 target_include_directories(caffe2_observers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_options(caffe2_observers PRIVATE "-DCAFFE2_BUILD_OBSERVER_LIB")
 install(TARGETS caffe2_observers DESTINATION lib)

@@ -18,6 +18,10 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 #include <binaries/benchmark_helper.h>
 #include "caffe2/core/blob_serialization.h"
@@ -35,19 +39,22 @@
 #include <observers/observer_config.h>
 #include <observers/perf_observer.h>
 
-using std::map;
-using std::shared_ptr;
-using std::string;
-using std::unique_ptr;
-using std::vector;
+#if defined(TARGET_OS_MAC) || \
+defined(TARGET_OS_IPHONE) || \
+defined(TARGET_IPHONE_SIMULATOR)
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
+
 
 void observerConfig() {
   caffe2::ClearGlobalNetObservers();
   caffe2::AddGlobalNetObserverCreator([](caffe2::NetBase* subject) {
-    return caffe2::make_unique<caffe2::PerfNetObserver>(subject);
+    return std::make_unique<caffe2::PerfNetObserver>(subject);
   });
   caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
+      std::make_unique<caffe2::NetObserverReporterPrint>());
 }
 
 bool backendCudaSet(const string& backend) {
@@ -218,7 +225,7 @@ void fillInputBlob(
     if (blob == nullptr) {
       blob = workspace->CreateBlob(tensor_kv.first);
     }
-    // todo: support gpu and make this function a tempalte
+    // todo: support gpu and make this function a template
     int protos_size = tensor_kv.second.protos_size();
     if (protos_size == 1 && iteration > 0) {
       // Do not override the input data if there is only one input data,
@@ -235,7 +242,7 @@ void fillInputBlob(
 
 void runNetwork(
     shared_ptr<caffe2::Workspace> workspace,
-    caffe2::NetDef& net_def,
+    caffe2::NetBase* net,
     map<string, caffe2::TensorProtos>& tensor_protos_map,
     const bool wipe_cache,
     const bool run_individual,
@@ -249,13 +256,6 @@ void runNetwork(
     const int sleep_between_net_and_operator,
     const std::string& output,
     const std::string& output_folder) {
-
-  if (!net_def.has_name()) {
-    net_def.set_name("benchmark");
-  }
-
-  caffe2::NetBase* net = workspace->CreateNet(net_def);
-  CHECK_NOTNULL(net);
 
   LOG(INFO) << "Starting benchmark.";
   caffe2::ObserverConfig::initSampleRate(1, 1, 1, run_individual, warmup);
@@ -376,6 +376,40 @@ void writeOutput(
   }
 }
 
+void logBenchmarkResult(
+    const std::string& type,
+    const std::string& metric,
+    const std::string& unit,
+    const int value) {
+  LOG(INFO) << caffe2::NetObserverReporterPrint::IDENTIFIER << "{"
+            << "\"type\": \"" << type << "\", "
+            << "\"metric\": \"" << metric << "\", "
+            << "\"unit\": \"" << unit << "\", "
+            << "\"value\": " << c10::to_string(value) << "}\n";
+}
+
+long getVirtualMemoryIfOptionEnabled(bool FLAGS_measure_memory) {
+  if (FLAGS_measure_memory) {
+#if defined(TARGET_OS_IPHONE) || \
+defined(TARGET_OS_MAC) || \
+defined(TARGET_IPHONE_SIMULATOR)
+    malloc_statistics_t stats = {0};
+    malloc_zone_statistics(nullptr, &stats);
+    return stats.size_allocated;
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    GetProcessMemoryInfo(
+        GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
+    return pmc.PrivateUsage;
+#else
+    struct mallinfo info = mallinfo();
+    return info.uordblks;
+#endif
+  }
+
+  return 0;
+}
+
 int benchmark(
     int argc,
     char* argv[],
@@ -386,6 +420,7 @@ int benchmark(
     const string& FLAGS_input_file,
     const string& FLAGS_input_type,
     int FLAGS_iter,
+    bool FLAGS_measure_memory,
     const string& FLAGS_net,
     const string& FLAGS_output,
     const string& FLAGS_output_folder,
@@ -423,19 +458,15 @@ int benchmark(
 
   auto workspace = std::make_shared<caffe2::Workspace>(new caffe2::Workspace());
   bool run_on_gpu = backendCudaSet(FLAGS_backend);
-  // Run initialization network.
+  // Run initialization network, measure resources used.
+  long init_vmem = getVirtualMemoryIfOptionEnabled(FLAGS_measure_memory);
   caffe2::NetDef init_net_def;
   CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_init_net, &init_net_def));
   setOperatorEngine(&init_net_def, FLAGS_backend);
   CAFFE_ENFORCE(workspace->RunNetOnce(init_net_def));
-
-  // Run main network.
-  caffe2::NetDef net_def;
-  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_net, &net_def));
-  setOperatorEngine(&net_def, FLAGS_backend);
+  init_vmem = getVirtualMemoryIfOptionEnabled(FLAGS_measure_memory) - init_vmem;
 
   map<string, caffe2::TensorProtos> tensor_protos_map;
-
   int num_blobs = loadInput(
       workspace,
       run_on_gpu,
@@ -445,9 +476,19 @@ int benchmark(
       FLAGS_input_dims,
       FLAGS_input_type);
 
+  // Run main network.
+  long predict_vmem = getVirtualMemoryIfOptionEnabled(FLAGS_measure_memory);
+  caffe2::NetDef net_def;
+  CAFFE_ENFORCE(ReadProtoFromFile(FLAGS_net, &net_def));
+  setOperatorEngine(&net_def, FLAGS_backend);
+  if (!net_def.has_name()) {
+    net_def.set_name("benchmark");
+  }
+  caffe2::NetBase* net = workspace->CreateNet(net_def);
+  CHECK_NOTNULL(net);
   runNetwork(
       workspace,
-      net_def,
+      net,
       tensor_protos_map,
       FLAGS_wipe_cache,
       FLAGS_run_individual,
@@ -461,6 +502,12 @@ int benchmark(
       FLAGS_sleep_between_net_and_operator,
       FLAGS_output,
       FLAGS_output_folder);
+  predict_vmem = getVirtualMemoryIfOptionEnabled(
+      FLAGS_measure_memory) - predict_vmem;
+  if (FLAGS_measure_memory) {
+    logBenchmarkResult(
+        "NET_", "memory", "kB", (init_vmem + predict_vmem) / 1024);
+  }
 
   return 0;
 }

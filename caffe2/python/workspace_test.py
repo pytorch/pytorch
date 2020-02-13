@@ -299,27 +299,13 @@ class TestWorkspace(unittest.TestCase):
         t.resize_(5)
         t[4] = t[2] = 777
         np.testing.assert_array_equal(t.numpy(), np.array([2,2,777,2,777]))
-        # this doesn't work because of variable / tensor confusion
-        # the underlying data tensor is not properly reshaped :(
         np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
 
         z = torch.ones((4,), dtype=torch.int64)
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2)))
-        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
-        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
-        # any sizes or strides change to `bar` will not be propagated back to `z`,
-        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
-        # the value of `bar` back into `z`.
-        #
-        # In the near future, we won't need to perform the shallow-copying of `z` and
-        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
-        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
-        # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
-        # the original tensor `z`.
-        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
@@ -400,28 +386,14 @@ class TestWorkspaceGPU(test_util.TestCase):
         t[4] = t[2] = 777
         np.testing.assert_array_equal(
             t.cpu().numpy(), np.array([2,2,777,2,777]))
-        # this doesn't work because of variable / tensor confusion
-        # the underlying data tensor is not properly reshaped :(
         np.testing.assert_array_equal(
-            workspace.FetchBlob("foo"), np.array([2,2,777,2]))
+            workspace.FetchBlob("foo"), np.array([2,2,777,2,777]))
 
         z = torch.ones((4,), dtype=torch.int64, device="cuda")
         workspace.FeedBlob('bar', z)
         workspace.RunOperatorOnce(
             core.CreateOperator("Reshape", ['bar'], ['bar', '_'], shape=(2,2),
             device_option=core.DeviceOption(workspace.GpuDeviceType)))
-        # NOTE: `workspace.FeedBlob('bar', z)` above creates a shallow-copy of `z`
-        # and assign it to `bar` in the Caffe2 workspace. Since it's a shallow-copy,
-        # any sizes or strides change to `bar` will not be propagated back to `z`,
-        # and we need to call `z = workspace.FetchTorch("bar")` to manually put
-        # the value of `bar` back into `z`.
-        #
-        # In the near future, we won't need to perform the shallow-copying of `z` and
-        # can directly pass it into the Caffe2 workspace, as long as `z` doesn't require
-        # grad. At that point we won't need to use `z = workspace.FetchTorch("bar")`
-        # to fetch `z` from the Caffe2 workspace, since it will exactly be the same as
-        # the original tensor `z`.
-        z = workspace.FetchTorch("bar")
         z[0,1] = 123
         np.testing.assert_array_equal(
             workspace.FetchBlob("bar"), np.array([[1,123],[1,1]]))
@@ -757,7 +729,7 @@ class TestScriptModule(test_util.TestCase):
         m = MyModule()
         workspace.FeedBlob('module', m)
         m2 = workspace.FetchBlob('module')
-        self.assertTrue(m._c is m2)
+        self.assertTrue(m2 is not None)
 
     def testForward(self):
         self._createFeedModule()

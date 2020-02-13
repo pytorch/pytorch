@@ -6,7 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
-#include <THC/THCAtomics.cuh>  // for atomicAdd
+#include <THC/THCAtomics.cuh>  // for gpuAtomicAdd
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -287,7 +287,7 @@ __global__ void atomicadaptiveaveragegradinput(
       for (it = 0; it < kT; ++it) {
         for (ih = 0; ih < kH; ++ih) {
           for (iw = 0; iw < kW; ++iw) {
-            atomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
+            gpuAtomicAdd(&(ptr_gradInput[ih*isizeW + iw]), grad_delta);
           }
         }
         ptr_gradInput += isizeH*isizeW; // next input frame
@@ -390,8 +390,8 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       input.scalar_type(), "adaptive_avg_pool3d_cuda", [&] {
-        scalar_t* input_data = input.data<scalar_t>();
-        scalar_t* output_data = output.data<scalar_t>();
+        scalar_t* input_data = input.data_ptr<scalar_t>();
+        scalar_t* output_data = output.data_ptr<scalar_t>();
 
         adaptiveaveragepool_loop(
             input_data, output_data,
@@ -455,8 +455,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   if (atomic) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
-          scalar_t* gradInput_data = gradInput.data<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
           atomicadaptiveaveragegradinput_loop(
               gradInput_data, gradOutput_data,
@@ -467,8 +467,8 @@ void adaptive_avg_pool3d_backward_out_cuda_template(
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         input.scalar_type(), "adaptive_avg_pool3d_backward_cuda", [&] {
-          scalar_t* gradInput_data = gradInput.data<scalar_t>();
-          scalar_t* gradOutput_data = gradOutput.data<scalar_t>();
+          scalar_t* gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t* gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
           adaptiveaveragegradinput_loop(
               gradInput_data, gradOutput_data,
@@ -508,7 +508,7 @@ Tensor& adaptive_avg_pool3d_backward_out_cuda(
 Tensor adaptive_avg_pool3d_backward_cuda(
     const Tensor& gradOutput_,
     const Tensor& input) {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_avg_pool3d_backward_out_cuda_template(gradInput, gradOutput_, input);
   return gradInput;
 }

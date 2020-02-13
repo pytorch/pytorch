@@ -18,7 +18,7 @@ template <typename TInd>
 bool BatchGatherOp<CUDAContext>::DoRunWithType() {
   // BatchGather is a special-case of Gather with Axis = 1, wrap = false.
   return gather_helper::gather_impl_cuda<TInd>(
-      this, DATA, INDICES, 0, 1, false);
+      this, DATA, INDICES, 0, 1, false, match_outer_);
 }
 
 template <typename T_INDEX, typename TData>
@@ -68,10 +68,12 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType() {
 template <>
 template <typename TInd, typename TData>
 bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
+  CAFFE_ENFORCE(
+      !match_outer_, "match_outer=true is currently only supported for CPU");
+
   auto& data = Input(DATA);
   auto& indices = Input(INDICES);
   auto& grad = Input(GRAD);
-  
 
   // ONNX allows negative axis to index from the back, valid range: [-r, r].
   int axis = axis_;

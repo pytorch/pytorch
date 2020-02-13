@@ -1,5 +1,6 @@
 #include <torch/csrc/cuda/python_nccl.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -56,7 +57,10 @@ static void destroy_nccl_comm(PyObject* capsule) {
 
   HANDLE_TH_ERRORS
   ncclComm_t comm = unpack_nccl_comm(capsule);
-  with_no_gil([&] { ncclCommDestroy(comm); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    ncclCommDestroy(comm);
+  }
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -118,8 +122,10 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   ncclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
   ncclComm_t comm;
-  with_no_gil(
-      [&] { NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank)); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    NCCL_CHECK(ncclCommInitRank(&comm, nranks, commId, rank));
+  }
   return PyCapsule_New(comm, COMM_CAPSULE_NAME, &destroy_nccl_comm);
   END_HANDLE_TH_ERRORS
 }
@@ -153,9 +159,10 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   std::vector<c10::optional<at::cuda::CUDAStream>> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
+  {
+    pybind11::gil_scoped_release no_gil;
     torch::cuda::nccl::reduce(inputs, outputs, root, op, streams, user_comms);
-  });
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -184,18 +191,18 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
-    _check_inputs(inputs, outputs, 1, 1);
+  {
+    pybind11::gil_scoped_release no_gil;
+    check_inputs(inputs, outputs, 1, 1);
     size_t len = inputs.size();
 
-    ncclDataType_t data_type = _get_data_type(inputs[0]);
+    ncclDataType_t data_type = get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
-    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    auto comms = user_comms.empty() ? _get_communicators(inputs)
+    auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
@@ -211,7 +218,7 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
           comms[i],
           stream));
     }
-  });
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -237,8 +244,10 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil(
-      [&] { torch::cuda::nccl::broadcast(inputs, streams, user_comms); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    torch::cuda::nccl::broadcast(inputs, streams, user_comms);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -264,18 +273,18 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
+  {
+    pybind11::gil_scoped_release no_gil;
     size_t len = inputs.size();
-    _check_inputs(inputs, outputs, len, 1);
+    check_inputs(inputs, outputs, len, 1);
 
-    ncclDataType_t data_type = _get_data_type(inputs[0]);
+    ncclDataType_t data_type = get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel();
-    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    auto comms = user_comms.empty() ? _get_communicators(inputs)
+    auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
@@ -300,7 +309,7 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
           stream));
 #endif
     }
-  });
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -327,18 +336,18 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
-  with_no_gil([&] {
+  {
+    pybind11::gil_scoped_release no_gil;
     size_t len = inputs.size();
-    _check_inputs(inputs, outputs, 1, len);
+    check_inputs(inputs, outputs, 1, len);
 
-    ncclDataType_t data_type = _get_data_type(inputs[0]);
+    ncclDataType_t data_type = get_data_type(inputs[0]);
 
     int64_t count = inputs[0].numel() / len;
-    std::lock_guard<std::mutex> lock(*(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    auto comms = user_comms.empty() ? _get_communicators(inputs)
+    auto comms = user_comms.empty() ? get_communicators(inputs)
                                     : ArrayRef<ncclComm_t>(user_comms);
-    at::cuda::OptionalCUDAGuard device_guard;
     AutoNcclGroup nccl_group_guard;
+    at::cuda::OptionalCUDAGuard device_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       device_guard.set_index(device);
@@ -354,7 +363,7 @@ PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
           comms[i],
           stream));
     }
-  });
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

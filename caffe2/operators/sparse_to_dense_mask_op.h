@@ -43,7 +43,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
 
   std::unordered_map<int64_t, int> sparse_;
   std::vector<int> dense_;
-  int featuresCount_;
+  size_t featuresCount_;
 
   inline int getFeatureIdx(int64_t id) const {
     if (id >= kMaxDenseSize) {
@@ -97,7 +97,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     int64_t block_size = default_value.numel();
     size_t block_nbytes = default_value.nbytes();
 
-    const int cols = this->featuresCount_;
+    const size_t cols = this->featuresCount_;
     int rows = -1;
     int32_t sparse_indices_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
@@ -215,7 +215,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
     int64_t block_size = gradient_output.size_from_dim(1);
     size_t block_nbytes = gradient_output.itemsize() * block_size;
 
-    const int cols = this->featuresCount_;
+    const size_t cols = this->featuresCount_;
     int rows = -1;
     int iter_offset = 1;
     int32_t default_length = sparse_indices.dim32(0);

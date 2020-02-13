@@ -35,7 +35,7 @@ Each component is described in more detail below:
 ### `func`
 
 ```
-- func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
+- func: func_name[.overload_name](ArgType arg0[=default], ArgType arg1[=default], ...) -> Return
 ```
 
 The `func` entry is a string describing the name of the function and its type
@@ -49,7 +49,7 @@ signature.
   and may be omitted by passing an undefined tensor.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
-  to be `FloatTensor`s).  
+  to be `FloatTensor`s).
   `Tensor` or `Tensor?` must sometimes be annotated to indicate aliasing and mutability.
   In general annotations can be defined via the following four situations:
   - `Tensor(a)` - `a` is a set of Tensors that may alias to the same data.
@@ -99,7 +99,9 @@ signature.
 Functions with no tensor inputs are called *factory functions*, and
 are handled specially by code generation.  If your function is behaving
 differently than another example, check first and see if one is a
-factory while another is not.
+factory while another is not. In some rare cases, factory function might have a
+tensor argument. In this case mark it with 'category_override: factory'
+explicitly.
 
 **Argument names.** Argument names are meaningful; downstream binding code may make use of the specific
 argument name you provide, and a rename of an argument name is considered a BC-breaking
@@ -168,7 +170,29 @@ two functions:
 Note that argument type modifiers such as defaults and optional are not currently supported on Return.
 
 
-The declarations also support the following attributes:
+**Overloads.** You can register multiple functions with the same name and different
+function signatures if you give them unique overload names. An overload name
+is specified after the function name, separated by a dot.
+
+Overload names do not have to be globally unique, but must be unique in the set
+of all overloads for the same function. Overload names cannot be changed for
+backwards compatibility reasons. Please try to make overload names semantically
+meaningful. An overload name that just enumerates all the argument types isn't
+helpful. In many cases, a semantic name is clear from what the overload is doing
+differently. As a fallback, you can use the name or type of the first differing
+argument as an overload name.
+
+If you add a new overload to an existing function, please leave the existing
+overload names as they are (for backwards compatibility), but give the new
+overload a new, unique name.
+
+Not specifying an overload name is equivalent to specifying an empty overload
+name. If you add a new function with multiple overloads, give them unique
+overload names, at most one overload is allowed to have an empty overload name.
+
+
+The declarations also support the following attributes.
+
 
 ### `variants`
 
@@ -198,8 +222,8 @@ to indicate whether an argument of a function is going to be mutated and returne
 ### `annotations`
 
 There are two typical situations in which we mutate the memory of an argument in the Python
-frontend:  
-a) For an inplace operations such as `self.abs_()`  
+frontend:
+a) For an inplace operations such as `self.abs_()`
 b) for a function with an output keyword argument such as `torch.abs(input, out=None)`.
 
 In order to provide implementations for these Python functions the legacy schema
@@ -273,6 +297,17 @@ that case, code generation of the device guard can be disabled by adding
 in which case this field would go away. If you have an opinion on the
 matter, please write in at https://github.com/pytorch/pytorch/issues/14234
 
+### `supports_named_tensor`
+
+```
+supports_named_tensor: True
+```
+
+By default, (`supports_named_tensor: False`) ATen code generation will generate a check
+that all tensor inputs to the function are unnamed. This is used to incrementally
+implement named tensors; if a function supports named tensors, then it'll have
+`supports_named_tensor: True`; otherwise, passing it a named tensor will error out.
+
 ### `matches_jit_signature`
 
 ```
@@ -286,6 +321,31 @@ of tracking an ongoing schema unification with the goal of aligning func syntax
 with other components of PyTorch in order to reduce overall complexity.
 If you find yourself having to set this field to False add @gchanan to your PR's
 set of reviewers.
+
+### `use_c10_dispatcher`
+
+```
+use_c10_dispatcher: 'no'
+use_c10_dispatcher: 'unboxed_only'
+use_c10_dispatcher: 'full'
+```
+
+This will indicate that the func signature only uses features supported by
+the c10 dispatcher. With this flag, the operator will be added to the
+c10 operator library and be available there. If setting this to 'full' works for
+your operator, please do. For a few corner cases, enabling this might not compile
+successfully, so setting this to 'unboxed_only', or as last resort 'no' is a
+workaround. Also, 'no' is the default if you don't specify anything.
+
+### `manual_kernel_registration`
+
+```
+manual_kernel_registration: True
+```
+
+With this flag set, we will not generate code to automatically register the C++ operator
+implementation with the dispatcher. This is a workaround for ops that need manual
+Variable code (see VariableTypeManual.cpp) and should only be used rarely.
 
 ## Writing an implementation in C++
 
@@ -315,6 +375,15 @@ However, in some situations, you can write a function in ATen and it
 will be automatically differentiated! This can be the case if the function implementation
 only calls other operations which are themselves differentiable.  In this
 case, you don't have to write an entry in `tools/autograd/derivatives.yaml`.
+
+### Will this function be exposed to python? What are the namespaces?
+
+We don't generate python bindings for all functions. There're certain patterns in function
+name that we skip in python binding generation, e.g. `*_backward`. Check
+`tools/autograd/gen_python_functions.py` for the latest rules.
+
+The generated bindings are either exposed as methods on python_variable or functions on
+torch._C._nn object(marked with `python_module: nn`).
 
 ### Can it handle being passed Variables?
 
@@ -346,44 +415,6 @@ NB: There is one downside to following the `at::` qualification rule, which
 is that if you know that you will only ever be called with `Tensor`, a
 direct `at::native` call will be more efficient (as it avoids a dynamic
 dispatch).
-
-### How to handle broadcasting?
-
-Unlike our legacy TH bindings, ATen native functions do not automatically
-handle broadcasting; you will have to insert the necessary broadcasting
-calls yourself.
-
-When writing broadcasting code, we obey the convention that `op` is
-broadcasting, while `s_op` (with the `s_` prefix) is not broadcasting.  The
-relationship is best seen by an example of how you would implement broadcasting
-addition out of non-broadcasting addition:
-
-```
-#include <ATen/ExpandUtils.h>
-
-Tensor add(const Tensor& self, const Tensor& other) {
-  Tensor b_self, b_other;
-  std::tie(b_self, b_other) = expand_outplace(self, other, "add");
-  return s_add(b_self, b_other);
-}
-
-Tensor s_add(const Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of addition
-}
-```
-
-For inplace operations, the convention looks like this:
-
-```
-Tensor& add_(Tensor& self, const Tensor& other) {
-  Tensor b_other = expand_inplace(self, other, "add_");
-  return s_add_(self, b_other);
-}
-
-Tensor& s_add_(Tensor& self, const Tensor& other) {
-  // non-broadcasting implementation of inplace addition
-}
-```
 
 ### Undefined tensor conventions
 

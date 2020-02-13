@@ -126,7 +126,7 @@ class Field(object):
     def field_blobs(self):
         """Return the list of blobs with contents for this Field.
         Values can either be all numpy.ndarray or BlobReference.
-        If any of the fields doens't have a blob, throws.
+        If any of the fields doesn't have a blob, throws.
         """
         raise NotImplementedError('Field is an abstract class.')
 
@@ -185,7 +185,7 @@ class Field(object):
         )
 
     def _pprint_impl(self, indent, str_buffer):
-        raise NotImplementedError('Field is an abstrct class.')
+        raise NotImplementedError('Field is an abstract class.')
 
     def __repr__(self):
         str_buffer = StringIO()
@@ -270,6 +270,88 @@ class List(Field):
                 return self.lengths
             elif item == 'values':
                 return self._items
+        else:
+            if names[0] == 'values':
+                return self._items[names[1]]
+        raise KeyError('Field not found in list: %s.' % item)
+
+
+class ListWithEvicted(List):
+    """
+    This class is similar with List, but containing extra field evicted_values for
+    LRU Hashing.
+    """
+    def __init__(self, values, lengths_blob=None, evicted_values=None):
+        if isinstance(evicted_values, Field):
+            assert isinstance(evicted_values, Scalar)
+            self._evicted_values = _normalize_field(evicted_values)
+        else:
+            self._evicted_values = Scalar(np.int64, evicted_values)
+        List.__init__(self, values, lengths_blob=lengths_blob)
+
+    def field_names(self):
+        value_fields = self._items.field_names()
+        return (
+            ['lengths'] + [_join_field_name('values', v) for v in value_fields] + ["_evicted_values"]
+        )
+
+    def field_types(self):
+        return self.lengths.field_types() + self._items.field_types() + self._evicted_values.field_types()
+
+    def field_metadata(self):
+        return self.lengths.field_metadata() + self._items.field_metadata() + self._evicted_values.field_metadata()
+
+    def field_blobs(self):
+        return self.lengths.field_blobs() + self._items.field_blobs() + self._evicted_values.field_blobs()
+
+    def all_scalars(self):
+        return self.lengths.all_scalars() + self._items.all_scalars() + self._evicted_values.all_scalars()
+
+    def has_blobs(self):
+        return self.lengths.has_blobs() and self._items.has_blobs() + self._evicted_values.has_blobs()
+
+    def clone(self, keep_blobs=True):
+        return type(self)(
+            _normalize_field(self._items, keep_blobs=keep_blobs),
+            _normalize_field(self.lengths, keep_blobs=keep_blobs),
+            _normalize_field(self._evicted_values, keep_blobs=keep_blobs)
+        )
+
+    def _pprint_impl(self, indent, str_buffer):
+        str_buffer.write('  ' * indent + "ListWithEvicted(\n")
+        str_buffer.write('  ' * (indent + 1) + "lengths=\n")
+        self.lengths._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * (indent + 1) + "_items=\n")
+        self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * (indent + 1) + "_evicted_Values=\n")
+        self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * indent + ")\n")
+
+
+    def __getattr__(self, item):
+        """If the value of this list is a struct,
+        allow to introspect directly into its fields."""
+        if item.startswith('__'):
+            raise AttributeError(item)
+        if item == "_evicted_values":
+            return self._evicted_values
+        if isinstance(self._items, Struct):
+            return getattr(self._items, item)
+        elif item == 'value' or item == 'items':
+            return self._items
+        else:
+            raise AttributeError('Field not found in list: %s.' % item)
+
+    def __getitem__(self, item):
+        names = item.split(FIELD_SEPARATOR, 1)
+
+        if len(names) == 1:
+            if item == 'lengths':
+                return self.lengths
+            elif item == 'values':
+                return self._items
+            elif item == '_evicted_values':
+                return self._evicted_values
         else:
             if names[0] == 'values':
                 return self._items[names[1]]
@@ -818,6 +900,22 @@ def Map(
         lengths_blob=lengths_blob
     )
 
+def MapWithEvicted(
+    keys,
+    values,
+    keys_name='keys',
+    values_name='values',
+    lengths_blob=None,
+    evicted_values=None
+):
+    """A map with extra field evicted_values
+    """
+    return ListWithEvicted(
+        Struct((keys_name, keys), (values_name, values)),
+        lengths_blob=lengths_blob,
+        evicted_values=evicted_values
+    )
+
 
 def NamedTuple(name_prefix, *fields):
     return Struct(* [('%s_%d' % (name_prefix, i), field)
@@ -1061,7 +1159,6 @@ def FeedRecord(blob_record, arrays, ws=None):
         else:
             ws.create_blob(str(b))
             ws.blobs[str(b)].feed(v)
-
     assert isinstance(blob_record, Field)
     field_blobs = blob_record.field_blobs()
     assert all(isinstance(v, BlobReference) for v in field_blobs)
@@ -1159,7 +1256,6 @@ def is_schema_subset(schema, original_schema):
     # TODO add more checks
     return set(schema.field_names()).issubset(
         set(original_schema.field_names()))
-
 
 def equal_schemas(schema,
                   original_schema,

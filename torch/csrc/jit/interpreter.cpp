@@ -1,16 +1,21 @@
 #include <torch/csrc/jit/interpreter.h>
 
-#include <ATen/core/ivalue.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/thread_pool.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 
 #include <exception>
@@ -32,119 +37,33 @@ namespace jit {
 // some preprocessing of the graph to turn it into a form that is closer
 // to what the instructions will look like.
 // In particular we:
-// * (TODO) desugar Loop trip counts into c = 0, c += 1 instructions in the loop
-// * Turn inputs/outputs into Load/Store instruction
-// *. computes move_flags (see Outputs), and inserts
+// *  Computes whether a input to a node is the last use, so we can issue MOVE
+//    rather than LOAD instructions.
 // *  Drop nodes are inserted for any node that is unused to create a dummy use
 //    that will cause the interpreter to free the node.
-//    A drop node is just a node with no outputs that just pops its inputs off
-//    the stack, to ensure the interpreter release references to nodes that are
-//    never used. Drop nodes are also inserted when the last use of a node is in
-//    some conditionally run control flow (e.g. one side of an If) and the
-//    interpreter must free the node only after the control flow has reconverged
+//    A drop node just pops its input off the stack to  ensure the interpreter
+//    releases references to nodes that are never used. Drop nodes are also
+//    inserted when the last use of a node is in some conditionally run control
+//    flow (e.g. one side of an If) and the interpreter must free the node only
+//    after the control flow has reconverged
 // Outputs are:
 // * graph - the post processed copy of g
 // * move_flags[n] - a list of booleans, one for each input,
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
 
+TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return TensorType::get()->withUndefined();
+  }
+  auto r = TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
+
 namespace {
-
-// new_cond = (i < max_trip_count) && cond
-Value* createTripCountConjunctiveCondition(
-    Graph* g,
-    Value* cur_trip_count,
-    Value* max_trip_count,
-    Value* cond) {
-  // Emit initial comparison -- initial_trip_count < max_trip_count
-  Value* initial_comparison_value =
-      g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output()
-          ->setType(BoolType::get());
-
-  // Replace initial condition with logical `and` of trip count and
-  // initial condition
-  Value* new_cond =
-      g->insertNode(
-           g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output()
-          ->setType(BoolType::get());
-  return new_cond;
-}
-
-// this currently just _removes_ the trip count inputs and checks they are
-// unused. In the future they will be desugared into normal arithmetic to
-// provide a loop counter
-void desugarTripCounts(Block* b) {
-  for (auto n : b->nodes()) {
-    if (n->kind() == prim::Loop) {
-      auto g = n->owningGraph();
-      auto body_block = n->blocks()[0];
-
-      Value* block_trip_count_input = body_block->inputs()[0];
-      // Treat loop iteration number as a loop-carried dependency. We emit an
-      // increment at the end of the body block.
-      n->insertOutput(0);
-
-      Value* max_trip_count_value = n->input(0);
-      {
-        WithInsertPoint guard(n);
-        // int i = 0
-        Value* initial_trip_count = g->insertConstant(0);
-        // Set up initial iteration number value for loop-carried dependency
-        n->removeInput(0);
-        // Input 0 is now initial termination condition, insert this after that.
-        // LCD's start at index 1.
-        n->insertInput(1, initial_trip_count);
-
-        Value* new_cond = createTripCountConjunctiveCondition(
-            g, initial_trip_count, max_trip_count_value, n->input(0));
-        n->replaceInput(0, new_cond);
-      }
-
-      {
-        WithInsertPoint guard(body_block);
-        // Trip count is now a loop carried dependency. We emit an op to
-        // increment the trip count at the end of the body. Then, emit the same
-        // conjunctive stopping condition as above.
-
-        Value* const_one = g->insertConstant(1);
-
-        Value* inc_trip_count =
-            g->insertNode(
-                 g->create(aten::add, {block_trip_count_input, const_one}, 1))
-                ->output()
-                ->setType(IntType::get());
-        body_block->insertOutput(1, inc_trip_count);
-
-        Value* body_cond = createTripCountConjunctiveCondition(
-            g, inc_trip_count, max_trip_count_value, body_block->outputs()[0]);
-        body_block->eraseOutput(0);
-        body_block->insertOutput(0, body_cond);
-      }
-    }
-    for (auto sb : n->blocks()) {
-      desugarTripCounts(sb);
-    }
-  }
-}
-
-// removes all inputs and outputs to a graph, replacing them with Load Store
-// nodes
-static void flattenIO(Graph& graph) {
-  auto load = graph.prependNode(graph.create(prim::Load, 0));
-  for (auto old_input : graph.inputs()) {
-    auto nv = load->addOutput();
-    nv->setType(old_input->type());
-    old_input->replaceAllUsesWith(nv);
-  }
-  graph.appendNode(graph.create(prim::Store, graph.outputs(), 0));
-
-  while (graph.inputs().size() > 0)
-    graph.eraseInput(graph.inputs().size() - 1);
-  while (graph.outputs().size() > 0)
-    graph.eraseOutput(graph.outputs().size() - 1);
-}
 
 // insert Drop nodes to kill references for anything unused:
 // this can happen in a few places, e.g. when a node returns
@@ -155,7 +74,7 @@ void dropUnused(Block* b) {
   auto createDropIfUnused = [&](ArrayRef<Value*> values) -> Node* {
     std::vector<Value*> to_drop;
     for (auto v : values) {
-      if (v->uses().size() == 0)
+      if (v->uses().size() == 0 && v->node()->kind() != prim::Constant)
         to_drop.push_back(v);
     }
     if (to_drop.size() == 0)
@@ -175,21 +94,26 @@ void dropUnused(Block* b) {
   }
 }
 
-// for each input, should we move rather than copy the inputs
-std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
+// ensure every value has a final use in the same block where it is defined.
+// This already true for most nodes. The exceptions are:
+// 1. A value that is unused.
+// 2. A value whose last use is nested in some control flow.
+// For (1) we simply add a prim::Drop node that uses the value right after
+// it is defined. For (2), we insert a prim::Drop right after the control
+// flow node where the last use occurs
+void insertLastUses(Graph& g) {
   // struct to share common data structures
-  struct FindLastUses {
+  struct InsertLastUses {
     Graph& graph;
     // have we seen this value, yet, if not, it is the last use of the value
     std::unordered_set<Value*> seen;
 
-    std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
     // A map from an If or Loop node to the optional Drop block that
     // occurs directly after it to release any tensors that go out of scope
     // when the If/Loop exits. These are created and inserted on demand.
     std::unordered_map<Node*, Node*> drop_for_node;
 
-    FindLastUses(Graph& g) : graph(g) {
+    InsertLastUses(Graph& g) : graph(g) {
       scanBlock(graph.block());
     }
     void scanBlock(Block* b) {
@@ -202,7 +126,6 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
       for (auto b : n->blocks()) {
         scanBlock(b);
       }
-      move_flags[n].resize(n->inputs().size());
       // scan backwards so if a value is used twice in the list then it is a
       // move
       for (size_t i = n->inputs().size(); i > 0; --i) {
@@ -210,11 +133,9 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
       }
     }
     void scanUse(Node* n, size_t i) {
-      auto& move_flags_n = move_flags[n];
       auto v = n->inputs()[i];
       auto inserted = seen.insert(v).second;
       if (!inserted) {
-        move_flags_n[i] = false;
         return;
       }
 
@@ -235,16 +156,14 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
       AT_ASSERT(
           same_depth_node); // failure means v is not in scope for n, use lint!
 
-      // In the case where v and n are in the same block, just mark
-      // its move_flags to be true
+      // In the case where v and n are in the same block,
+      // we have a legit final use already.
       if (same_depth_node == n) {
-        move_flags_n[i] = true;
         return;
       }
 
       // in the case where the use is nested in a block
       // add a Drop node after that block which will drop 'v'.
-      move_flags_n[i] = false;
       addToDropIfNotExists(
           findOrCreateDropInstructionForNode(same_depth_node), v);
     }
@@ -273,325 +192,562 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph& g) {
     }
 
     void addToDropIfNotExists(Node* drop, Value* v) {
+      if (v->node()->kind() == prim::Constant) {
+        return;
+      }
       for (auto i : drop->inputs()) {
         // we already accounted for this use
         if (i == v)
           return;
       }
       drop->addInput(v);
-      move_flags[drop].push_back(true);
     }
   };
 
-  return FindLastUses(g).move_flags;
+  InsertLastUses ilu(g);
 }
 } // namespace
+
+std::ostream& operator<<(std::ostream& out, Instruction inst);
+
+/*
+This is an optimization that reduces the number of store/load/move nodes needed
+by recognizing that parts of the graph are simple trees like a*x + b*y. When
+this happens it is possible to work directly off of the stack by emitting the
+tree in a depth-first left-to-right manner:
+  load a
+  load x
+  mul # stack now is a*x
+  load b
+  load y
+  mul # stack now is a*x, b*y
+  add
+
+can_emit_inline_[node] == true means that this node participates as a non-root
+member of one of these trees. The code emitter will not emit this node when
+it is encountered in the node. Instead the node is emitted in a depth first
+traversal from where it is used in a tree.
+
+To participate in a tree a node must have a single use (otherwise it is not
+tree-like) and output a single value (for simplicity.) If our IR was functional,
+these would be the only constraints. However, many nodes have side effects, so
+we must ensure that emitting the nodes in depth first order from the tree's root
+_does not reorder the emission of the nodes_. To ensure this, we work backward
+from the root of a potential tree, visiting its inputs in reverse depth first
+order, while scanning the node list backward (with the block_point node). When
+these traversal line up we know it is safe to emit the tree in this way. We
+ignore constant nodes, which do not have side effects.
+*/
+struct CanEmitInline {
+  CanEmitInline(const std::shared_ptr<Graph>& graph) {
+    scanBlock(graph->block());
+  }
+  bool canInline(Value* v) {
+    return v->node()->kind() != prim::Param &&
+           // without this a BailOut may float downstream past some later
+           // BailOut
+           // and receive a higher jf_index. Then a GUARD instruction
+           // we generated for the floated BailOut will get popped up from the
+           // instruction stack
+           // by the later BailOut in createBailoutBlock and its jf_index
+           // will become invalid.
+           v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
+           v->node()->outputs().size() == 1;
+  }
+
+  Node* previousNonConstant(Node* n) {
+    do {
+      n = n->prev();
+    } while (n->kind() == prim::Constant);
+    return n;
+  }
+
+  Node* scanValue(Node* block_point, Value* v) {
+    // this node is a candidate for inline, if our reverse scan of the
+    // node list lines up with the use of v, we know it will be emitted in
+    // tree order, and we can inlining. Scan continutes for further nodes.
+    if (v->node() == block_point && canInline(v)) {
+      // since we inlined this node, we may be able to recursively inline
+      // its inputs, so we continue scanning it
+      block_point = scanNode(v->node());
+      can_emit_inline_[v->node()] = true;
+    }
+    // if it does not line up, we can't inline 'v', and will just generate
+    // a load/move for it. However, other inputs may still appear in tree
+    // order so we continue the scan of the inputs.
+    return block_point;
+  }
+
+  Node* scanNode(Node* n) {
+    // don't bother to scan nodes we have already determined to be inline
+    if (can_emit_inline_.count(n)) {
+      return nullptr;
+    }
+    for (auto b : n->blocks()) {
+      scanBlock(b);
+    }
+    Node* block_point = previousNonConstant(n);
+    for (auto it = n->inputs().rbegin(), end = n->inputs().rend(); it != end;
+         ++it) {
+      block_point = scanValue(block_point, *it);
+    }
+    return block_point;
+  }
+
+  void scanBlock(Block* b) {
+    scanNode(b->return_node());
+    for (auto node : b->nodes().reverse()) {
+      scanNode(node);
+    }
+  }
+  std::unordered_map<Node*, bool> can_emit_inline_;
+};
 
 // pre-processing that happens once per graph
 struct PreprocessGraph {
   PreprocessGraph(Graph& g) : graph(g.copy()) {
-    n_outputs = graph->outputs().size();
-    desugarTripCounts(graph->block());
-    flattenIO(*graph);
     dropUnused(graph->block());
     // fill in move_flags by scanning blocks;
-    move_flags = findLastUses(*graph);
-    // TODO: desugar Loop trip counts, for now we drop trip counts
+    insertLastUses(*graph);
+    can_emit_inline = std::move(CanEmitInline(graph).can_emit_inline_);
   }
   // Outputs of the preprocessing:
   std::shared_ptr<Graph> graph;
-  // for each input, should we move rather than copy the inputs
-  std::unordered_map<Node*, std::vector<uint8_t>> move_flags;
-  // Record number of outputs before flattenIO()
-  size_t n_outputs;
+  std::unordered_map<Node*, bool> can_emit_inline;
 };
 
-// We need some lists for inputs and outputs. To keep all the memory
-// contiguous we allocate a single vector and use offsets into the vector
-// which are stored in the ListHandle struct
-// start is an offset into int_data of Code for ListHandle<int>
-// and bool_data of Code for ListHandle<bool>
-template <typename T>
-struct ListHandle {
-  int start;
-  int size;
+// for keeping track of the current node
+struct WithCurrentNode {
+  WithCurrentNode(Node** loc, Node* new_value) : loc_(loc), old_value_(*loc_) {
+    *loc = new_value;
+  }
+  ~WithCurrentNode() {
+    *loc_ = old_value_;
+  }
+
+ private:
+  Node** loc_;
+  Node* old_value_;
 };
 
-struct UseList {
-  // values to be used
-  ListHandle<int> values;
-  // boolean flags indicating whether to free the Tensor after this use
-  ListHandle<bool> free_flags;
+// BailoutBlocks are used to temporarily store
+// instructions (typically, argument LOADs and TAIL_CALL)
+// generated for prim::BailOut nodes
+// before they are merged back into
+// CodeImpl._instructions_ by insertBailoutBlocks
+struct BailoutBlock {
+  size_t jf_instruction_index; // this node gets patched to jump here on failure
+  std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
-
-// one instruction plus meta-data
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct Instruction {
-  Operation callback;
-  UseList inputs;
-  ListHandle<int> outputs;
-  Symbol debug_name; // used in dump to understand the generated code
-  c10::optional<SourceRange> debug_location; // for error reporting
-};
-
-int relativeJump(int from_inst, int to_inst) {
-  return to_inst - (from_inst + 1);
-}
 
 struct CodeImpl {
-  CodeImpl(const std::shared_ptr<Graph>& graph_) : preprocess(*graph_) {
-    graph = preprocess.graph;
-    insertNodesFromBlock(graph->block());
+  friend struct InterpreterState;
+  std::vector<Instruction> instructions_;
+
+  // same length as instructions.
+  // what node in the graph cause this
+  // instruction to be emitted?
+  std::vector<Node*> instructions_source_;
+
+  std::vector<IValue> constant_table_;
+  std::vector<Operation> operator_table_;
+  std::vector<Function*> function_table_;
+  std::vector<TypePtr> type_table_;
+  int register_size_ = 0;
+  size_t n_outputs;
+  size_t n_inputs;
+  TypePtr return_type_;
+
+  // We MUST hold onto graph here because some Operators stored in the
+  // instruction lists have dependencies on meta-data stored in the graph
+  // that would be dead otherwise.
+  // It is also very useful for debugging interpreter problems to
+  // keep this around.
+  std::shared_ptr<Graph> graph_;
+  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
+  PreprocessGraph preprocess_;
+
+  // map from unique of nodes to register in register table
+  std::unordered_map<Value*, int> value_to_reg_;
+
+  // running count of uses as we emit. When we reach use_count_[v] =
+  // v.uses().size() we know it is the final use and we can move rather than
+  // load.
+  std::unordered_map<Value*, size_t> use_count_;
+
+  Node* current_node_; // used in creation of code to keep track
+                       // of node being emitted
+  Node* last_inserted_op_ = nullptr;
+
+  // out-of-line jumps for bailouts that are patched in at the end
+  std::vector<BailoutBlock> bailout_blocks_;
+  std::vector<std::unique_ptr<Function>> bailout_functions_;
+  size_t remaining_bailout_depth_;
+
+  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        remaining_bailout_depth_(remaining_bailout_depth) {
+    graph_ = preprocess_.graph;
+    n_outputs = graph_->outputs().size();
+    if (n_outputs == 1) {
+      return_type_ = graph->outputs().at(0)->type();
+    } else {
+      return_type_ = TupleType::create(
+          fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+    }
+    n_inputs = graph_->inputs().size();
+    // std::cout << *graph_ << "\n";
+    emitCodeForBlock(graph_->block());
+    insertInstruction(RET);
+    // we deferred the emission of bailout blocks so they appear at the end
+    // emit them now and patch up the jumps
+    insertBailoutBlocks();
   }
 
-  // jump when input is false
-  void createJumpFalse(int from_inst, int to_inst) {
-    auto& inst = instructions[from_inst];
-    AT_ASSERT(inst.debug_name == prim::Placeholder);
-    auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [offset](Stack& stack) {
-      auto t = pop(stack).toBool();
-      return t ? 0 : offset;
-    };
-    inst.debug_name = prim::JumpZ;
+  const std::vector<c10::IValue>& constant_table() const {
+    return constant_table_;
   }
 
-  // jump when input is true
-  void createJumpTrue(int from_inst, int to_inst) {
-    auto& inst = instructions[from_inst];
-    AT_ASSERT(inst.debug_name == prim::Placeholder);
-    auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [offset](Stack& stack) {
-      auto t = pop(stack).toBool();
-      return t ? offset : 0;
-    };
-    inst.debug_name = prim::JumpNZ;
-  }
-
-  void createJump(int from_inst, int to_inst) {
-    auto& inst = instructions[from_inst];
-    AT_ASSERT(inst.debug_name == prim::Placeholder);
-    auto offset = relativeJump(from_inst, to_inst);
-    inst.callback = [=](Stack& stack) { return offset; };
-    inst.debug_name = prim::Jump;
-  }
-
-  void insertNodesFromBlock(Block* block) {
-    for (auto node : block->nodes()) {
-      SourceRange source_location = node->sourceRange();
-      switch (node->kind()) {
-        case prim::If: {
-          // x = if c:
-          //   <then_block>
-          //   -> (vt)
-          // else:
-          //    <else_block>
-          //   -> (vf)
-
-          // turns into:
-          //   JumpNZ c, then
-          //   <else_block>
-          //   x = vf
-          //   Jump end
-          // then:
-          //   <then_block>
-          //   x = vt
-          // end:
-
-          // prim::Placeholder instructions are replaced with branch
-          // instructions when the branch target locations are known
-          auto cond_branch = insertInstruction(
-              prim::Placeholder,
-              source_location,
-              node->inputs(),
-              moveFlags(node),
-              {});
-          auto then_block = node->blocks()[0];
-          auto else_block = node->blocks()[1];
-          insertNodesFromBlock(else_block);
-          insertAssign(
-              source_location,
-              else_block->outputs(),
-              moveFlags(else_block),
-              node->outputs());
-          auto jump =
-              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
-          auto then_block_start = instructions.size();
-          insertNodesFromBlock(then_block);
-          insertAssign(
-              source_location,
-              then_block->outputs(),
-              moveFlags(then_block),
-              node->outputs());
-          createJump(jump, instructions.size());
-          createJumpTrue(cond_branch, then_block_start);
-        } break;
-        case prim::Loop: {
-          // o0 = while c i0
-          //        block 0: l0
-          //          <body>
-          //          -> (v0, v1)
-
-          // turns into:
-          // l0 = i0
-          // JumpZ c, end
-          // begin:
-          //   <body>
-          //   c, l0 = v0, v1
-          //   JumpNZ c, begin
-          // end:
-
-          auto body_block = node->blocks()[0];
-
-          // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(
-              source_location,
-              node->inputs(),
-              moveFlags(node),
-              body_block->inputs());
-          // after assign op: stack: ... <cond>
-          // cond_branch consumes <cond> from top of the stack
-          auto cond_branch =
-              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
-          // after branch: stack: ...
-
-          auto entry = instructions.size();
-          insertNodesFromBlock(body_block);
-          // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(
-              source_location,
-              body_block->outputs(),
-              moveFlags(body_block),
-              body_block->inputs());
-          // after assign op: stack: ... <cond>
-          auto cond_branch_end =
-              insertInstruction(prim::Placeholder, source_location, {}, {}, {});
-          // after branch: stack: ...
-
-          aliasRegistersTo(node->outputs(), body_block->inputs());
-          createJumpFalse(cond_branch, instructions.size());
-          createJumpTrue(cond_branch_end, entry);
-        } break;
-        default: {
-          insertInstruction(node);
-        } break;
+  void request_bailout(size_t index) {
+    auto count = index;
+    for (size_t instr_index = 0; instr_index < instructions_.size();
+         instr_index++) {
+      if (instructions_[instr_index].op == GUARD || instructions_[instr_index].op == FAIL_GUARD) {
+        if (count-- == 0) {
+          // patching GUARD to FAIL_GUARD
+          instructions_[instr_index] =
+              Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
+          GRAPH_DEBUG(
+              "Added a bailout request for ",
+              index,
+              " at instruction ",
+              instr_index);
+          break;
+        }
       }
     }
   }
 
-  size_t insertInstruction(Node* n) {
-    auto inst = insertInstruction(
-        n->kind(),
-        n->sourceRange(),
-        n->inputs(),
-        moveFlags(n),
-        n->outputs());
-    instructions[inst].callback = getOperation(n);
-    return inst;
-  }
-  size_t insertInstruction(
-      Symbol sym,
-      const SourceRange& debug_location,
-      ArrayRef<Value*> inputs,
-      ArrayRef<uint8_t> move_flags,
-      ArrayRef<Value*> outputs) {
-    instructions.emplace_back();
-    auto& inst = instructions.back();
-    inst.debug_name = sym;
-    inst.debug_location = std::move(debug_location);
-    listBegin(inst.inputs.values);
-    for (auto input : inputs) {
-      listInsert(inst.inputs.values, getOrAllocateRegister(input, true));
-    }
-    listBegin(inst.inputs.free_flags);
-    for (auto flag : move_flags) {
-      listInsert(inst.inputs.free_flags, flag);
-    }
-    listBegin(inst.outputs);
-    for (auto output : outputs) {
-      listInsert(inst.outputs, getOrAllocateRegister(output));
-    }
-    return instructions.size() - 1;
-  }
-  ArrayRef<uint8_t> moveFlags(Node* n) {
-    return preprocess.move_flags.at(n);
-  }
-  ArrayRef<uint8_t> moveFlags(Block* b) {
-    return moveFlags(b->return_node());
+  const std::vector<Instruction>& instructions() const {
+    return instructions_;
   }
 
-  size_t insertAssign(
-      const SourceRange& debug_location,
-      ArrayRef<Value*> inputs,
-      ArrayRef<uint8_t> move_flags,
-      ArrayRef<Value*> outputs) {
-    auto inst = insertInstruction(
-        prim::Assign, std::move(debug_location), inputs, move_flags, outputs);
-    // This node effectively forwards its inputs into different places in a
-    // register list. We don't need to manipulate the stack in any way, because
-    // all inputs are also outputs, and the interpreter will take care of
-    // putting them in correct places.
-    instructions[inst].callback = [](Stack& stack) { return 0; };
-    return inst;
+  const std::vector<Node*>& instructions_source() const {
+    return instructions_source_;
   }
 
-  // helpers to build/access RegList objects
-  int get(const ListHandle<int>& list, int i) const {
-    return int_data[list.start + i];
-  }
-  bool get(const ListHandle<bool>& list, int i) const {
-    return bool_data[list.start + i];
-  }
-  void listBegin(ListHandle<int>& list) {
-    list.start = int_data.size();
-    list.size = 0;
-  }
-  void listInsert(ListHandle<int>& list, int value) {
-    TORCH_CHECK(
-        list.start + list.size == (int)int_data.size(),
-        "another list already started");
-    int_data.push_back(value);
-    list.size++;
-  }
-  void listBegin(ListHandle<bool>& list) {
-    list.start = bool_data.size();
-    list.size = 0;
-  }
-  void listInsert(ListHandle<bool>& list, int value) {
-    TORCH_CHECK(
-        list.start + list.size == (int)bool_data.size(),
-        "another list already started");
-    bool_data.push_back(value);
-    list.size++;
-  }
-  // must be called before any new_allocations are used, otherwise they will
-  // already have registers assigned
-  void aliasRegistersTo(
-      ArrayRef<Value*> new_allocations,
-      ArrayRef<Value*> existing_allocations) {
-    AT_ASSERT(new_allocations.size() == existing_allocations.size());
-    for (size_t i = 0; i < new_allocations.size(); ++i) {
-      auto n = new_allocations[i]->unique();
-      auto e = existing_allocations[i]->unique();
-      AT_ASSERT(unique_to_reg.count(e) > 0 && unique_to_reg.count(n) == 0);
-      unique_to_reg[n] = unique_to_reg[e];
+  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
+    instructions_.emplace_back(op, X, N);
+    instructions_source_.emplace_back(current_node_);
+
+    // check that we didn't accidentally emit nodes out of topological order
+    if (op == OP) {
+      if (last_inserted_op_ != nullptr && current_node_ != last_inserted_op_ &&
+          current_node_->owningBlock() == last_inserted_op_->owningBlock()) {
+        TORCH_INTERNAL_ASSERT(
+            current_node_->isAfter(last_inserted_op_),
+            *current_node_,
+            " is not after ",
+            *last_inserted_op_);
+      }
+      last_inserted_op_ = current_node_;
     }
   }
-  int getOrAllocateRegister(Value* n, bool required = false) {
-    size_t u = n->unique();
-    if (unique_to_reg.count(u) > 0)
-      return unique_to_reg[u];
-    AT_ASSERT(!required);
-    int r = register_size++;
-    unique_to_reg[u] = r;
-    return r;
+
+  void truncateInstructions(size_t size) {
+    while(instructions_.size() > size) {
+      instructions_.pop_back();
+      instructions_source_.pop_back();
+    }
+  }
+
+  void createBailoutBlock(size_t jf_index) {
+    bailout_blocks_.emplace_back(BailoutBlock{jf_index});
+    auto& bailout_instructions = bailout_blocks_.back().instructions;
+
+    bailout_instructions.insert(
+        bailout_instructions.end(),
+        instructions_.begin() + jf_index + 1,
+        instructions_.end());
+    truncateInstructions(jf_index + 1);
+  }
+
+  int allocRegs(at::ArrayRef<Value*> vs) {
+    int result = register_size_ + 1;
+    for (Value* v : vs) {
+      AT_ASSERT(value_to_reg_.count(v) == 0);
+      value_to_reg_[v] = ++register_size_;
+    }
+    return result;
+  }
+
+  int registerFor(Value* v) {
+    return value_to_reg_.at(v);
+  }
+
+  void emitUse(Value* input, bool drop) {
+    // drop - if true, we are not actually going to use this thing
+    // and we can short circuit doing many instructions here
+    // by either clearing the register (DROPR) or just popping the stack
+    // (DROP)
+    if (preprocess_.can_emit_inline[input->node()]) {
+      emitNode(input->node());
+      if (drop) {
+        insertInstruction(DROP);
+      }
+    } else {
+      int reg = registerFor(input);
+      bool moved = input->uses().size() == ++use_count_[input];
+
+      OpCode op;
+      if (input->node()->kind() == prim::Constant) {
+        op = LOADC;
+      } else if (drop) {
+        op = DROPR;
+      } else if (moved) {
+        op = MOVE;
+      } else {
+        op = LOAD;
+      }
+      insertInstruction(op, reg);
+    }
+  }
+
+  void emitLoadInputs(at::ArrayRef<Value*> inputs) {
+    for (Value* input : inputs) {
+      emitUse(input, false);
+    }
+  }
+
+  void emitOperator(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(OP, operator_table_.size());
+    operator_table_.emplace_back(node->getOperation());
+  }
+
+  void emitWait(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(WAIT);
+  }
+
+  void emitDrop(at::ArrayRef<Value*> to_drop) {
+    for (Value* input : to_drop) {
+      emitUse(input, true);
+    }
+  }
+
+  void emitStoreOutputs(Node* node) {
+    size_t N = node->outputs().size();
+    if (N == 0)
+      return;
+    int regs = allocRegs(node->outputs());
+    if (N == 1) {
+      insertInstruction(STORE, regs);
+    } else {
+      insertInstruction(STOREN, regs, node->outputs().size());
+    }
+  }
+
+  int insertConstant(IValue value) {
+    int result = constant_table_.size();
+    constant_table_.emplace_back(std::move(value));
+    return result;
+  }
+
+  void emitConstant(Node* node) {
+    if (node->output()->type()->kind() == FunctionType::Kind) {
+      return;
+    }
+    // constants are just put in the constant table
+    value_to_reg_[node->output()] =
+        insertConstant(toIValue(node->output()).value());
+  }
+
+  void emitIf(Node* node) {
+    emitLoadInputs(node->inputs());
+    size_t start_if = instructions_.size();
+    insertInstruction(JF, 0); // dummy offset to be filled in
+    emitCodeForBlock(node->blocks().at(0));
+    insertInstruction(JMP, 0); // dummy offset
+    size_t start_else = instructions_.size();
+    instructions_[start_if].X = start_else - start_if;
+    emitCodeForBlock(node->blocks().at(1));
+    instructions_[start_else - 1].X = instructions_.size() - (start_else - 1);
+  }
+
+  void emitLoop(Node* loop) {
+    insertInstruction(LOADC, insertConstant(0));
+    emitLoadInputs(loop->inputs());
+    size_t start = instructions_.size();
+    insertInstruction(LOOP, 0, loop->inputs().size()); // dummy offset
+    emitCodeForBlock(loop->blocks().at(0));
+    insertInstruction(JMP, start - instructions_.size());
+    instructions_[start].X = instructions_.size() - start;
+  }
+
+  void emitCall(
+      Function* func,
+      at::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
+    insertInstruction(CALL, function_table_.size());
+    function_table_.emplace_back(std::move(func));
+  }
+
+  void emitNodeAtBlockLevel(Node* node) {
+    WithCurrentNode guard(&current_node_, node);
+    switch (node->kind()) {
+      case prim::Constant:
+        emitConstant(node);
+        break;
+      case prim::Return:
+        emitLoadInputs(node->inputs());
+        break;
+      default:
+        if (!preprocess_.can_emit_inline[node]) {
+          emitNode(node);
+          emitStoreOutputs(node);
+        }
+        break;
+    }
+  }
+
+  size_t emitGuard(Node* node) {
+    // unoptimized graph is at index 0
+    // guarded input is at index 1
+    // the rest of args follow
+    emitLoadInputs(node->inputs().slice(1, 1));
+    insertInstruction(GUARD, type_table_.size());
+
+    type_table_.emplace_back(node->outputs().at(0)->type());
+    insertInstruction(JF, 0 /* to be patched */);
+
+    return instructions_.size() - 1;
+  }
+
+  void emitBailOut(Node* node) {
+    auto jf_index = emitGuard(node);
+    auto unoptimized_graph = node->inputs().at(0)->node()->g(attr::Subgraph);
+    // note, guaded input is already loaded onto the stack
+    // for GUARD instruction
+    emitLoadInputs(node->inputs().slice(2));
+    insertInstruction(TAIL_CALL, function_table_.size());
+    TORCH_INTERNAL_ASSERT(node->kind() == prim::BailOut);
+    auto bailout_index = node->i(attr::index);
+    TORCH_INTERNAL_ASSERT(bailout_index >= 0);
+
+    auto build_bailout_graph = [bailout_index,
+                                unoptimized_graph](Function &func) {
+
+      BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
+    };
+
+    auto empty_graph = std::make_shared<Graph>();
+    auto func = torch::make_unique<Function>(
+        "bailout", empty_graph, build_bailout_graph);
+    function_table_.emplace_back(func.get());
+    bailout_functions_.emplace_back(std::move(func));
+    createBailoutBlock(jf_index);
+  }
+
+  void emitGetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->input()->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(GET_ATTR, slot);
+  }
+
+  void emitSetAttr(Node* node) {
+    emitLoadInputs(node->inputs());
+    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& field = node->s(attr::name);
+    const auto slot = type->getAttributeSlot(field);
+    insertInstruction(SET_ATTR, slot);
+  }
+
+  void insertBailoutBlocks() {
+    for(const BailoutBlock& block : bailout_blocks_) {
+      TORCH_INTERNAL_ASSERT(instructions_[block.jf_instruction_index].op == JF)
+      instructions_[block.jf_instruction_index].X =
+          instructions_.size() - block.jf_instruction_index;
+      instructions_.insert(
+          instructions_.end(),
+          block.instructions.begin(),
+          block.instructions.end());
+      instructions_source_.insert(
+          instructions_source_.end(),
+          block.instructions.size(),
+          instructions_source_[block.jf_instruction_index]);
+    }
+  }
+  void emitInterfaceCall(
+      std::string method_name_str,
+      c10::ArrayRef<Value*> inputs) {
+    emitLoadInputs(inputs);
+    auto method_name = insertConstant(std::move(method_name_str));
+    insertInstruction(INTERFACE_CALL, method_name, inputs.size());
+  }
+  void emitNode(Node* node) {
+    WithCurrentNode guard(&current_node_, node);
+    switch (node->kind()) {
+      default:
+        emitOperator(node);
+        break;
+      case prim::Drop:
+        emitDrop(node->inputs());
+        break;
+      case prim::Constant:
+        emitConstant(node);
+        break;
+      case prim::If:
+        emitIf(node);
+        break;
+      case prim::Loop:
+        emitLoop(node);
+        break;
+      case aten::wait:
+        emitWait(node);
+        break;
+      case prim::Param:
+        break;
+      case prim::CallFunction:
+        emitCall(
+            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().slice(1));
+        break;
+      case prim::CallMethod:
+        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+          emitCall(class_type->getMethod(node->s(attr::name)), node->inputs());
+        } else {
+          emitInterfaceCall(node->s(attr::name), node->inputs());
+        }
+        break;
+      case prim::BailOut:
+        emitBailOut(node);
+        break;
+      case prim::GetAttr:
+        emitGetAttr(node);
+        break;
+      case prim::SetAttr:
+        emitSetAttr(node);
+        break;
+    }
+  }
+
+  void emitCodeForBlock(Block* block) {
+    emitNodeAtBlockLevel(block->param_node());
+    for (auto node : block->nodes()) {
+      emitNodeAtBlockLevel(node);
+    }
+    emitNodeAtBlockLevel(block->return_node());
   }
 
   const std::vector<GraphExecutor*>& grad_executors() {
     if (!grad_executors_) {
       grad_executors_.emplace();
-      for (Instruction& instr : instructions) {
-        if (auto executor = detail::getGradExecutor(instr.callback)) {
+      for (Operation& op : operator_table_) {
+        if (auto executor = detail::getGradExecutor(op)) {
           grad_executors_->push_back(executor);
         }
       }
@@ -599,235 +755,486 @@ struct CodeImpl {
     return *grad_executors_;
   }
 
-  void dumpInstruction(std::ostream& out, size_t pc) const {
-    auto writeList = [&](const ListHandle<int>& list) {
-      for (int i = 0; i < list.size; i++) {
-        if (i > 0)
-          out << ", ";
-        out << get(list, i);
-      }
-    };
-    auto writeUseList = [&](const UseList& list) {
-      for (int i = 0; i < list.values.size; i++) {
-        if (i > 0)
-          out << ", ";
-        if (get(list.free_flags, i))
-          out << "move(" << get(list.values, i) << ")";
-        else
-          out << get(list.values, i);
-      }
-    };
-    auto& inst = instructions.at(pc);
-    writeList(inst.outputs);
-    // NB: debug names are the kind of operator used to select
-    // dispatch
-    out << " = " << inst.debug_name.toUnqualString() << " ";
-    writeUseList(inst.inputs);
-  }
-  void dump(std::ostream& out) const {
-    for (size_t i = 0; i < instructions.size(); ++i) {
-      dumpInstruction(out, i);
+  void dump(std::ostream& out, size_t i) const {
+    out << i << " " << instructions_[i];
+    if (instructions_[i].op == OP || instructions_[i].op == CALL) {
+      out << " # " << *instructions_source_[i];
+    } else {
       out << "\n";
     }
   }
 
-  // We MUST hold onto graph here because some Operators stored in the
-  // instruction lists have dependencies on meta-data stored in the graph
-  // that would be dead otherwise.
-  // It is also very useful for debugging interpreter problems to
-  // keep this around.
-  std::shared_ptr<Graph> graph;
-  c10::optional<std::vector<GraphExecutor*>> grad_executors_;
-  PreprocessGraph preprocess;
-
-  std::unordered_map<size_t, int>
-      unique_to_reg; // map from unique of nodes to register in register table
-
-  friend struct InterpreterState;
-  std::vector<Instruction> instructions;
-  int register_size = 0;
-
-  // all memory ArrayRef<int> are slices of this, to make sure
-  // the interpreter is mostly linearly scanning through memory
-  std::vector<int> int_data;
-  std::vector<bool> bool_data;
+  void dump(std::ostream& out) const {
+    out << *graph_ << "\n";
+    for (size_t i = 0; i < instructions_.size(); ++i) {
+      dump(out, i);
+    }
+  }
 };
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code)
-      : function(code.pImpl),
-        int_data(function->int_data.data()),
-        bool_data(function->bool_data),
-        registers(function->register_size) {}
+  InterpreterStateImpl(const Code& code) {
+    enterFrame(code, 0);
+  }
 
  private:
-  c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
-    c10::raw::intrusive_ptr::incref(this);
-    return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
-  }
-
-  bool runImpl(Stack& stack) {
-    auto& instructions = function->instructions;
-    size_t last = instructions.size();
-
-    while (pc < last) {
-      // std::cout << "executing " << pc << ": ";
-      // function->dumpInstruction(std::cout, pc);
-      // std::cout << "\n";
-      auto& inst = instructions[pc];
-      try {
-        loadTensorsFromRegisters(inst.inputs, stack);
-        size_t new_pc = pc + 1 + inst.callback(stack);
-        for (int i = inst.outputs.size - 1; i >= 0; --i) {
-          int reg = get(inst.outputs, i);
-          registers[reg] = pop(stack);
-          // std::cout << "pop reg[" << reg << "];\n" << registers[reg] << "\n";
-        }
-        pc = new_pc;
-      } catch (Suspend& e) {
-        // wait() expects a single input
-        AT_ASSERT(inst.inputs.values.size == 1);
-
-        getOrCreateFuture();
-
-        if (get(inst.inputs.free_flags, 0)) {
-          // make sure the register is not freed once we are waked up
-          registers[get(inst.inputs.values, 0)] = e.future;
-        }
-
-        // Make sure adding callback is the last step.
-        // Otherwise if e.future has completed,
-        // the current thread will continue running before it suspends.
-        InterpreterState state(intrusive_from_this());
-        e.future->addCallback([state]() {
-          at::launch(InterpreterContinuation(state, Stack(),
-              autograd::GradMode::is_enabled()));
-        });
-
-        return true;
-      } catch (Future::FutureError& e) {
-        // Error from the forked thread.
-        auto msg = e.error_msg; // copy the error for each callback
-        handleError(std::move(msg), false);
-        return false;
-      } catch (std::exception& e) {
-        // Error from the current thread
-        bool is_jit_exception = dynamic_cast<JITException*>(&e);
-        handleError(
-            instructions[pc].debug_location->wrapException(
-                e, "operation failed in interpreter"),
-            is_jit_exception);
-        return false;
-      }
-    }
-    if (future) {
-      auto num_outputs = function->preprocess.n_outputs;
-      if (num_outputs == 1) {
-        future->markCompleted(stack.back());
-      } else {
-        future->markCompleted(
-            Tuple::create(jit::last(stack, num_outputs).vec()));
-      }
-    }
-
-    return false;
-  }
-
-  void handleError(std::string&& error_msg, bool is_jit_exception) {
-    if (future) {
-      future->markCompleted(Future::FutureError(std::move(error_msg)));
-    } else if (is_jit_exception) {
-      throw JITException(std::move(error_msg));
-    } else {
-      throw std::runtime_error(std::move(error_msg));
-    }
-  }
-
- public:
-  c10::intrusive_ptr<Future> getOrCreateFuture() {
-    if (!future) {
-      future = c10::make_intrusive<Future>();
-    }
-    return future;
-  }
-
-  c10::intrusive_ptr<Future> runAsync(Stack& stack) {
-    getOrCreateFuture();
-    runImpl(stack);
-    return future;
-  }
-
-  void run(Stack& stack) {
-    if (runImpl(stack)) {
-      future->wait();
-
-      auto num_outputs = function->preprocess.n_outputs;
-      if (num_outputs == 1) {
-        push(stack, future->value());
-      } else {
-        auto tuple = future->value().toTuple();
-        for (const auto& value : tuple->elements()) {
-          push(stack, value);
-        }
-      }
-    }
-  }
-
-  int get(const ListHandle<int>& list, int i) {
-    return int_data[list.start + i];
-  };
-  bool get(const ListHandle<bool>& list, int i) {
-    return bool_data[list.start + i];
-  }
-  void loadTensorsFromRegisters(const UseList& uses, Stack& stack) {
-    for (int i = 0; i < uses.values.size; i++) {
-      int reg = get(uses.values, i);
-      // std::cout << "push reg[" << reg << "];\n" << registers[reg] << "\n\n";
-      if (get(uses.free_flags, i)) {
-        stack.push_back(std::move(registers[reg]));
-      } else {
-        stack.push_back(registers[reg]);
-      }
-    }
-  }
-
-  // pc is critical for the interperter to pick up the progress from suspend
-  size_t pc = 0;
-  c10::intrusive_ptr<Future> future;
-  std::shared_ptr<CodeImpl> function; // keep function alive
-  // these are just copies of function to prevent indirections in interpreter
-  int* int_data;
-  const std::vector<bool>& bool_data;
+  // if we need to suspend, where do we reset the stack?
+  // answer: to where it was when we were called, not
+  // including any inputs to this function
+  int64_t stack_start_ = -1;
+  c10::intrusive_ptr<Future> future_;
 
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
   // memory used by the pointers in this will be small
   // instead we are very aggresive about releasing tensors when they become dead
   // to make sure memory management happens efficiently.
-
   // We optimize for the case where derivatives are run with retain_graph=False
   // in the case where it is true, then the interpreter and this array get
   // copied if this every becomes a bottleneck then we _should_ consider
   // minimizing the total number or register
   std::vector<IValue> registers;
 
-  // single buffer for input/output calls to ATen functions, so that we do not
-  // reallocate
-  Stack stack;
+  // A Frame captures function's state
+  // (e.g. `pc` and `base_pointer`)
+  // Each Frame corresponds to a call to a `Frame::function`
+  // which has not yet returned
+  // The arguments for `Frame::function`
+  // are located at [base_pointer + arg_number]
+  struct Frame {
+    std::shared_ptr<CodeImpl> function;
+    // program counter corresponds to the index
+    // of the currently executed instruction
+    size_t pc;
+    // marks the start index of the frame
+    // base_pointer is used by TAIL_CALL
+    // to replace the current frame
+    // with a frame of a bailout graph
+    size_t base_pointer;
+  };
+
+  // saved-by-value stuff that can exist on the stack inside runInterpreter
+  struct ActiveFrame {
+    size_t pc;
+    Instruction* instructions;
+    IValue* constants;
+    Operation* operators;
+    Function** functions;
+    TypePtr* types;
+
+    ActiveFrame(const Frame& frame)
+        : pc(frame.pc),
+          instructions(frame.function->instructions_.data()),
+          constants(frame.function->constant_table_.data()),
+          operators(frame.function->operator_table_.data()),
+          functions(frame.function->function_table_.data()),
+          types(frame.function->type_table_.data()) {}
+  };
+
+  std::vector<Frame> frames;
+
+  c10::intrusive_ptr<InterpreterStateImpl> intrusive_from_this() {
+    c10::raw::intrusive_ptr::incref(this);
+    return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
+  }
+
+  void enterFrame(const Code& code, size_t base_pointer) {
+    frames.emplace_back(Frame{code.pImpl, 0, base_pointer});
+    registers.resize(registers.size() + code.pImpl->register_size_);
+    // frames.back().function->dump(std::cout);
+  }
+
+  void leaveFrame() {
+    registers.resize(registers.size() - frames.back().function->register_size_);
+    frames.pop_back();
+  }
+
+  // relative to the end of the register list so that when we call
+  // functions we are referring to the registers of the currenly executing
+  // function.
+  IValue& reg(size_t reg) {
+    return *(registers.end() - reg);
+  }
+
+  void dump(std::ostream& out, const Stack& stack) const {
+    out << "Stack:\n";
+    for (const auto& val : stack) {
+      out << val;
+      out << "\n";
+    }
+  }
+
+  bool runImpl(Stack& stack) {
+    // if we have never run before, then we might have to return the
+    // stack when we suspend, record where it starts so we return the right
+    // stack
+    if (stack_start_ == -1) {
+      TORCH_INTERNAL_ASSERT(stack.size() >= frames.back().function->n_inputs);
+      stack_start_ = stack.size() - frames.back().function->n_inputs;
+    } else {
+      // during restarts, all of the stack is always our own, so we leave
+      // nothing
+      stack_start_ = 0;
+    }
+
+    ActiveFrame af(frames.back());
+    try {
+      while (true) {
+//         std::cout << "RUNNING ";
+//         frames.back().function->dump(std::cout, af.pc);
+        Instruction inst = af.instructions[af.pc];
+        switch (inst.op) {
+          case OP:
+            af.operators[inst.X](stack);
+            ++af.pc;
+            break;
+          case OPN:
+            AT_ERROR("OPN is currently supported in mobile mode only.");
+            break;
+          case LOAD:
+            stack.emplace_back(reg(inst.X));
+            ++af.pc;
+            break;
+          case MOVE:
+            stack.emplace_back(std::move(reg(inst.X)));
+            ++af.pc;
+            break;
+          case STORE:
+            reg(inst.X) = pop(stack);
+            ++af.pc;
+            break;
+          case STOREN:
+            for (size_t i = inst.N; i > 0; --i) {
+              reg(inst.X + i - 1) = pop(stack);
+            }
+            ++af.pc;
+            break;
+          case DROP:
+            pop(stack);
+            ++af.pc;
+            break;
+          case DROPR:
+            reg(inst.X) = IValue();
+            ++af.pc;
+            break;
+          case LOADC:
+            stack.emplace_back(af.constants[inst.X]);
+            ++af.pc;
+            break;
+          case GET_ATTR: {
+            auto userObj = pop(stack).toObject();
+            auto value = userObj->getSlot(inst.X);
+            push(stack, std::move(value));
+            ++af.pc;
+          } break;
+          case SET_ATTR: {
+            auto v = pop(stack);
+            auto userObj = pop(stack).toObject();
+            userObj->setSlot(inst.X, std::move(v));
+            ++af.pc;
+          } break;
+          case JF:
+            af.pc += (pop(stack).toBool()) ? 1 : inst.X;
+            break;
+          case JMP:
+            af.pc += inst.X;
+            break;
+          case LOOP: {
+            // stack: iteration_count, max_iter, cond, loop_carried_deps...
+            auto frame = stack.end() - (inst.N + 1);
+            int64_t trip_count = frame[0].toInt();
+            int64_t max_trip_count = frame[1].toInt();
+            bool cond = frame[2].toBool();
+            if (trip_count < max_trip_count && cond) {
+              frame[2] = trip_count;
+              frame[0] = trip_count + 1;
+              ++af.pc;
+            } else {
+              size_t n_loop_carried = inst.N - 2;
+              for (size_t i = 0; i < n_loop_carried; ++i) {
+                frame[i] = std::move(frame[i + 3]);
+              }
+              drop(stack, 3); // iteration_count, max_iter, cond
+              af.pc += inst.X;
+            }
+          } break;
+          case CALL: {
+            const Code& code =
+                // consider passing
+                // `frames.back().function->remaining_bailout_depth_` into
+                // `get_executor().getPlanFor()` to propagate caller's depth
+                // restrictions onto children while this strategy has a
+                // potential to reduce the number of compilations for too
+                // dynamic callers we might miss opportunities where a caller is
+                // dynamic but a callee gets stable arguments
+                af.functions[inst.X]
+                    ->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
+            frames.back().pc = af.pc + 1;
+            enterFrame(code, stack.size() - code.num_inputs());
+            af = ActiveFrame(frames.back());
+          } break;
+          case INTERFACE_CALL: {
+            // note the hash table lookup to find the function
+            // this can be more optimized if necessary, caching parts
+            // of the hashing computation or storing the offset when
+            // the object is turned into an interface
+
+            // consider passing
+            // `frames.back().function->remaining_bailout_depth_` into
+            // `get_executor().getPlanFor()` to propagate caller's depth
+            // restrictions onto children while this strategy has a potential to
+            // reduce the number of compilations for too dynamic callers we
+            // might miss opportunities where a caller is dynamic but a callee
+            // gets stable arguments
+            auto function = peek(stack, 0, inst.N)
+                                .toObject()
+                                ->type()
+                                ->getMethod(af.constants[inst.X].toStringRef());
+            const Code& code =
+                function->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
+            frames.back().pc = af.pc + 1;
+            enterFrame(code, stack.size() - inst.N);
+            af = ActiveFrame(frames.back());
+          } break;
+          case RET:
+            if (frames.size() > 1) {
+              leaveFrame();
+              af = ActiveFrame(frames.back());
+              break;
+            }
+            if (future_) {
+              auto num_outputs = frames.back().function->n_outputs;
+              if (num_outputs == 1) {
+                future_->markCompleted(stack.back());
+              } else {
+                future_->markCompleted(c10::ivalue::Tuple::create(
+                    jit::last(stack, num_outputs).vec()));
+              }
+            }
+            return false;
+          case WAIT: {
+            auto future = stack.back().toFuture();
+            if (!future->completed()) {
+              getOrCreateFuture();
+
+              // callback needs to be a struct rather than a lambda so that
+              // we can move the stack to the other thread
+              struct Callback {
+                Callback(
+                    c10::intrusive_ptr<InterpreterStateImpl> state,
+                    Stack stack)
+                    : state_(std::move(state)), stack_(std::move(stack)) {}
+                void operator()() {
+                  at::launch(InterpreterContinuation(
+                      state_,
+                      std::move(stack_),
+                      autograd::GradMode::is_enabled()));
+                }
+
+               private:
+                InterpreterState state_;
+                Stack stack_;
+              };
+
+              // we are suspending, so we need to reset the stack to where we
+              // started if it started empty, except for the inputs we can avoid
+              // a true copy by swapping, which leaves the original stack empty.
+              Stack copied;
+              if (stack_start_ == 0) {
+                copied.swap(stack);
+              } else {
+                copied.insert(
+                    copied.begin(),
+                    std::make_move_iterator(stack.begin() + stack_start_),
+                    std::make_move_iterator(stack.end()));
+                stack.resize(stack_start_);
+              }
+              // save pc into the frame so we continue here when restored
+              frames.back().pc = af.pc;
+              future->addCallback(
+                  Callback(intrusive_from_this(), std::move(copied)));
+
+              return true;
+            }
+            stack.pop_back();
+            stack.emplace_back(future->value());
+            ++af.pc;
+          } break;
+          case FAIL_GUARD: {
+            // patch FAIL_GUARD back to GUARD
+            GRAPH_DEBUG(
+                "Bailout ", inst.X, " triggered via bailout_requests_!");
+            af.instructions[af.pc] = Instruction(GUARD, inst.X, 0);
+            push(stack, false);
+            ++af.pc;
+            break;
+          }
+          case GUARD: {
+            auto t = stack.back().toTensor();
+            const TypePtr& expected = af.types[inst.X];
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
+            ++af.pc;
+          } break;
+          case TAIL_CALL: {
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
+            af.functions[inst.X]->ensure_defined();
+            size_t remaining_bailout_depth =
+                frames.back().function->remaining_bailout_depth_ > 0
+                ? frames.back().function->remaining_bailout_depth_ - 1
+                : 0;
+            const Code& code = af.functions[inst.X]
+                                   ->get_executor()
+                                   .getPlanFor(stack, remaining_bailout_depth)
+                                   .code;
+            size_t num_inputs = code.num_inputs();
+            size_t base_pointer = frames.back().base_pointer;
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
+            size_t inputs_start = stack.size() - num_inputs;
+            for (size_t i = 0; i < num_inputs; ++i) {
+              stack.at(base_pointer + i) =
+                  std::move(stack.at(inputs_start + i));
+            }
+            stack.resize(base_pointer + num_inputs);
+            leaveFrame();
+            enterFrame(code, base_pointer);
+            af = ActiveFrame(frames.back());
+          } break;
+        }
+      }
+    } catch (std::exception& e) {
+      frames.back().pc = af.pc;
+      bool is_jit_exception = dynamic_cast<JITException*>(&e);
+      handleError(ExceptionMessage(e), is_jit_exception);
+      return false;
+    }
+  }
+
+  void formatStackTrace(std::ostream& out) {
+    std::string previous_fn_name = "";
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
+      const Frame& frame = frames[frames.size() - 1 - i];
+      size_t pc = (i == 0) ? frame.pc
+                           : frame.pc -
+              1; // make sure we report the call node, not the node after it
+      Node* node = frame.function->instructions_source_[pc];
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          p.second.print_with_context(
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          previous_fn_name = p.first->name();
+        }
+      }
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+      if (node->kind() == prim::CallFunction) {
+        previous_fn_name = node->inputs()
+                               .at(0)
+                               ->type()
+                               ->expect<FunctionType>()
+                               ->function()
+                               ->name();
+      }
+    }
+  }
+
+  void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
+    std::stringstream ss;
+    ss << msg << "\n";
+    ss << "The above operation failed in interpreter.\n";
+    ss << "Traceback (most recent call last):\n";
+    formatStackTrace(ss);
+    if (future_) {
+      future_->markCompleted(Future::FutureError(ss.str()));
+    } else if (is_jit_exception) {
+      throw JITException(ss.str());
+    } else {
+      throw std::runtime_error(ss.str());
+    }
+  }
+
+ public:
+  c10::intrusive_ptr<Future> getOrCreateFuture() {
+    if (!future_) {
+      future_ =
+          c10::make_intrusive<Future>(frames.front().function->return_type_);
+    }
+    return future_;
+  }
+
+  c10::intrusive_ptr<Future> runAsync(Stack& stack) {
+    getOrCreateFuture();
+    runImpl(stack);
+    return future_;
+  }
+
+  void run(Stack& stack) {
+    if (runImpl(stack)) {
+      future_->wait();
+
+      auto num_outputs = frames.front().function->n_outputs;
+      if (num_outputs == 1) {
+        push(stack, future_->value());
+      } else {
+        auto tuple = future_->value().toTuple();
+        for (const IValue& value : tuple->elements()) {
+          push(stack, value);
+        }
+      }
+    }
+  }
 };
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
-  out << *code.pImpl->graph << "\n";
+  out << *code.pImpl->graph_ << "\n";
   code.pImpl->dump(out);
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_bailouts() const {
+  return pImpl->type_table_.size();
+}
+
+void Code::request_bailout(size_t index) {
+  pImpl->request_bailout(index);
+}
+
+size_t Code::num_inputs() const {
+  return pImpl->n_inputs;
+}
+
+size_t Code::num_outputs() const {
+  return pImpl->n_outputs;
+}
+
+const std::vector<c10::IValue>& Code::constant_table() const {
+  return pImpl->constant_table();
+}
+
+const std::vector<Instruction>& Code::instructions() const {
+  return pImpl->instructions();
+}
+
+const std::vector<Node*>& Code::instructions_source() const {
+  return pImpl->instructions_source();
+}
+
+size_t Code::register_size() const {
+  return pImpl->register_size_;
 }
 
 InterpreterState::InterpreterState(const Code& code)

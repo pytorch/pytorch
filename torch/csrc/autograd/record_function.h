@@ -6,7 +6,7 @@
 
 namespace torch { namespace autograd {
 
-struct Function;
+struct Node;
 
 namespace profiler {
 
@@ -21,6 +21,20 @@ struct TORCH_API StringView {
   inline const char* str() const {
     return str_ptr_;
   }
+
+  friend std::ostream& operator<<(std::ostream& os, const StringView& dt) {
+    os << dt.str();
+    return os;
+  }
+
+  friend bool operator==(const StringView& lhs, const StringView& rhs) {
+    return strcmp(lhs.str(), rhs.str()) == 0;
+  }
+
+  friend bool operator!=(const StringView& lhs, const StringView& rhs) {
+    return !(lhs == rhs);
+  }
+
  private:
   std::shared_ptr<std::string> owned_str_ptr_;
   const char* str_ptr_;
@@ -30,11 +44,17 @@ struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards
   RecordFunction() {}
 
+  RecordFunction(const RecordFunction&) = delete;
+  RecordFunction& operator=(const RecordFunction&) = delete;
+
+  // current returns the currently active RecordFunction in this thread.
+  static RecordFunction* current();
+
   // before function initializes RecordFunction members and calls
   // start callbacks
   void before(const char* name, int64_t sequence_nr = -1);
   void before(std::string name, int64_t sequence_nr = -1);
-  void before(Function* fn, int64_t sequence_nr = -1);
+  void before(Node* fn, int64_t sequence_nr = -1);
 
   template<typename F>
   void before(
@@ -57,7 +77,7 @@ struct TORCH_API RecordFunction {
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
-  inline Function* func() const {
+  inline Node* func() const {
     return fn_;
   }
 
@@ -77,35 +97,69 @@ struct TORCH_API RecordFunction {
     return parent_;
   }
 
+  bool active() const {
+    return initialized_;
+  }
+
+  void setRunSampled(bool run_sampled) {
+    run_sampled_ = run_sampled;
+  }
+
+  void end();
+
+  // Saves the thread_id that this RecordFunction was created with. This is
+  // needed so that we can access Events created by the original thread in a
+  // different thread, since they are thread-local. This should be used to call
+  // RecordFunction::end() in a different thread.
+  void setThreadId();
+
+  // Retrieves the thread_id that this RecordFunction was created with. Useful
+  // if we need to access Events created by the original thread in a different
+  // thread. The threadId_ should only be set (via setThreadId) in cases where
+  // RecordFunction::end is called in a different thread.
+  inline uint16_t getThreadId() const {
+    return threadId_;
+  }
+
  private:
   void processCallbacks();
 
-  Function* fn_ = nullptr;
+  Node* fn_ = nullptr;
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
+  // parent_ points to the parent RecordFunction and must out live this.
   RecordFunction* parent_ = nullptr;
 
   bool initialized_ = false;
+  bool run_sampled_ = false;
+  // The thread_id that this RecordFunction was created with. If 0, this means
+  // that it was not set with setThreadId() and this RecordFunction's callbacks
+  // cannot be invoked from a separate thread.
+  uint16_t threadId_ = 0;
 };
 
 TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();
+TORCH_API bool hasNonSampledCallbacks();
 
 TORCH_API void setSamplingProbability(double);
 TORCH_API double getSamplingProbability();
-TORCH_API bool checkCallbacksSampled();
 
-inline bool checkCallbacksEnabled() {
-  return !checkCallbacksSampled() ||
-      (((double) std::rand() / RAND_MAX) < getSamplingProbability());
-}
+TORCH_API bool shouldRunSampledCallbacks();
+// Given a record function, run the (possibly sampled) start callbacks that have
+// been pushed via pushCallback().
+TORCH_API void runBeforeCallbacks(
+    RecordFunction* rf,
+    const std::string& funcName);
 
 // optional argument - function's seq_no
 #define RECORD_FUNCTION(fn, inputs, ...) \
   torch::autograd::profiler::RecordFunction guard; \
   if (torch::autograd::profiler::hasCallbacks()) { \
-    if (torch::autograd::profiler::checkCallbacksEnabled()) { \
+    auto run_sampled = torch::autograd::profiler::shouldRunSampledCallbacks(); \
+    if (run_sampled || torch::autograd::profiler::hasNonSampledCallbacks()) { \
+      guard.setRunSampled(run_sampled); \
       if (torch::autograd::profiler::needsInputs()) { \
         guard.before(fn, inputs, ##__VA_ARGS__); \
       } else { \
@@ -120,7 +174,8 @@ using RecordFunctionCallback = std::function<void(const RecordFunction&)>;
 TORCH_API void pushCallback(
     RecordFunctionCallback start,
     RecordFunctionCallback end = [](const RecordFunction&){},
-    bool needs_inputs = false);
+    bool needs_inputs = false,
+    bool sampled = false);
 TORCH_API void popCallback();
 
 } // namespace profiler

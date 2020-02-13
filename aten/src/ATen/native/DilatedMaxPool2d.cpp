@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/Pool.h>
 #include <tuple>
 
 
@@ -54,15 +55,13 @@ static void max_pool2d_with_indices_single_out_frame(
           int64_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
           /* compute local max: */
-          int64_t maxindex = -1;
-          scalar_t maxval = -std::numeric_limits<scalar_t>::max();
-          int64_t tcntr = 0;
-          int64_t x,y;
-          for(y = hstart; y < hend; y += dilationH)
+          int64_t maxindex = hstart*iwidth + wstart;
+          scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
+          for(int64_t y = hstart; y < hend; y += dilationH)
           {
-            for(x = wstart; x < wend; x += dilationW)
+            for(int64_t x = wstart; x < wend; x += dilationW)
             {
-              tcntr = y*iwidth + x;
+              int64_t tcntr = y*iwidth + x;
               scalar_t val = *(ip + tcntr);
               if ((val > maxval) || std::isnan(val))
               {
@@ -129,28 +128,32 @@ void max_pool2d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
-              (stride.empty() || stride.size() == 2) &&
-              (padding.size() == 1 || padding.size() == 2) &&
-              (dilation.size() == 1 || dilation.size() == 2),
-    "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
-
-  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
+  // NB: stride default is not expressible as an integer constant, so we accept
+  // empty stride for this case
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
+    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   /* sizes */
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
@@ -161,7 +164,7 @@ void max_pool2d_with_indices_out_cpu_template(
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
@@ -182,9 +185,9 @@ void max_pool2d_with_indices_out_cpu_template(
       "max_pool2d_with_indices_cpu",
       [&] {
         /* get raw pointers */
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_single_out_frame(
           input_data, output_data,
@@ -207,9 +210,9 @@ void max_pool2d_with_indices_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
       "max_pool2d_with_indices_cpu",
       [&] {
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_out_frame(
           input_data,
@@ -303,28 +306,32 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX JIT: Pooling.cpp allows stride.empty().
-  // XXX IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 2 &&
-              (stride.empty() || stride.size() == 2) &&
-              (padding.size() == 1 || padding.size() == 2) &&
-              (dilation.size() == 1 || dilation.size() == 2),
-    "max_pool2d_with_indices: internal error: all IntArrayRef sizes must be 2");
-
-  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input");
-
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
+    "max_pool2d: kernel_size must either be a single int, or a tuple of two ints")
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
+  // NB: stride default is not expressible as an integer constant, so we accept
+  // empty stride for this case
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 2,
+    "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints")
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
+    "max_pool2d: padding must be either be a single int, or a tuple of two ints");
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
+    "max_pool2d: dilation must be either a single int, or a tuple of two ints");
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
+
+  TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
+    "non-empty 3D or 4D (batch mode) tensor expected for input");
 
   /* get contiguous gradOutput */
   const Tensor gradOutput = gradOutput_.contiguous();
@@ -345,7 +352,7 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
   const int64_t outputHeight_for_shape_check = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
   const int64_t outputWidth_for_shape_check = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
 
-  max_pool2d_with_indices_shape_check(
+  max_pool2d_backward_shape_check(
     input,
     gradOutput_,
     indices,
@@ -362,9 +369,9 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
       "max_pool2d_with_indices_backward",
       [&] {
         /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_backward_single_out_frame(
           gradInput_data, gradOutput_data,
@@ -382,9 +389,9 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
       "max_pool2d_with_indices_backward",
       [&] {
         /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool2d_with_indices_backward_out_frame<scalar_t>(
           gradInput_data, gradOutput_data,
@@ -433,6 +440,8 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cpu(
   IntArrayRef dilation,
   bool ceil_mode)
 {
+  NoNamesGuard guard;
+
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   max_pool2d_with_indices_out_cpu_template(
@@ -444,6 +453,11 @@ std::tuple<Tensor, Tensor> max_pool2d_with_indices_cpu(
     padding,
     dilation,
     ceil_mode);
+
+  guard.reset();
+  namedinference::propagate_names(output, input);
+  namedinference::propagate_names(indices, input);
+
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
@@ -481,7 +495,7 @@ Tensor max_pool2d_with_indices_backward_cpu(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool2d_with_indices_backward_out_cpu_template(
     gradInput,
     gradOutput_,

@@ -68,7 +68,7 @@ AsyncNetBase::AsyncNetBase(
     Workspace* ws)
     : NetBase(net_def, ws), options_(net_def), counters_(net_def) {
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
-  helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
+  helper_ = std::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
   for (const auto& node : operator_nodes_) {
     auto op_ptr = node.operator_.get();
@@ -399,6 +399,10 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
     if (!options_.finish_chain_) {
       asyncWait(task_id, stream_id, parents(task_id));
     }
+    int iter_id = -1;
+    if (tracer_) {
+      iter_id = tracer_->getIter();
+    }
     for (auto& op_id : chains_[task_id]) {
       op = operators_[op_id];
       bool success = false;
@@ -409,7 +413,9 @@ bool AsyncNetBase::run(int task_id, int stream_id) noexcept {
             tracing::TRACE_TASK,
             task_id,
             tracing::TRACE_STREAM,
-            stream_id);
+            stream_id,
+            tracing::TRACE_ITER,
+            iter_id);
         success = op->RunAsync(stream_id);
       } else {
         counters_.AddPerOpStartTime(op_id);
@@ -452,15 +458,65 @@ void AsyncNetBase::finishTasks(const std::unordered_set<int>& task_ids) {
 }
 
 void AsyncNetBase::finalizeEvents() {
+  std::vector<OperatorBase*> pending_ops;
   for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
     auto status = query(task_id);
     if (status == EventStatus::EVENT_SCHEDULED) {
-      event(task_id).Finish();
+      // async cpu ops need to be handled separately,
+      // as they may potentially never finish
+      auto* op = lastTaskOp(task_id);
+      if (op->HasAsyncPart() &&
+          op->device_option().device_type() == PROTO_CPU) {
+        pending_ops.push_back(op);
+      } else {
+        event(task_id).Finish();
+      }
     } else if (status == EventStatus::EVENT_INITIALIZED) {
       event(task_id).SetFinished();
     }
+  }
+
+  // avoid events cancelling each other and causing
+  // a deadlock
+  std::atomic_flag error_happened = ATOMIC_FLAG_INIT;
+  for (auto* pending_op : pending_ops) {
+    pending_op->event().SetCallback(
+        [pending_op, &pending_ops, &error_happened]() {
+          // if one of the async cpu ops failed,
+          // we have to terminate other pending async cpu ops
+          auto status = pending_op->event().Query();
+          TORCH_CHECK(
+              status == EventStatus::EVENT_SUCCESS ||
+              status == EventStatus::EVENT_FAILED);
+          if (status == EventStatus::EVENT_FAILED) {
+            // go through all the ops and terminate them,
+            // we may get an exception in case of multiple
+            // SetFinished() calls
+            if (!error_happened.test_and_set()) {
+              for (auto* op : pending_ops) {
+                if (op != pending_op) {
+                  try {
+                    op->CancelAsyncCallback();
+                    op->event().SetFinished("Cancelled");
+                  } catch (const EnforceNotMet&) {
+                    // ignore
+                  }
+                }
+              }
+            }
+          }
+        });
+  }
+
+  // wait for all pending ops to be finished or be terminated
+  for (auto* pending_op : pending_ops) {
+    pending_op->event().Finish();
+  }
+
+  for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
     if (event(task_id).Query() != EventStatus::EVENT_SUCCESS) {
       success_ = false;
+      break;
     }
   }
 }

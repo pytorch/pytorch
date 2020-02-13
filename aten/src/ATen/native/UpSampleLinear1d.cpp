@@ -17,7 +17,8 @@ static void upsample_linear1d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -36,7 +37,7 @@ static void upsample_linear1d_out_frame(
     return;
   }
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
@@ -66,7 +67,8 @@ static void upsample_linear1d_backward_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   channels = nbatch * channels;
 
   // special case: same-size matching grids
@@ -85,7 +87,7 @@ static void upsample_linear1d_backward_out_frame(
     return;
   }
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales);
 
   for (int64_t w2 = 0; w2 < output_width; ++w2) {
     const scalar_t w1r = area_pixel_compute_source_index<scalar_t>(
@@ -111,7 +113,8 @@ static void upsample_linear1d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -139,8 +142,8 @@ static void upsample_linear1d_out_cpu_template(
   AT_ASSERT(input_width > 0 && output_width > 0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_linear1d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+    auto* idata = input.data_ptr<scalar_t>();
+    auto* odata = output.data_ptr<scalar_t>();
 
     upsample_linear1d_out_frame<scalar_t>(
         odata,
@@ -149,7 +152,8 @@ static void upsample_linear1d_out_cpu_template(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales);
   });
 }
 
@@ -158,7 +162,8 @@ static void upsample_linear1d_backward_out_cpu_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -190,8 +195,8 @@ static void upsample_linear1d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_linear1d_backward", [&] {
-        scalar_t* idata = grad_input.data<scalar_t>();
-        scalar_t* odata = grad_output.data<scalar_t>();
+        scalar_t* idata = grad_input.data_ptr<scalar_t>();
+        scalar_t* odata = grad_output.data_ptr<scalar_t>();
 
         upsample_linear1d_backward_out_frame<scalar_t>(
             odata,
@@ -200,7 +205,8 @@ static void upsample_linear1d_backward_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales);
       });
 }
 } // namespace
@@ -209,17 +215,19 @@ Tensor& upsample_linear1d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
-  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners);
+    bool align_corners,
+    c10::optional<double> scales) {
+  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners, scales);
   return output;
 }
 
 Tensor upsample_linear1d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   auto output = at::empty({0}, input.options());
-  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners);
+  upsample_linear1d_out_cpu_template(output, input, output_size, align_corners, scales);
   return output;
 }
 
@@ -228,9 +236,10 @@ Tensor& upsample_linear1d_backward_out_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   upsample_linear1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales);
   return grad_input;
 }
 
@@ -238,10 +247,11 @@ Tensor upsample_linear1d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_linear1d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales);
   return grad_input;
 }
 

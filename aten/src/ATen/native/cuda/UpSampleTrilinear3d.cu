@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
+#include <THC/THCAtomics.cuh>
 
 namespace at {
 namespace native {
@@ -21,8 +22,8 @@ __global__ void upsample_trilinear3d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor<scalar_t, 5> idata,
-    PackedTensorAccessor<scalar_t, 5> odata) {
+    const PackedTensorAccessor64<scalar_t, 5> idata,
+    PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -105,8 +106,8 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    PackedTensorAccessor<scalar_t, 5> idata,
-    const PackedTensorAccessor<scalar_t, 5> odata) {
+    PackedTensorAccessor64<scalar_t, 5> idata,
+    const PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
   const int batchsize = idata.size(0);
@@ -161,28 +162,28 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t d2val = odata[n][c][t2][h2][w2];
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1][h1][w1],
             static_cast<scalar_t>(t0lambda * h0lambda * w0lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1][h1][w1 + w1p],
             static_cast<scalar_t>(t0lambda * h0lambda * w1lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1][h1 + h1p][w1],
             static_cast<scalar_t>(t0lambda * h1lambda * w0lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1][h1 + h1p][w1 + w1p],
             static_cast<scalar_t>(t0lambda * h1lambda * w1lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1 + t1p][h1][w1],
             static_cast<scalar_t>(t1lambda * h0lambda * w0lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1 + t1p][h1][w1 + w1p],
             static_cast<scalar_t>(t1lambda * h0lambda * w1lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1 + t1p][h1 + h1p][w1],
             static_cast<scalar_t>(t1lambda * h1lambda * w0lambda * d2val));
-        atomicAdd(
+        gpuAtomicAdd(
             &idata[n][c][t1 + t1p][h1 + h1p][w1 + w1p],
             static_cast<scalar_t>(t1lambda * h1lambda * w1lambda * d2val));
       }
@@ -194,7 +195,10 @@ static void upsample_trilinear3d_out_cuda_template(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_trilinear3d_out_cuda", {input_arg, output_arg});
 
@@ -245,15 +249,15 @@ static void upsample_trilinear3d_out_cuda_template(
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor<scalar_t, 5>();
-        auto odata = output.packed_accessor<scalar_t, 5>();
+        auto idata = input.packed_accessor64<scalar_t, 5>();
+        auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_d);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_h);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_w);
 
         upsample_trilinear3d_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -277,7 +281,10 @@ static void upsample_trilinear3d_backward_out_cuda_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -332,15 +339,15 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = grad_input.packed_accessor<scalar_t, 5>();
-        auto odata = grad_output.packed_accessor<scalar_t, 5>();
+        auto idata = grad_input.packed_accessor64<scalar_t, 5>();
+        auto odata = grad_output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
-            input_depth, output_depth, align_corners);
+            input_depth, output_depth, align_corners, scales_d);
         const accscalar_t rheight = area_pixel_compute_scale<accscalar_t>(
-            input_height, output_height, align_corners);
+            input_height, output_height, align_corners, scales_h);
         const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
-            input_width, output_width, align_corners);
+            input_width, output_width, align_corners, scales_w);
 
         upsample_trilinear3d_backward_out_frame<scalar_t, accscalar_t>
             <<<cuda::ATenCeilDiv(num_kernels, num_threads),
@@ -365,19 +372,25 @@ Tensor& upsample_trilinear3d_out_cuda(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_d, scales_h, scales_w);
   return output;
 }
 
 Tensor upsample_trilinear3d_cuda(
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
-  Tensor output = at::empty_like(input);
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_out_cuda_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_d, scales_h, scales_w);
   return output;
 }
 
@@ -386,9 +399,12 @@ Tensor& upsample_trilinear3d_backward_out_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_trilinear3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
   return grad_input;
 }
 
@@ -396,10 +412,13 @@ Tensor upsample_trilinear3d_backward_cuda(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
-  Tensor grad_input = at::empty_like(grad_output);
+    bool align_corners,
+    c10::optional<double> scales_d,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_trilinear3d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w);
   return grad_input;
 }
 

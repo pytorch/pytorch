@@ -81,6 +81,10 @@
 #define THPHalfUtils_unpackReal(object)       (at::Half)THPUtils_unpackReal_FLOAT(object)
 #define THPHalfUtils_newReal(value)           PyFloat_FromDouble(value)
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
+#define THPBFloat16Utils_checkReal(object)    THPUtils_checkReal_FLOAT(object)
+#define THPBFloat16Utils_unpackReal(object)   (at::BFloat16)THPUtils_unpackReal_FLOAT(object)
+#define THPBFloat16Utils_newReal(value)       PyFloat_FromDouble(value)
+#define THPBFloat16Utils_newAccreal(value)    THPUtils_newReal_FLOAT(value)
 
 #define THPBoolUtils_checkReal(object)        THPUtils_checkReal_BOOL(object)
 #define THPBoolUtils_unpackReal(object)       THPUtils_unpackReal_BOOL(object)
@@ -123,8 +127,6 @@ THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
-#ifdef _THP_CORE
-
 bool THPUtils_checkIntTuple(PyObject *arg);
 std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 
@@ -148,6 +150,9 @@ struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateHalfType.h>
+
+#include <torch/csrc/generic/utils.h>
+#include <TH/THGenerateBFloat16Type.h>
 
 #include <torch/csrc/generic/utils.h>
 #include <TH/THGenerateBoolType.h>
@@ -185,7 +190,5 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
-
-#endif /* _THP_CORE */
 
 #endif

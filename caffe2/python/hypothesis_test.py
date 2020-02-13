@@ -773,13 +773,12 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [var, nz, indices, grad, alpha],
                                    ftrl)
 
-    # TODO: (bddppq) test_unique keeps running into segfault on rocm 1.8.2
     @given(input=hu.tensor(max_value=20,
                            max_dim=1,
                            dtype=np.int32,
                            elements=st.integers(min_value=0, max_value=10)),
            with_remapping=st.booleans(),
-           **hu.gcs_no_hip)
+           **hu.gcs)
     def test_unique(self, input, with_remapping, gc, dc):
         op = core.CreateOperator(
             "Unique",
@@ -1593,9 +1592,7 @@ class TestOperators(hu.HypothesisTestCase):
             self.assertAlmostEqual(np.sum(np.square(output)), 91.81752,
                                    delta=1e-2)
 
-    @given(input=hu.tensor(min_dim=2, max_dim=6, dtype=np.int32,
-                           elements=st.integers(min_value=0,
-                                                max_value=2**32 - 1)),
+    @given(input=hu.tensor(min_dim=2, max_dim=6),
            slice_dim=st.integers(),
            a=st.integers(),
            b=st.integers(),
@@ -1626,6 +1623,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [input, start_vec, end_vec],
                                    slice_ref)
+        self.assertGradientChecks(gc, op, [input, start_vec, end_vec], 0, [0])
 
     @given(data=hu.tensor(), **hu.gcs_cpu_only)
     def test_shape(self, data, gc, dc):
@@ -1640,13 +1638,13 @@ class TestOperators(hu.HypothesisTestCase):
         op = core.CreateOperator("Shape", ["data"], ["shape"], axes=axes)
         self.assertReferenceChecks(gc, op, [data, axes], shape_ref)
 
-    @given(data=hu.tensor(), **hu.gcs_cpu_only)
-    def test_has_elements(self, data, gc, dc):
-        op = core.CreateOperator("HasElements", ["data"], ["has_elements"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) > 0, ))
+    @given(x=hu.tensor(), y=hu.tensor(), **hu.gcs_cpu_only)
+    def test_has_elements(self, x, y, gc, dc):
+        op = core.CreateOperator("HasElements", ["x", "y"], ["has_elements"])
+        self.assertReferenceChecks(gc, op, [x, y], lambda x, y: (len(x) > 0 or len(y) > 0, ))
 
-        op = core.CreateOperator("IsEmpty", ["data"], ["is_empty"])
-        self.assertReferenceChecks(gc, op, [data], lambda x: (len(x) == 0, ))
+        op = core.CreateOperator("IsEmpty", ["x"], ["is_empty"])
+        self.assertReferenceChecks(gc, op, [x], lambda x: (len(x) == 0, ))
 
     @given(initial_iters=st.integers(0, 100),
            max_iters=st.integers(0, 100))
@@ -1840,7 +1838,7 @@ class TestOperators(hu.HypothesisTestCase):
         # error increases dramtically when input is close to 0 or 1
         # and it will fail the test.
         # So we only run gradient test in the range of (0.01, 0.99)
-        # very occationally, test may fail due to random accumulated error
+        # very occasionally, test may fail due to random accumulated error
         # reduce test range to (0.02, 0.98) will improve test stability
         op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
         self.assertDeviceChecks(dc, op, [a], [0])

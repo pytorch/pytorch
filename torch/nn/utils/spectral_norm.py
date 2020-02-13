@@ -79,8 +79,8 @@ class SpectralNorm(object):
                     u = normalize(torch.mv(weight_mat, v), dim=0, eps=self.eps, out=u)
                 if self.n_power_iterations > 0:
                     # See above on why we need to clone
-                    u = u.clone()
-                    v = v.clone()
+                    u = u.clone(memory_format=torch.contiguous_format)
+                    v = v.clone(memory_format=torch.contiguous_format)
 
         sigma = torch.dot(u, torch.mv(weight_mat, v))
         weight = weight / sigma
@@ -135,7 +135,6 @@ class SpectralNorm(object):
         module.register_buffer(fn.name + "_v", v)
 
         module.register_forward_pre_hook(fn)
-
         module._register_state_dict_hook(SpectralNormStateDictHook(fn))
         module._register_load_state_dict_pre_hook(SpectralNormLoadStateDictPreHook(fn))
         return fn
@@ -161,14 +160,30 @@ class SpectralNormLoadStateDictPreHook(object):
         fn = self.fn
         version = local_metadata.get('spectral_norm', {}).get(fn.name + '.version', None)
         if version is None or version < 1:
+            weight_key = prefix + fn.name
+            if version is None and all(weight_key + s in state_dict for s in ('_orig', '_u', '_v')) and \
+                    weight_key not in state_dict:
+                # Detect if it is the updated state dict and just missing metadata.
+                # This could happen if the users are crafting a state dict themselves,
+                # so we just pretend that this is the newest.
+                return
+            has_missing_keys = False
+            for suffix in ('_orig', '', '_u'):
+                key = weight_key + suffix
+                if key not in state_dict:
+                    has_missing_keys = True
+                    if strict:
+                        missing_keys.append(key)
+            if has_missing_keys:
+                return
             with torch.no_grad():
-                weight_orig = state_dict[prefix + fn.name + '_orig']
-                weight = state_dict.pop(prefix + fn.name)
+                weight_orig = state_dict[weight_key + '_orig']
+                weight = state_dict.pop(weight_key)
                 sigma = (weight_orig / weight).mean()
                 weight_mat = fn.reshape_weight_to_matrix(weight_orig)
-                u = state_dict[prefix + fn.name + '_u']
+                u = state_dict[weight_key + '_u']
                 v = fn._solve_v_and_rescale(weight_mat, u, sigma)
-                state_dict[prefix + fn.name + '_v'] = v
+                state_dict[weight_key + '_v'] = v
 
 
 # This is a top level class because Py2 pickle doesn't like inner class nor an
@@ -255,7 +270,19 @@ def remove_spectral_norm(module, name='weight'):
         if isinstance(hook, SpectralNorm) and hook.name == name:
             hook.remove(module)
             del module._forward_pre_hooks[k]
-            return module
+            break
+    else:
+        raise ValueError("spectral_norm of '{}' not found in {}".format(
+            name, module))
 
-    raise ValueError("spectral_norm of '{}' not found in {}".format(
-        name, module))
+    for k, hook in module._state_dict_hooks.items():
+        if isinstance(hook, SpectralNormStateDictHook) and hook.fn.name == name:
+            del module._state_dict_hooks[k]
+            break
+
+    for k, hook in module._load_state_dict_pre_hooks.items():
+        if isinstance(hook, SpectralNormLoadStateDictPreHook) and hook.fn.name == name:
+            del module._load_state_dict_pre_hooks[k]
+            break
+
+    return module

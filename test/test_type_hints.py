@@ -1,6 +1,6 @@
 from __future__ import print_function
 import unittest
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 import torch
 import re
@@ -61,7 +61,15 @@ def get_all_examples():
     This function grabs (hopefully all) examples from the torch documentation
     strings and puts them in one nonsensical module returned as a string.
     """
-    blacklist = {"_np"}
+    blacklist = {
+        "_np",
+        "refine_names",
+        "rename",
+        "names",
+        "align_as",
+        "align_to",
+        "unflatten",
+    }
     allexamples = ""
 
     example_file_lines = [

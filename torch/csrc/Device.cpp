@@ -76,7 +76,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_type(THPDevice *self)
+PyObject *THPDevice_type(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   std::ostringstream oss;
@@ -86,7 +86,7 @@ PyObject *THPDevice_type(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_index(THPDevice *self)
+PyObject *THPDevice_index(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   if (self->device.has_index()) {
@@ -138,7 +138,7 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_reduce(THPDevice *self)
+PyObject *THPDevice_reduce(THPDevice *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto ret = THPObjectPtr{PyTuple_New(2)};
@@ -181,39 +181,39 @@ PyTypeObject THPDeviceType = {
   "torch.device",                        /* tp_name */
   sizeof(THPDevice),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  nullptr,                                     /* tp_dealloc */
-  nullptr,                                     /* tp_print */
-  nullptr,                                     /* tp_getattr */
-  nullptr,                                     /* tp_setattr */
-  nullptr,                                     /* tp_reserved */
+  nullptr,                               /* tp_dealloc */
+  0,                                     /* tp_vectorcall_offset */
+  nullptr,                               /* tp_getattr */
+  nullptr,                               /* tp_setattr */
+  nullptr,                               /* tp_reserved */
   (reprfunc)THPDevice_repr,              /* tp_repr */
-  nullptr,                                     /* tp_as_number */
-  nullptr,                                     /* tp_as_sequence */
-  nullptr,                                     /* tp_as_mapping */
+  nullptr,                               /* tp_as_number */
+  nullptr,                               /* tp_as_sequence */
+  nullptr,                               /* tp_as_mapping */
   (hashfunc)THPDevice_hash,              /* tp_hash  */
-  nullptr,                                     /* tp_call */
+  nullptr,                               /* tp_call */
   (reprfunc)THPDevice_str,               /* tp_str */
-  nullptr,                                     /* tp_getattro */
-  nullptr,                                     /* tp_setattro */
-  nullptr,                                     /* tp_as_buffer */
+  nullptr,                               /* tp_getattro */
+  nullptr,                               /* tp_setattro */
+  nullptr,                               /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
   nullptr,                               /* tp_doc */
-  nullptr,                                     /* tp_traverse */
-  nullptr,                                     /* tp_clear */
+  nullptr,                               /* tp_traverse */
+  nullptr,                               /* tp_clear */
   (richcmpfunc)THPDevice_rc,             /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  nullptr,                                     /* tp_iter */
-  nullptr,                                     /* tp_iternext */
+  nullptr,                               /* tp_iter */
+  nullptr,                               /* tp_iternext */
   THPDevice_methods,                     /* tp_methods */
-  nullptr,                                     /* tp_members */
+  nullptr,                               /* tp_members */
   THPDevice_properties,                  /* tp_getset */
-  nullptr,                                     /* tp_base */
-  nullptr,                                     /* tp_dict */
-  nullptr,                                     /* tp_descr_get */
-  nullptr,                                     /* tp_descr_set */
+  nullptr,                               /* tp_base */
+  nullptr,                               /* tp_dict */
+  nullptr,                               /* tp_descr_get */
+  nullptr,                               /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  nullptr,                                     /* tp_init */
-  nullptr,                                     /* tp_alloc */
+  nullptr,                               /* tp_init */
+  nullptr,                               /* tp_alloc */
   THPDevice_pynew,                       /* tp_new */
 };
 

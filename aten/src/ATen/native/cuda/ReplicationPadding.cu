@@ -5,6 +5,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/Utils.h"
 #include "c10/util/Exception.h"
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include "THC/THCNumerics.cuh"
 #include "THC/THCDeviceUtils.cuh"
@@ -27,8 +28,8 @@ __host__ __device__ __forceinline__ int imax(int a, int b) {
 namespace {
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel1d(
-    PackedTensorAccessor<scalar_t, 3> input,
-    PackedTensorAccessor<scalar_t, 3> output,
+    PackedTensorAccessor64<scalar_t, 3> input,
+    PackedTensorAccessor64<scalar_t, 3> output,
     int padL, int padR) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -50,8 +51,8 @@ __global__ void replication_pad_forward_kernel1d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
-    PackedTensorAccessor<scalar_t, 3> gradInput,
-    PackedTensorAccessor<scalar_t, 3> gradOutput,
+    PackedTensorAccessor64<scalar_t, 3> gradInput,
+    PackedTensorAccessor64<scalar_t, 3> gradOutput,
     int padL, int padR) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -68,13 +69,13 @@ __global__ void replication_pad_backward_kernel(
   int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel2d(
-    PackedTensorAccessor<scalar_t, 4> input,
-    PackedTensorAccessor<scalar_t, 4> output,
+    PackedTensorAccessor64<scalar_t, 4> input,
+    PackedTensorAccessor64<scalar_t, 4> output,
     int padT, int padB, int padL, int padR) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -100,8 +101,8 @@ __global__ void replication_pad_forward_kernel2d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
-    PackedTensorAccessor<scalar_t, 4> gradInput,
-    PackedTensorAccessor<scalar_t, 4> gradOutput,
+    PackedTensorAccessor64<scalar_t, 4> gradInput,
+    PackedTensorAccessor64<scalar_t, 4> gradOutput,
     int padT, int padB, int padL, int padR) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -122,13 +123,13 @@ __global__ void replication_pad_backward_kernel(
   int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel3d(
-    PackedTensorAccessor<scalar_t, 5> input,
-    PackedTensorAccessor<scalar_t, 5> output,
+    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<scalar_t, 5> output,
     int pfront, int pback, int ptop, int pbottom, int pleft, int pright) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
@@ -163,8 +164,8 @@ __global__ void replication_pad_forward_kernel3d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
-    PackedTensorAccessor<scalar_t, 5> gradInput,
-    PackedTensorAccessor<scalar_t, 5> gradOutput,
+    PackedTensorAccessor64<scalar_t, 5> gradInput,
+    PackedTensorAccessor64<scalar_t, 5> gradOutput,
     int pfront, int pback, int ptop, int pbottom, int pleft, int pright) {
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
   int plane = blockIdx.y;
@@ -196,7 +197,7 @@ __global__ void replication_pad_backward_kernel(
 
   scalar_t valueToCopy =
     gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
-  atomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
+  gpuAtomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
       valueToCopy);
 }
 
@@ -242,8 +243,8 @@ void replication_pad1d_out_cuda_template(
         output.resize_({numPlanes, outputW});
         auto input_ = input.unsqueeze(0);
         auto output_ = output.unsqueeze(0);
-        auto devInput = input_.packed_accessor<scalar_t, 3>();
-        auto devOutput = output_.packed_accessor<scalar_t, 3>();
+        auto devInput = input_.packed_accessor64<scalar_t, 3>();
+        auto devOutput = output_.packed_accessor64<scalar_t, 3>();
 
         int outputPlaneSize = devOutput.size(2);
         dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -255,8 +256,8 @@ void replication_pad1d_out_cuda_template(
           at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput, padL, padR);
       } else {
         output.resize_({numBatch, numPlanes, outputW});
-        auto devInput = input.packed_accessor<scalar_t, 3>();
-        auto devOutput = output.packed_accessor<scalar_t, 3>();
+        auto devInput = input.packed_accessor64<scalar_t, 3>();
+        auto devOutput = output.packed_accessor64<scalar_t, 3>();
 
         int outputPlaneSize = devOutput.size(2);
         dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -314,8 +315,8 @@ void replication_pad1d_backward_out_cuda_template(
       gradInput_ = gradInput.unsqueeze(0);
       gradOutput_ = gradOutput.unsqueeze(0);
       }
-      auto devGradInput = gradInput_.packed_accessor<scalar_t, 3>();
-      auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 3>();
+      auto devGradInput = gradInput_.packed_accessor64<scalar_t, 3>();
+      auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 3>();
 
       int outputPlaneSize = devGradOutput.size(2);
       dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -379,8 +380,8 @@ void replication_pad2d_out_cuda_template(
         output.resize_({numPlanes, outputH, outputW});
         auto input_ = input.unsqueeze(0);
         auto output_ = output.unsqueeze(0);
-        auto devInput = input_.packed_accessor<scalar_t, 4>();
-        auto devOutput = output_.packed_accessor<scalar_t, 4>();
+        auto devInput = input_.packed_accessor64<scalar_t, 4>();
+        auto devOutput = output_.packed_accessor64<scalar_t, 4>();
 
         int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
         dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -393,8 +394,8 @@ void replication_pad2d_out_cuda_template(
             devInput, devOutput, padT, padB, padL, padR);
       } else {
         output.resize_({numBatch, numPlanes, outputH, outputW});
-        auto devInput = input.packed_accessor<scalar_t, 4>();
-        auto devOutput = output.packed_accessor<scalar_t, 4>();
+        auto devInput = input.packed_accessor64<scalar_t, 4>();
+        auto devOutput = output.packed_accessor64<scalar_t, 4>();
 
         int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
         dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -462,8 +463,8 @@ void replication_pad2d_backward_out_cuda_template(
           gradInput_ = gradInput.unsqueeze(0);
           gradOutput_ = gradOutput.unsqueeze(0);
         }
-        auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
-        auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
+        auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
+        auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
 
         int outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
         dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
@@ -614,8 +615,8 @@ void replication_pad3d_out_cuda_template(
         output.resize_({numPlanes, outputD, outputH, outputW});
         auto input_ = input.unsqueeze(0);
         auto output_ = output.unsqueeze(0);
-        auto devInput = input_.packed_accessor<scalar_t, 5>();
-        auto devOutput = output_.packed_accessor<scalar_t, 5>();
+        auto devInput = input_.packed_accessor64<scalar_t, 5>();
+        auto devOutput = output_.packed_accessor64<scalar_t, 5>();
 
         int outputPlaneSize = devOutput.size(2) * devOutput.size(3) *
         devOutput.size(4);
@@ -629,8 +630,8 @@ void replication_pad3d_out_cuda_template(
             devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright);
       } else {
         output.resize_({numBatch, numPlanes, outputD, outputH, outputW});
-        auto devInput = input.packed_accessor<scalar_t, 5>();
-        auto devOutput = output.packed_accessor<scalar_t, 5>();
+        auto devInput = input.packed_accessor64<scalar_t, 5>();
+        auto devOutput = output.packed_accessor64<scalar_t, 5>();
 
         int outputPlaneSize = devOutput.size(2) * devOutput.size(3) *
           devOutput.size(4);
@@ -689,8 +690,8 @@ void replication_pad3d_backward_out_cuda_template(
         gradInput_ = gradInput.unsqueeze(0);
         gradOutput_ = gradOutput.unsqueeze(0);
       }
-      auto devGradInput = gradInput_.packed_accessor<scalar_t, 5>();
-      auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 5>();
+      auto devGradInput = gradInput_.packed_accessor64<scalar_t, 5>();
+      auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 5>();
 
       int outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3) *
       devGradOutput.size(4);
@@ -744,7 +745,7 @@ Tensor replication_pad1d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad1d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -786,7 +787,7 @@ Tensor replication_pad2d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad2d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;
@@ -828,7 +829,7 @@ Tensor replication_pad3d_backward_cuda(
     const Tensor& input,
     IntArrayRef paddingSize)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   replication_pad3d_backward_out_cuda_template(
       gradInput, gradOutput, input, paddingSize);
   return gradInput;

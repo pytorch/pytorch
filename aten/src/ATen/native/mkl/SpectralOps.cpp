@@ -49,7 +49,7 @@ template <typename scalar_t>
 static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
                        int64_t signal_ndim, int64_t size_last_dim,
                        int64_t start_last_dim_idx, int64_t i, int64_t num) {
-  scalar_t *data = output.data<scalar_t>();
+  scalar_t *data = output.data_ptr<scalar_t>();
 
   // A slice means a slice of last dimension (of size size_last_dim)
 
@@ -99,7 +99,7 @@ static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
         //   1. if this dim idx becomes 1, will need to add (size - 1) * stride
         //   2. otherwise, will need to subtract stride
         if (from_slice_indices[d] == 0) {
-          // Substract. Carries over to previous dimension
+          // Subtract. Carries over to previous dimension
           from_slice_data -= output.stride(d);
         } else if (from_slice_indices[d] == 1) {
           // Dimension index becomes 1
@@ -107,7 +107,7 @@ static inline void _fft_fill_with_conjugate_symmetry_slice(Tensor& output,
           from_slice_data += (output.size(d) - 1) * output.stride(d);
           break;
         } else {
-          // Substract. Doesn't carry over to previous dimension
+          // Subtract. Doesn't carry over to previous dimension
           from_slice_data -= output.stride(d);
           break;
         }

@@ -404,10 +404,10 @@ Currently only works on CPU because of access to INDICES.
         "*(type: int; default: 1)* Which dimension to scatter on.");
 
 OPERATOR_SCHEMA(HasElements)
-    .NumInputs(1)
+    .NumInputs(1, INT_MAX)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-The *HasElements* op accepts a single input $tensor$, and produces a single boolean output $has\_elements$. The output is *True* if and only if $tensor$ has size > 0. Note, this op is the opposite of the *IsEmpty* op.
+The *HasElements* op accepts a single or multiple input tensors, and produces a single boolean output $has\_elements$. The output is *True* if and only if any of the input tensor has size > 0. Note, this op is the opposite of the *IsEmpty* op.
 
 Github Links:
 
@@ -465,8 +465,14 @@ has_elements:  False
 </details>
 
 )DOC")
-    .Input(0, "tensor", "Input data tensor to check for elements.")
-    .Output(0, "has_elements", "Output scalar boolean tensor. True if input has size > 0.");
+    .Input(
+        0,
+        "X1, X2, ...",
+        "List of input data tensors to check for elements.")
+    .Output(
+        0,
+        "has_elements",
+        "Output scalar boolean tensor. True if input has size > 0.");
 
 OPERATOR_SCHEMA(GatherRanges)
     .NumInputs(2)
@@ -1018,9 +1024,9 @@ output: [ 4  6  8 10 12 14 16]
     .Input(
         0,
         "start",
-        "(*Tensor*): [OPTIONAL] scalar tensor containing the start of the interval (inclusive) (default=0)")
-    .Input(1, "stop", "(*Tensor*): scalar tensor containing the end of the interval (exclusive)")
-    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar tensor specifying the spacing between values (default=1)")
+        "(*Tensor*): [OPTIONAL] scalar or 1-element tensor containing the start of the interval (inclusive) (default=0)")
+    .Input(1, "stop", "(*Tensor*): scalar or 1-element tensor containing the end of the interval (exclusive)")
+    .Input(2, "step", "(*Tensor*): [OPTIONAL] scalar or 1-element tensor specifying the spacing between values (default=1)")
     .Output(
         0,
         "output",

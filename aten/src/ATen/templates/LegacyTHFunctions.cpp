@@ -3,7 +3,8 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include <ATen/CheckGenerator.h>
+#include <ATen/Utils.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/${Generator}.h>
 #include <ATen/ExpandUtils.h>
 ${th_headers}
@@ -26,8 +27,7 @@ namespace {
   TensorOptions options(ScalarType s) {
     return TensorOptions().dtype(s)
                           .device(DeviceType::${DeviceType})
-                          .layout(kStrided)
-                          .is_variable(false);
+                          .layout(kStrided);
   }
 
   Allocator* allocator() {

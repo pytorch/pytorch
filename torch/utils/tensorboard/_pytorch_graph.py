@@ -1,17 +1,12 @@
-import logging
-import numpy as np
-import time
 from collections import OrderedDict
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
-from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats, NodeExecStats, AllocatorMemoryUsed
+from tensorboard.compat.proto.step_stats_pb2 import StepStats, DeviceStepStats
 from tensorboard.compat.proto.versions_pb2 import VersionDef
 
 import torch
 from ._proto_graph import node_proto
-from torch.onnx.utils import OperatorExportTypes
-from torch.onnx import _optimize_trace
 
 methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
               'kind', 'outputs', 'outputsSize', 'scopeName']
@@ -21,14 +16,16 @@ methods_OP = ['attributeNames', 'hasMultipleOutputs', 'hasUses', 'inputs',
 #   'type' (type <Tensor<class 'torch._C.Type'>>)
 #
 # But the below are sufficient for now.
-methods_IO = ['node', 'offset', 'uniqueName']
+methods_IO = ['node', 'offset', 'debugName']
 
+GETATTR_KIND = 'prim::GetAttr'
+CLASSTYPE_KIND = 'ClassType'
 
 class NodeBase(object):
-    def __init__(self, uniqueName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
+    def __init__(self, debugName=None, inputs=None, scope=None, tensor_size=None, op_type='UnSpecified', attributes=''):
         # TODO; Specify a __slots__ for this class or potentially
         # used namedtuple instead
-        self.uniqueName = uniqueName
+        self.debugName = debugName
         self.inputs = inputs
         self.tensor_size = tensor_size
         self.kind = op_type
@@ -56,8 +53,8 @@ class NodePy(NodeBase):
                 io_unique_names = []
                 io_tensor_sizes = []
                 for n in list_of_node:
-                    io_unique_names.append(n.uniqueName())
-                    if n.type().kind() == 'CompleteTensorType':
+                    io_unique_names.append(n.debugName())
+                    if n.isCompleteTensor():
                         io_tensor_sizes.append(n.type().sizes())
                     else:
                         io_tensor_sizes.append(None)
@@ -109,7 +106,7 @@ class GraphPy(object):
     appeared in the nodes in scope_name_appeared list for later processing.
 
     In the second pass, scope names are fully applied to all nodes.
-    uniqueNameToScopedName is a mapping from a node's ID to its fully qualified
+    debugNameToScopedName is a mapping from a node's ID to its fully qualified
     scope name. e.g. Net1/Linear[0]/1. Unfortunately torch.jit doesn't have
     totally correct scope output, so this is nontrivial. The function
     populate_namespace_from_OP_to_IO and find_common_root are used to
@@ -126,17 +123,9 @@ class GraphPy(object):
 
     def append(self, x):
         if isinstance(x, NodePyIO):
-            self.nodes_io[x.uniqueName] = x
+            self.nodes_io[x.debugName] = x
         if isinstance(x, NodePyOP):
             self.nodes_op.append(x)
-            for node_output, outputSize in zip(x.outputs, x.outputstensor_size):
-                self.scope_name_appeared.append(x.scopeName)
-                self.nodes_io[node_output] = NodeBase(node_output,
-                                                      x.inputs,
-                                                      x.scopeName,
-                                                      outputSize,
-                                                      op_type=x.kind,
-                                                      attributes=x.attributes)
 
     def printall(self):
         print('all nodes')
@@ -152,22 +141,37 @@ class GraphPy(object):
 
     def populate_namespace_from_OP_to_IO(self):
         for node in self.nodes_op:
+            for node_output, outputSize in zip(node.outputs, node.outputstensor_size):
+                self.scope_name_appeared.append(node.scopeName)
+                self.nodes_io[node_output] = NodeBase(node_output,
+                                                      node.inputs,
+                                                      node.scopeName,
+                                                      outputSize,
+                                                      op_type=node.kind,
+                                                      attributes=node.attributes)
+
+        self.find_common_root()
+
+        for node in self.nodes_op:
             for input_node_id in node.inputs:
                 self.unique_name_to_scoped_name[input_node_id] = node.scopeName + '/' + input_node_id
 
         for key, node in self.nodes_io.items():
+            if type(node) == NodeBase:
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
             if hasattr(node, 'input_or_output'):
-                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.uniqueName
+                self.unique_name_to_scoped_name[key] = node.input_or_output + '/' + node.debugName
+
             if hasattr(node, 'scope') and node.scope is not None:
-                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.uniqueName
+                self.unique_name_to_scoped_name[key] = node.scope + '/' + node.debugName
                 if node.scope == '' and self.shallowest_scope_name:
-                    self.unique_name_to_scoped_name[node.uniqueName] = self.shallowest_scope_name + '/' + node.uniqueName
+                    self.unique_name_to_scoped_name[node.debugName] = self.shallowest_scope_name + '/' + node.debugName
 
         # replace name
         for key, node in self.nodes_io.items():
             self.nodes_io[key].inputs = [self.unique_name_to_scoped_name[node_input_id] for node_input_id in node.inputs]
-            if node.uniqueName in self.unique_name_to_scoped_name:
-                self.nodes_io[key].uniqueName = self.unique_name_to_scoped_name[node.uniqueName]
+            if node.debugName in self.unique_name_to_scoped_name:
+                self.nodes_io[key].debugName = self.unique_name_to_scoped_name[node.debugName]
 
     def to_proto(self):
         """
@@ -177,32 +181,23 @@ class GraphPy(object):
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
         nodes = []
-        node_stats = []
         for v in self.nodes_io.values():
-            nodes.append(node_proto(v.uniqueName,
+            nodes.append(node_proto(v.debugName,
                                     input=v.inputs,
                                     outputsize=v.tensor_size,
                                     op=v.kind,
                                     attributes=v.attributes))
-
-            if v.tensor_size and len(v.tensor_size) > 0:  # assume data is float32, only parameter is counted
-                node_stats.append(
-                    NodeExecStats(node_name=v.uniqueName,
-                                  all_start_micros=int(time.time() * 1e7),
-                                  all_end_rel_micros=42,
-                                  memory=[AllocatorMemoryUsed(allocator_name="cpu",
-                                                              total_bytes=int(np.prod(v.tensor_size)) * 4)]))
-
-        return nodes, node_stats
+        return nodes
 
 
-def parse(graph, args=None, omit_useless_nodes=True):
+def parse(graph, trace, args=None, omit_useless_nodes=True):
     """This method parses an optimized PyTorch model graph and produces
     a list of nodes and node stats for eventual conversion to TensorBoard
     protobuf format.
 
     Args:
-      graph (PyTorch module): The model to be parsed.
+      graph (PyTorch module): The model graph to be parsed.
+      trace (PyTorch JIT TracedModule): The model trace to be parsed.
       args (tuple): input tensor[s] for the model.
       omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
@@ -210,27 +205,71 @@ def parse(graph, args=None, omit_useless_nodes=True):
 
     scope = {}
     nodes_py = GraphPy()
-    for i, node in enumerate(graph.inputs()):
+    for node in graph.inputs():
         if omit_useless_nodes:
             if len(node.uses()) == 0:  # number of user of the node (= number of outputs/ fanout)
                 continue
 
-        if i < n_inputs:
+        if node.type().kind() != CLASSTYPE_KIND:
             nodes_py.append(NodePyIO(node, 'input'))
-        else:
-            nodes_py.append(NodePyIO(node))  # parameter
 
+    attr_to_scope = dict()
     for node in graph.nodes():
-        nodes_py.append(NodePyOP(node))
+        if node.kind() == GETATTR_KIND:
+            attr_name = node.s('name')
+            parent = node.input().node()
+            if parent.kind() == GETATTR_KIND:  # If the parent node is not the top-level "self" node
+                parent_attr_name = parent.s('name')
+                parent_scope = attr_to_scope[parent_attr_name]
+                attr_scope = parent_scope.split('/')[-1]
+                attr_to_scope[attr_name] = '{}/{}.{}'.format(parent_scope, attr_scope, attr_name)
+            else:
+                attr_to_scope[attr_name] = '__module.{}'.format(attr_name)
+            # We don't need classtype nodes; scope will provide this information
+            if node.output().type().kind() != CLASSTYPE_KIND:
+                node_py = NodePyOP(node)
+                node_py.scopeName = attr_to_scope[attr_name]
+                nodes_py.append(node_py)
+        else:
+            nodes_py.append(NodePyOP(node))
 
-    for node in graph.outputs():  # must place last.
-        NodePyIO(node, 'output')
-    nodes_py.find_common_root()
+    for i, node in enumerate(graph.outputs()):  # Create sink nodes for output ops
+        node_py = NodePyIO(node, 'output')
+        node_py.debugName = "output.{}".format(i + 1)
+        node_py.inputs = [node.debugName()]
+        nodes_py.append(node_py)
+
+    def parse_traced_name(module):
+        if isinstance(module, torch.jit.TracedModule):
+            module_name = module._name
+        else:
+            module_name = getattr(module, 'original_name', "Module")
+        return module_name
+
+    alias_to_name = dict()
+    base_name = parse_traced_name(trace)
+    for name, module in trace.named_modules(prefix='__module'):
+        mod_name = parse_traced_name(module)
+        attr_name = name.split('.')[-1]
+        alias_to_name[name] = '{}[{}]'.format(mod_name, attr_name)
+
+    for node in nodes_py.nodes_op:
+        module_aliases = node.scopeName.split('/')
+        replacements = [
+            alias_to_name[alias]
+            if alias in alias_to_name
+            else alias.split('.')[-1]
+            for alias in module_aliases
+        ]
+        node.scopeName = base_name
+        if any(replacements):
+            node.scopeName += '/' + '/'.join(replacements)
+
     nodes_py.populate_namespace_from_OP_to_IO()
     return nodes_py.to_proto()
 
 
-def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_nodes=True):
+def graph(model, args, verbose=False):
     """
     This method processes a PyTorch model and produces a `GraphDef` proto
     that can be logged to TensorBoard.
@@ -240,48 +279,20 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
       args (tuple): input tensor[s] for the model.
       verbose (bool): Whether to print out verbose information while
         processing.
-      operator_export_type (str): One of 'ONNX', 'ONNX_ATEN', or 'RAW'.
-        Defaults to 'ONNX' format  because it outputs the most visually
-        understandable format.
-      omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
-    operator_export_type = getattr(OperatorExportTypes, operator_export_type)
-
-
-    with torch.onnx.set_training(model, False):
+    with torch.onnx.set_training(model, False):  # TODO: move outside of torch.onnx?
         try:
-            trace, _ = torch.jit.get_trace_graph(model, args)
-        except RuntimeError:
+            trace = torch.jit.trace(model, args)
+            graph = trace.graph
+            torch._C._jit_pass_inline(graph)
+        except RuntimeError as e:
+            print(e)
             print('Error occurs, No graph saved')
-            _ = model(*args)  # don't catch, just print the error message
-            print("Checking if it's onnx problem...")
-            try:
-                import tempfile
-                torch.onnx.export(
-                    model, args, tempfile.TemporaryFile(), verbose=True)
-            except RuntimeError:
-                print("Your model cannot be exported by onnx, please report to onnx team")
-            # Create an object matching
-            # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/graph.proto
-            # The producer version has been reverse engineered from standard
-            # TensorBoard logged data.
-            return GraphDef(versions=VersionDef(producer=22))
+            raise e
 
-    try:
-        # An optimized graph helps debug at a higher level. Users can focus
-        # on connections between big modules such as Linear instead of W, x,
-        # bias, matmul, etc. Honestly, most users don't care about those
-        # detailed nodes information.
-        _optimize_trace(trace, operator_export_type)
-    except RuntimeError as e:
-        # Optimize trace might fail (due to bad scopes in some cases we've seen)
-        # and we don't want graph visualization to fail in this case. In this
-        # case we'll log the warning and display the non-optimized graph.
-        logging.warn(ImportError(e))
-    graph = trace.graph()
     if verbose:
         print(graph)
-    list_of_nodes, node_stats = parse(graph, args, omit_useless_nodes)
+    list_of_nodes = parse(graph, trace, args)
     # We are hardcoding that this was run on CPU even though it might have actually
     # run on GPU. Note this is what is shown in TensorBoard and has no bearing
     # on actual execution.
@@ -292,6 +303,7 @@ def graph(model, args, verbose=False, operator_export_type='ONNX', omit_useless_
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/test/graph-test.ts
     # and
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
-    stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0",
-                                                                            node_stats=node_stats)]))
+    stepstats = RunMetadata(step_stats=StepStats(dev_stats=[DeviceStepStats(device="/device:CPU:0")]))
     return GraphDef(node=list_of_nodes, versions=VersionDef(producer=22)), stepstats
+    # The producer version has been reverse engineered from standard
+    # TensorBoard logged data.

@@ -43,6 +43,40 @@ void FindMinMax(const T* data, float* min, float* max, int len) {
   fbgemm::FindMinMax(temp.data(), min, max, len);
 }
 
+float* GetFloatTensorData(TensorCPU* tensor) {
+  float* data = nullptr;
+  vector<float> data_temp;
+  if (tensor->IsType<float>()) {
+    if (!tensor->data<float>()) {
+      return nullptr;
+    }
+    data = tensor->template data<float>();
+  } else if (tensor->IsType<int>()) {
+    if (!tensor->data<int>()) {
+      return nullptr;
+    }
+    const int* data_orig = tensor->data<int>();
+    data_temp.resize(tensor->numel());
+    for (int j = 0; j < tensor->numel(); ++j) {
+      data_temp[j] = data_orig[j];
+    }
+    data = data_temp.data();
+  } else if (tensor->IsType<long>()) {
+    if (!tensor->data<long>()) {
+      return nullptr;
+    }
+    const long* data_orig = tensor->data<long>();
+    data_temp.resize(tensor->numel());
+    for (int j = 0; j < tensor->numel(); ++j) {
+      data_temp[j] = data_orig[j];
+    }
+    data = data_temp.data();
+  } else {
+    return nullptr;
+  }
+  return data;
+}
+
 template <>
 void FindMinMax<float>(const float* data, float* min, float* max, int len) {
   fbgemm::FindMinMax(data, min, max, len);
@@ -54,7 +88,7 @@ void OutputMinMaxObserver::Stop() {
       continue;
     }
     Tensor* tensor = subject_->template Output<Tensor>(i, CPU);
-    if (tensor->numel() == 0 || tensor->numel() == -1)
+    if (!tensor || tensor->numel() == 0 || tensor->numel() == -1)
       continue;
     string out_name(subject_->debug_def().output(i));
 
@@ -117,11 +151,13 @@ void OutputMinMaxObserver::Stop() {
 OutputMinMaxNetObserver::OutputMinMaxNetObserver(
     NetBase* subject,
     const string& out_file_name,
-    int dump_freq)
+    int dump_freq,
+    string delimiter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
       cnt_(0),
-      out_file_name_(out_file_name) {
+      out_file_name_(out_file_name),
+      delimiter_(delimiter) {
   VLOG(2) << out_file_name;
   min_max_infos_.resize(subject->GetOperators().size());
   int i = 0;
@@ -150,15 +186,15 @@ void OutputMinMaxNetObserver::DumpAndReset_(
             op_info->tensor_infos[i];
 
         ostringstream ost;
-        ost << op_index << " " << op_info->type << " " << i << " "
-            << tensor_info.name << " ";
+        ost << op_index << delimiter_ << op_info->type << delimiter_ << i
+            << delimiter_ << tensor_info.name << delimiter_;
         if (print_total_min_max) {
-          ost << tensor_info.total_min << " " << tensor_info.total_max;
+          ost << tensor_info.total_min << delimiter_ << tensor_info.total_max;
         } else {
-          ost << tensor_info.min << " " << tensor_info.max;
+          ost << tensor_info.min << delimiter_ << tensor_info.max;
         }
 
-        LOG(INFO) << this << " " << ost.str();
+        LOG(INFO) << this << delimiter_ << ost.str();
         f << ost.str() << endl;
 
         op_info->tensor_infos[i].min = numeric_limits<float>::max();
@@ -232,7 +268,7 @@ void HistogramObserver::Stop() {
       continue;
     }
     Tensor* tensor = subject_->template Output<Tensor>(i, CPU);
-    if (tensor->numel() == 0 || tensor->numel() == -1) {
+    if (!tensor || tensor->numel() == 0 || tensor->numel() == -1) {
       continue;
     }
 
@@ -281,17 +317,102 @@ void HistogramObserver::Stop() {
   return;
 }
 
+OutputColumnMaxHistogramObserver::OutputColumnMaxHistogramObserver(
+    OperatorBase* op,
+    const std::string& col_max_blob_name,
+    int nbins,
+    std::shared_ptr<HistogramObserver::Info> info)
+    : ObserverBase<OperatorBase>(op),
+      col_max_blob_name_(col_max_blob_name),
+      nbins_(nbins),
+      info_(info) {
+  const auto& output_names = op->debug_def().output();
+  auto it =
+      std::find(output_names.begin(), output_names.end(), col_max_blob_name);
+  CAFFE_ENFORCE(
+      it != output_names.end(), "Cannot find blob in operator output.");
+  col_max_blob_idx_ = std::distance(output_names.begin(), it);
+};
+
+void OutputColumnMaxHistogramObserver::Stop() {
+  if (!subject_->OutputIsTensorType(col_max_blob_idx_, CPU)) {
+    return;
+  }
+  Tensor* tensor = subject_->template Output<Tensor>(col_max_blob_idx_, CPU);
+  if (!tensor || tensor->numel() == 0 || tensor->numel() == -1) {
+    return;
+  }
+
+  float* data = GetFloatTensorData(tensor);
+  if (data == nullptr && !warning_printed_) {
+    LOG(INFO) << "Tensor " << col_max_blob_name_
+              << " has mismatching type, or unsupported type "
+              << tensor->meta().name() << " with size " << tensor->numel();
+    warning_printed_ = true;
+    return;
+  }
+
+  // determine number of columns
+  CAFFE_ENFORCE(
+      tensor->dim() == 2,
+      "Tensor " + col_max_blob_name_ +
+          " is not two-dimensional. Tensor.dim() = " +
+          caffe2::to_string(tensor->dim()));
+  int num_columns = tensor->size_from_dim(1);
+  if (num_columns_ == -1) {
+    num_columns_ = num_columns;
+  }
+  CAFFE_ENFORCE(
+      num_columns_ == num_columns, "Observed inconsistent number of columns.");
+  int num_rows = tensor->size_to_dim(1);
+  for (int col = 0; col < num_columns; col++) {
+    // find col max of the ith column
+    auto col_max = std::abs(data[col]);
+    for (int r = 0; r < num_rows; r++) {
+      int idx = r * num_columns + col;
+      col_max = max(col_max, std::abs(data[idx]));
+    }
+    if (info_->histograms.size() <= col) {
+      info_->histograms.emplace_back(nbins_);
+      info_->total_histograms.emplace_back(nbins_);
+      info_->min_max_info.tensor_infos.emplace_back(col_max_blob_name_);
+    }
+    info_->histograms[col].Add(col_max);
+    info_->total_histograms[col].Add(col_max);
+  }
+}
+
 HistogramNetObserver::HistogramNetObserver(
     NetBase* subject,
     const string& out_file_name,
     int nbins,
     int dump_freq,
-    bool mul_nets)
+    bool mul_nets,
+    string op_filter,
+    string delimiter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
       cnt_(0),
       mul_nets_(mul_nets),
+      op_filter_(op_filter),
+      delimiter_(delimiter),
       out_file_name_(out_file_name) {
+  net_name_ = subject->Name();
+  if (op_filter != "") {
+    bool has_op = false;
+    for (auto* op : subject->GetOperators()) {
+      if (op->debug_def().type() == op_filter) {
+        has_op = true;
+        break;
+      }
+    }
+    if (!has_op) {
+      LOG(INFO) << "Net " << net_name_ << " doesn't include operator "
+                << op_filter;
+      return;
+    }
+  }
+
   hist_infos_.resize(subject->GetOperators().size());
 
   int i = 0;
@@ -315,8 +436,12 @@ HistogramNetObserver::HistogramNetObserver(
 void HistogramNetObserver::DumpAndReset_(
     const string& out_file_name,
     bool print_total_min_max) {
+  if (hist_infos_.size() == 0) {
+    return;
+  }
   stringstream file_name;
   file_name << out_file_name;
+  LOG(INFO) << "Dumping histograms of net " << net_name_ << " in " << this;
   if (mul_nets_) {
     file_name << ".";
     file_name << this;
@@ -348,16 +473,17 @@ void HistogramNetObserver::DumpAndReset_(
       }
 
       ostringstream ost;
-      ost << op_index << " " << info->min_max_info.type << " " << i << " "
-          << info->min_max_info.tensor_infos[i].name << " " << hist->Min()
-          << " " << hist->Max() << " " << hist->GetHistogram()->size();
+      ost << op_index << delimiter_ << info->min_max_info.type << delimiter_
+          << i << delimiter_ << info->min_max_info.tensor_infos[i].name
+          << delimiter_ << hist->Min() << delimiter_ << hist->Max()
+          << delimiter_ << hist->GetHistogram()->size();
 
       for (uint64_t c : *hist->GetHistogram()) {
-        ost << " " << c;
+        ost << delimiter_ << c;
       }
 
       if (print_total_min_max) {
-        LOG(INFO) << this << " " << ost.str();
+        LOG(INFO) << this << delimiter_ << ost.str();
       }
 
       f << ost.str() << endl;
@@ -367,11 +493,12 @@ void HistogramNetObserver::DumpAndReset_(
       }
     }
   }
+  f.flush();
   f.close();
 }
 
 HistogramNetObserver::~HistogramNetObserver() {
-  DumpAndReset_(out_file_name_, true);
+  DumpAndReset_(out_file_name_, false);
 }
 
 void HistogramNetObserver::Stop() {
@@ -405,6 +532,138 @@ static bool HasDNNLowPEngine_(const OperatorDef& op_def) {
 
 static bool HasDNNLowPEngine_(const OperatorBase& op) {
   return HasDNNLowPEngine_(op.debug_def());
+}
+
+OutputColumnMaxHistogramNetObserver::OutputColumnMaxHistogramNetObserver(
+    NetBase* subject,
+    const std::string& out_file_name,
+    const std::vector<std::string>& observe_column_max_for_blobs,
+    int nbins,
+    int dump_freq,
+    bool mul_nets,
+    string delimiter)
+    : NetObserver(subject),
+      dump_freq_(dump_freq),
+      cnt_(0),
+      mul_nets_(mul_nets),
+      out_file_name_(out_file_name),
+      delimiter_(delimiter) {
+  if (observe_column_max_for_blobs.size() == 0) {
+    return;
+  }
+  col_max_blob_names_.insert(
+      observe_column_max_for_blobs.begin(), observe_column_max_for_blobs.end());
+  int op_idx = 0;
+  for (auto* op : subject->GetOperators()) {
+    const auto& op_output_names = op->debug_def().output();
+    int output_idx = 0;
+    std::unordered_map<int, std::shared_ptr<HistogramObserver::Info>>
+        output_col_hists_map;
+    for (const auto& output_blob : op_output_names) {
+      if (col_max_blob_names_.find(output_blob) == col_max_blob_names_.end()) {
+        ++output_idx;
+        continue;
+      }
+      /// create col max hist observer for blob
+      auto info = std::make_shared<HistogramObserver::Info>();
+      info->min_max_info.type = op->debug_def().type();
+      // number of histograms in info will be determined at runtime by the
+      // number of columns in the tensor.
+      OutputColumnMaxHistogramObserver* observer =
+          new OutputColumnMaxHistogramObserver(op, output_blob, nbins, info);
+      op->AttachObserver(
+          unique_ptr<OutputColumnMaxHistogramObserver>(observer));
+      output_col_hists_map[output_idx] = info;
+      ++output_idx;
+    }
+    if (output_col_hists_map.size() > 0) {
+      hist_infos_[op_idx] = output_col_hists_map;
+    }
+    ++op_idx;
+  }
+}
+
+void OutputColumnMaxHistogramNetObserver::DumpAndReset_(
+    const std::string& out_file_name,
+    bool print_total_min_max) {
+  stringstream file_name;
+  file_name << out_file_name;
+  if (mul_nets_) {
+    file_name << ".";
+    file_name << this;
+  }
+  ofstream f(file_name.str());
+  if (!f) {
+    LOG(WARNING) << this << ": can't open " << file_name.str();
+  }
+  for (const auto& it : hist_infos_) {
+    auto output_idx_hists_map = it.second;
+    for (const auto& output_idx_hist : output_idx_hists_map) {
+      int output_idx = output_idx_hist.first;
+      HistogramObserver::Info* info = output_idx_hist.second.get();
+      if (!info) {
+        continue;
+      }
+      for (int i = 0; i < info->histograms.size(); ++i) {
+        const Histogram* hist =
+            (print_total_min_max ? info->total_histograms : info->histograms)[i]
+                .Finalize();
+        if (hist->Min() >= hist->Max()) {
+          LOG(WARNING) << "Histogram of "
+                       << info->min_max_info.tensor_infos[i].name
+                       << " has an empty range: min " << hist->Min()
+                       << " and max " << hist->Max();
+        }
+        if (hist->GetHistogram()->empty()) {
+          LOG(WARNING) << "Histogram of "
+                       << info->min_max_info.tensor_infos[i].name
+                       << " is empty";
+        }
+        ostringstream ost;
+        // op_idx, output_idx, blob_name, col, min, max, nbins
+        ost << it.first << delimiter_ << output_idx << delimiter_
+            << info->min_max_info.tensor_infos[i].name << delimiter_ << i
+            << delimiter_ << hist->Min() << delimiter_ << hist->Max()
+            << delimiter_ << hist->GetHistogram()->size();
+
+        // bins
+        for (uint64_t c : *hist->GetHistogram()) {
+          ost << delimiter_ << c;
+        }
+        if (print_total_min_max) {
+          LOG(INFO) << this << delimiter_ << ost.str();
+        }
+        f << ost.str() << endl;
+        if (!print_total_min_max) {
+          info->histograms[i] = DynamicHistogram(hist->GetHistogram()->size());
+        }
+      }
+    }
+  }
+  f.close();
+}
+
+void OutputColumnMaxHistogramNetObserver::Stop() {
+  ++cnt_;
+  if (dump_freq_ == -1 || (cnt_ % dump_freq_) != 0) {
+    return;
+  }
+  ostringstream ost;
+  size_t last_dot = out_file_name_.rfind('.');
+  size_t last_slash = out_file_name_.rfind('/');
+  if (last_dot != string::npos &&
+      (last_slash == string::npos || last_slash < last_dot)) {
+    ost << out_file_name_.substr(0, last_dot) << "_" << cnt_ / dump_freq_
+        << out_file_name_.substr(last_dot);
+  } else {
+    ost << out_file_name_ << "_" << cnt_ / dump_freq_;
+  }
+  DumpAndReset_(ost.str());
+  return;
+}
+
+OutputColumnMaxHistogramNetObserver::~OutputColumnMaxHistogramNetObserver() {
+  DumpAndReset_(out_file_name_, true);
 }
 
 RegisterQuantizationParamsNetObserver::RegisterQuantizationParamsNetObserver(
@@ -569,6 +828,7 @@ RegisterQuantizationParamsWithHistogramNetObserver::
 
       Histogram hist = Histogram(min, max, bins);
 
+      LOG(INFO) << "Choosing qparams for " << tensor_name;
       TensorQuantizationParams qparams;
       if (max > min) {
         unique_ptr<QuantizationFactory> qfactory(GetQuantizationFactoryOf(op));

@@ -26,7 +26,7 @@ void ArgumentSpecCreator::scan(
   };
   // the simple vm that scans instructions_ has a limited stack depth,
   // this prevents going deeper than that.
-  if (depth >= DEPTH_LIMIT) {
+  if (depth >= ARG_SPEC_DEPTH_LIMIT) {
     instructions_.emplace_back(SKIP);
   }
   if (typ->isSubtypeOf(TensorType::get())) {
@@ -52,7 +52,7 @@ void ArgumentSpecCreator::scan(
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
-      auto key = cls->qualname() + cls->attributeNames().at(i);
+      auto key = cls->name()->qualifiedName() + cls->attributeNames().at(i);
       // it is only safe to specialize because someone might have written to it
       if (!written_slots.count(key)) {
         scan(cls->containedTypes().at(i), depth + 1, written_slots);
@@ -66,7 +66,7 @@ void ArgumentSpecCreator::scan(
   }
 };
 
-// this is a coarse-grained guarentee that the slots of a class will not be
+// this is a coarse-grained guarantee that the slots of a class will not be
 // modified by the function. It works fine for things that used be read-only
 // modules, but will be overly conservative when some classes are written to.
 // Doing alias analysis and looking for writes to the class would be more
@@ -77,7 +77,7 @@ static void scanWrittenSlots(
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::SetAttr) {
       if (auto cls = n->inputs().at(0)->type()->cast<ClassType>()) {
-        written_slots.insert(cls->qualname() + n->s(attr::name));
+        written_slots.insert(cls->name()->qualifiedName() + n->s(attr::name));
       }
     }
     for (Block* subblock : n->blocks()) {
@@ -130,7 +130,7 @@ void ArgumentSpecCreator::dump() const {
 ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
     const {
   ArgumentSpec spec(num_tensors_, num_optionals_);
-  const IValue* stack[DEPTH_LIMIT]; // The stack of IValue lists
+  const IValue* stack[ARG_SPEC_DEPTH_LIMIT]; // The stack of IValue lists
   // The stack gets initialized with the input list
   stack[0] = last(input, num_inputs_).begin();
   size_t stack_top = 0; // offset to the top of the stack
@@ -155,8 +155,7 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       case ENTER_TUPLE: {
         // consume tuple
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isTuple());
-        // see [argspec refcounting]
+        AT_ASSERT(iv->isTuple(), "Expected Tuple but got ", iv->tagKind());
         auto p = *reinterpret_cast<const at::ivalue::Tuple* const*>(iv);
         auto tup_ptr = &p->elements()[0];
         // push list of tuple elements to the stack
@@ -165,11 +164,8 @@ ArgumentSpec ArgumentSpecCreator::create(bool with_grad, const Stack& input)
       case ENTER_OBJECT: {
         // consume object
         const IValue* iv = stack[stack_top]++;
-        AT_ASSERT(iv->isObject());
-        iv->toObject();
-        // see [argspec refcounting]
-        auto p = *reinterpret_cast<const at::ivalue::Object* const*>(iv);
-        auto obj_ptr = &p->slots()[0];
+        AT_ASSERT(iv->isObject(), "Expected Object but got ", iv->tagKind());
+        auto obj_ptr = &iv->toObjectRef().slots()[0];
         // push list of object elements to the stack
         stack[++stack_top] = obj_ptr;
       } break;
@@ -202,13 +198,6 @@ void ArgumentSpecCreator::specializeTypes(
   size_t optional_arg_spec_offset =
       0; // number of specialized optionals seen so far
 
-  auto dim_tensor_type_from_arg = [](const ArgumentInfo& arg) {
-    return DimensionedTensorType::create(
-        arg.type(),
-        ConvertIntToCPUOrCUDA(arg.device()),
-        arg.dim(),
-        arg.requires_grad());
-  };
   for (Inst inst : instructions_) {
     switch (inst) {
       case SPECIALIZE_OPTIONAL_TENSOR: {
@@ -220,15 +209,15 @@ void ArgumentSpecCreator::specializeTypes(
         }
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         AT_ASSERT(arg.defined());
-        result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
+        result_stack.back().emplace_back(arg.toType());
       } break;
       case SPECIALIZE_TENSOR: {
         input_stack.back()++;
         auto& arg = spec.tensorAt(tensor_arg_spec_offset++);
         if (!arg.defined()) {
-          result_stack.back().emplace_back(AutogradZeroTensorType::get());
+          result_stack.back().emplace_back(TensorType::get()->withUndefined());
         } else {
-          result_stack.back().emplace_back(dim_tensor_type_from_arg(arg));
+          result_stack.back().emplace_back(arg.toType());
         }
       } break;
       case SPECIALIZE_OPTIONAL: {
@@ -280,7 +269,7 @@ void ArgumentSpecCreator::specializeTypes(
       // so we disconnect the input here and replace its uses with
       // a constant
       WithInsertPoint guard(*graph.nodes().begin());
-      auto c = graph.insertConstant({}, ot);
+      auto c = graph.insertConstant({});
       inputs[i]->replaceAllUsesWith(c);
     } else {
       inputs[i]->setType(t);

@@ -1,7 +1,8 @@
+#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <memory>
 #include <sstream>
@@ -19,58 +20,54 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-std::shared_ptr<Function> as_function(const py::object& obj) {
-  if (py::isinstance<Function>(obj)) {
-    return py::cast<std::shared_ptr<Function>>(obj);
+c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+  if (py::isinstance<StrongFunctionPtr>(obj)) {
+    return py::cast<StrongFunctionPtr>(obj);
   }
-  return nullptr;
-}
-
-thread_local bool recurse_on_python_ops = false;
-bool& getRecursiveScriptMode() {
-  return recurse_on_python_ops;
+  return c10::nullopt;
 }
 
 FunctionSchema PythonValue::getSchema(
     const size_t n_args,
-    const size_t n_binders) {
+    const size_t n_binders,
+    const SourceRange& loc) {
   auto annotations = py::module::import("torch.jit.annotations");
-  auto signature = annotations.attr("get_signature")(self);
-  std::vector<Argument> args, rets;
-  // We may mutate this if we can determine the number of args from Python
-  // introspection.
-  size_t actual_n_args = n_args;
-  if (!signature.is_none()) {
-    std::vector<TypePtr> arg_types;
-    TypePtr ret_type;
-    std::tie(arg_types, ret_type) =
-        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
-    args.reserve(arg_types.size());
-    size_t idx = 0; // Fake argument names by putting in the index
-    for (auto& arg_type : arg_types) {
-      args.push_back(
-          Argument(std::to_string(idx++), std::move(arg_type), {}, {}, false));
-    }
-    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
-  } else {
-    // Create a default signature using what information we have
+  const auto callable = moduleSelf_ ? py::getattr(self, "original_fn") : self;
 
-    // First see if we can introspect the number of function parameters
-    // irrespective of the presence of explicit type annotations
-    auto num_params = annotations.attr("get_num_params")(self);
-    if (!num_params.is_none()) {
-      // Return a signature with the correct number of params according to the
-      // Python function. The error handling in call() will catch any mismatch
-      // later.
-      actual_n_args = py::cast<size_t>(num_params);
+  // Make sure the function is not a class instantiation (e.g. `Exception()`)
+  annotations.attr("check_fn")(callable, loc);
+  auto is_vararg = py::cast<bool>(annotations.attr("is_vararg")(callable));
+
+  auto signature = annotations.attr("get_signature")(
+      callable, rcb ? *rcb : py::none(), loc, bool(moduleSelf_));
+  std::vector<Argument> args, rets;
+
+  auto py_param_names = annotations.attr("get_param_names")(callable, n_args);
+  auto param_names = py::cast<std::vector<std::string>>(py_param_names);
+  auto names_it = param_names.begin();
+  if (moduleSelf_) {
+    if (param_names.size() == 0) {
+      throw ErrorReport(loc)
+          << "Non-static method does not have a self argument";
     }
-    // Construct the default signature: all arguments and returns will be
-    // DynamicType
-    args.reserve(actual_n_args);
-    for (size_t i = 0; i < actual_n_args; ++i) {
-      args.push_back(
-          Argument(std::to_string(i), TensorType::get(), {}, {}, false));
+
+    // If there is a `self` parameter on the callable, skip it on the names list
+    args.emplace_back(Argument(*names_it, moduleSelf_->type(), {}, {}, false));
+    ++names_it;
+  }
+  if (signature.is_none()) {
+    // No type signature was provided on the callable, so make a default
+    // signature where each argument is typed as a Tensor
+    for (; names_it != param_names.end(); ++names_it) {
+      args.emplace_back(Argument(
+          /*name=*/*names_it,
+          /*type=*/TensorType::get(),
+          /*N=*/c10::nullopt,
+          /*default_value=*/c10::nullopt,
+          /*kwarg_only=*/false));
     }
+
+    // Use as many outputs as are requested to make the return type
     TypePtr ret_type = TensorType::get();
     if (n_binders == 0) {
       ret_type = NoneType::get();
@@ -78,16 +75,38 @@ FunctionSchema PythonValue::getSchema(
       std::vector<TypePtr> tuple_values(n_binders, ret_type);
       ret_type = TupleType::create(std::move(tuple_values));
     }
-    rets.push_back(Argument("0", ret_type, {}, {}, false));
+    rets.emplace_back(Argument("0", ret_type, {}, {}, false));
+  } else {
+    // Use the provided type signature
+    std::vector<TypePtr> arg_types;
+    TypePtr ret_type;
+    std::tie(arg_types, ret_type) =
+        py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(signature);
+
+    // arg_types does not include self but param_names does, so adjust for that
+    // if needed
+    TORCH_INTERNAL_ASSERT(arg_types.size() == param_names.size() - (moduleSelf_ ? 1 : 0));
+
+    auto types_it = arg_types.begin();
+    for (; types_it != arg_types.end(); ++types_it, ++names_it) {
+      args.push_back(Argument(
+          /*name=*/*names_it,
+          /*type=*/std::move(*types_it),
+          /*N=*/c10::nullopt,
+          /*default_value=*/c10::nullopt,
+          /*kwarg_only=*/false));
+    }
+    rets.push_back(Argument("0", std::move(ret_type), {}, {}, false));
   }
-  std::string name("");
-  // Use the qualified name if possible
+
+  std::string name;
   if (py::hasattr(self, "__qualname__")) {
+    // Use the qualified name if possible
     name = py::str(py::getattr(self, "__qualname__"));
   } else if (py::hasattr(self, "__name__")) {
     name = py::str(py::getattr(self, "__name__"));
   }
-  return FunctionSchema("", "", std::move(args), std::move(rets));
+  return FunctionSchema(name, "", std::move(args), std::move(rets), is_vararg);
 }
 
 std::shared_ptr<SugaredValue> PythonValue::call(
@@ -96,21 +115,33 @@ std::shared_ptr<SugaredValue> PythonValue::call(
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  auto inputs = toValues(*m.graph(), inputs_);
-  auto schema = getSchema(inputs.size(), n_binders);
+  std::vector<NamedValue> inputsWithSelf;
+  if (moduleSelf_) {
+    inputsWithSelf.emplace_back(NamedValue("self", moduleSelf_));
+  }
+  inputsWithSelf.insert(inputsWithSelf.end(), inputs_.begin(), inputs_.end());
+  inputs_ = inputsWithSelf;
 
-  std::stringstream failure_messages;
-  c10::optional<MatchedSchema> matched_schema = tryMatchSchema(
-      schema,
-      loc,
-      *m.graph(),
-      c10::nullopt,
-      inputs_,
-      attributes,
-      &failure_messages,
-      /*conv_tensor_to_num*/ true);
-  if (!matched_schema)
-    throw ErrorReport(loc) << failure_messages.str();
+  auto schema = getSchema(inputs_.size(), n_binders, loc);
+  auto inputs = toValues(*m.graph(), inputs_);
+
+  MatchedSchema matched_schema =
+      matchSchema(schema, loc, *m.graph(), inputs_, attributes);
+
+  // If if a function is marked as dropped,
+  // we throw an exception if it is invoked.
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("should_drop")(self))) {
+    auto g = m.graph();
+    auto err_msg = insertConstant(
+        *g,
+        IValue(
+            "This Python function is annotated to be ignored and cannot be run"));
+    g->insert(prim::RaiseException, {err_msg}, {}, loc);
+    return std::make_shared<SimpleValue>(
+        g->insertNode(g->createUninitialized(matched_schema.return_types.at(0)))
+            ->output());
+  }
 
   // Release the function object so we can wrap it in a PythonOp
   py::object func = self;
@@ -118,18 +149,12 @@ std::shared_ptr<SugaredValue> PythonValue::call(
   Node* new_node = m.graph()->insertNode(
       m.graph()->createPythonOp(THPObjectPtr(func.release().ptr()), cconv, {}));
 
-  // Mark if function is ignored on export
-  if (py::cast<bool>(py::module::import("torch._jit_internal")
-                         .attr("should_drop_on_export")(self))) {
-    auto python_op = static_cast<PythonOp*>(new_node);
-    python_op->ignore_on_export = true;
-  }
   new_node->setSourceRange(loc);
-  for (auto& i : matched_schema->inputs)
+  for (auto& i : matched_schema.inputs)
     new_node->addInput(i);
 
   Value* output =
-      new_node->addOutput()->setType(matched_schema->return_types.at(0));
+      new_node->addOutput()->setType(matched_schema.return_types.at(0));
   return std::make_shared<SimpleValue>(output);
 }
 
@@ -186,198 +211,217 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
   // on modules like math.pi or torch.float to be constants
-  // eventhough it is possible, though rare, for someone to mutate them
+  // even though it is possible, though rare, for someone to mutate them
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ConstantPythonTupleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
-  py::tuple tup = self;
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  result.reserve(tup.size());
-  for (py::handle t : tup) {
-    py::object obj = py::reinterpret_borrow<py::object>(t);
-    result.push_back(toSugaredValue(obj, m, loc, true));
-  }
-  return result;
+Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
+  return self_;
 }
 
-Value* ConstantPythonTupleValue::asValue(const SourceRange& loc, Function& m) {
-  std::vector<Value*> values;
-  for (const auto& sugared_item : asTuple(loc, m)) {
-    values.push_back(sugared_item->asValue(loc, m));
-  }
-  auto node = m.graph()->createTuple(values);
-  return m.graph()->insertNode(node)->output();
-}
-
-std::shared_ptr<SugaredValue> OverloadedMethodValue::call(
+SugaredValuePtr ModuleValue::desugarModuleContainer(
+    bool get_keys,
+    bool get_values,
     const SourceRange& loc,
-    Function& caller,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
-    size_t n_binders) {
-  std::stringstream err;
-  std::vector<NamedValue> new_inputs = inputs.vec();
-  new_inputs.insert(new_inputs.begin(), module_);
-
-  for (const std::string& method_name : method_names_) {
-    auto cls = module_->type()->expect<ClassType>();
-    std::shared_ptr<Function> fn = cls->getMethod(method_name);
-    auto match = tryMatchSchema(
-        fn->getSchema(),
-        loc,
-        *caller.graph().get(),
-        c10::nullopt,
-        new_inputs,
-        attributes,
-        &err,
-        true);
-    if (match) {
-      return MethodValue(module_, method_name)
-          .call(loc, caller, inputs, attributes, n_binders);
+    Function& m) {
+  std::vector<std::string> submoduleNames;
+  const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
+  for (size_t i = 0; i < selfType->numAttributes(); ++i) {
+    const auto& attrType = selfType->getAttribute(i);
+    if (attrType->is_module()) {
+      submoduleNames.push_back(selfType->getAttributeName(i));
     }
   }
-  throw ErrorReport(loc) << "Could not find any matching overloads\n"
-                         << err.str();
+
+  std::vector<SugaredValuePtr> keys;
+  std::vector<SugaredValuePtr> values;
+  for (const auto& name : submoduleNames) {
+    auto name_v =
+        std::make_shared<SimpleValue>(insertConstant(*m.graph(), name));
+    Value* module_v = m.graph()->insertGetAttr(self_, name);
+    auto mod_v = std::make_shared<ModuleValue>(
+        module_v, concreteType_->findSubmoduleConcreteType(name));
+
+    if (get_keys) {
+      keys.push_back(name_v);
+    }
+    if (get_values) {
+      values.push_back(mod_v);
+    }
+  }
+
+  if (get_keys && !get_values) {
+    return std::make_shared<SugaredTupleValue>(keys);
+  } else if (get_values && !get_keys) {
+    return std::make_shared<SugaredTupleValue>(values);
+  } else if (get_values && get_keys) {
+    auto key_list = std::make_shared<SugaredTupleValue>(keys);
+    auto value_list = std::make_shared<SugaredTupleValue>(values);
+    auto iterator = std::make_shared<IterableTree>();
+    iterator->addChild(loc, m, key_list);
+    iterator->addChild(loc, m, value_list);
+    return iterator->iter(loc, m);
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
+// helper function for instantiating a SugaredValue from an IValue
+std::shared_ptr<SugaredValue> toSugaredValue(
+    const IValue& v,
+    Function& m,
+    const SourceRange& loc) {
+  if (v.isTuple()) {
+    auto tp = v.toTuple();
+    std::vector<Value*> values;
+    values.reserve(tp->elements().size());
+    for (const auto& e: tp->elements()) {
+      values.push_back(toSugaredValue(e, m, loc)->asValue(loc, m));
+    }
+    return toSimple(
+        m.graph()->insertNode(m.graph()->createTuple(values))->output());
+  } else {
+    return toSimple(
+        m.graph()->insertConstant(v, loc));
+  }
+}
+
+// This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  // workaround to make self.training work
-  // it adds a buffer 'training' to the model if one doesn't exist
-  // and then loads that parameter, casting it to bool
-  if (field == "training") {
-    Slot* v = module_->find_buffer(field);
-    if (!v) {
-      bool training = py::cast<bool>(py::getattr(py_module_, "training"));
-      auto t =
-          autograd::make_variable(at::full({}, training ? 1 : 0, at::kLong));
-      module_->register_buffer("training", std::move(t));
-      v = module_->find_buffer(field);
-    }
-    Value* the_tensor = m.graph()->insertGetAttr(self_, "training");
-    Value* the_bool = m.graph()->insert(prim::Bool, {the_tensor});
-    return std::make_shared<SimpleValue>(the_bool);
+  // 1. Look inside script::Module object for the field.
+  const auto& selfType_ = concreteType_->getJitType();
+  if (selfType_->cast<InterfaceType>()) {
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 
-  if (std::shared_ptr<Module> v = module_->find_module(field)) {
+  const auto& selfType = selfType_->expect<ClassType>();
+
+  if (selfType->hasAttribute(field) && selfType->getAttribute(field)->is_module()) {
+    // ...if it's a submodule, return it as a new ModuleValue.
+    const auto submoduleConcreteType =
+        concreteType_->findSubmoduleConcreteType(field);
     return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field),
-        v,
-        py_module_.attr(field.c_str()));
-  } else if (auto kind = module_->kind_of(field)) {
-    // methods, parameters, attributes, and buffers are all first class
-    return SimpleValue(self_).attr(loc, m, field);
+        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+  } else if (selfType->hasAttribute(field) || selfType->getMethod(field)) {
+    // ...otherwise, methods, parameters, attributes, and buffers are all
+    // first class so they get returned as SimpleValues
+    return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
+  } else if (selfType->hasConstant(field)) {
+    auto v = selfType->getConstant(field);
+    return toSugaredValue(v, m, loc);
   }
+
+  // 2. Special case: for module dicts we manually desugar items(), keys(),
+  // values() calls into the appropriate method.
+  // TODO: These could be represented as first class methods probably.
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
+    if (field == "items" || field == "keys" || field == "values") {
+      bool get_keys = false;
+      bool get_values = false;
+      if (field == "items") {
+        get_keys = true;
+        get_values = true;
+      } else if (field == "values") {
+        get_values = true;
+      } else {
+        get_keys = true;
+      }
+      return std::make_shared<ModuleDictMethod>(
+          desugarModuleContainer(get_keys, get_values, loc, m), field);
+    }
+  }
+
+  // 3. Check if this is the name of an overloaded method.
 
   // This can also be a call to a non-script module, or a plain
   // python method. If so return this as a python value.
-
-  py::object overloads =
-      py_module_.attr("_overloads").attr("get")(field, py::none());
-  if (!overloads.is_none()) {
-    return std::make_shared<OverloadedMethodValue>(
-        self_, py::cast<std::vector<std::string>>(overloads));
+  if (const auto overloads = concreteType_->findOverloads(field)) {
+    return std::make_shared<MethodValue>(self_, *overloads);
   }
-  if (!py::hasattr(py_module_, field.c_str())) {
-    throw ErrorReport(loc) << "module has no attribute '" << field;
+
+  // 4. Check if it's a function attribute.
+  if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
+    return std::make_shared<FunctionValue>(*fnAttr);
+  } else if (
+      const auto builtin = concreteType_->findBuiltinFunction(field)) {
+    return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
-  py::object attr = py::getattr(py_module_, field.c_str());
 
-  // HACK: This is used for rnn.py to get all the parameters of a Module as a
-  // List[Tensor]
-  if (py::isinstance<py::function>(attr) &&
-      py::hasattr(attr, "_parameter_names_fn")) {
-    // Fetch the names of the parameters in the list so they're in the
-    // right order
-    auto fn_self = py::getattr(attr, "__self__");
-    auto param_names = py::getattr(attr, "_parameter_names_fn")(fn_self);
-
-    Graph& g = *m.graph();
-    // Add all module parameters as inputs to the graph
-    std::vector<Value*> params;
-    for (auto name : param_names) {
-      params.emplace_back(g.insertGetAttr(self_, py::str(name)));
+  // 5. Check if it's an attribute of the original Python class that this
+  // ScriptModule was derived from. The only class attributes we handle are
+  // methods.
+  py::object unboundMethod = py::getattr(
+      concreteType_->getPyClass(),
+      field.c_str(),
+      pybind11::cast<pybind11::none>(Py_None));
+  if (py::isinstance<py::function>(unboundMethod)) {
+    // For Python methods that we're trying to call directly, we need to bind
+    // the method to a self. (see the documentation for lazy_bind in Python for
+    // more info).
+    bool isIgnoredFn =
+        py::cast<bool>(py::module::import("torch._jit_internal")
+                           .attr("is_ignored_fn")(unboundMethod));
+    if (isIgnoredFn) {
+      // Create a generated ScriptModule type with module_ set as cpp_module
+      auto boundMethod = py::module::import("torch.jit._recursive")
+                             .attr("lazy_bind")(concreteType_, unboundMethod);
+      TORCH_CHECK(py::isinstance<py::function>(boundMethod));
+      auto rcb =
+          py::module::import("torch._jit_internal")
+              .attr("createResolutionCallbackFromClosure")(unboundMethod);
+      return std::make_shared<PythonValue>(boundMethod, rcb, self_);
     }
-    auto list = g.insertNode(g.createTuple(params))->output();
-    return std::make_shared<ConstantParameterList>(list);
+
+    // If we reach here, it's because this is a "normal" method that just hasn't
+    // been compiled yet (directly exported methods would have been returned by
+    // step 1). Just compile it.
+    auto stub =
+        py::module::import("torch.jit._recursive")
+            .attr("compile_unbound_method")(concreteType_, unboundMethod);
+    TORCH_INTERNAL_ASSERT(!stub.is_none());
+    // Look up the attribute again, it will be available as a compiled method.
+    return attr(loc, m, field);
   }
 
-  // If recursive script mode is on, create a ScriptModule and register it as
-  // as submodule or register a python method as a script::Method
-  if (getRecursiveScriptMode()) {
-    if (py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
-      // If the module is a submodule of the py_module, convert it to a
-      // ScriptModule and add it as a submodule to the script::Module. This
-      // enables lazy strong-ification of modules.
-      auto result =
-          py::module::import("torch.jit")
-              .attr("_make_strong_submodule")(field, attr, py_module_);
-      if (!result.is_none()) {
-        auto submodule = as_module(result);
-        AT_CHECK(
-            submodule,
-            "Result of torch.jit._make_strong_submodule "
-            "was not a ScriptModule");
-        // The module was a submodule of the nn.Module, so register it here
-        // and return the submodule.
-        module_->register_module(field, submodule);
-        auto v = module_->find_module(field);
-        return std::make_shared<ModuleValue>(
-            m.graph()->insertGetAttr(self_, field), v, attr);
-      }
-    } else if (py::isinstance<py::function>(attr)) {
-      auto stub = py::module::import("torch.jit")
-                      .attr("_create_method_from_fn")(py_module_, attr);
-      if (!stub.is_none()) {
-        return SimpleValue(self_).attr(loc, m, field);
-      }
-    }
+  // We've exhausted all possibilities. Bailout with a hint to the user.
+  std::string hint;
+  if (auto failureReason = concreteType_->findFailedAttribute(field)) {
+    hint = *failureReason;
   }
 
-  if (py::isinstance<py::function>(attr) ||
-      py::isinstance(attr, py::module::import("torch.nn").attr("Module")) ||
-      py_module_.attr("_constants_set").contains(field.c_str())) {
-    return toSugaredValue(attr, m, loc, true);
-  }
-  std::string hint = "did you forget to add it __constants__?";
-  if (py::isinstance(attr, py::module::import("torch").attr("Tensor"))) {
-    hint = "Tensors must be added to a module as a buffer or parameter";
-  }
-  throw ErrorReport(loc) << "attribute '" << field << "' of type '"
-                         << typeString(attr)
-                         << "' is not usable in a script method (" << hint
-                         << ")";
+  throw ErrorReport(loc) << "Module '" << selfType->name()->name() << "'"
+                         << " has no attribute '" << field << "' " << hint;
 }
 
-std::vector<std::shared_ptr<SugaredValue>> ModuleValue::asTuple(
-    const SourceRange& loc,
-    Function& m,
-    const c10::optional<size_t>& size_hint) {
-  if (!py::isinstance(
-          py_module_, py::module::import("torch.jit").attr("_ConstModuleList")))
-    return SugaredValue::asTuple(loc, m, size_hint);
-  std::vector<std::shared_ptr<SugaredValue>> result;
-  for (py::handle py_submodule : py_module_) {
-    py::object obj = py::reinterpret_borrow<py::object>(py_submodule);
-    if (auto sub_module = as_module(obj)) {
-      Value* module_v = m.graph()->insertGetAttr(self_, sub_module->name());
-      result.emplace_back(
-          std::make_shared<ModuleValue>(module_v, sub_module, obj));
-    } else {
-      result.push_back(toSugaredValue(
-          obj,
-          m,
-          loc,
-          /*is_constant =*/false));
-    }
+SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
+  const auto iterableModuleKind = concreteType_->getIterableModuleKind();
+  if (iterableModuleKind == IterableModuleKind::NONE) {
+    throw ErrorReport(loc)
+        << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
-  return result;
+
+  // iterating over a dictionary returns the keys, iterating over a
+  // list returns the values
+  const bool get_keys = iterableModuleKind == IterableModuleKind::DICT;
+  const bool get_values = iterableModuleKind == IterableModuleKind::LIST;
+  return desugarModuleContainer(get_keys, get_values, loc, m);
+}
+
+std::shared_ptr<SugaredValue> PythonClassValue::attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
+  // Resolve values from the Python object first (e.g. for static methods on
+  // this type, resolve them as functions)
+  auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
+  if (!py_attr.is_none()) {
+    return toSugaredValue(py_attr, m, loc);
+  }
+
+  return ClassValue::attr(loc, m, field);
 }
 
 void ModuleValue::setAttr(
@@ -402,19 +446,25 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   auto index = py::cast<size_t>(dispatched_fn_["index"]);
   auto arg_name = py::str(dispatched_fn_["arg_name"]);
 
+  ErrorReport error(loc);
   if (index < inputs.size()) {
     // Dispatch flag is in arg list
     result = constant_as<bool>(inputs.at(index).value(graph));
+    error << "Argument for boolean dispatch at position " << index
+          << " was not constant";
   } else if (auto i = findInputWithName(arg_name, attributes)) {
     // Dispatch flag is in kwargs
     result = constant_as<bool>(attributes[*i].value(graph));
+    error << "Keyword argument '" << arg_name
+          << "' for boolean dispatch at position was not constant";
   } else {
     // Didn't find dispatch flag, so use default value
     result = py::cast<bool>(dispatched_fn_["default"]);
+    TORCH_INTERNAL_ASSERT(result);
   }
 
   if (!result) {
-    throw ErrorReport(loc) << "value for boolean dispatch was not constant";
+    throw error;
   }
 
   std::shared_ptr<SugaredValue> value;
@@ -425,11 +475,13 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   }
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
     bool is_constant) {
+
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -438,46 +490,60 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto& g = *m.graph();
   if (is_constant) {
     if (py::isinstance<py::bool_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<bool>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<bool>(obj), loc));
     } else if (py::isinstance<py::int_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<int64_t>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<int64_t>(obj), loc));
     } else if (py::isinstance<py::float_>(obj)) {
-      return toSimple(g.insertConstant(py::cast<double>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<double>(obj), loc));
     } else if (py::isinstance<py::str>(obj)) {
-      return toSimple(
-          g.insertConstant(py::cast<std::string>(obj), nullptr, loc));
+      return toSimple(g.insertConstant(py::cast<std::string>(obj), loc));
     } else if (obj.is(py::none())) {
-      return toSimple(g.insertConstant(IValue(), nullptr, loc));
+      return toSimple(g.insertConstant(IValue(), loc));
     } else if (THPDevice_Check(obj.ptr())) {
       auto device = reinterpret_cast<THPDevice*>(obj.ptr());
       return toSimple(g.insertConstant(device->device));
     } else if (THPLayout_Check(obj.ptr())) {
       auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPMemoryFormat_Check(obj.ptr())) {
+      auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+      const auto v = static_cast<int64_t>(memory_format->memory_format);
+      return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(g.insertConstant(v, nullptr, loc));
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPQScheme_Check(obj.ptr())) {
+      auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
+      const auto v = static_cast<uint8_t>(qscheme->qscheme);
+      return toSimple(g.insertConstant(v, loc));
+    } else if (THPLayout_Check(obj.ptr())) {
+      auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
+      const auto l = static_cast<int8_t>(layout->layout);
+      return toSimple(g.insertConstant(l, loc));
     } else if (py::isinstance<py::tuple>(obj)) {
-      return std::make_shared<ConstantPythonTupleValue>(obj);
+      py::tuple tup = obj;
+      std::vector<Value*> values;
+      values.reserve(tup.size());
+      for (py::handle t : tup) {
+        py::object obj = py::reinterpret_borrow<py::object>(t);
+        values.push_back(toSugaredValue(obj, m, loc, true)->asValue(loc, m));
+      }
+      return toSimple(
+          m.graph()->insertNode(m.graph()->createTuple(values))->output());
     }
   }
 
-  auto weak_obj =
-      py::module::import("torch.jit").attr("_try_get_weak_module")(obj);
-  if (!weak_obj.is_none()) {
-    obj = weak_obj;
-  }
   if (auto callee = as_function(obj)) {
-    return std::make_shared<FunctionValue>(callee);
+    return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {
-    return std::make_shared<ForkValue>();
+    return SpecialFormValue::create(prim::fork);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
-    return std::make_shared<AnnotateValue>();
+    return SpecialFormValue::create(prim::annotate);
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
@@ -491,10 +557,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (py::isinstance<py::function>(obj)) {
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_weak_script")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
+    if (typeString(obj) == "builtin_function_or_method") {
+      throw ErrorReport(loc) << "Python builtin " << py::str(obj)
+                             << " is currently not supported in Torchscript";
     }
   }
 
@@ -504,36 +569,81 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return std::make_shared<BooleanDispatchValue>(std::move(dispatched_fn));
   }
 
+  if (py::isinstance<ScriptClass>(obj)) {
+    auto script_class = py::cast<ScriptClass>(obj);
+    return std::make_shared<PythonClassValue>(
+        script_class.class_type_.type_, obj);
+  }
+
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
   if (py::cast<bool>(isClass)) {
     py::str qualifiedName =
         py::module::import("torch.jit").attr("_qualified_name")(obj);
-    auto& pyCu = CompilationUnit::_get_python_cu();
-    if (auto classType = pyCu.get_class(c10::QualifiedName(qualifiedName))) {
-      return std::make_shared<ClassValue>(classType);
-    }
-    // Use a heuristic here to identify NamedTuple instances:
-    // 1) must be a subclass of tuple
-    // 2) Has an attribute "_fields"
-    auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
-    if (PyObject_IsSubclass(obj.ptr(), tuple_type) &&
-        py::hasattr(obj, "_fields")) {
-      throw ErrorReport(loc)
-          << "NamedTuple is currently not supported in TorchScript";
+    auto pyCu = get_python_cu();
+    auto qualname = c10::QualifiedName(qualifiedName);
+    if (auto classType = pyCu->get_class(qualname)) {
+      return std::make_shared<PythonClassValue>(classType, obj);
+    } else {
+      // If we can't get the source code for the type, it's implemented in C and
+      // probably part of the standard library, so give up and leave it as a
+      // call to Python
+      bool can_compile_class =
+          py::cast<bool>(py::module::import("torch._jit_internal")
+                             .attr("can_compile_class")(obj));
+      if (can_compile_class) {
+        // Register class
+        auto rcb = py::module::import("torch._jit_internal")
+                       .attr("createResolutionCallbackForClassMethods")(obj);
+
+        {
+          // We're starting a new compilation, so update the error call stack in
+          // case it fails
+          ErrorReport::CallStack stack(qualname.name());
+          ErrorReport::CallStack::update_pending_range(loc);
+
+          py::module::import("torch.jit")
+              .attr("_compile_and_register_class")(obj, rcb, qualifiedName);
+        }
+
+        // Return class
+        auto newClassType = pyCu->get_class(qualname);
+        AT_ASSERT(
+            newClassType,
+            "Class '",
+            qualifiedName,
+            "' should have been compiled but was not");
+        return std::make_shared<PythonClassValue>(newClassType, obj);
+      }
     }
   }
 
-  if (getRecursiveScriptMode() && py::isinstance<py::function>(obj)) {
-    auto compiled_fn =
-        py::module::import("torch.jit").attr("_try_compile_fn")(obj);
-    if (auto callee = as_function(compiled_fn)) {
-      return std::make_shared<FunctionValue>(callee);
+  py::bool_ isFunction = py::module::import("inspect").attr("isfunction")(obj);
+  if (py::cast<bool>(isFunction)) {
+    auto overloads =
+        py::module::import("torch.jit").attr("_get_overloads")(obj);
+    if (!overloads.is_none()) {
+      auto compiled_fns = py::cast<std::vector<StrongFunctionPtr>>(overloads);
+      return std::make_shared<FunctionValue>(std::move(compiled_fns));
     }
+
+    auto compiled_fn =
+        py::module::import("torch.jit._recursive").attr("try_compile_fn")(obj, loc);
+    if (auto callee = as_function(compiled_fn)) {
+      return std::make_shared<FunctionValue>(*callee);
+    }
+  }
+
+  py::bool_ isMethod = py::module::import("inspect").attr("ismethod")(obj);
+  // methods here have been explicitly annotated to not be compiled,
+  // so they do not have the same overload and compile checks as for functions
+  if (isFunction || isMethod) {
+    auto rcb = py::module::import("torch._jit_internal")
+                   .attr("createResolutionCallbackFromClosure")(obj);
+    return std::make_shared<PythonValue>(obj, rcb);
   }
 
   return std::make_shared<PythonValue>(obj);
 }
-
 } // namespace script
 } // namespace jit
 } // namespace torch

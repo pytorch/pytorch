@@ -3,7 +3,15 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
+#ifdef __HIP_PLATFORM_HCC__
+#include <cfloat>
+#endif
+
+#ifdef __HIP_PLATFORM_HCC__
+namespace rocprim {
+#else
 namespace cub {
+#endif
 
 template <typename KeyT, typename ValueT>
 inline __host__ __device__ bool operator<(

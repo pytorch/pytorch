@@ -52,6 +52,9 @@ class ProcessGroup {
     // Returns source rank if this objects represents a recv-from-any.
     virtual int sourceRank() const;
 
+    // Returns result tensors, if applicable.
+    virtual std::vector<at::Tensor> result() const;
+
     // Ensures that operations on the output tensors that are invoked
     // after this function returns are correctly sequenced after the
     // asynchronous completion of this work.
@@ -70,6 +73,8 @@ class ProcessGroup {
 
     // Waits until request completes. Blocking operation.
     // Throws if the work completed with an exception.
+    // Returns false if the work is aborted.
+    // Otherwise, it always returns true, indicating the work is completed.
     //
     // Functionally equivalent to:
     //
@@ -78,7 +83,9 @@ class ProcessGroup {
     //   if (!success) { std::rethrow_exception(exception()); }
     //   return success;
     //
-    virtual void wait();
+    virtual bool wait();
+
+    virtual void abort();
 
    protected:
     void finish(std::exception_ptr exception = nullptr);
@@ -108,6 +115,12 @@ class ProcessGroup {
       std::vector<at::Tensor>& data,
       const AllreduceOptions& opts = AllreduceOptions()) = 0;
 
+  // This will be moved out of ProcessGroup, do not add dependencies on this
+  // function.
+  virtual std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) = 0;
+
   virtual std::shared_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) = 0;
@@ -116,6 +129,23 @@ class ProcessGroup {
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) = 0;
+
+  // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
+  // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
+  // For implementers of ProcessGroup API and advanced users only.
+  virtual std::shared_ptr<ProcessGroup::Work> allgather_base(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) = 0;
+
+  // This function is deprecated and will be moved out of ProcessGroup to comms:
+  // * do not add dependencies on this function,
+  // * do not implement it in your ProcessGroup, implement allgather_base
+  //   instead.
+  virtual std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions());
 
   virtual std::shared_ptr<ProcessGroup::Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,

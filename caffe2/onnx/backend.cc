@@ -349,10 +349,12 @@ Caffe2Backend::get_special_operators() const {
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
+              {"Int8Reshape", &Caffe2Backend::CreateReshape},
               {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
               {"Pad", &Caffe2Backend::CreatePad},
               {"Concat", &Caffe2Backend::CreateConcat},
+              {"Int8Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
               {"Split", &Caffe2Backend::CreateSplit},
@@ -365,7 +367,9 @@ Caffe2Backend::get_special_operators() const {
               {"DynamicSlice", &Caffe2Backend::CreateDynamicSlice},
               {"RandomNormal", &Caffe2Backend::CreateRandomNormal},
               {"RandomNormalLike", &Caffe2Backend::CreateRandomNormal},
-              {"Where", &Caffe2Backend::CreateWhereOp}};
+              {"Where", &Caffe2Backend::CreateWhereOp},
+              {"NonZero", &Caffe2Backend::CreateNonZeroOp},
+              {"Multinomial", &Caffe2Backend::CreateMultinomialOp}};
   return kSpecialOperators;
 }
 
@@ -596,6 +600,83 @@ Caffe2Ops Caffe2Backend::CreateWhereOp(
   attr->set_s("where");
   OnnxNode new_node(converted);
   return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+}
+
+Caffe2Ops Caffe2Backend::CreateNonZeroOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Native Caffe2 doesn't support NonZero, fallback to ATen.
+  // ATen nonzero is equivalent to Transpose(ONNX::NonZero).
+  onnx::NodeProto converted;
+  converted.CopyFrom(onnx_node->node);
+
+  auto nonzero_output = dummy_->NewDummyName();
+  converted.set_output(0, nonzero_output);
+  converted.set_op_type("ATen");
+  onnx::AttributeProto* attr = converted.add_attribute();
+  attr->set_name("operator");
+  attr->set_s("nonzero");
+  OnnxNode new_node(converted);
+  auto ret = CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
+
+  auto* c2_transpose = ret.ops.Add();
+  BuildOperator(c2_transpose, "Transpose", {nonzero_output}, {onnx_node->node.output(0)});
+  return ret;
+}
+
+Caffe2Ops Caffe2Backend::CreateMultinomialOp(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  // Fallback to ATen.
+  // ATen::Multinomial takes probabilities as input, ONNX Multinomial expects input to be log probabilities.
+  Caffe2Ops ret;
+  auto c2_exp_output = dummy_->NewDummyName();
+  auto* c2_exp = ret.ops.Add();
+  BuildOperator(c2_exp, "Exp", {onnx_node->node.input(0)}, {c2_exp_output});
+
+  auto* c2_multinomial = ret.ops.Add();
+  caffe2::Argument c2_arg_op;
+  c2_arg_op.set_name("operator");
+  c2_arg_op.set_s("multinomial");
+  // ONNX Multinomial only supports replacement=True.
+  caffe2::Argument c2_arg_rep;
+  c2_arg_rep.set_name("replacement");
+  c2_arg_rep.set_i(1);
+  auto& onnx_attributes = onnx_node->attributes;
+  caffe2::Argument c2_arg_num;
+  c2_arg_num.set_name("num_samples");
+  c2_arg_num.set_i(onnx_attributes.get<int64_t>("sample_size"));
+
+  // ONNX Multinomial has attribute dtype in {int64, int32}, which specifies output datatype.
+  // ATen::Multinomial output dtype is always int64.
+  auto onnx_dtype =
+    onnx_attributes.get<int64_t>("dtype", TensorProto::UNDEFINED);
+  if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT64) {
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {onnx_node->node.output(0)},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+  } else if (onnx_dtype == ::ONNX_NAMESPACE::TensorProto::INT32) {
+    auto c2_multinomial_output = dummy_->NewDummyName();
+    BuildOperator(
+        c2_multinomial,
+        "ATen",
+        {c2_exp_output},
+        {c2_multinomial_output},
+        {c2_arg_op, c2_arg_rep, c2_arg_num});
+
+    auto* c2_cast = ret.ops.Add();
+    caffe2::Argument to;
+    to.set_name("to");
+    to.set_i(caffe2::TensorProto::INT32);
+    BuildOperator(c2_cast, "Cast", {c2_multinomial_output}, {onnx_node->node.output(0)}, {to});
+  } else {
+    CAFFE_THROW("ONNX does not support dtype other than int32/int64 in Multinomial, but get ", onnx_dtype);
+  }
+
+  return ret;
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
@@ -1081,7 +1162,7 @@ Caffe2Ops Caffe2Backend::CreateDynamicSlice(
   // Axes tensor will be used to populate the fully-specified starts and ends
   // arguments to the caffe2 Slice operator.
   std::string axes_tensor;
-  if (onnx_node->node.input_size() > 2) {
+  if (onnx_node->node.input_size() > 3) {
     axes_tensor = onnx_node->node.input(3);
   } else {
     axes_tensor = dummy_->NewDummyName();
@@ -1576,7 +1657,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
     }
   }
 
-  // TODO: avoid extra copy by directly feed initialiers to backend blobs
+  // TODO: avoid extra copy by directly feed initializers to backend blobs
   OnnxToCaffe2(
       &rep->init_net(),
       &rep->pred_net(),

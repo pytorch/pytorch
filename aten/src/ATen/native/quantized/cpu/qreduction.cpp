@@ -1,0 +1,141 @@
+#include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+
+namespace at {
+namespace native {
+#ifdef USE_PYTORCH_QNNPACK
+Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
+  Tensor output;
+  TORCH_CHECK(
+      input.ndimension() == 4,
+      "qnnpack_global_average_pool: Expected input to be 4-dimensional: got ",
+      input.ndimension());
+  TORCH_CHECK(
+      dim.size() == 2,
+      "qnnpack_global_average_pool: dim size must be a tuple of two ints");
+  TORCH_CHECK(
+      dim[0] == 2 && dim[1] == 3,
+      "qnnpack_global_average_pool: Reduction dimensions must match last 2 dimensions of input tensor")
+
+  const int64_t batch_size = input.size(0);
+  const int64_t inC = input.size(1);
+  const int64_t inH = input.size(2);
+  const int64_t inW = input.size(3);
+
+  // TODO: change it to contiguous(MemoryFormat::ChannelsLast) once a perf
+  // regression of it is fixed. Today it's equivalent because `input` sizes
+  // are not used below
+  Tensor input_contig = input.permute({0, 2, 3, 1}).contiguous();
+
+  initQNNPACK();
+  const auto scale = input_contig.q_scale();
+  const auto zero_point = input_contig.q_zero_point();
+
+  const auto outC = inC;
+  output = at::_empty_affine_quantized(
+      {batch_size, outC}, at::device(kCPU).dtype(kQUInt8), scale, zero_point);
+  pytorch_qnnp_operator_t qnnpack_operator{nullptr};
+  const pytorch_qnnp_status createStatus =
+      pytorch_qnnp_create_global_average_pooling_nwc_q8(
+          inC,
+          zero_point,
+          scale,
+          zero_point,
+          scale,
+          std::numeric_limits<uint8_t>::min() /* output min */,
+          std::numeric_limits<uint8_t>::max() /* output max */,
+          0,
+          &qnnpack_operator);
+
+  CAFFE_ENFORCE(
+      createStatus == pytorch_qnnp_status_success,
+      "failed to create QNNPACK Global Average Pooling operator");
+  std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
+      qnnpack_uniq_ptr(qnnpack_operator);
+
+  const pytorch_qnnp_status setupStatus =
+      pytorch_qnnp_setup_global_average_pooling_nwc_q8(
+          qnnpack_operator,
+          batch_size,
+          inH * inW,
+          (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+          inC,
+          (uint8_t*)output.data_ptr<c10::quint8>() /* output data */,
+          outC);
+  CAFFE_ENFORCE(
+      setupStatus == pytorch_qnnp_status_success,
+      "failed to setup QNNPACK Global Average Pooling operator");
+  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  const pytorch_qnnp_status runStatus =
+      pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
+  TORCH_INTERNAL_ASSERT(
+      runStatus == pytorch_qnnp_status_success,
+      "failed to run QNNPACK Global Average Pool operator");
+  return output;
+}
+#endif
+Tensor& quantized_mean_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype) {
+#ifdef USE_PYTORCH_QNNPACK
+  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+      self.scalar_type() == kQUInt8) {
+    result = qnnpack_mean(self, dim);
+    return result;
+  }
+#endif
+  auto self_dequantized = self.dequantize();
+  auto result_dequantized =
+      at::native::mean_cpu_gpu(self_dequantized, dim, keepdim, opt_dtype);
+  result = at::quantize_per_tensor(
+      result_dequantized,
+      self.q_scale(),
+      self.q_zero_point(),
+      opt_dtype.value_or(self.scalar_type()));
+  return result;
+}
+
+Tensor quantized_mean_cpu(const Tensor& self, optional<ScalarType> dtype) {
+  Tensor result;
+  quantized_mean_out_cpu(result, self, IntArrayRef{}, false, dtype);
+  return result;
+}
+
+Tensor quantized_mean_cpu(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  Tensor result;
+  quantized_mean_out_cpu(result, self, dim, keepdim, dtype);
+  return result;
+}
+
+Tensor quantized_mean_cpu(
+    const Tensor& self,
+    DimnameList dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  return quantized_mean_cpu(
+      self, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor& quantized_mean_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    DimnameList dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype) {
+  return quantized_mean_out_cpu(
+      result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+} // namespace native
+} // namespace at

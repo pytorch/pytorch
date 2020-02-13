@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THC.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <nccl.h>
@@ -18,7 +19,7 @@ namespace nccl {
 // Don't use them outside of these files.
 namespace detail {
 
-void throw_nccl_error(ncclResult_t status);
+TORCH_CUDA_API void throw_nccl_error(ncclResult_t status);
 
 static inline void NCCL_CHECK(ncclResult_t status) {
   if (status != ncclSuccess) {
@@ -28,6 +29,7 @@ static inline void NCCL_CHECK(ncclResult_t status) {
 
 struct AutoNcclGroup {
   AutoNcclGroup() {
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupStart());
 #endif
@@ -36,34 +38,35 @@ struct AutoNcclGroup {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclGroupEnd());
 #endif
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
   }
 };
 
-at::ArrayRef<ncclComm_t> _get_communicators(at::TensorList inputs);
-void _check_inputs(
+TORCH_CUDA_API at::ArrayRef<ncclComm_t> get_communicators(at::TensorList inputs);
+TORCH_CUDA_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
     int input_multiplier,
     int output_multiplier);
-ncclDataType_t _get_data_type(const at::Tensor& t);
+TORCH_CUDA_API ncclDataType_t get_data_type(const at::Tensor& t);
 
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
 using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
 
-std::uint64_t version();
+TORCH_CUDA_API std::uint64_t version();
 
 bool is_available(at::TensorList tensors);
 
-void broadcast(
+TORCH_CUDA_API void broadcast(
     at::TensorList tensors,
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
 size_t get_max_count();
 
-void reduce(
+TORCH_CUDA_API void reduce(
     const std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
     int32_t root = 0,
@@ -71,7 +74,7 @@ void reduce(
     const stream_list& streams = {},
     const comm_list& user_comms = {});
 
-void reduce(
+TORCH_CUDA_API void reduce(
     std::vector<at::Tensor>& inputs,
     int32_t root = 0,
     int32_t op = ncclSum,

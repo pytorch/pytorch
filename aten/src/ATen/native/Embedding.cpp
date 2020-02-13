@@ -85,7 +85,7 @@ Tensor embedding_dense_backward_cpu(
   checkScalarType("embedding_backward", indices_arg, kLong);
 
   auto indices_contig = indices.contiguous();
-  auto indices_data = indices_contig.data<int64_t>();
+  auto indices_data = indices_contig.data_ptr<int64_t>();
   int64_t numel = indices.numel();
 
   std::unique_ptr<int64_t[]> counts;
@@ -140,23 +140,23 @@ Tensor & embedding_renorm_cpu_(
   auto indices_contig = indices.contiguous();
 
   auto num_indices = indices.numel();
-  auto data_ptr = indices_contig.data<int64_t>();
+  auto data_ptr = indices_contig.data_ptr<int64_t>();
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 
-  at::parallel_for(0, num_indices, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
-        continue;
-      }
-      auto row = self[sorted_indices[i]];
-      auto norm = row.norm(norm_type).item<double>();
-      if (norm > max_norm) {
-        auto scale = max_norm / (norm + 1e-7);
-        row *= scale;
-      }
+  // Note that we cannot use at::parallel_for here because we perform operations on
+  // Tensor inside the loop. See github.com/pytorch/pytorch/issues/28370 for more details.
+  for (auto i = 0; i < num_indices; i++) {
+    if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
+      continue;
     }
-  });
+    auto row = self[sorted_indices[i]];
+    auto norm = row.norm(norm_type).item<double>();
+    if (norm > max_norm) {
+      auto scale = max_norm / (norm + 1e-7);
+      row *= scale;
+    }
+  }
 
   return self;
 }

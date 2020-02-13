@@ -31,7 +31,7 @@ struct CAFFE2_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&);
+  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
@@ -41,15 +41,13 @@ public:
   Tensor values() const { return values_; }
 
   IntArrayRef strides() const override;
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const override;
+  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   int64_t stride(int64_t d) const override;
-  void resize_dim(int64_t ndim) override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;
@@ -57,7 +55,7 @@ public:
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values
   void raw_resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "raw_resize_ is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "raw_resize_ ", err_msg_tensor_metadata_change_not_allowed);
     sizes_ = size.vec();
     sparse_dim_ = sparse_dim;
     dense_dim_ = dense_dim;
@@ -87,7 +85,7 @@ public:
   // 4. When we attempt to shrink the size of any of the sparse dimensions on a non-empty sparse tensor
   // (this could make some of the stored indices out-of-bound and thus unsafe).
   void resize_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_ is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "resize_ ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
     if (nnz() > 0) {
       auto alt_options_msg = "You could try the following options:\n\
@@ -145,7 +143,7 @@ public:
 
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   void resize_and_clear_(int64_t sparse_dim, int64_t dense_dim, IntArrayRef size) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "resize_and_clear_ ", err_msg_tensor_metadata_change_not_allowed);
     TORCH_CHECK(sparse_dim + dense_dim == static_cast<int64_t>(size.size()), "number of dimensions must be sparse_dim (", sparse_dim, ") + dense_dim (", dense_dim, "), but got ", size.size());
 
     sizes_ = size.vec();
@@ -162,13 +160,13 @@ public:
   }
 
   void set_coalesced(bool coalesced) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_coalesced is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_coalesced ", err_msg_tensor_metadata_change_not_allowed);
     coalesced_ = coalesced;
   }
 
   // NOTE: this function is only used internally and not exposed to Python frontend
   void set_nnz_and_narrow(int64_t new_nnz) {
-    TORCH_CHECK(allow_tensor_metadata_change(), "set_nnz_and_narrow is not allowed on Tensor created from .data or .detach()");
+    TORCH_CHECK(allow_tensor_metadata_change(), "set_nnz_and_narrow ", err_msg_tensor_metadata_change_not_allowed);
     AT_ASSERT(new_nnz <= nnz());
     indices_ = indices_.narrow(1, 0, new_nnz);
     values_ = values_.narrow(0, 0, new_nnz);
@@ -192,8 +190,8 @@ public:
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseTensorImpl>(type_id(), dtype());
-    copy_tensor_data(
+    auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
+    copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/version_counter,
@@ -209,9 +207,9 @@ public:
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(typeid(*(impl.get())) == typeid(SparseTensorImpl));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
-    copy_tensor_data(
+    copy_tensor_metadata(
       /*src_impl=*/sparse_impl,
       /*dest_impl=*/this,
       /*version_counter=*/version_counter(),
@@ -219,20 +217,20 @@ public:
     refresh_numel();
   }
 private:
-    explicit SparseTensorImpl(at::TensorTypeId, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+    explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 
   /**
-   * Copy the storage pointer and the tensor metadata fields (e.g. sizes / strides / storage_offset)
+   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)
    * from one TensorImpl to another TensorImpl.
    *
    * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE [ TensorImpl Shallow-Copying ].
    */
-  static void copy_tensor_data(
+  static void copy_tensor_metadata(
       const SparseTensorImpl* src_sparse_impl,
       SparseTensorImpl* dest_sparse_impl,
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) {
-    TensorImpl::copy_tensor_data(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
+    TensorImpl::copy_tensor_metadata(src_sparse_impl, dest_sparse_impl, version_counter, allow_tensor_metadata_change);
 
     // Sparse-specific fields
     dest_sparse_impl->sparse_dim_ = src_sparse_impl->sparse_dim();

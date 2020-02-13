@@ -1,8 +1,4 @@
 #pragma once
-#include <ATen/ATen.h>
-#include <ATen/core/ivalue.h>
-
-#include <c10/core/thread_pool.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -12,19 +8,27 @@
 
 namespace at {
 namespace internal {
-// internal function to get access to intra-op thread pool from
-// template parallel primitives (parallel_for, parallel_reduce)
-CAFFE2_API TaskThreadPoolBase& _get_intraop_pool();
 
-// internal utility function to mark master thread as in parallel
-// region when executing parallel primitives
-CAFFE2_API void _set_in_parallel_region(bool);
-
-// Simulate OMP's omp_get_thread_num() by force-setting thread local
-// task id as thread number when executing parallel primitives
-CAFFE2_API void _set_thread_num(size_t thread_num);
-CAFFE2_API void _unset_thread_num();
+inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
+    int64_t begin, int64_t end, int64_t grain_size) {
+  if ((end - begin) < grain_size) {
+    return std::make_tuple(1, std::max((int64_t)0, end - begin));
+  }
+  // Choose number of tasks based on grain size and number of threads.
+  size_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max((size_t)grain_size, chunk_size);
+  size_t num_tasks = divup((end - begin), chunk_size);
+  return std::make_tuple(num_tasks, chunk_size);
 }
+
+CAFFE2_API void _parallel_run(
+  const int64_t begin,
+  const int64_t end,
+  const int64_t grain_size,
+  const std::function<void(int64_t, int64_t, size_t)>& f);
+
+} // namespace internal
 
 template <class F>
 inline void parallel_for(
@@ -36,64 +40,18 @@ inline void parallel_for(
   if (begin >= end) {
     return;
   }
-
-  if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    // choose number of tasks based on grain size and number of threads
-    size_t chunk_size = divup((end - begin), get_num_threads());
-    // make sure each task is at least grain_size size
-    chunk_size = std::max((size_t)grain_size, chunk_size);
-    size_t num_tasks = divup((end - begin), chunk_size);
-
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-    auto task = [f, &eptr, &err_flag]
-        (int64_t task_id, int64_t local_start, int64_t local_end) {
-      internal::_set_thread_num(task_id);
-      internal::_set_in_parallel_region(true);
-      try {
-        f(local_start, local_end);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
-      internal::_set_in_parallel_region(false);
-      internal::_unset_thread_num();
-    };
-
-    // using shared_ptr to share ownership of the future with the lambda,
-    // to ensure we don't destroy future while lambda is still
-    // running in markCompleted
-    std::vector<std::shared_ptr<ivalue::Future>> futures(num_tasks);
-    for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id] = std::make_shared<ivalue::Future>();
-      auto future_ptr = futures[task_id];
-      int64_t local_start = begin + task_id * chunk_size;
-      if (local_start < end) {
-        int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
-        internal::_get_intraop_pool().run(
-            // copy future_ptr, task_id, local_start, local_end
-            [task, future_ptr, task_id, local_start, local_end]() {
-          task(task_id, local_start, local_end);
-          future_ptr->markCompleted(IValue());
-        });
-      } else {
-        future_ptr->markCompleted(IValue());
-      }
-    }
-
-    int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
-    task(0, begin, first_task_end);
-    // wait for all tasks to finish
-    for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id]->wait();
-    }
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    }
-  } else {
+  if ((end - begin) < grain_size || in_parallel_region()) {
     f(begin, end);
+    return;
   }
+  internal::_parallel_run(
+      begin,
+      end,
+      grain_size,
+      [f](int64_t start, int64_t end, size_t /* unused */) {
+        f(start, end);
+      }
+  );
 }
 
 template <class scalar_t, class F, class SF>
@@ -108,66 +66,27 @@ inline scalar_t parallel_reduce(
   if (begin >= end) {
     return ident;
   }
-
-  if (((end - begin) >= grain_size) && !in_parallel_region()) {
-    size_t chunk_size = divup((end - begin), get_num_threads());
-    chunk_size = std::max((size_t)grain_size, chunk_size);
-    size_t num_tasks = divup((end - begin), chunk_size);
-    std::vector<scalar_t> results(num_tasks);
-    scalar_t* results_data = results.data();
-
-    std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
-    std::exception_ptr eptr;
-    auto task = [f, ident, results_data, &eptr, &err_flag]
-        (int64_t task_id, int64_t local_start, int64_t local_end) {
-      internal::_set_thread_num(task_id);
-      internal::_set_in_parallel_region(true);
-      try {
-        results_data[task_id] = f(local_start, local_end, ident);
-      } catch (...) {
-        if (!err_flag.test_and_set()) {
-          eptr = std::current_exception();
-        }
-      }
-      internal::_set_in_parallel_region(false);
-      internal::_unset_thread_num();
-    };
-
-    std::vector<std::shared_ptr<ivalue::Future>> futures(num_tasks);
-    for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id] = std::make_shared<ivalue::Future>();
-      auto future_ptr = futures[task_id];
-      int64_t local_start = begin + task_id * chunk_size;
-      if (local_start < end) {
-        int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
-        internal::_get_intraop_pool().run(
-            // copy future_ptr, task_id, local_start, local_end
-            [&, future_ptr, task_id, local_start, local_end]() {
-          task(task_id, local_start, local_end);
-          future_ptr->markCompleted(IValue());
-        });
-      } else {
-        future_ptr->markCompleted(IValue());
-      }
-    }
-
-    int64_t first_task_end = std::min(end, (int64_t)(chunk_size + begin));
-    task(0, begin, first_task_end);
-    for (size_t task_id = 1; task_id < num_tasks; ++task_id) {
-      futures[task_id]->wait();
-    }
-    if (eptr) {
-      std::rethrow_exception(eptr);
-    }
-
-    scalar_t result = ident;
-    for (auto partial_result : results) {
-      result = sf(result, partial_result);
-    }
-    return result;
-  } else {
+  if ((end - begin) < grain_size || in_parallel_region()) {
     return f(begin, end, ident);
   }
+  size_t num_tasks, chunk_size;
+  std::tie(num_tasks, chunk_size) =
+      internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
+  std::vector<scalar_t> results(num_tasks);
+  scalar_t* results_data = results.data();
+  internal::_parallel_run(
+      begin,
+      end,
+      grain_size,
+      [f, ident, results_data](int64_t start, int64_t end, size_t task_id) {
+        results_data[task_id] = f(start, end, ident);
+      }
+  );
+  scalar_t result = ident;
+  for (auto partial_result : results) {
+    result = sf(result, partial_result);
+  }
+  return result;
 }
 
 } // namespace at

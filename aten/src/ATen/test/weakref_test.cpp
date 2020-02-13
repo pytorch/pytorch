@@ -1,59 +1,61 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 
 #include <iostream>
 #include <chrono>
 #include <sstream>
 
 using at::Tensor;
-using at::WeakTensor;
+using c10::WeakIValue;
+using c10::IValue;
 
 // Weak pointer tests
 // gets invalidated
 TEST(TestWeakPointer, WeakPointerGetsInvalidated) {
-  Tensor a = at::ones({2, 2});
-  WeakTensor b = a;
-  a.reset();
-  ASSERT_FALSE(b.lock().defined());
+  IValue a = at::ones({2, 2});
+  WeakIValue b = a;
+  a = IValue();
+  ASSERT_TRUE(b.lock().isNone());
 }
 
 // can successfully lock
 TEST(TestWeakPointer, WeakPointerLock) {
-  Tensor a = at::ones({2, 2});
-  WeakTensor b = a;
+  IValue a = at::ones({2, 2});
+  WeakIValue b = a;
   auto c = b.lock();
-  ASSERT_TRUE(c.defined());
+  ASSERT_TRUE(c.isTensor());
 
-  a.reset();
-  ASSERT_TRUE(b.lock().defined());
-  c.reset();
-  ASSERT_FALSE(b.lock().defined());
+  a = IValue();
+  ASSERT_TRUE(!b.lock().isNone());
+  c = IValue();
+  ASSERT_TRUE(b.lock().isNone());
 }
 
 // updates refcounts correctly
 TEST(TestWeakPointer, WeakUpdatesRefcountsTest) {
-  Tensor a = at::ones({2, 2});
+  at::Tensor a = at::ones({2, 2});
   ASSERT_EQ(a.use_count(), 1);
   ASSERT_EQ(a.weak_use_count(), 1);
   {
-    WeakTensor b = a;
+    WeakIValue b = IValue(a);
     ASSERT_EQ(a.use_count(), 1);
     ASSERT_EQ(a.weak_use_count(), 2);
   }
   ASSERT_EQ(a.use_count(), 1);
   ASSERT_EQ(a.weak_use_count(), 1);
   {
-    WeakTensor b = a;
+    WeakIValue b = IValue(a);
     ASSERT_EQ(a.use_count(), 1);
     auto locked = b.lock();
-    ASSERT_TRUE(locked.defined());
+    ASSERT_FALSE(locked.isNone());
     ASSERT_EQ(a.use_count(), 2);
   }
   ASSERT_EQ(a.use_count(), 1);
   ASSERT_EQ(a.weak_use_count(), 1);
   {
-    WeakTensor b = a;
+    WeakIValue b = IValue(a);
     ASSERT_EQ(a.use_count(), 1);
     ASSERT_EQ(a.weak_use_count(), 2);
     a.reset();

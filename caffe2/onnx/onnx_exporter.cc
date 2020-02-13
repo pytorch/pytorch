@@ -185,7 +185,7 @@ void ssaRewriteForIfOp(
     OperatorDef* op,
     std::unordered_map<std::string, int>* blob_versions,
     std::set<std::string>* is_initialized_tensor) {
-  // Get all the "external" inputs and outpus of the subnet
+  // Get all the "external" inputs and outputs of the subnet
   // Since then_net and else_net has same external input/output, we only collect
   // external input/output from one of its subnet And perform the rewrite to
   // both then_net and else_net
@@ -1020,7 +1020,6 @@ ConvertedResult OnnxExporter::CreateReduceMeanNodes(
 
     ConvertedResult result;
     auto& nodes = result.first;
-    auto& const_tensors = result.second;
     std::unordered_map<std::string, const caffe2::Argument*> args;
     for (const auto& a : def.arg()) {
         args.emplace(a.name(), &a);

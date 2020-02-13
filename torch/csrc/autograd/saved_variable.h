@@ -9,8 +9,8 @@
 
 namespace torch { namespace autograd {
 
-struct Variable;
-struct Function;
+using Variable = at::Tensor;
+struct Node;
 
 TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
@@ -19,14 +19,14 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;
-  SavedVariable(const Variable& variable, bool is_output);
+  SavedVariable(const Variable& variable, bool is_output, bool is_inplace_view=false);
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
 
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
-  Variable unpack(std::shared_ptr<Function> saved_for = nullptr) const;
+  Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
   void reset_data() {
     return data_.reset();
@@ -43,8 +43,11 @@ class TORCH_API SavedVariable {
   // is false, then this is a leaf node. Note that the grad_fn is not saved if
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
-  std::shared_ptr<Function> grad_fn_;
-  std::weak_ptr<Function> grad_accumulator_;
+  std::shared_ptr<Node> grad_fn_;
+  // Weak version of grad_fn_ that prevents leaks in rebase_history() for
+  // inplace views.
+  std::weak_ptr<Node> weak_grad_fn_;
+  std::weak_ptr<Node> grad_accumulator_;
   c10::VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;
@@ -52,5 +55,6 @@ class TORCH_API SavedVariable {
   bool was_default_constructed_ = true;
   bool requires_grad_ = false;
   bool has_grad_fn_ = false;
+  bool is_inplace_view_ = false;
 };
 }} // namespace torch::autograd

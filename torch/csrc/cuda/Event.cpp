@@ -1,3 +1,4 @@
+#include <pybind11/pybind11.h>
 #include <torch/csrc/cuda/Event.h>
 #include <torch/csrc/cuda/Module.h>
 #include <torch/csrc/cuda/Stream.h>
@@ -81,13 +82,13 @@ static void THCPEvent_dealloc(THCPEvent *self) {
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static PyObject * THCPEvent_get_cuda_event(THCPEvent *self) {
+static PyObject * THCPEvent_get_cuda_event(THCPEvent *self, void *unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(self->cuda_event.event());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_get_device(THCPEvent *self) {
+static PyObject * THCPEvent_get_device(THCPEvent *self, void *unused) {
   HANDLE_TH_ERRORS
   at::optional<at::Device> device = self->cuda_event.device();
   if (!device) {
@@ -106,12 +107,15 @@ static PyObject * THCPEvent_record(THCPEvent *self, THCPStream *stream) {
 
 static PyObject * THCPEvent_wait(THCPEvent *self, THCPStream *stream) {
   HANDLE_TH_ERRORS
-  with_no_gil([&] { self->cuda_event.block(stream->cuda_stream); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    self->cuda_event.block(stream->cuda_stream);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_query(THCPEvent *self) {
+static PyObject * THCPEvent_query(THCPEvent *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cuda_event.query());
   END_HANDLE_TH_ERRORS
@@ -123,14 +127,17 @@ static PyObject * THCPEvent_elapsed_time(THCPEvent *self, THCPEvent *other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_synchronize(THCPEvent *self) {
+static PyObject * THCPEvent_synchronize(THCPEvent *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
-  with_no_gil([&] { self->cuda_event.synchronize(); });
+  {
+    pybind11::gil_scoped_release no_gil;
+    self->cuda_event.synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THCPEvent_ipc_handle(THCPEvent *self) {
+static PyObject * THCPEvent_ipc_handle(THCPEvent *self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   cudaIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);
@@ -145,7 +152,7 @@ static struct PyGetSetDef THCPEvent_properties[] = {
 };
 
 static PyMethodDef THCPEvent_methods[] = {
-  {(char*)"from_ipc_handle", (PyCFunction)THCPEvent_from_ipc_handle,
+  {(char*)"from_ipc_handle", (PyCFunction)(void(*)(void))THCPEvent_from_ipc_handle,
     METH_CLASS | METH_VARARGS | METH_KEYWORDS, nullptr},
   {(char*)"record", (PyCFunction)THCPEvent_record, METH_O, nullptr},
   {(char*)"wait", (PyCFunction)THCPEvent_wait, METH_O, nullptr},
@@ -164,7 +171,7 @@ PyTypeObject THCPEventType = {
   sizeof(THCPEvent),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   (destructor)THCPEvent_dealloc,         /* tp_dealloc */
-  0,                                     /* tp_print */
+  0,                                     /* tp_vectorcall_offset */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */

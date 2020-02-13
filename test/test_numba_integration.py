@@ -1,9 +1,9 @@
 import unittest
 import sys
 
-import common_utils as common
-from common_utils import TEST_NUMBA, TEST_NUMPY, IS_WINDOWS
-from common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
+import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY
+from torch.testing._internal.common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
 
@@ -82,7 +82,7 @@ class TestNumbaIntegration(common.TestCase):
                     AttributeError, lambda: sparse_cuda_t.__cuda_array_interface__
                 )
 
-            # CUDA tensors have the attribute and v0 interface
+            # CUDA tensors have the attribute and v2 interface
             cudat = tp(10).cuda()
 
             self.assertTrue(hasattr(cudat, "__cuda_array_interface__"))
@@ -94,11 +94,11 @@ class TestNumbaIntegration(common.TestCase):
             )
 
             self.assertEqual(ar_dict["shape"], (10,))
-            self.assertEqual(ar_dict["strides"], (cudat.storage().element_size(),))
+            self.assertIs(ar_dict["strides"], None)
             # typestr from numpy, cuda-native little-endian
             self.assertEqual(ar_dict["typestr"], numpy.dtype(npt).newbyteorder("<").str)
             self.assertEqual(ar_dict["data"], (cudat.data_ptr(), False))
-            self.assertEqual(ar_dict["version"], 0)
+            self.assertEqual(ar_dict["version"], 2)
 
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
@@ -117,12 +117,6 @@ class TestNumbaIntegration(common.TestCase):
         ]
 
         for dt in torch_dtypes:
-            if dt == torch.int8 and not IS_WINDOWS:
-                # "CharTensor" numpy conversion not supported
-                with self.assertRaises(TypeError):
-                    torch.arange(10).to(dt).numpy()
-
-                continue
 
             # CPU tensors of all types do not register as cuda arrays,
             # attempts to convert raise a type error.
@@ -305,7 +299,7 @@ class TestNumbaIntegration(common.TestCase):
                 torch_ary += 42
                 self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary) + 42)
 
-            # Explict-copy when using `torch.tensor()`
+            # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.tensor(numba_ary, device="cuda")
@@ -314,6 +308,30 @@ class TestNumbaIntegration(common.TestCase):
                 # Check that `torch_ary` and `numba_ary` points to different memory
                 torch_ary += 42
                 self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary) + 42)
+
+    @unittest.skipIf(not TEST_NUMPY, "No numpy")
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    @unittest.skipIf(not TEST_NUMBA_CUDA, "No numba.cuda")
+    def test_from_cuda_array_interface_inferred_strides(self):
+        """torch.as_tensor(numba_ary) should have correct inferred (contiguous) strides"""
+        # This could, in theory, be combined with test_from_cuda_array_interface but that test
+        # is overly strict: it checks that the exported protocols are exactly the same, which
+        # cannot handle differing exported protocol versions.
+        dtypes = [
+            numpy.float64,
+            numpy.float32,
+            numpy.int64,
+            numpy.int32,
+            numpy.int16,
+            numpy.int8,
+            numpy.uint8,
+        ]
+        for dtype in dtypes:
+            numpy_ary = numpy.arange(6).reshape(2, 3).astype(dtype),
+            numba_ary = numba.cuda.to_device(numpy_ary)
+            self.assertTrue(numba_ary.is_c_contiguous())
+            torch_ary = torch.as_tensor(numba_ary, device="cuda")
+            self.assertTrue(torch_ary.is_contiguous())
 
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
@@ -333,16 +351,23 @@ class TestNumbaIntegration(common.TestCase):
     def test_from_cuda_array_interface_active_device(self):
         """torch.as_tensor() tensor device must match active numba context."""
 
-        # Both torch/numba default to device 0 and can interop freely
+        # Zero-copy: both torch/numba default to device 0 and can interop freely
         numba_ary = numba.cuda.to_device(numpy.arange(6))
         torch_ary = torch.as_tensor(numba_ary, device="cuda")
         self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
         self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)
 
-        # Torch should raise `RuntimeError` when the Numba and Torch device differ
+        # Implicit-copy: when the Numba and Torch device differ
         numba_ary = numba.cuda.to_device(numpy.arange(6))
-        with self.assertRaises(RuntimeError):
-            torch.as_tensor(numba_ary, device=torch.device("cuda", 1))
+        torch_ary = torch.as_tensor(numba_ary, device=torch.device("cuda", 1))
+        self.assertEqual(torch_ary.get_device(), 1)
+        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+        if1 = torch_ary.__cuda_array_interface__
+        if2 = numba_ary.__cuda_array_interface__
+        self.assertNotEqual(if1["data"], if2["data"])
+        del if1["data"]
+        del if2["data"]
+        self.assertEqual(if1, if2)
 
 
 if __name__ == "__main__":

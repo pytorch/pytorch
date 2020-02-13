@@ -145,6 +145,10 @@ std::string Tracer::serializeEvent(const TracerEvent& event) {
       int_args["task_id"] = event.task_id_;
     }
 
+    if (event.iter_ >= 0) {
+      int_args["iter_id"] = event.iter_;
+    }
+
     if (event.stream_id_ >= 0) {
       int_args["stream_id"] = event.stream_id_;
     }
@@ -258,6 +262,10 @@ int Tracer::bumpIter() {
   return iter_++;
 }
 
+int Tracer::getIter() {
+  return iter_;
+}
+
 int Tracer::bumpDumpingIter() {
   return dumping_iter_++;
 }
@@ -332,6 +340,10 @@ void TracerGuard::addArgument(TracingField field, int value) {
     }
     case TRACE_THREAD: {
       event_.thread_label_ = value;
+      break;
+    }
+    case TRACE_ITER: {
+      event_.iter_ = value;
       break;
     }
     default: {
@@ -449,7 +461,7 @@ std::shared_ptr<Tracer> create(
     const std::string& net_name) {
   // Enable the tracer if the net has the "enable_tracing" argument set OR
   // if the command line option includes the net name option in the list of
-  // tracable nets.
+  // traceable nets.
   bool trace_net = hasEnableTracingFlag(net) || isTraceableNetName(net_name);
   return trace_net
       ? std::make_shared<Tracer>(net, net_name, getTracingConfigFromNet(net))

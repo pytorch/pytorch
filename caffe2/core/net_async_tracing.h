@@ -39,6 +39,7 @@ struct CAFFE2_API TracerEvent {
   bool is_beginning_ = false;
   long thread_label_ = -1;
   std::thread::id tid_;
+  int iter_ = -1;
 };
 
 enum TracingField {
@@ -48,6 +49,7 @@ enum TracingField {
   TRACE_THREAD,
   TRACE_NAME,
   TRACE_CATEGORY,
+  TRACE_ITER,
 };
 
 enum class TracingMode {
@@ -87,6 +89,7 @@ class CAFFE2_API Tracer {
     return config_;
   }
   int bumpIter();
+  int getIter();
   int bumpDumpingIter();
   // Dump the tracing result to file with given suffix, and then
   // clear current events.

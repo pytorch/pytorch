@@ -17,74 +17,76 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
   AT_ERROR(msg);
 }
 
-const TypeMetaData _typeMetaDataInstance_uninitialized_ = detail::TypeMetaData(
-    0,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    TypeIdentifier::uninitialized(),
-    "nullptr (uninitialized)");
 
 } // namespace detail
 
-// TODO Inlineable on non-MSVC like other preallocated ids?
 template <>
-C10_EXPORT const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
+EXPORT_IF_NOT_GCC const detail::TypeMetaData* TypeMeta::_typeMetaDataInstance<
     detail::_Uninitialized>() noexcept {
-  return &detail::_typeMetaDataInstance_uninitialized_;
+  static constexpr detail::TypeMetaData singleton = detail::TypeMetaData(
+      0,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      nullptr,
+      TypeIdentifier::uninitialized(),
+      "nullptr (uninitialized)");
+  return &singleton;
 }
 
-TypeIdentifier TypeIdentifier::createTypeId() {
-  static std::atomic<TypeIdentifier::underlying_type> counter(
-      TypeMeta::Id<_CaffeHighestPreallocatedTypeId>().underlyingId());
-  const TypeIdentifier::underlying_type new_value = ++counter;
-  if (new_value ==
-      std::numeric_limits<TypeIdentifier::underlying_type>::max()) {
-    throw std::logic_error(
-        "Ran out of available type ids. If you need more than 2^16 CAFFE_KNOWN_TYPEs, we need to increase TypeIdentifier to use more than 16 bit.");
-  }
-  return TypeIdentifier(new_value);
-}
-
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(0, uint8_t)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(1, int8_t)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(2, int16_t)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(3, int)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(4, int64_t)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(5, at::Half)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(6, float)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(7, double)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(8, at::ComplexHalf)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(9, std::complex<float>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(10, std::complex<double>)
+CAFFE_KNOWN_TYPE(uint8_t)
+CAFFE_KNOWN_TYPE(int8_t)
+CAFFE_KNOWN_TYPE(int16_t)
+CAFFE_KNOWN_TYPE(int)
+CAFFE_KNOWN_TYPE(int64_t)
+CAFFE_KNOWN_TYPE(at::Half)
+CAFFE_KNOWN_TYPE(float)
+CAFFE_KNOWN_TYPE(double)
+CAFFE_KNOWN_TYPE(at::ComplexHalf)
+CAFFE_KNOWN_TYPE(std::complex<float>)
+CAFFE_KNOWN_TYPE(std::complex<double>)
 // 11 = undefined type id
 // 12 = Tensor (defined in tensor.cc)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(13, std::string)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(14, bool)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(15, uint16_t)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(16, char)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(17, std::unique_ptr<std::mutex>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(18, std::unique_ptr<std::atomic<bool>>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(19, std::vector<int32_t>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(20, std::vector<int64_t>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(21, std::vector<unsigned long>)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(22, bool*)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(23, char*)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(24, int*)
+CAFFE_KNOWN_TYPE(std::string)
+CAFFE_KNOWN_TYPE(bool)
+CAFFE_KNOWN_TYPE(uint16_t)
+CAFFE_KNOWN_TYPE(char)
+CAFFE_KNOWN_TYPE(std::unique_ptr<std::mutex>)
+CAFFE_KNOWN_TYPE(std::unique_ptr<std::atomic<bool>>)
+CAFFE_KNOWN_TYPE(std::vector<int32_t>)
+CAFFE_KNOWN_TYPE(std::vector<int64_t>)
+CAFFE_KNOWN_TYPE(std::vector<unsigned long>)
+CAFFE_KNOWN_TYPE(bool*)
+CAFFE_KNOWN_TYPE(char*)
+CAFFE_KNOWN_TYPE(int*)
 
-// see typeid.h for details.
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(25, detail::_guard_long_unique<long>);
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(
-    26,
-    detail::_guard_long_unique<std::vector<long>>)
+// For some of the compilers, long is definied separately from int32_t and
+// int64_t. As a result we will need to actually define them separately.
+// It is recommended that one does NOT use long - use int32_t and int64_t
+// explicitly. Explicit long type annotation may go away in the future.
+// details: This hack works by defining a _guard_long_unique type, which is
+// long iff the compiler has a separate long type and is a dummy type otherwise.
+// we then allocate a type id to that _guard_long_unique. If the compiler has a
+// separate long type, this allocates a type id for long. Otherwise, it
+// allocates a type id for the dummy type, which doesn't matter.
+namespace detail {
+template <class T>
+class _guard_long_unique_dummy final {};
+template <class T>
+using _guard_long_unique = std::conditional_t<
+    std::is_same<long, int32_t>::value || std::is_same<long, int64_t>::value,
+    _guard_long_unique_dummy<T>,
+    T>;
+} // namespace detail
+CAFFE_KNOWN_TYPE(detail::_guard_long_unique<long>);
+CAFFE_KNOWN_TYPE(detail::_guard_long_unique<std::vector<long>>)
 
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(27, float*)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(28, at::Half*)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(29, c10::qint8)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(30, c10::quint8)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(31, c10::qint32)
-CAFFE_DEFINE_PREALLOCATED_KNOWN_TYPE(32, _CaffeHighestPreallocatedTypeId)
+CAFFE_KNOWN_TYPE(float*)
+CAFFE_KNOWN_TYPE(at::Half*)
+CAFFE_KNOWN_TYPE(c10::qint8)
+CAFFE_KNOWN_TYPE(c10::quint8)
+CAFFE_KNOWN_TYPE(c10::qint32)
+CAFFE_KNOWN_TYPE(at::BFloat16)
 
 } // namespace caffe2

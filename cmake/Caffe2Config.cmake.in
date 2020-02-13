@@ -118,13 +118,7 @@ include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 # Interface libraries, that allows one to build proper link flags.
 # We will also define a helper variable, Caffe2_MAIN_LIBS, that resolves to
 # the main caffe2 libraries in cases of cuda presence / absence.
-caffe2_interface_library(caffe2 caffe2_library)
-if (@USE_CUDA@)
-  caffe2_interface_library(caffe2_gpu caffe2_gpu_library)
-  set(Caffe2_MAIN_LIBS caffe2_library caffe2_gpu_library)
-else()
-  set(Caffe2_MAIN_LIBS caffe2_library)
-endif()
+set(Caffe2_MAIN_LIBS torch_library)
 
 # include directory.
 #

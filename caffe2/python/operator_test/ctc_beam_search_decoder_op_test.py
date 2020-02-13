@@ -19,37 +19,41 @@ DEFAULT_PRUNE_THRESHOLD = 0.001
 
 
 class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
-    @caffe2_flaky
     @serial.given(
         batch=st.sampled_from([1, 2, 4]),
         max_time=st.sampled_from([1, 8, 64]),
         alphabet_size=st.sampled_from([1, 2, 32, 128, 512]),
         beam_width=st.sampled_from([1, 2, 16, None]),
+        num_candidates=st.sampled_from([1, 2]),
         **hu.gcs_cpu_only
     )
     def test_ctc_beam_search_decoder(
-        self, batch, max_time,
-        alphabet_size, beam_width, gc, dc
+        self, batch, max_time, alphabet_size, beam_width, num_candidates, gc, dc
     ):
         if not beam_width:
             beam_width = DEFAULT_BEAM_WIDTH
             op_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
                 ['INPUTS', 'SEQ_LEN'],
-                ['OUTPUT_LEN', 'VALUES'])
+                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+                num_candidates=num_candidates)
 
             op_no_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
                 ['INPUTS'],
-                ['OUTPUT_LEN', 'VALUES'])
+                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+                num_candidates=num_candidates)
         else:
+            num_candidates = min(num_candidates, beam_width)
             op_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
                 ['INPUTS', 'SEQ_LEN'],
-                ['OUTPUT_LEN', 'VALUES'],
-                beam_width=beam_width)
+                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+                beam_width=beam_width,
+                num_candidates=num_candidates)
 
             op_no_seq_len = core.CreateOperator('CTCBeamSearchDecoder',
                 ['INPUTS'],
-                ['OUTPUT_LEN', 'VALUES'],
-                beam_width=beam_width)
+                ['OUTPUT_LEN', 'VALUES', 'OUTPUT_PROB'],
+                beam_width=beam_width,
+                num_candidates=num_candidates)
 
         def input_generater():
             inputs = np.random.rand(max_time, batch, alphabet_size)\
@@ -59,7 +63,8 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
             return inputs, seq_len
 
         def ref_ctc_decoder(inputs, seq_len):
-            output_len = np.array([]).astype(np.int32)
+            output_len = np.zeros(batch * num_candidates, dtype=np.int32)
+            output_prob = np.zeros(batch * num_candidates, dtype=np.float32)
             val = np.array([]).astype(np.int32)
 
             for i in range(batch):
@@ -96,12 +101,15 @@ class TestCTCBeamSearchDecoderOp(serial.SerializedTestCase):
                     A_prev = sorted(A_next, key=A_next.get, reverse=True)
                     A_prev = A_prev[:beam_width]
 
-                decoded = A_prev[0] if len(A_prev) > 0 else ()
+                candidates = A_prev[:num_candidates]
+                index = 0
+                for candidate in candidates:
+                    val = np.hstack((val, candidate))
+                    output_len[i * num_candidates + index] = len(candidate)
+                    output_prob[i * num_candidates + index] = Pb[t][candidate] + Pnb[t][candidate]
+                    index += 1
 
-                val = np.hstack((val, decoded))
-                output_len = np.append(output_len, len(decoded))
-
-            return [output_len, val]
+            return [output_len, val, output_prob]
 
         def ref_ctc_decoder_max_time(inputs):
             return ref_ctc_decoder(inputs, None)

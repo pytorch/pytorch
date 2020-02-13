@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-// keeping THC headers for atomicAdd
+// keeping THC headers for gpuAtomicAdd
 #include <THC/THCAtomics.cuh>
 
 #include <thrust/pair.h>
@@ -101,7 +101,7 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
-    atomicAdd(
+    gpuAtomicAdd(
       &grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
@@ -142,7 +142,7 @@ __global__ void reflection_pad2d_backward_out_kernel(
       pad_l, pad_t,
       output_xy);
 
-    atomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
+    gpuAtomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
 
@@ -194,7 +194,7 @@ void reflection_pad1d_out_template(
     input.scalar_type(), "reflection_pad1d_out_template", [&] {
       reflection_pad1d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -242,7 +242,7 @@ void reflection_pad1d_backward_out_template(
     grad_input.scalar_type(), "reflection_pad1d_backward_out_template", [&] {
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, pad_l, pad_r);
     }
   );
@@ -314,7 +314,7 @@ void reflection_pad2d_out_template(
     input.scalar_type(), "reflection_pad2d_out_template", [&] {
       reflection_pad2d_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          input.data<scalar_t>(), output.data<scalar_t>(),
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }
@@ -371,7 +371,7 @@ void reflection_pad2d_backward_out_template(
     input.scalar_type(), "reflection_pad2d_backward_out_template", [&] {
       reflection_pad2d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
-          grad_input.data<scalar_t>(), grad_output.data<scalar_t>(),
+          grad_input.data_ptr<scalar_t>(), grad_output.data_ptr<scalar_t>(),
           input_w, input_h,
           pad_t, pad_b, pad_l, pad_r);
     }
@@ -410,7 +410,7 @@ Tensor reflection_pad1d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad1d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;
@@ -443,7 +443,7 @@ Tensor reflection_pad2d_backward_cuda(
     const Tensor& grad_output,
     const Tensor& input,
     IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   reflection_pad2d_backward_out_template(
     grad_input, grad_output, input, padding);
   return grad_input;

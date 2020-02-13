@@ -11,12 +11,11 @@
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/symbolic_variable.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
@@ -30,27 +29,17 @@
 namespace torch {
 namespace jit {
 
-struct ExecutionPlan {
-  ExecutionPlan() = default;
-  ExecutionPlan(std::shared_ptr<Graph> graph)
-      : code(graph), graph(std::move(graph)) {}
+void packGradient(const Gradient& gradient, Node* dnode);
+bool needsGradient(const std::shared_ptr<const Graph>& graph);
+void runOptimization(std::shared_ptr<Graph>& graph);
+void runNondiffOptimization(std::shared_ptr<Graph>& graph);
+void debugSetAutodiffSubgraphInlining(bool state);
+bool getAutodiffSubgraphInlining();
 
-  void run(Stack& stack) const;
-
-  operator bool() const {
-    return static_cast<bool>(graph);
-  }
-
-  ExecutionPlanState getDebugState() {
-    ExecutionPlanState state;
-    state.code = &code;
-    state.graph = graph.get();
-    return state;
-  }
-
-  Code code;
-  std::shared_ptr<Graph> graph;
-};
+// Tunable parameters for deciding when to create/keep subgraphs of
+// differentiable code
+const size_t autodiffSubgraphNodeThreshold = 2;
+const size_t autodiffSubgraphInlineThreshold = 5;
 
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
@@ -65,16 +54,17 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, bool optimize)
+  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph)
       : graph(prepareGraph(graph)),
-        // until we have correct alias analysis any use of mutable operators
-        // disables all optimization
-        optimize(optimize),
         num_inputs(this->graph->inputs().size()),
         num_outputs(this->graph->outputs().size()) {}
 
   // entry point where execution begins
-  virtual void run(Stack& stack) = 0;
+  void run(Stack& stack);
+
+  virtual ExecutionPlan getPlanFor(
+      Stack& stack,
+      size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 
@@ -88,7 +78,6 @@ struct GraphExecutorImplBase {
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.
-  const bool optimize;
   const size_t num_inputs;
   const size_t num_outputs;
 

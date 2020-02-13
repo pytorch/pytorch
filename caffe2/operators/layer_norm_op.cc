@@ -2,7 +2,7 @@
 
 #include <array>
 
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
@@ -157,8 +157,7 @@ void LayerNormGradientOp<CPUContext>::GammaBetaBackward(
     const T* rstd,
     const T* g_scale,
     T* dgamma,
-    T* dbeta,
-    T* /* scratch */) {
+    T* dbeta) {
   math::Set<T, CPUContext>(N, T(0), dgamma, &context_);
   math::Set<T, CPUContext>(N, T(0), dbeta, &context_);
   ConstEigenArrayMap<T> dYxX_arr(dYxX, N, M);
@@ -276,7 +275,7 @@ to the end.)
 
 } // namespace caffe2
 
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     LayerNorm,
     "_caffe2::LayerNorm("
     "    Tensor X,"
@@ -290,7 +289,7 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
 
 namespace caffe2 {
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_caffe2::LayerNorm",
     C10LayerNorm_DontUseThisOpYet);
 

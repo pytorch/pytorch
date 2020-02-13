@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/NamedTensorUtils.h>
 
 namespace at { namespace native {
 
@@ -21,6 +22,7 @@ Tensor& _clamp_out_cuda(
   } else {
     AT_ERROR("At least one of 'min' or 'max' must not be None");
   }
+  at::namedinference::propagate_names(result, self);
   return result;
 }
 
@@ -29,7 +31,9 @@ Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
-  return legacy::cuda::_th_clamp_max_out(result, self, max);
+  legacy::cuda::_th_clamp_max_out(result, self, max);
+  at::namedinference::propagate_names(result, self);
+  return result;
 }
 
 Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
@@ -37,7 +41,9 @@ Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
-  return legacy::cuda::_th_clamp_min_out(result, self, min);
+  legacy::cuda::_th_clamp_min_out(result, self, min);
+  at::namedinference::propagate_names(result, self);
+  return result;
 }
 
 // These are just forwarding stubs
@@ -51,33 +57,13 @@ Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
   }
 
 
-IMPLEMENT_UNARY_OP_PREQUEL(abs)
-IMPLEMENT_UNARY_OP_PREQUEL(acos)
-IMPLEMENT_UNARY_OP_PREQUEL(asin)
 IMPLEMENT_UNARY_OP_PREQUEL(atan)
-IMPLEMENT_UNARY_OP_PREQUEL(ceil)
 IMPLEMENT_UNARY_OP_PREQUEL(cos)
 IMPLEMENT_UNARY_OP_PREQUEL(cosh)
 IMPLEMENT_UNARY_OP_PREQUEL(erf)
 IMPLEMENT_UNARY_OP_PREQUEL(erfc)
 IMPLEMENT_UNARY_OP_PREQUEL(exp)
-IMPLEMENT_UNARY_OP_PREQUEL(expm1)
-IMPLEMENT_UNARY_OP_PREQUEL(frac)
-IMPLEMENT_UNARY_OP_PREQUEL(floor)
-IMPLEMENT_UNARY_OP_PREQUEL(log)
-IMPLEMENT_UNARY_OP_PREQUEL(log10)
-IMPLEMENT_UNARY_OP_PREQUEL(log1p)
-IMPLEMENT_UNARY_OP_PREQUEL(log2)
-IMPLEMENT_UNARY_OP_PREQUEL(neg)
-IMPLEMENT_UNARY_OP_PREQUEL(reciprocal)
-IMPLEMENT_UNARY_OP_PREQUEL(round)
-IMPLEMENT_UNARY_OP_PREQUEL(rsqrt)
-IMPLEMENT_UNARY_OP_PREQUEL(sigmoid)
-IMPLEMENT_UNARY_OP_PREQUEL(sin)
-IMPLEMENT_UNARY_OP_PREQUEL(sinh)
-IMPLEMENT_UNARY_OP_PREQUEL(sqrt)
 IMPLEMENT_UNARY_OP_PREQUEL(tan)
 IMPLEMENT_UNARY_OP_PREQUEL(tanh)
-IMPLEMENT_UNARY_OP_PREQUEL(trunc)
 
 }}

@@ -1,10 +1,11 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 
 namespace at {
 namespace internal {
 // This parameter is heuristically chosen to determine the minimum number of
-// work that warrants paralellism. For example, when summing an array, it is
+// work that warrants parallelism. For example, when summing an array, it is
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
@@ -42,6 +43,11 @@ grain_size: number of elements per chunk. impacts the degree of parallelization
 
 f: user function applied in parallel to the chunks, signature:
   void f(int64_t begin, int64_t end)
+
+Warning: parallel_for does NOT copy thread local
+states from the current thread to the worker threads.
+This means for example that Tensor operations CANNOT be used in the
+body of your function, only data pointers.
 */
 template <class F>
 inline void parallel_for(
@@ -81,6 +87,11 @@ would be "+" and 0 respectively. This is similar to tbb's approach [1], where
 you need to provide a function to accumulate a subrange, a function to combine
 two partial results and an identity.
 
+Warning: parallel_reduce does NOT copy thread local
+states from the current thread to the worker threads.
+This means for example that Tensor operations CANNOT be used in the
+body of your function, only data pointers.
+
 [1] https://software.intel.com/en-us/node/506154
 */
 template <class scalar_t, class F, class SF>
@@ -107,10 +118,19 @@ CAFFE2_API void launch(std::function<void()> func);
 // Launches intra-op parallel task
 CAFFE2_API void intraop_launch(std::function<void()> func);
 
+// Launches intra-op parallel task, returns a future
+CAFFE2_API std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func);
+
+// Returns number of intra-op threads used by default
+CAFFE2_API int intraop_default_num_threads();
+
 } // namespace at
 
 #if AT_PARALLEL_OPENMP
 #include <ATen/ParallelOpenMP.h>
 #elif AT_PARALLEL_NATIVE
 #include <ATen/ParallelNative.h>
+#elif AT_PARALLEL_NATIVE_TBB
+#include <ATen/ParallelNativeTBB.h>
 #endif

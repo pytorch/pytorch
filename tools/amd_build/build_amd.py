@@ -4,10 +4,16 @@ from __future__ import absolute_import, division, print_function
 import os
 import subprocess
 import argparse
-from functools import reduce
-from itertools import chain
+import sys
+sys.path.append(os.path.realpath(os.path.join(
+    __file__,
+    os.path.pardir,
+    os.path.pardir,
+    os.path.pardir,
+    'torch',
+    'utils')))
 
-from pyHIPIFY import hipify_python
+from hipify import hipify_python
 
 parser = argparse.ArgumentParser(description='Top-level script for HIPifying, filling in most common parameters')
 parser.add_argument(
@@ -37,12 +43,6 @@ parser.add_argument(
     help="The list of extra directories in caffe2 to hipify",
     required=False)
 
-# Hipify using HIP-Clang launch.
-parser.add_argument(
-    '--hip-clang-launch',
-    action='store_true',
-    help=argparse.SUPPRESS)
-
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
@@ -70,6 +70,7 @@ includes = [
     "caffe2/db/*",
     "caffe2/utils/*",
     "caffe2/contrib/gloo/*",
+    "caffe2/contrib/nccl/*",
     "c10/cuda/*",
     "c10/cuda/test/CMakeLists.txt",
     "modules/*",
@@ -79,6 +80,7 @@ includes = [
     "aten/src/ATen/native/cuda/*",
     "aten/src/ATen/native/cudnn/*",
     "aten/src/ATen/native/sparse/cuda/*",
+    "aten/src/ATen/native/quantized/cuda/*",
     "aten/src/THC/*",
     "aten/src/THCUNN/*",
     "aten/src/ATen/test/*",
@@ -102,13 +104,10 @@ ignores = [
     '*/hip/*',
     # These files are compatible with both cuda and hip
     "aten/src/ATen/core/*",
-    "torch/csrc/autograd/engine.cpp",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
 ]
-
-json_settings = os.path.join(amd_build_dir, "disabled_features.json")
 
 if not args.out_of_place_only:
     # Apply patch files in place (PyTorch only)
@@ -116,32 +115,13 @@ if not args.out_of_place_only:
     for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
         subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
 
-    # Make various replacements inside AMD_BUILD/torch directory
-    ignore_files = [
-        # These files use nvrtc, hip doesn't have equivalent
-        "csrc/autograd/profiler.h",
-        "csrc/autograd/profiler.cpp",
-        # These files are compatible with both cuda and hip
-        "csrc/autograd/engine.cpp"
-    ]
-    paths = ("torch", "tools")
-    for root, _directories, files in chain.from_iterable(os.walk(path) for path in paths):
-        for filename in files:
-            if filename.endswith(".cpp") or filename.endswith(".h") or filename.endswith(".hpp"):
-                source = os.path.join(root, filename)
-                # Disabled files
-                if reduce(lambda result, exclude: source.endswith(exclude) or result, ignore_files, False):
-                    continue
-                # Update contents.
-                with open(source, "r+") as f:
-                    contents = f.read()
-                    contents = contents.replace("USE_CUDA", "USE_ROCM")
-                    contents = contents.replace("CUDA_VERSION", "0")
-                    f.seek(0)
-                    f.write(contents)
-                    f.truncate()
-                    f.flush()
-                    os.fsync(f)
+# Check if the compiler is hip-clang.
+def is_hip_clang():
+    try:
+        hip_path = os.getenv('HIP_PATH', '/opt/rocm/hip')
+        return 'HIP_COMPILER=clang' in open(hip_path + '/lib/.hipInfo').read()
+    except IOError:
+        return False
 
 hipify_python.hipify(
     project_directory=proj_dir,
@@ -149,5 +129,4 @@ hipify_python.hipify(
     includes=includes,
     ignores=ignores,
     out_of_place_only=args.out_of_place_only,
-    json_settings=json_settings,
-    hip_clang_launch=args.hip_clang_launch)
+    hip_clang_launch=is_hip_clang())

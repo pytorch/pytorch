@@ -21,6 +21,8 @@
 import itertools
 import sys
 import builtins
+import types
+import inspect
 
 
 PY2 = sys.version_info[0] == 2
@@ -159,3 +161,11 @@ def istuple(obj):
     # by a pytorch operator.
     t = type(obj)
     return isinstance(obj, tuple) or t.__module__ == 'torch.return_types'
+
+def bind_method(fn, obj, obj_type):
+    if PY2:
+        if inspect.ismethod(fn):
+            fn = fn.__func__
+        return types.MethodType(fn, obj, obj_type)
+    else:
+        return types.MethodType(fn, obj)

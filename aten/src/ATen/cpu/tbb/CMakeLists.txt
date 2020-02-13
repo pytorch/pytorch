@@ -21,6 +21,12 @@ endif()
 if(NOT TBB_ROOT_DIR)
   set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
+if(NOT TBB_INSTALL_EXPORT_NAME)
+  set(TBB_INSTALL_EXPORT_NAME "Caffe2Targets")
+endif()
+if(NOT TBB_INSTALL_EXPORT_DESTINATION)
+  set(TBB_INSTALL_EXPORT_DESTINATION lib)
+endif()
 if(NOT TBB_INSTALL_RUNTIME_DIR)
   set(TBB_INSTALL_RUNTIME_DIR bin)
 endif()
@@ -115,9 +121,9 @@ endif()
 if (UNIX)
   add_definitions (-DUSE_PTHREAD)
 
-   check_cxx_compiler_flag ("-std=c++11" SUPPORTS_STDCXX11)
-  if (SUPPORTS_STDCXX11)
-    set (CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+   check_cxx_compiler_flag ("-std=c++14" SUPPORTS_STDCXX14)
+  if (SUPPORTS_STDCXX14)
+    set (CMAKE_CXX_FLAGS "-std=c++14 ${CMAKE_CXX_FLAGS}")
   endif ()
 
    check_cxx_compiler_flag ("-mrtm -Werror" SUPPORTS_MRTM)
@@ -246,7 +252,9 @@ if (TBB_BUILD_STATIC)
   target_include_directories(tbb_static PRIVATE ${TBB_INCLUDES})
   set_property(TARGET tbb_static APPEND PROPERTY COMPILE_DEFINITIONS "__TBB_BUILD=1")
   set_property(TARGET tbb_static APPEND_STRING PROPERTY COMPILE_FLAGS ${ENABLE_RTTI})
-  install(TARGETS tbb_static ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
+  install(TARGETS tbb_static
+          EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
+          ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
   if (MSVC)
     target_compile_definitions(tbb_static PUBLIC __TBB_NO_IMPLICIT_LINKAGE=1)
   endif()
@@ -272,6 +280,7 @@ if (TBB_BUILD_SHARED)
   endif()
 
   install(TARGETS tbb
+          EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
           LIBRARY DESTINATION ${TBB_INSTALL_LIBRARY_DIR}
           ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR}
           RUNTIME DESTINATION ${TBB_INSTALL_RUNTIME_DIR})
@@ -305,7 +314,9 @@ if(TBB_BUILD_TBBMALLOC)
     if (MSVC)
       target_compile_definitions(tbbmalloc_static PUBLIC __TBB_NO_IMPLICIT_LINKAGE=1 __TBBMALLOC_NO_IMPLICIT_LINKAGE=1)
     endif()
-    install(TARGETS tbbmalloc_static ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
+    install(TARGETS tbbmalloc_static
+            EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
+            ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
   endif()
 
   if (TBB_BUILD_SHARED)
@@ -325,6 +336,7 @@ if(TBB_BUILD_TBBMALLOC)
       target_compile_definitions(tbbmalloc PUBLIC __TBB_NO_IMPLICIT_LINKAGE=1 __TBBMALLOC_NO_IMPLICIT_LINKAGE=1)
     endif()
     install(TARGETS tbbmalloc
+            EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
             LIBRARY DESTINATION ${TBB_INSTALL_LIBRARY_DIR}
             ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR}
             RUNTIME DESTINATION ${TBB_INSTALL_RUNTIME_DIR})
@@ -340,7 +352,9 @@ if(TBB_BUILD_TBBMALLOC_PROXY)
     add_library(tbbmalloc_proxy_static STATIC ${tbbmalloc_proxy_src})
     set_property(TARGET tbbmalloc_proxy_static APPEND PROPERTY COMPILE_DEFINITIONS "__TBBMALLOC_BUILD=1")
     set_property(TARGET tbbmalloc_proxy_static APPEND_STRING PROPERTY COMPILE_FLAGS ${DISABLE_RTTI})
-    install(TARGETS tbbmalloc_proxy_static ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
+    install(TARGETS tbbmalloc_proxy_static
+            EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
+            ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR})
   endif()
 
   if (TBB_BUILD_SHARED)
@@ -349,6 +363,7 @@ if(TBB_BUILD_TBBMALLOC_PROXY)
     set_property(TARGET tbbmalloc_proxy APPEND_STRING PROPERTY COMPILE_FLAGS ${DISABLE_RTTI})
     target_link_libraries(tbbmalloc_proxy PUBLIC tbbmalloc)
     install(TARGETS tbbmalloc_proxy
+            EXPORT ${TBB_INSTALL_EXPORT_NAME} DESTINATION ${TBB_INSTALL_EXPORT_DESTINATION}
             LIBRARY DESTINATION ${TBB_INSTALL_LIBRARY_DIR}
             ARCHIVE DESTINATION ${TBB_INSTALL_ARCHIVE_DIR}
             RUNTIME DESTINATION ${TBB_INSTALL_RUNTIME_DIR})

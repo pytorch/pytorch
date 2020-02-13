@@ -30,7 +30,7 @@ C10_API void memset_junk(void* data, size_t num);
 C10_API void* alloc_cpu(size_t nbytes);
 C10_API void free_cpu(void* data);
 
-// Get the CPU Alloctor.
+// Get the CPU Allocator.
 C10_API at::Allocator* GetCPUAllocator();
 // Sets the CPU allocator to the given allocator: the caller gives away the
 // ownership of the pointer.

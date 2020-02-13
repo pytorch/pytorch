@@ -11,6 +11,9 @@
 #include <TH/THGenerateBoolType.h>
 
 #include <torch/csrc/generic/serialization.h>
+#include <TH/THGenerateBFloat16Type.h>
+
+#include <torch/csrc/generic/serialization.h>
 #include <TH/THGenerateQTypes.h>
 
 template <class io>

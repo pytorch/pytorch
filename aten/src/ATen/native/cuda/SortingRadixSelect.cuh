@@ -1,3 +1,5 @@
+#include <THC/THCAtomics.cuh>
+
 namespace at {
 namespace native {
 
@@ -199,7 +201,7 @@ __device__ void countRadixUsingMask(
   if (getLaneId() == 0) {
 #pragma unroll
     for (uint32_t i = 0; i < RadixSize; ++i) {
-      atomicAdd(&smem[i], counts[i]);
+      gpuAtomicAdd(&smem[i], counts[i]);
     }
   }
 
@@ -229,7 +231,7 @@ __device__ scalar_t findPattern(
     index_t withinSliceStride,
     bitwise_t desired,
     bitwise_t desiredMask) {
-  if (threadIdx.x < WARP_SIZE) {
+  if (threadIdx.x < 2) {
     smem[threadIdx.x] = static_cast<scalar_t>(0);
   }
   __syncthreads();

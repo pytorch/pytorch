@@ -19,7 +19,9 @@ static void upsample_bilinear2d_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: just copy
@@ -42,10 +44,10 @@ static void upsample_bilinear2d_out_frame(
     return;
   }
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_h);
 
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+       input_width, output_width, align_corners, scales_w);
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
@@ -91,7 +93,9 @@ static void upsample_bilinear2d_backward_out_frame(
     int64_t output_width,
     int64_t nbatch,
     int64_t channels,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   channels = channels * nbatch;
 
   // special case: same-size matching grids
@@ -114,9 +118,9 @@ static void upsample_bilinear2d_backward_out_frame(
   }
 
   const scalar_t rheight = area_pixel_compute_scale<scalar_t>(
-      input_height, output_height, align_corners);
+      input_height, output_height, align_corners, scales_h);
   const scalar_t rwidth = area_pixel_compute_scale<scalar_t>(
-      input_width, output_width, align_corners);
+      input_width, output_width, align_corners, scales_w);
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const scalar_t h1r = area_pixel_compute_source_index<scalar_t>(
@@ -158,7 +162,9 @@ static void upsample_bilinear2d_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -192,8 +198,8 @@ static void upsample_bilinear2d_out_cpu_template(
       output_width > 0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d", [&] {
-    auto* idata = input.data<scalar_t>();
-    auto* odata = output.data<scalar_t>();
+    auto* idata = input.data_ptr<scalar_t>();
+    auto* odata = output.data_ptr<scalar_t>();
 
     upsample_bilinear2d_out_frame<scalar_t>(
         odata,
@@ -204,7 +210,9 @@ static void upsample_bilinear2d_out_cpu_template(
         output_width,
         nbatch,
         channels,
-        align_corners);
+        align_corners,
+        scales_h,
+        scales_w);
   });
 }
 
@@ -213,7 +221,9 @@ static void upsample_bilinear2d_backward_out_cpu_template(
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -249,8 +259,8 @@ static void upsample_bilinear2d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad_output.scalar_type(), "upsample_bilinear2d_backward", [&] {
-        scalar_t* idata = grad_input.data<scalar_t>();
-        scalar_t* odata = grad_output.data<scalar_t>();
+        scalar_t* idata = grad_input.data_ptr<scalar_t>();
+        scalar_t* odata = grad_output.data_ptr<scalar_t>();
 
         upsample_bilinear2d_backward_out_frame<scalar_t>(
             odata,
@@ -261,7 +271,9 @@ static void upsample_bilinear2d_backward_out_cpu_template(
             output_width,
             nbatch,
             channels,
-            align_corners);
+            align_corners,
+            scales_h,
+            scales_w);
       });
 }
 } // namespace
@@ -270,19 +282,23 @@ Tensor& upsample_bilinear2d_out_cpu(
     Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_out_cpu_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_h, scales_w);
   return output;
 }
 
 Tensor upsample_bilinear2d_cpu(
     const Tensor& input,
     IntArrayRef output_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto output = at::empty({0}, input.options());
   upsample_bilinear2d_out_cpu_template(
-      output, input, output_size, align_corners);
+      output, input, output_size, align_corners, scales_h, scales_w);
   return output;
 }
 
@@ -291,9 +307,11 @@ Tensor& upsample_bilinear2d_backward_out_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   upsample_bilinear2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
 }
 
@@ -301,10 +319,12 @@ Tensor upsample_bilinear2d_backward_cpu(
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    bool align_corners) {
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
   auto grad_input = at::zeros(input_size, grad_output.options());
   upsample_bilinear2d_backward_out_cpu_template(
-      grad_input, grad_output, output_size, input_size, align_corners);
+      grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
 }
 

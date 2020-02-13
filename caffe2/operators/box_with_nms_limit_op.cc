@@ -308,7 +308,7 @@ SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 } // namespace caffe2
 
 // clang-format off
-C10_REGISTER_CAFFE2_OPERATOR_CPU(
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     BoxWithNMSLimit,
     "_caffe2::BoxWithNMSLimit("
       "Tensor scores, "
@@ -330,9 +330,9 @@ C10_REGISTER_CAFFE2_OPERATOR_CPU(
       "Tensor scores, "
       "Tensor boxes, "
       "Tensor classes, "
-      "Tensor batch_splits"
-      //"Tensor keeps, "
-      //"Tensor keeps_size, "
+      "Tensor batch_splits, "
+      "Tensor keeps, "
+      "Tensor keeps_size"
     ")",
     caffe2::BoxWithNMSLimitOp<caffe2::CPUContext>);
 // clang-format on

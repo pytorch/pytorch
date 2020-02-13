@@ -58,7 +58,20 @@ output = [[1, 2], [2, 1], [1, 2]]
         "output",
         "indices of bins given by boundaries to which each value"
         "in data belongs")
+    .TensorInferenceFunction([](const OperatorDef& /* def */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(in);
+      out[0].set_data_type(TensorProto::INT32);
+      return out;
+    })
     .Arg("boundaries", "bucketization boundaries");
 
 NO_GRADIENT(BucketizeOp);
 } // namespace caffe2
+
+using BucketizeInt = caffe2::BucketizeOp<int, caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Bucketize,
+    "_caffe2::Bucketize(Tensor data, float[] boundaries) -> Tensor output",
+    BucketizeInt);

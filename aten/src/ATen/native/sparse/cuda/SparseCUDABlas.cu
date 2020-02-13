@@ -1,16 +1,15 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 
 #include <TH/THGeneral.h>
 
 #include <cusparse.h>
 
-namespace at { namespace native { namespace sparse { namespace cuda {
-
-#if (!((CUSPARSE_VER_MAJOR >= 10) && (CUSPARSE_VER_MINOR >= 2)))
-std::string cusparseGetErrorString(cusparseStatus_t status) {
+#if !defined(CUSPARSE_VERSION) || (CUSPARSE_VERSION < 10200)
+const char* cusparseGetErrorString(cusparseStatus_t status) {
   switch(status)
   {
     case CUSPARSE_STATUS_SUCCESS:
@@ -44,43 +43,23 @@ std::string cusparseGetErrorString(cusparseStatus_t status) {
       return "an entry of the matrix is either structural zero or numerical zero (singular block)";
 
     default:
-      {
-        std::ostringstream oss;
-        oss << "unknown error " << static_cast<int64_t>(status);
-        return oss.str();
-      }
+      return "unknown error";
   }
 }
 #endif
 
-inline void CUSPARSE_CHECK(cusparseStatus_t status)
-{
-  if (status != CUSPARSE_STATUS_SUCCESS) {
-    AT_ERROR("cusparse runtime error: ", cusparseGetErrorString(status));
-  }
-}
-
-inline cusparseHandle_t setCUDASparseStream() {
-  cusparseHandle_t handle = at::cuda::getCurrentCUDASparseHandle();
-  cusparseSetStream(handle, at::cuda::getCurrentCUDAStream());
-  return handle;
-}
+namespace at { namespace native { namespace sparse { namespace cuda {
 
 void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   TORCH_CHECK((m <= INT_MAX) && (nnz <= INT_MAX),
     "cusparseXcoo2csr only supports m, nnz with the bound [val] <= ",
     INT_MAX);
 
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(nnz == 0 || m == 0) return;
-#endif
-
   int i_nnz = (int)nnz;
   int i_m = (int)m;
 
-  auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  TORCH_CUDASPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
 }
 
 cusparseOperation_t convertTransToCusparseOperation(char trans) {
@@ -127,16 +106,11 @@ void Scsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   int i_ldb = (int)ldb;
   int i_ldc = (int)ldc;
 
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(n == 0) return;
-#endif
-
-  auto handle = setCUDASparseStream();
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  CUSPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
-  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
+  TORCH_CUDASPARSE_CHECK(cusparseScsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
 void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t nnz, double alpha, double *csrvala, int *csrrowptra, int *csrcolinda, double *b, int64_t ldb, double beta, double *c, int64_t ldc)
@@ -155,16 +129,11 @@ void Dcsrmm2(char transa, char transb, int64_t m, int64_t n, int64_t k, int64_t 
   int i_ldc = (int)ldc;
 
 
-#ifdef __HIP_PLATFORM_HCC__
-  // current shortcoming in hip/rocSPARSE
-  if(n == 0) return;
-#endif
-
-  auto handle = setCUDASparseStream();
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  CUSPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
-  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
+  TORCH_CUDASPARSE_CHECK(cusparseDcsrmm2(handle, opa, opb, i_m, i_n, i_k, i_nnz, &alpha, desc, csrvala, csrrowptra, csrcolinda, b, i_ldb, &beta, c, i_ldc));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
   // TODO: Proper fix is to create real descriptor classes
 }
 
@@ -175,7 +144,7 @@ void CreateIdentityPermutation(int64_t nnz, int *P) {
     INT_MAX);
   int i_nnz = (int)nnz;
 
-  auto handle = setCUDASparseStream();
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseCreateIdentityPermutation(handle, i_nnz, P);
 }
 
@@ -188,8 +157,8 @@ void Xcsrsort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *csrRow
   int i_n = (int)n;
   int i_nnz = (int)nnz;
 
-  auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
 }
 
 void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
@@ -201,11 +170,11 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
   int i_n = (int)n;
   int i_nnz = (int)nnz;
 
-  auto handle = setCUDASparseStream();
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
   cusparseMatDescr_t desc;
   cusparseCreateMatDescr(&desc);
-  CUSPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
-  CUSPARSE_CHECK(cusparseDestroyMatDescr(desc));
+  TORCH_CUDASPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
+  TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));
 }
 
 void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
@@ -217,8 +186,8 @@ void Xcoosort_bufferSizeExt(int64_t m, int64_t n, int64_t nnz, const int *cooRow
   int i_n = (int)n;
   int i_nnz = (int)nnz;
 
-  auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  TORCH_CUDASPARSE_CHECK(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
 }
 
 void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
@@ -230,8 +199,8 @@ void XcoosortByRow(int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols
   int i_n = (int)n;
   int i_nnz = (int)nnz;
 
-  auto handle = setCUDASparseStream();
-  CUSPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
+  auto handle = at::cuda::getCurrentCUDASparseHandle();
+  TORCH_CUDASPARSE_CHECK(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
 }
 
 

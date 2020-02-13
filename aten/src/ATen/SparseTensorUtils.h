@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 
@@ -17,7 +19,7 @@ using SparseType = Type;
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
 inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
-  AT_ASSERTM(!self.is_variable(), "_internal_get_SparseTensorImpl: should not be a variable");  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
   return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
@@ -73,7 +75,7 @@ inline LongTensor flatten_indices(const Tensor& indices, IntArrayRef full_size, 
   int64_t sparse_dim = indices.size(0);
   if (sparse_dim == 1) {
     if (force_clone) {
-      return indices.squeeze(0).clone();
+      return indices.squeeze(0).clone(at::MemoryFormat::Contiguous);
     } else {
       return indices.squeeze(0);
     }

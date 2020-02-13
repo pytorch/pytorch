@@ -8,13 +8,13 @@ from itertools import chain
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-IS_PPC = (platform.machine() == 'ppc64le')
-IS_ARM = (platform.machine() == 'aarch64')
 
 IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version or any([x.startswith('CONDA') for x in os.environ])
 CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 IS_64BIT = (struct.calcsize("P") == 8)
+
+BUILD_DIR = 'build'
 
 
 def check_env_flag(name, default=''):
@@ -33,32 +33,60 @@ def lib_paths_from_base(base_path):
     return [os.path.join(base_path, s) for s in ['lib/x64', 'lib', 'lib64']]
 
 
-def hotpatch_var(var, prefix='USE_'):
-    if check_env_flag('NO_' + var):
-        os.environ[prefix + var] = '0'
-    elif check_negative_env_flag('NO_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '1'
-    elif check_negative_env_flag('WITH_' + var):
-        os.environ[prefix + var] = '0'
+# We promised that CXXFLAGS should also be affected by CFLAGS
+if 'CFLAGS' in os.environ and 'CXXFLAGS' not in os.environ:
+    os.environ['CXXFLAGS'] = os.environ['CFLAGS']
 
 
-def hotpatch_build_env_vars():
-    # Before we run the setup_helpers, let's look for NO_* and WITH_*
-    # variables and hotpatch environment with the USE_* equivalent
-    use_env_vars = ['CUDA', 'CUDNN', 'FBGEMM', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED',
-                    'OPENCV', 'TENSORRT', 'QNNPACK', 'FFMPEG', 'SYSTEM_NCCL',
-                    'GLOO_IBVERBS']
-    list(map(hotpatch_var, use_env_vars))
+class BuildType(object):
+    """Checks build type. The build type will be given in :attr:`cmake_build_type_env`. If :attr:`cmake_build_type_env`
+    is ``None``, then the build type will be inferred from ``CMakeCache.txt``. If ``CMakeCache.txt`` does not exist,
+    os.environ['CMAKE_BUILD_TYPE'] will be used.
 
-    # Also hotpatch a few with BUILD_* equivalent
-    build_env_vars = ['BINARY', 'TEST', 'CAFFE2_OPS']
-    [hotpatch_var(v, 'BUILD_') for v in build_env_vars]
+    Arguments:
+      cmake_build_type_env (str): The value of os.environ['CMAKE_BUILD_TYPE']. If None, the actual build type will be
+        inferred.
 
-hotpatch_build_env_vars()
+    """
 
-DEBUG = check_env_flag('DEBUG')
-REL_WITH_DEB_INFO = check_env_flag('REL_WITH_DEB_INFO')
-USE_MKLDNN = check_env_flag('USE_MKLDNN', 'OFF' if IS_PPC or IS_ARM else 'ON')
-NAMEDTENSOR_ENABLED = check_env_flag('USE_NAMEDTENSOR') or check_negative_env_flag('NO_NAMEDTENSOR')
+    def __init__(self, cmake_build_type_env=None):
+        if cmake_build_type_env is not None:
+            self.build_type_string = cmake_build_type_env
+            return
+
+        cmake_cache_txt = os.path.join(BUILD_DIR, 'CMakeCache.txt')
+        if os.path.isfile(cmake_cache_txt):
+            # Found CMakeCache.txt. Use the build type specified in it.
+            from .cmake import get_cmake_cache_variables_from_file
+            with open(cmake_cache_txt) as f:
+                cmake_cache_vars = get_cmake_cache_variables_from_file(f)
+            # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
+            # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
+            # CMake using CMAKE_BUILD_TYPE from our Python scripts, this is OK here.
+            self.build_type_string = cmake_cache_vars['CMAKE_BUILD_TYPE']
+        else:
+            self.build_type_string = os.environ.get('CMAKE_BUILD_TYPE', 'Release')
+
+    def is_debug(self):
+        "Checks Debug build."
+        return self.build_type_string == 'Debug'
+
+    def is_rel_with_deb_info(self):
+        "Checks RelWithDebInfo build."
+        return self.build_type_string == 'RelWithDebInfo'
+
+    def is_release(self):
+        "Checks Release build."
+        return self.build_type_string == 'Release'
+
+
+# hotpatch environment variable 'CMAKE_BUILD_TYPE'. 'CMAKE_BUILD_TYPE' always prevails over DEBUG or REL_WITH_DEB_INFO.
+if 'CMAKE_BUILD_TYPE' not in os.environ:
+    if check_env_flag('DEBUG'):
+        os.environ['CMAKE_BUILD_TYPE'] = 'Debug'
+    elif check_env_flag('REL_WITH_DEB_INFO'):
+        os.environ['CMAKE_BUILD_TYPE'] = 'RelWithDebInfo'
+    else:
+        os.environ['CMAKE_BUILD_TYPE'] = 'Release'
+
+build_type = BuildType()

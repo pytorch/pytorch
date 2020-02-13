@@ -13,9 +13,7 @@
 namespace torch {
 namespace jit {
 
-using ::c10::ProfiledTensorTypePtr;
-
-TORCH_API void EliminateGuards(std::shared_ptr<Graph> graph);
+TORCH_API void EliminateRedundantGuards(std::shared_ptr<Graph> graph);
 
 } // namespace jit
 } // namespace torch

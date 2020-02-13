@@ -5,6 +5,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
 #include <THC/THCNumerics.cuh>
 
@@ -184,7 +185,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      atomicAdd(&(gradInput[argmax]), z);
+      gpuAtomicAdd(&(gradInput[argmax]), z);
     }
   }
 }
@@ -234,9 +235,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeD, osizeH, osizeW});
         indices.resize_({sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -271,9 +272,9 @@ void adaptive_max_pool2d_out_cuda_template(
         output.resize_({sizeB, sizeD, osizeH, osizeW});
         indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input_.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input_.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -328,9 +329,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -374,9 +375,9 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         // cuda blocks & threads:
         int blocksH = (int)(16L / sizeD);
@@ -455,7 +456,7 @@ Tensor adaptive_max_pool2d_backward_cuda(
   const Tensor& input,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   adaptive_max_pool2d_backward_out_cuda_template(
     gradInput,
     gradOutput_,

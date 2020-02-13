@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/DilatedMaxPool.h>
+#include <ATen/native/Pool.h>
 #include <tuple>
 
 
@@ -70,18 +71,16 @@ static void max_pool3d_with_indices_single_out_frame(
               + ti * owidth * oheight + i * owidth + j;
 
             /* compute local max: */
-            int64_t maxindex = -1;
-            scalar_t maxval = -std::numeric_limits<scalar_t>::max();
-            int64_t x,y,z;
-            int64_t index = 0;
+            int64_t maxindex = start_t * iwidth * iheight + start_h * iwidth + start_w;
+            scalar_t maxval = -std::numeric_limits<scalar_t>::infinity();
 
-            for (z = start_t; z < end_t; z += dilationT)
+            for (int64_t z = start_t; z < end_t; z += dilationT)
             {
-              for (y = start_h; y < end_h; y += dilationH)
+              for (int64_t y = start_h; y < end_h; y += dilationH)
               {
-                for (x = start_w; x < end_w; x += dilationW)
+                for (int64_t x = start_w; x < end_w; x += dilationW)
                 {
-                  index = z * iwidth * iheight + y * iwidth + x;
+                  int64_t index = z * iwidth * iheight + y * iwidth + x;
                   scalar_t val = ip[index];
                   if ((val > maxval) || std::isnan(val))
                   {
@@ -148,32 +147,35 @@ void max_pool3d_with_indices_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX [JIT] Pooling.cpp allows stride.empty().
-  // XXX [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 3 &&
-              (stride.empty() || stride.size() == 3) &&
-              (padding.size() == 1 || padding.size() == 3) &&
-              (dilation.size() == 1 || dilation.size() == 3),
-    "max_pool3d_with_indices: internal error: all IntArrayRef sizes must be 3");
-
-  TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
+    "max_pool3d: kernel_size must either be a single int, or a tuple of three ints")
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+    "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[2]);
+  const int dH = stride.empty() ? kH :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
+    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 3,
+    "max_pool3d: dilation must be either a single int, or a tuple of three ints");
   const int dilationT = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
+
+  TORCH_CHECK((input_.ndimension() == 4 || input_.ndimension() == 5),
+    "non-empty 4D or 5D (batch mode) tensor expected for input");
 
   const int64_t nslices = input_.size(-4);
   const int64_t itime = input_.size(-3);
@@ -184,7 +186,7 @@ void max_pool3d_with_indices_out_cpu_template(
   const int64_t oheight = pooling_output_shape<int64_t>(iheight, kH, pH, dH, dilationH, ceil_mode);
   const int64_t owidth = pooling_output_shape<int64_t>(iwidth, kW, pW, dW, dilationW, ceil_mode);
 
-  max_pool3d_with_indices_shape_check(
+  pool3d_shape_check(
     input_,
     nslices,
     kT, kH, kW,
@@ -206,9 +208,9 @@ void max_pool3d_with_indices_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
       "max_pool3d_with_indices_cpu",
       [&] {
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool3d_with_indices_single_out_frame(
           input_data, output_data,
@@ -236,9 +238,9 @@ void max_pool3d_with_indices_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
       "max_pool3d_with_indices_cpu",
       [&] {
-        scalar_t *input_data = input.data<scalar_t>();
-        scalar_t *output_data = output.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool3d_with_indices_out_frame(
           input_data,
@@ -353,32 +355,35 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
           IntArrayRef dilation,
           bool ceil_mode)
 {
-  // XXX [JIT] Pooling.cpp allows stride.empty().
-  // XXX [LIBTORCH] IntegrationTest.MNIST: padding.size() == 1 && dilation.size() == 1.
-  TORCH_CHECK(kernel_size.size() == 3 &&
-              (stride.empty() || stride.size() == 3) &&
-              (padding.size() == 1 || padding.size() == 3) &&
-              (dilation.size() == 1 || dilation.size() == 3),
-    "max_pool3d_with_indices: internal error: all IntArrayRef sizes must be 3");
-
-  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
-    "non-empty 4D or 5D (batch mode) tensor expected for input");
-
+  // #20866, #22032: Guarantee this for the official C++ API?
+  TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 3,
+    "max_pool3d: kernel_size must either be a single int, or a tuple of three ints")
   const int kT = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kH = safe_downcast<int, int64_t>(kernel_size[1]);
-  const int kW = safe_downcast<int, int64_t>(kernel_size[2]);
+  const int kH = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int kW = kernel_size.size() == 1 ? kT : safe_downcast<int, int64_t>(kernel_size[2]);
 
+  TORCH_CHECK(stride.size() == 0 || stride.size() == 1 || stride.size() == 3,
+    "max_pool3d: stride must either be omitted, a single int, or a tuple of three ints")
   const int dT = stride.empty() ? kT : safe_downcast<int, int64_t>(stride[0]);
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[1]);
-  const int dW = stride.empty() ? kW : safe_downcast<int, int64_t>(stride[2]);
+  const int dH = stride.empty() ? kH :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW :
+                 stride.size() == 1 ? dT : safe_downcast<int, int64_t>(stride[2]);
 
+  TORCH_CHECK(padding.size() == 1 || padding.size() == 3,
+    "max_pool3d: padding must be either be a single int, or a tuple of three ints");
   const int pT = safe_downcast<int, int64_t>(padding[0]);
   const int pH = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[1]);
   const int pW = padding.size() == 1 ? pT : safe_downcast<int, int64_t>(padding[2]);
 
+  TORCH_CHECK(dilation.size() == 1 || dilation.size() == 3,
+    "max_pool3d: dilation must be either a single int, or a tuple of three ints");
   const int dilationT = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationH = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[1]);
   const int dilationW = dilation.size() == 1 ? dilationT : safe_downcast<int, int64_t>(dilation[2]);
+
+  TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
+    "non-empty 4D or 5D (batch mode) tensor expected for input");
 
   const int64_t nslices = input.size(-4);
   const int64_t itime = input.size(-3);
@@ -396,7 +401,7 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
   const int64_t oheight = gradOutput.size(-2);
   const int64_t owidth = gradOutput.size(-1);
 
-  max_pool3d_with_indices_shape_check(
+  max_pool3d_backward_shape_check(
     input,
     gradOutput,
     indices,
@@ -415,9 +420,9 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
       "max_pool3d_with_indices_backward",
       [&] {
         /* get raw pointers */
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool3d_with_indices_backward_single_out_frame(
           gradInput_data, gradOutput_data,
@@ -440,9 +445,9 @@ Tensor& max_pool3d_with_indices_backward_out_cpu_template(
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(),
       "max_pool3d_with_indices_backward",
       [&] {
-        scalar_t *gradInput_data = gradInput.data<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data<scalar_t>();
-        int64_t *indices_data = indices.data<int64_t>();
+        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
         max_pool3d_with_indices_backward_out_frame<scalar_t>(
           gradInput_data,
@@ -495,6 +500,8 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
   IntArrayRef dilation,
   bool ceil_mode)
 {
+  NoNamesGuard guard;
+
   Tensor output = at::empty({0}, input.options());
   Tensor indices = at::empty({0}, input.options().dtype(kLong));
   max_pool3d_with_indices_out_cpu_template(
@@ -506,6 +513,11 @@ std::tuple<Tensor, Tensor> max_pool3d_with_indices_cpu(
     padding,
     dilation,
     ceil_mode);
+
+  guard.reset();
+  namedinference::propagate_names(output, input);
+  namedinference::propagate_names(indices, input);
+
   return std::tuple<Tensor, Tensor>(output, indices);
 }
 
@@ -543,7 +555,7 @@ Tensor max_pool3d_with_indices_backward_cpu(
   bool ceil_mode,
   const Tensor& indices)
 {
-  auto gradInput = at::zeros_like(input);
+  auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   max_pool3d_with_indices_backward_out_cpu_template(
     gradInput,
     gradOutput_,

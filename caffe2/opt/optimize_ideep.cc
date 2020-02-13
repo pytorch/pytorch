@@ -459,14 +459,14 @@ bool fuseConvSum(repr::NNModule* nn, caffe2::Workspace* ws) {
     auto newOutputName = repr::nn::get<repr::Tensor>(sumInputX)->getName() +
         "_fusion_fix_" + std::to_string(i);
 
-    auto newInputTensor = util::make_unique<repr::Tensor>(newOutputName);
+    auto newInputTensor = std::make_unique<repr::Tensor>(newOutputName);
     auto newInput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newInputTensor));
 
     nn->dataFlow.replaceNode(sumInputX, newInput);
     nn->dataFlow.deleteNode(sumInputX);
 
-    auto newOutputTensor = util::make_unique<repr::Tensor>(newOutputName);
+    auto newOutputTensor = std::make_unique<repr::Tensor>(newOutputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
 
@@ -627,7 +627,7 @@ bool enforceFusionInplace(repr::NNModule* nn, caffe2::Workspace* ws) {
       return false;
     }
 
-    auto newOutputTensor = util::make_unique<repr::Tensor>(inputName);
+    auto newOutputTensor = std::make_unique<repr::Tensor>(inputName);
     auto newOutput = nn->dataFlow.createNode(
         unique_dyn_cast<repr::NeuralNetData>(newOutputTensor));
     nn->dataFlow.replaceNode(convOutput, newOutput);
@@ -892,10 +892,11 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
 
       if (filter->get_descriptor() != expectedDesc) {
         filter->set_public_format(ideep::format::iohw);
-        itensor&& newFilter(expectedDesc);
+        itensor newFilter;
+        newFilter.init(expectedDesc);
         newFilter.feed_from(*filter);
         newFilter.set_public_format(ideep::format::iohw);
-        filterBlob->Reset<itensor>(new itensor(newFilter));
+        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
       }
     } else if (repr::nn::is<repr::Conv>(node)) {
       auto conv = repr::nn::get<repr::Conv>(node);
@@ -932,9 +933,10 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
           aalgorithm);
 
       if (filter->get_descriptor() != expectedDesc) {
-        itensor&& newFilter(expectedDesc);
+        itensor newFilter;
+        newFilter.init(expectedDesc);
         newFilter.feed_from(*filter);
-        filterBlob->Reset<itensor>(new itensor(newFilter));
+        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
       }
       // convert weights for FC
     } else if (repr::nn::is<repr::FC>(node)) {
@@ -959,9 +961,10 @@ void preConvertFiltersFormat(repr::NNModule* nn, caffe2::Workspace* ws) {
           filter->get_dims());
 
       if (filter->get_descriptor() != expectedDesc) {
-        itensor&& newFilter(expectedDesc);
+        itensor newFilter;
+        newFilter.init(expectedDesc);
         newFilter.feed_from(filter->as_weights());
-        filterBlob->Reset<itensor>(new itensor(newFilter));
+        filterBlob->Reset<itensor>(new itensor(std::move(newFilter)));
       }
     }
   }

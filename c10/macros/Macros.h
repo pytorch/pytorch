@@ -90,6 +90,8 @@
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
 
+#define C10_RESTRICT __restrict
+
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {} // namespace c10
@@ -113,13 +115,6 @@ namespace at { namespace cuda { using namespace c10::cuda; }}
 // HIPIFY is no longer out-of-place, we can switch the cuda
 // here to hip and everyone is happy.
 namespace at { namespace cuda { using namespace c10::hip; }}
-
-// C10_NORETURN
-#if defined(_MSC_VER)
-#define C10_NORETURN __declspec(noreturn)
-#else
-#define C10_NORETURN __attribute__((noreturn))
-#endif
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -191,6 +186,21 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_HIP_HOST_DEVICE
 #endif
 
+#ifdef __HIP_PLATFORM_HCC__
+#define C10_WARP_SIZE 64
+#else
+#define C10_WARP_SIZE 32
+#endif
+
+// CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
+// kernels. This is not supported by Apple platforms so we special case it.
+// See http://docs.nvidia.com/cuda/cuda-c-programming-guide/#assertion
+#if defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#define CUDA_KERNEL_ASSERT(...)
+#else // __APPLE__
+#define CUDA_KERNEL_ASSERT(...) assert(__VA_ARGS__)
+#endif // __APPLE__
+
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -208,10 +218,59 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif // ANDROID / IOS / MACOS
 
 // Portably determine if a type T is trivially copyable or not.
-#if __GNUG__ && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
+#endif
+
+// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
+// device code in CUDA to call host constexpr functions. Unfortunately,
+// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
+// with many of the constexpr things we'd like to do and the device code
+// compiler crashes when it sees one of these host-only functions.
+// It works when nvcc builds host code, but not when it builds device code
+// and notices it can call these constexpr functions from device code.
+// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
+// functions. This enables constexpr when compiled on the host and applies
+// __host__ when it is compiled on the device in an attempt to stop it from
+// being called from device functions. Not sure if the latter works, but
+// even if not, it not being constexpr anymore should be enough to stop
+// it from being called from device code.
+// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
+#if defined(__CUDA_ARCH__)
+#define C10_HOST_CONSTEXPR __host__
+#define C10_HOST_CONSTEXPR_VAR
+#else
+#define C10_HOST_CONSTEXPR constexpr
+#define C10_HOST_CONSTEXPR_VAR constexpr
+#endif
+
+#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
+    __GNUC__ < 6
+#define CONSTEXPR_EXCEPT_GCC5
+#define IS_NOT_GCC5_CONSTEXPR 0
+#else
+#define CONSTEXPR_EXCEPT_GCC5 constexpr
+#define IS_NOT_GCC5_CONSTEXPR 1
+#endif
+
+#if defined(__CUDA_ARCH__)
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+#endif
+#else
+#if defined(_MSC_VER) && defined(__CUDACC__)
+#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+#else
+#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

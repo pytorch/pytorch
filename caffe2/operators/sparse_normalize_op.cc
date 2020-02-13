@@ -6,12 +6,8 @@ namespace caffe2 {
 
 template <>
 bool SparseNormalizeOp<float, CPUContext>::RunOnDevice() {
-  CAFFE_ENFORCE_EQ(
-      Input(PARAM).size_from_dim(1),
-      Input(GRAD).size_from_dim(Input(INDICES).dim()));
-
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-     this, Input(INDICES));
+      this, Input(INDICES));
 }
 
 template <>
@@ -29,7 +25,7 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
   }
 
   // embedding length, e.g. 32, 64, 128
-  auto block_size = Input(GRAD).numel() / n;
+  auto block_size = Input(PARAM).size_from_dim(1);
   for (int i = 0; i < n; ++i) {
     auto idx = indices[i];
     auto offsetIdx = idx * block_size;
@@ -52,11 +48,14 @@ bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
 
 REGISTER_CPU_OPERATOR(SparseNormalize, SparseNormalizeOp<float, CPUContext>);
 OPERATOR_SCHEMA(SparseNormalize)
-    .NumInputs(3)
+    .NumInputs(2, 3)
     .NumOutputs(1)
     .Input(0, "param", "Parameters to be normalized")
     .Input(1, "indices", "Sparse indices")
-    .Input(2, "grad", "Gradient computed")
+    .Input(
+        2,
+        "grad",
+        "Gradient computed (optional - not used, this argument is for backwards compatibility)")
     .Output(0, "output_param", "Normalized parameters")
     .EnforceOneToOneInplace()
     .Arg(
@@ -64,7 +63,7 @@ OPERATOR_SCHEMA(SparseNormalize)
         "A bool variable to control whether to use max norm \
     or constant norm. When use_max_norm = false, constant norm is used so that \
     all the embedding vectors are scaled to have a L2 norm equals to A \
-    (see blow arugment norm=A). If use_max_norm = true, \
+    (see blow argument norm=A). If use_max_norm = true, \
     max norm is used so that embedding is scaled so that its l2 norm is no larger \
     than A. If an embedding's norm is less than A originally, \
     the embedding is left unchanged.\

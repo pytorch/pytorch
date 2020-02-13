@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/operators/elementwise_ops_utils.h"
 #include "caffe2/utils/math.h"
 
@@ -73,11 +73,11 @@ void add_op_cpu_impl(
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::Add",
     c10::RegisterOperators::options()
-      .kernel<decltype(add_op_cpu_impl<float>), &add_op_cpu_impl<float>>(CPUTensorId()));
+      .kernel<decltype(add_op_cpu_impl<float>), &add_op_cpu_impl<float>>(DispatchKey::CPUTensorId));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::Add",
     C10Add_DontUseThisOpYet)
 

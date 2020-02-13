@@ -2,9 +2,9 @@
 
 #include <sstream>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/Exceptions.h>
@@ -29,13 +29,13 @@ PyFunctionPreHook::PyFunctionPreHook(PyObject* dict, int value_idx)
 }
 
 PyFunctionPreHook::~PyFunctionPreHook() {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   Py_DECREF(dict);
 }
 
 auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
 {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
 
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
@@ -60,7 +60,7 @@ PyFunctionPostHook::PyFunctionPostHook(PyObject* dict) : dict(dict) {
 }
 
 PyFunctionPostHook::~PyFunctionPostHook() {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   Py_DECREF(dict);
 }
 
@@ -68,7 +68,7 @@ auto PyFunctionPostHook::operator()(
     const variable_list& _outputs, /* grad_inputs */
     const variable_list& _inputs /* grad_outputs */) -> variable_list
 {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
 
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
@@ -160,33 +160,7 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
   auto& original = ((THPVariable*)_original)->cdata;
   auto& result = ((THPVariable*)_result)->cdata;
 
-  if (original.type() != result.type()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the type of value (";
-    ss << "was " << original.toString() << " got ";
-    ss << result.toString() << ")";
-    throw std::runtime_error(ss.str());
-  }
-
-  if (original.is_cuda() != result.is_cuda()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the type of value";
-    if (original.is_cuda()) {
-      ss << " (was CUDA tensor got CPU tensor)";
-    } else {
-      ss << " (was CPU tensor got CUDA tensor)";
-    }
-    throw std::runtime_error(ss.str());
-  }
-
-  if (original.sizes().vec() != result.sizes().vec()) {
-    std::stringstream ss;
-    auto name = hook_name(hook);
-    ss << "hook '" << name << "' has changed the size of value";
-    throw std::runtime_error(ss.str());
-  }
+  torch::autograd::check_variable_result(original, result, hook_name(hook));
 }
 
 static std::string hook_name(PyObject* hook) {

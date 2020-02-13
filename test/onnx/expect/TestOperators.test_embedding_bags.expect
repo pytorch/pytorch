@@ -1,6 +1,6 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.1"
+producer_version: "1.4"
 graph {
   node {
     input: "weight"
@@ -10,7 +10,13 @@ graph {
     output: "4"
     output: "5"
     output: "6"
+    name: "ATen_0"
     op_type: "ATen"
+    attribute {
+      name: "include_last_offset"
+      i: 0
+      type: INT
+    }
     attribute {
       name: "mode"
       i: 1

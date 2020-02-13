@@ -1,8 +1,9 @@
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
+#include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 #include <THCUNN/common.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <curand.h>
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>

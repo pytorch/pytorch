@@ -84,7 +84,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
-             "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", input_lengths[b], " for ", log_probs_arg,
+             "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
   }
 
@@ -94,7 +94,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   auto lpp  = log_probs.permute({1,0,2});
   auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
-  auto targets_data = targets.data<target_t>();
+  auto targets_data = targets.data_ptr<target_t>();
   auto neg_log_likelihood_a = neg_log_likelihood.accessor<scalar_t, 1>();
 
   // alpha calculation for the first row, the three equations for alpha_1 above eq (6)
@@ -147,12 +147,17 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         }
       }
       // the likelihood is the the sum of the last two alphas, eq (8), the loss is the negative log likelihood
-      scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
-      scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
-      scalar_t m = std::max(l1, l2);
-      m = ((m == neginf) ? 0 : m);
-      scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
-      neg_log_likelihood_a[b] = -log_likelihood;
+      if (target_length == 0) {
+        // if the target is empty then there is no preceding BLANK state and hence there is no path to merge
+        neg_log_likelihood_a[b] = -log_alpha_a[input_length-1][0];
+      } else {
+        scalar_t l1 = log_alpha_a[input_length-1][target_length*2];
+        scalar_t l2 = log_alpha_a[input_length-1][target_length*2-1];
+        scalar_t m = std::max(l1, l2);
+        m = ((m == neginf) ? 0 : m);
+        scalar_t log_likelihood = std::log(std::exp(l1-m)+std::exp(l2-m))+m;
+        neg_log_likelihood_a[b] = -log_likelihood;
+      }
     }
   });
 
@@ -170,7 +175,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  Tensor grad = at::full_like(log_probs, neginf); // at this point, this is log of empty sum
+  Tensor grad = at::full_like(log_probs, neginf, LEGACY_CONTIGUOUS_MEMORY_FORMAT); // at this point, this is log of empty sum
 
   // The admin bits. We don't do much checking and assume that the forward did.
   int64_t tg_target_stride;
@@ -198,14 +203,14 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     max_target_length = targets.size(1);
   }
 
-  Tensor log_beta = at::empty_like(log_alpha);  // could be optimized to use only 2 rows
+  Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);  // could be optimized to use only 2 rows
   auto lpp  = log_probs.permute({1,0,2});
   auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
   auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
   auto log_beta_a_global = log_beta.accessor<scalar_t, 3>();
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
-  auto targets_data = targets.data<target_t>();
+  auto targets_data = targets.data_ptr<target_t>();
 
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
     for (int64_t b = start; b < end; b++) {
@@ -334,42 +339,35 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  auto& ctx = at::globalContext();
-
   bool use_cudnn =
-    detail::getCUDAHooks().compiledWithCuDNN() &&
-    (detail::getCUDAHooks().versionCuDNN() >= 7000) &&
-    ctx.userEnabledCuDNN() &&
-    (BLANK == 0) && (targets.dim()==1) &&
-    (log_probs.scalar_type() == at::kFloat) &&
-    (targets.scalar_type() == at::kInt) &&
-    (log_probs.type().backend() == Backend::CUDA);
-
-  if (use_cudnn) {
-    // we don't know that input_lengths and target_lengths have the same size (they should, but we didn't check yet)
-    int64_t max_input_length = log_probs.size(0);
-    for (int64_t b = 0; b < input_lengths.size(); b++) {
-      use_cudnn &= (input_lengths[b] == max_input_length);
-    }
-    for (int64_t b = 0; b < target_lengths.size(); b++) {
-      // target length < 256 is documented, but we see illegal memory accesses when target lengths > input lengths for CuDNN
-      use_cudnn &= (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
-    }
-  }
+      (log_probs.device().type() == at::kCUDA) &&
+      at::_use_cudnn_ctc_loss(
+          log_probs, targets, input_lengths, target_lengths, BLANK);
 
   Tensor res;
   if (use_cudnn) {
-    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, ctx.deterministicCuDNN(), zero_infinity));
+    // non-deterministic ctc loss on cudnn disabled due to inconsistent results
+    // see: https://github.com/pytorch/pytorch/issues/21680
+    res = std::get<0>(at::_cudnn_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, /*deterministic=*/true, zero_infinity));
   } else {
-    res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK, zero_infinity));
+    // if the targets are on CPU (which you need for CuDNN, let's move them to
+    // GPU as a service for the user)
+    res = std::get<0>(at::_ctc_loss(
+        log_probs,
+        targets.to(log_probs.device(), kLong),
+        input_lengths,
+        target_lengths,
+        BLANK,
+        zero_infinity));
     if (zero_infinity) {
       res = at::where(res == Scalar(std::numeric_limits<double>::infinity()), at::zeros({}, res.options()), res);
     }
   }
-  if (reduction == Reduction::Mean) {
-    auto target_lengths_t = at::tensor(target_lengths, res.options());
+  if (reduction == at::Reduction::Mean) {
+    auto target_lengths_t =
+        at::tensor(target_lengths, res.options()).clamp_min(1);
     return (res / target_lengths_t).mean();
-  } else if (reduction == Reduction::Sum) {
+  } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
   return res;
@@ -377,13 +375,13 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
 
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
-  TORCH_CHECK(isIntegralType(input_lengths.scalar_type()), "input_lenghts must be integral");
-  TORCH_CHECK(isIntegralType(target_lengths.scalar_type()), "target_lenghts must be integral");
+  TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
+  TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 
-  Tensor ilc = input_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
-  Tensor tlc = target_lengths.toType(kLong).toBackend(Backend::CPU).contiguous();
-  IntArrayRef il(ilc.data<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data<int64_t>(), tlc.numel());
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 

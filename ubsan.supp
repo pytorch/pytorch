@@ -1,3 +1,1 @@
-vptr:libtorch.so
-vptr:libcaffe2.so
-bounds:asmjit::Zone::_alloc
+vptr:libtorch_python.so

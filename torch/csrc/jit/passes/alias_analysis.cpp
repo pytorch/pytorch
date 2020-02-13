@@ -1,57 +1,64 @@
 #include <torch/csrc/jit/passes/alias_analysis.h>
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/error_report.h>
 #include <torch/csrc/utils/memory.h>
-
-#include <list>
 
 namespace torch {
 namespace jit {
 
-// Get a typekind that can be used as a key to distinguish different kinds of
-// mutable types. If the type is not mutable, return nullopt.
-//
-// TODO: We use these rules to divide wildcards into distinct "buckets", where
-// every wildcard that resolves to the same kind will alias each other. We can
-// introduce more granularity here (e.g. List[int] will never alias
-// List[float]).
-c10::optional<TypeKind> AliasDb::getMutableTypeKind(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
-    return TypeKind::TensorType;
-  }
-
+// For any mutable type, map it to a type such that all other types which it can
+// alias will be mapped to the same type. This function follows a similar logic
+// to `unifyTypes` because any two mutable types which can be unified
+// can alias each other.
+// getMutableTypePtr(Optional[List[int]]) == getMutableTypePtr([List[int]])
+// If a type is not mutable, return nullopt
+c10::optional<TypePtr> getMutableTypePtr(const TypePtr& type) {
   switch (type->kind()) {
     case TypeKind::ListType:
-    case TypeKind::TupleType:
     case TypeKind::DictType:
     case TypeKind::ClassType:
-      return type->kind();
+    case TypeKind::TensorType:
+      return unshapedType(type);
     case TypeKind::OptionalType:
-      return getMutableTypeKind(type->cast<OptionalType>()->getElementType());
+      return getMutableTypePtr(type->cast<OptionalType>()->getElementType());
+    case TypeKind::FutureType: {
+      if (auto elem = getMutableTypePtr(type->cast<FutureType>()->getElementType())) {
+        return FutureType::create(*elem);
+      }
+      return c10::nullopt;
+    }
+    case TypeKind::TupleType: {
+      std::vector<TypePtr> mutable_types;
+      for (const auto& elem : type->expect<TupleType>()->elements()) {
+        if (auto mut_elem = getMutableTypePtr(elem)) {
+          mutable_types.push_back(*mut_elem);
+        }
+      }
+      if (mutable_types.size() == 0) {
+        return c10::nullopt;
+      } else {
+        return TupleType::create(mutable_types);
+      }
+    }
     default:
       return c10::nullopt;
   }
 }
 
-bool AliasDb::shouldAnnotate(const TypePtr& type) {
-  return getMutableTypeKind(type) != c10::nullopt;
+bool AliasDb::mutableType(const TypePtr& type) {
+  return getMutableTypePtr(type) != c10::nullopt;
 }
 
 // We only need to annotate values that either are mutable or could contain
 // mutable types.
-bool AliasDb::shouldAnnotate(const Value* v) {
-  return shouldAnnotate(v->type());
+bool AliasDb::mutableType(const Value* v) {
+  return mutableType(v->type());
 }
 
 bool AliasDb::isContainerType(const TypePtr& type) {
-  if (type->kind() == TypeKind::FutureType) {
-    return isContainerType(type->cast<FutureType>()->getElementType());
-  } else if (type->kind() == TypeKind::OptionalType) {
-    return isContainerType(type->cast<OptionalType>()->getElementType());
-  } else {
-    return type->containedTypes().size() > 0;
-  }
+  auto mut_type = getMutableTypePtr(type);
+  return mut_type && (*mut_type)->containedTypes().size() > 0;
 }
 
 AliasDb::~AliasDb() = default;
@@ -59,20 +66,37 @@ AliasDb::~AliasDb() = default;
 AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
   memoryDAG_ = torch::make_unique<MemoryDAG>();
   analyze(graph_);
+  GRAPH_DEBUG(toString());
 }
 
-bool AliasDb::hasWriters(const Node* n) const {
+bool AliasDb::isMutable(Node* n) const {
+  ValueSet vs;
+  for (const auto input : n->inputs()) {
+    vs.insert(input);
+  }
+  return writesToAlias(n, vs);
+}
+
+bool AliasDb::hasInputWriters(const Node* n) const {
   for (const auto input : n->inputs()) {
     if (hasWriters(input)) {
       return true;
     }
   }
+  return false;
+}
+
+bool AliasDb::hasOutputWriters(const Node* n) const {
   for (const auto output : n->outputs()) {
     if (hasWriters(output)) {
       return true;
     }
   }
   return false;
+}
+
+bool AliasDb::hasWriters(const Node* n) const {
+  return hasInputWriters(n) || hasOutputWriters(n);
 }
 
 bool AliasDb::hasWriters(const Value* v) const {
@@ -92,35 +116,27 @@ bool AliasDb::hasWriters(const Value* v) const {
   return writeCache_.intersects(el->getMemoryLocations());
 }
 
-void AliasDb::getWritesImpl(Block* b, MemoryLocations& ret, bool recurseBlocks)
-    const {
-  for (auto node : b->nodes()) {
-    getWritesImpl(node, ret, recurseBlocks);
-  }
-}
-
-void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
-    const {
+void AliasDb::getWritesImpl(Node* n, MemoryLocations& ret) const {
   if (writeIndex_.count(n)) {
     const auto& writes = writeIndex_.at(n);
     ret |= writes;
   }
 
-  if (recurseBlocks) {
     for (auto block : n->blocks()) {
-      getWritesImpl(block, ret, recurseBlocks);
+      for (auto node : block->nodes()) {
+        getWritesImpl(node, ret);
+      }
     }
-  }
 }
 
 // Does `n` write to an alias of one of the values in `vs`?
-bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
-    const {
-  const auto writtenTo = getWrites(n, recurseBlocks);
+bool AliasDb::writesToAlias(Node* n, const ValueSet& vs) const {
+  const auto writtenTo = getWrites(n);
   if (writtenTo.empty()) {
     return false;
   }
 
+  MemoryLocations locs;
   for (const auto v : vs) {
     auto it = elementMap_.find(v);
     if (it != elementMap_.end()) {
@@ -134,85 +150,101 @@ bool AliasDb::writesToAlias(Node* n, const ValueSet& vs, bool recurseBlocks)
   return false;
 }
 
-MemoryLocations AliasDb::getWrites(Node* n, bool recurseBlocks) const {
+MemoryLocations AliasDb::getWrites(Node* n) const {
   MemoryLocations writes;
-  getWritesImpl(n, writes, recurseBlocks);
+  getWritesImpl(n, writes);
   return writes;
 }
 
-void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret, bool recurseBlocks)
-    const {
+void AliasDb::getReadsImpl(Node* n, MemoryLocations& ret) const {
   for (const auto input : n->inputs()) {
     auto it = elementMap_.find(input);
     if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
-    }
-  }
-  for (const auto output : n->outputs()) {
-    auto it = elementMap_.find(output);
-    if (it != elementMap_.end()) {
-      ret |= it->second->getMemoryLocations();
-    }
-  }
+      auto el = it->second;
+      // Add all memory locations this element may alias.
+      ret |= el->getMemoryLocations();
 
-  if (recurseBlocks) {
-    for (auto block : n->blocks()) {
-      for (auto node : block->nodes()) {
-        getReadsImpl(node, ret, recurseBlocks);
+      // We also consider memory locations of contained values to be "read".
+      for (const auto& type : input->type()->containedTypes()) {
+        if (auto wildcard = getWildcard(type)) {
+          ret |= wildcard->getMemoryLocations();
+        }
       }
     }
   }
+
+  for (auto block : n->blocks()) {
+    for (auto node : block->nodes()) {
+      getReadsImpl(node, ret);
+    }
+  }
 }
 
-MemoryLocations AliasDb::getReads(Node* n, bool recurseBlocks) const {
+MemoryLocations AliasDb::getReads(Node* n) const {
   MemoryLocations reads;
-  getReadsImpl(n, reads, recurseBlocks);
+  getReadsImpl(n, reads);
   return reads;
 }
 
-static std::string getElementName(const Element* e) {
+std::string AliasDb::getElementName(const Element* e) const {
   if (e->value == nullptr) {
+    // not the most efficient way, but given the fact there are
+    // not too many types and even fewer of them will end up in
+    // wildcardIndex_, we should be fine with a linear search
+    // each time we hit a wildcard leaf
+    for (const auto& ent : wildcardIndex_) {
+      if (ent.second == e) {
+        return std::string("WILDCARD for type ") + ent.first->str();
+      }
+    }
     return "WILDCARD";
   } else {
-    return e->value->uniqueName();
+    return e->value->debugName();
   }
 }
 
 void AliasDb::dump() const {
-  std::cout << "\n===1. GRAPH===\n";
-  graph_->dump();
+  std::cout << toString();
+}
 
-  std::cout << "\n===2. ALIAS DB===\n";
+std::string AliasDb::toString() const {
+  std::stringstream ss{};
+
+  ss << "\n===1. GRAPH===\n";
+  ss << graph_->toString();
+
+  ss << "\n===2. ALIAS DB===\n";
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
     if (!element->pointsTo.empty()) {
-      std::cout << getElementName(element) << " points to: ";
+      ss << getElementName(element) << " points to: ";
       for (const auto pointedTo : element->pointsTo) {
-        std::cout << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
+        ss << getElementName(memoryDAG_->fromIndex(pointedTo)) << ", ";
       }
-      std::cout << "\n";
+      ss << "\n";
     }
-    if (!element->contained_elements.empty()) {
-      std::cout << getElementName(element) << " contains: ";
-      for (const auto contained : element->contained_elements) {
-        std::cout << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
+    if (!element->containedElements.empty()) {
+      ss << getElementName(element) << " contains: ";
+      for (const auto contained : element->containedElements) {
+        ss << getElementName(memoryDAG_->fromIndex(contained)) << ", ";
       }
-      std::cout << "\n";
+      ss << "\n";
     }
   }
 
-  // std::cout << "\n===3. Writes===\n";
-  // for (const auto& pr : writeIndex_) {
-  //   const auto node = pr.first;
-  //   const auto& values = pr.second;
-  //   std::cout << *node;
-  //   std::cout << "  ";
-  //   for (const auto value : values) {
-  //     std::cout << value->uniqueName() << ", ";
-  //   }
-  //   std::cout << "\n";
-  // }
-  std::cout << "\n";
+  ss << "\n===3. Writes===\n";
+  for (const auto& pr : writeIndex_) {
+    const auto node = pr.first;
+    const auto& values = pr.second;
+    ss << *node;
+    ss << "  ";
+    for (const auto value : values) {
+      ss << getElementName(memoryDAG_->fromIndex(value)) << ", ";
+    }
+    ss << "\n";
+  }
+  ss << "\n";
+  return ss.str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
@@ -235,14 +267,11 @@ void AliasDb::analyze(Node* node) {
 // Returns true if analysis was run using
 // the registered analyzer.
 bool AliasDb::tryRegisteredAnalysis(Node* node) {
-  const Operator& op = getOperatorFor(node);
+  const Operator& op = node->getOperator();
   auto analysis = op.aliasAnalysisKind();
-  switch (analysis) {
-    case AliasAnalysisKind::PURE:
-      analyzeCreator(node);
-      return true;
-    case AliasAnalysisKind::DEFAULT:
-      return false;
+  if (AliasAnalysisKind::PURE_FUNCTION == analysis) {
+    analyzeCreator(node);
+    return true;
   }
   return false;
 }
@@ -253,6 +282,35 @@ bool AliasDb::tryRegisteredAnalysis(Node* node) {
 //      information to the outputs. For unschematized nodes, a special analyzer
 //      will have to be handwritten.
 void AliasDb::analyzeImpl(Node* node) {
+  auto op = node->maybeOperator();
+  const bool hasSpecialCase = aliasAnalysisHasSpecialCaseFor(node->kind());
+  if (op) {
+    const auto analysis = op->aliasAnalysisKind();
+
+    const bool registeredAsSpecialCase =
+        analysis == AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
+    if (C10_UNLIKELY(registeredAsSpecialCase && !hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Op ",
+          node->kind().toDisplayString(),
+          " is registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but doesn't have a special case.");
+    } else if (C10_UNLIKELY(!registeredAsSpecialCase && hasSpecialCase)) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Op ",
+          node->kind().toDisplayString(),
+          " has a special case and should be registered with AliasAnalysisKind::INTERNAL_SPECIAL_CASE but is registered with ",
+          c10::toString(analysis));
+    }
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        hasSpecialCase,
+        "We don't have an op for ",
+        node->kind().toDisplayString(),
+        " but it isn't a special case.");
+  }
+
   // These nodes are not schematized, so we need to handle them specially
   switch (node->kind()) {
     case prim::If:
@@ -266,8 +324,6 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
-    case prim::TupleConstruct:
-      return analyzeTupleConstruct(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
@@ -281,17 +337,19 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Function:
     case prim::CreateObject:
       return analyzeCreator(node);
+    case prim::TupleConstruct:
     case prim::DictConstruct:
     case prim::ListConstruct:
       return analyzeContainerConstruct(node);
     case prim::TupleUnpack:
     case prim::TupleIndex:
-    case prim::DictIndex:
     case prim::TupleSlice:
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
       return analyzeExtractor(node);
+    case prim::unchecked_cast:
+      return makePointerTo(node->output(), node->input());
     case prim::ConstantChunk:
       return analyzeChunk(node);
     case prim::BroadcastingChunk:
@@ -299,33 +357,80 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      AT_ERROR("Analyzing prim::profile isn't yet implemented");
-      // TODO: simply mapping inputs' aliases to outputs'
-      // should work but a) we should probably avoid exposing
-      // prim::profile to optimizations b) the alias semantics
-      // might be more complicated than just mapAliases
-      // mapAliases(node->inputs(), node->outputs());
+      if (node->inputs().size() > 0) {
+        makePointerTo(node->output(), node->inputs().at(0));
+      }
+      return;
+    case prim::BailOut:
+      TORCH_INTERNAL_ASSERT(node->inputs().at(0)->node()->kind() ==
+                            prim::BailoutTemplate);
+      makePointerTo(node->output(), node->inputs().at(1));
+      return;
+    case prim::Guard:
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::CallFunction:
     case prim::CallMethod:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
+      // NB: update safeToChangeAliasingRelationship if changed
       return analyzeConservative(node);
+    case prim::Uninitialized:
+      giveFreshAlias(node->output());
+      return;
     case prim::Print:
+    case prim::isinstance:
       // These ops do nothing
       return;
     default:
       if (tryRegisteredAnalysis(node)) {
         return;
       }
-      TORCH_INTERNAL_ASSERT(!aliasAnalysisHasSpecialCaseFor(node->kind()));
   }
 
-  const auto& schema = node->schema();
-  // see [custom operator aliasing]
-  if (!node->kind().is_aten() && !node->kind().is_prim()) {
+  TORCH_INTERNAL_ASSERT(op, "We should have an op schema if we get to here");
+  const AliasAnalysisKind analysis = op->aliasAnalysisKind();
+  TORCH_INTERNAL_ASSERT(
+      analysis != AliasAnalysisKind::INTERNAL_SPECIAL_CASE &&
+          !aliasAnalysisHasSpecialCaseFor(node->kind()),
+      "Special cases should be handled already if we're here.");
+
+  if (node->kind().is_aten() || node->kind().is_prim()) {
+    // TODO There is nothing in the system that relies on aten:: and prim::
+    // ops using AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::INTERNAL_SPECIAL_CASE,
+    // but this is the intended behavior for all current ops and a good error check.
+    // We can consider lifting this constraint later if we have a use case for it.
+    TORCH_INTERNAL_ASSERT(
+        analysis == AliasAnalysisKind::FROM_SCHEMA ||
+            analysis == AliasAnalysisKind::CONSERVATIVE,
+        "aten:: and prim:: operators should use AliasAnalysisKind::FROM_SCHEMA or "
+        "AliasAnalysisKind::CONSERVATIVE(if really necessary), but ",
+        node->kind().toDisplayString(),
+        " doesn't. Note: Ideally, prim:: operators actually shouldn't have a schema ",
+        "and then use AliasAnalysisKind::INTERNAL_SPECIAL_CASE instead.");
+  }
+
+  if (analysis == AliasAnalysisKind::CONSERVATIVE) {
+    // TODO A previous implementation of alias analysis always accessed
+    // node->schema , which cause the schema caches in the Node class to be
+    // filled for the full graph. Unfortunately, our JIT passes started relying
+    // on that, so we need to keep doing this. Details: in
+    // caffe2/torch/onnx/utils.py, _jit_pass_onnx is called on an invalid JIT
+    // graph because we called _jit_pass_erase_number_types right before and
+    // ints are now Tensors instead. So if _jit_pass_onnx tries to look up
+    // operator schemas, it will crash. However, _jit_pass_constant_propagation,
+    // which is called before it, runs alias analysis and prefills the schema
+    // cache in the all Node instances so that _jit_pass_onnx doesn't look up
+    // operators to get the schemas anymore. We should fix this.
+    node->schema(); // fill the schema cache in the Node class
+
     return analyzeConservative(node);
   }
+
+  TORCH_INTERNAL_ASSERT(
+      analysis == AliasAnalysisKind::FROM_SCHEMA,
+      "AliasAnalysisKind::CONSERVATIVE/PURE_FUNCTION/INTERNAL_SPECIAL_CASE should already have been handled above");
+  const auto& schema = node->schema();
 
   // Bind the schema's "formal" alias annotation to the actual values those
   // schema arguments represent
@@ -339,7 +444,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!shouldAnnotate(actualValue)) {
+    if (!mutableType(actualValue)) {
       continue;
     }
 
@@ -391,7 +496,7 @@ void AliasDb::analyzeImpl(Node* node) {
     }
 
     // If this type cannot alias, continue. Can occur with a VarType schema
-    if (!shouldAnnotate(actual)) {
+    if (!mutableType(actual)) {
       continue;
     }
 
@@ -439,7 +544,7 @@ void AliasDb::analyzeImpl(Node* node) {
 
 // Register the fact that `n` writes to `v`.
 void AliasDb::registerWrite(const Value* v, Node* n) {
-  if (!shouldAnnotate(v)) {
+  if (!mutableType(v)) {
     // don't need to register a write if the value isn't mutable
     return;
   }
@@ -565,19 +670,6 @@ void AliasDb::analyzeWait(Node* node) {
   }
 }
 
-void AliasDb::analyzeTupleConstruct(Node* node) {
-  // Because we currently mark all Tuples as needing annotation
-  // (even those containing just prmitive types), an element needs to be created
-  // for TupleConstruct. When that changes we can create an element
-  // only if it contains elements which need annotation
-  getOrCreateElement(node->output());
-  for (const auto& input : node->inputs()) {
-    if (shouldAnnotate(input)) {
-      addToContainedElements(input, node->output());
-    }
-  }
-}
-
 // SetAttr: writes to the `self` field
 void AliasDb::analyzeSetAttr(Node* node) {
   const auto self = node->inputs().at(0);
@@ -592,12 +684,18 @@ void AliasDb::analyzeSetAttr(Node* node) {
 // may write to any input and produce wildcards
 void AliasDb::analyzeConservative(Node* node) {
   for (const auto input : node->inputs()) {
+    if (!mutableType(input)) {
+      continue;
+    }
+    auto elem = elementMap_.at(input);
     registerWrite(input, node);
-    // We may also write to any contained types
-    for (const auto& type : input->type()->containedTypes()) {
-      if (shouldAnnotate(type)) {
-        auto el = getOrCreateWildcard(type);
-        registerWrite(el, node);
+    MemoryLocations mem_locations;
+    memoryDAG_->collectAllContainedMemoryLocations(elem, mem_locations);
+    for (unsigned loc : mem_locations) {
+      auto contained_elem = memoryDAG_->fromIndex(loc);
+      // we only register writes on memory locations
+      if (contained_elem->pointsTo.empty()) {
+        registerWrite(contained_elem, node);
       }
     }
     setWildcard(input);
@@ -608,20 +706,30 @@ void AliasDb::analyzeConservative(Node* node) {
   }
 }
 
-// List or dict construct: create an aliasing element for the actual container,
-// then mark all inputs as wildcards, since they've gone inside the container.
-// TODO: tuples are treated differently since we actually compare the contained
-// values for aliasing, so we don't need wildcards.
+// List or dict or tuple: construct: create an aliasing element for the actual
+// container, then mark all inputs as wildcards, since they've gone inside the
+// container. Then, add the wildcard sets of appropriate type to the contained
+// elements of the container.
 void AliasDb::analyzeContainerConstruct(Node* node) {
   TORCH_INTERNAL_ASSERT(
       node->kind() == prim::ListConstruct ||
-      node->kind() == prim::DictConstruct);
+      node->kind() == prim::DictConstruct ||
+      node->kind() == prim::TupleConstruct);
 
-  for (auto input : node->inputs()) {
-    setWildcard(input);
+  // tuples which contain immutable types are immutable
+  if (!mutableType(node->output())) {
+    return;
   }
-  for (auto output : node->outputs()) {
-    giveFreshAlias(output);
+
+  TORCH_INTERNAL_ASSERT(node->outputs().size() == 1);
+  auto container = node->output();
+  giveFreshAlias(container);
+  auto container_elem = elementMap_.at(container);
+  for (auto input : node->inputs()) {
+    auto maybe_wildcard_elem = setWildcard(input);
+    if (maybe_wildcard_elem) {
+      memoryDAG_->addToContainedElements(*maybe_wildcard_elem, container_elem);
+    }
   }
 }
 
@@ -641,10 +749,27 @@ void AliasDb::analyzeBroadcastingChunk(Node* node) {
   }
 }
 
+bool AliasDb::nonAliasingValue(const Value* elem) const {
+  // these are values which can point to aliasing types in the graph,
+  // as with a None value pointing to an optional if node output,
+  // but will never alias themselves
+  return elem->mustBeNone() || elem->node()->kind() == prim::Uninitialized;
+}
+
 // Register the fact that `from` is a pointer to `to`
 void AliasDb::makePointerTo(const Value* from, const Value* to) {
-  if (!shouldAnnotate(from)) {
-    TORCH_INTERNAL_ASSERT(!shouldAnnotate(to));
+  if (nonAliasingValue(from) || nonAliasingValue(to)) {
+    // if either value is guaranteed to be non-aliasing, we do not need to
+    // connect the two elements. however, it is invariant that aliasing types
+    // that are not wildcards have a memory dag element, so we create one if
+    // needed
+    giveFreshAlias(from);
+    giveFreshAlias(to);
+    return;
+  }
+
+  if (!mutableType(from)) {
+    TORCH_INTERNAL_ASSERT(!mutableType(to));
     return;
   }
 
@@ -660,7 +785,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   }
 
   // At this point, we should be dealing with two mutable types.
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(from) && shouldAnnotate(to));
+  TORCH_INTERNAL_ASSERT(mutableType(from) && mutableType(to));
 
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
@@ -671,7 +796,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
 void AliasDb::addToContainedElements(
     const Value* elem,
     const Value* container) {
-  if (!shouldAnnotate(elem)) {
+  if (!mutableType(elem)) {
     return;
   }
 
@@ -684,7 +809,7 @@ void AliasDb::addToContainedElements(
 }
 
 bool AliasDb::mayAlias(const Value* a, const Value* b) const {
-  if (!shouldAnnotate(a) || !shouldAnnotate(b)) {
+  if (!mutableType(a) || !mutableType(b)) {
     return false;
   }
 
@@ -718,20 +843,6 @@ bool AliasDb::mayAlias(const ValueSet& a, const ValueSet& b) const {
   return false;
 }
 
-bool AliasDb::cannotCheckAliasContainment(const Value* elem) const {
-  if (isContainerType(elem->type())) {
-    if (elem->node()->kind() != prim::TupleConstruct) {
-      return true;
-    }
-    auto inps = elem->node()->inputs();
-    return std::any_of(inps.begin(), inps.end(), [&](const Value* v) {
-      return cannotCheckAliasContainment(v);
-    });
-  }
-
-  return false;
-}
-
 bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   const std::vector<Value*> a_vec = {a};
   const std::vector<Value*> b_vec = {b};
@@ -739,33 +850,21 @@ bool AliasDb::mayContainAlias(Value* a, Value* b) const {
   return mayContainAlias(a_vec, b_vec);
 }
 
+std::vector<Element*> AliasDb::getElements(at::ArrayRef<Value*> vs) const {
+  std::vector<Element*> elements;
+  for (const auto& val : vs) {
+    if (mutableType(val)) {
+      elements.push_back(elementMap_.at(val));
+    }
+  }
+  return elements;
+}
+
 bool AliasDb::mayContainAlias(
-    const at::ArrayRef<Value*>& a,
-    const at::ArrayRef<Value*>& b) const {
-  std::vector<Element*> a_elements;
-  for (const auto& val : a) {
-    if (cannotCheckAliasContainment(val)) {
-      return true;
-    }
-    if (shouldAnnotate(val)) {
-      a_elements.push_back(elementMap_.at(val));
-    }
-  }
-
-  if (a_elements.size() == 0) {
-    return false;
-  }
-
-  std::vector<Element*> b_elements;
-  for (const auto& val : b) {
-    if (cannotCheckAliasContainment(val)) {
-      return true;
-    }
-    if (shouldAnnotate(val)) {
-      b_elements.push_back(elementMap_.at(val));
-    }
-  }
-  return memoryDAG_->mayContainAlias(a_elements, b_elements);
+    const at::ArrayRef<Value*> a,
+    const at::ArrayRef<Value*> b) const {
+  auto a_elems = getElements(a);
+  return a_elems.size() == 0 ? false : memoryDAG_->mayContainAlias(a_elems, getElements(b));
 }
 
 // Make each value in the `from` list point to its partner in the `to` list
@@ -777,7 +876,8 @@ void AliasDb::mapAliases(at::ArrayRef<Value*> from, at::ArrayRef<Value*> to) {
 }
 
 void AliasDb::giveFreshAlias(const Value* value) {
-  if (!shouldAnnotate(value)) {
+  auto maybe_mut_type = getMutableTypePtr(value->type());
+  if (!maybe_mut_type) {
     return;
   }
 
@@ -787,7 +887,9 @@ void AliasDb::giveFreshAlias(const Value* value) {
     return;
   }
 
-  elementMap_[value] = memoryDAG_->makeFreshValue(value);
+  auto new_elem = memoryDAG_->makeFreshValue(value);
+  elementMap_[value] = new_elem;
+  addContainedTypesToFreshElement(new_elem, *maybe_mut_type);
 }
 
 Element* AliasDb::getOrCreateElement(const Value* value) {
@@ -820,6 +922,31 @@ bool AliasDb::couldMoveBeforeTopologically(Node* n, Node* movePoint) {
   return tryMove(n, movePoint, MoveSide::BEFORE, /*dryRun=*/true);
 }
 
+bool AliasDb::hasWriters(const at::ArrayRef<Value*>& values) const {
+  return std::any_of(values.begin(), values.end(), [&](Value* value) {
+    return hasWriters(value);
+  });
+}
+
+bool AliasDb::escapesScope(const at::ArrayRef<Value*>& vs) const {
+  return mayContainAlias(graph_->inputs(), vs) ||
+      mayContainAlias(graph_->outputs(), vs) || mayAliasWildcard(vs);
+}
+
+// Correctness conditions:
+// no values in either set can have writers, and values in both sets
+// cannot escape the current graph scope. Values can escape the current scope
+// by aliasing a graph output or input, or by aliasing the wildcard set.
+bool AliasDb::safeToChangeAliasingRelationship(
+    const at::ArrayRef<Value*>& a,
+    const at::ArrayRef<Value*>& b) const {
+  if (hasWriters(a) || hasWriters(b)) {
+    return false;
+  }
+
+  return !(escapesScope(a) && escapesScope(b));
+}
+
 // Helper for topologically-safe node moves. See `tryMove()` for details.
 class AliasDb::WorkingSet {
  public:
@@ -828,8 +955,8 @@ class AliasDb::WorkingSet {
     for (const auto user : getUsersSameBlock(mover_)) {
       moverUsers_.insert(user);
     }
-    moverWrites_ |= aliasDb_.getWrites(mover_, /*recurseBlocks=*/true);
-    moverReads_ |= aliasDb_.getReads(mover_, /*recurseBlocks=*/true);
+    moverWrites_ |= aliasDb_.getWrites(mover_);
+    moverReads_ |= aliasDb_.getReads(mover_);
   }
 
   // Add `n` to the working set
@@ -839,8 +966,8 @@ class AliasDb::WorkingSet {
       users_.insert(user);
     }
 
-    writes_ |= aliasDb_.getWrites(n, /*recurseBlocks=*/true);
-    reads_ |= aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    writes_ |= aliasDb_.getWrites(n);
+    reads_ |= aliasDb_.getReads(n);
   }
 
   void eraseMover() {
@@ -865,6 +992,9 @@ class AliasDb::WorkingSet {
 
  private:
   bool hasDataDependency(Node* n) const {
+    if (!mover_ && nodes_.empty()) {
+      return false;
+    }
     const Node* pivot = mover_ ? mover_ : nodes_.front();
     if (n->isAfter(pivot)) {
       return producesFor(n);
@@ -875,7 +1005,7 @@ class AliasDb::WorkingSet {
 
   bool hasMutabilityDependency(Node* n) const {
     // Check that `n` does not write to anything used by the working set
-    const auto& nWrites = aliasDb_.getWrites(n, /*recurseBlocks=*/true);
+    const auto& nWrites = aliasDb_.getWrites(n);
     if (reads_.intersects(nWrites)) {
       return true;
     }
@@ -884,7 +1014,7 @@ class AliasDb::WorkingSet {
     }
 
     // Check that the working set doesn't write to anything that `n` uses.
-    const auto& nReads = aliasDb_.getReads(n, /*recurseBlocks=*/true);
+    const auto& nReads = aliasDb_.getReads(n);
     if (writes_.intersects(nReads)) {
       return true;
     }
@@ -1103,63 +1233,7 @@ bool AliasDb::writesToWildcard(Node* n) const {
   return false;
 }
 
-bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
-  // WARNING: by adding a case to this list, you are asserting that you have
-  // added a case for the unschematized node in AliasDb::analyze
-  const static std::unordered_set<Symbol> handled = {
-      prim::If,
-      prim::Loop,
-      prim::FusionGroup,
-      prim::DifferentiableGraph,
-      prim::Constant,
-      prim::DictConstruct,
-      prim::ListConstruct,
-      prim::TupleConstruct,
-      prim::AutogradZero,
-      prim::FusedConcat,
-      prim::GradOf,
-      prim::MMTreeReduce,
-      prim::MMBatchSide,
-      prim::BroadcastSizes,
-      prim::ChunkSizes,
-      prim::Function,
-      prim::TupleUnpack,
-      prim::TupleIndex,
-      prim::DictIndex,
-      prim::TupleSlice,
-      prim::ListUnpack,
-      prim::PythonOp,
-      prim::ConstantChunk,
-      prim::BroadcastingChunk,
-      prim::fork,
-      prim::CreateObject,
-      prim::AutogradAdd,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::profile,
-      prim::Print,
-      aten::wait,
-  };
-
-  // Operators that should not be used by alias analysis
-  const static std::unordered_set<Symbol> purposefully_not_handled = {
-      prim::Load,
-      prim::Store,
-      prim::Drop,
-      at::onnx::Reshape,
-      at::onnx::Shape,
-      prim::AutogradAnyNonZero,
-      prim::AutogradAdd,
-  };
-
-  return handled.count(symbol) || purposefully_not_handled.count(symbol);
-}
-
 bool AliasDb::mayAliasWildcard(const Value* v) const {
-  if (!shouldAnnotate(v)) {
-    return false;
-  }
-
   if (auto e = getWildcard(v->type())) {
     return memoryDAG_->mayAlias(elementMap_.at(v), e);
   }
@@ -1167,39 +1241,82 @@ bool AliasDb::mayAliasWildcard(const Value* v) const {
   return false;
 }
 
-// Search the wildcard index for an element that corresponds to the given type.
-Element* AliasDb::getOrCreateWildcard(const TypePtr& type) {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
-  const auto kind = getMutableTypeKind(type);
-  TORCH_INTERNAL_ASSERT(kind);
+bool AliasDb::mayAliasWildcard(const at::ArrayRef<Value*> vs) const {
+  return std::any_of(
+      vs.begin(), vs.end(), [&](Value* v) { return mayAliasWildcard(v); });
+}
 
-  if (!wildcardIndex_.count(*kind)) {
-    // create a new empty Element to stand in for the wildcard set.
-    wildcardIndex_.emplace(*kind, memoryDAG_->makeFreshValue(nullptr));
+c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
+  auto updated_type = getMutableTypePtr(type);
+  if (!updated_type) {
+    return c10::nullopt;
   }
-  return wildcardIndex_.at(*kind);
+  auto mapped_type = *updated_type;
+  auto existing_wildcard = wildcardIndex_.find(mapped_type);
+  if (existing_wildcard != wildcardIndex_.end()) {
+    return existing_wildcard->second;
+  }
+
+  auto wildcard_elem = memoryDAG_->makeFreshValue(nullptr);
+  wildcardIndex_.emplace(mapped_type, wildcard_elem);
+  addContainedTypesToFreshElement(wildcard_elem, mapped_type);
+  return wildcard_elem;
+}
+
+void AliasDb::addContainedTypesToFreshElement(
+    Element* container_elem,
+    const TypePtr& mut_type) {
+  for (const auto& contained : mut_type->containedTypes()) {
+    auto maybe_elem = tryGetOrCreateWildcard(contained);
+    if (maybe_elem) {
+      memoryDAG_->addToContainedElements(*maybe_elem, container_elem);
+    }
+  }
 }
 
 // Search the wildcard index for an element that corresponds to the given type.
 // Const version returns nullptr
 Element* AliasDb::getWildcard(const TypePtr& type) const {
-  TORCH_INTERNAL_ASSERT(shouldAnnotate(type));
-  const auto kind = getMutableTypeKind(type);
-  TORCH_INTERNAL_ASSERT(kind);
-  if (!wildcardIndex_.count(*kind)) {
+  auto maybe_mut_type = getMutableTypePtr(type);
+  if (!maybe_mut_type) {
     return nullptr;
   }
-  return wildcardIndex_.at(*kind);
+  TypePtr mut_type = *maybe_mut_type;
+  auto wildcard = wildcardIndex_.find(mut_type);
+  if (wildcard != wildcardIndex_.end()) {
+    return wildcard->second;
+  }
+  return nullptr;
 }
 
 // Register `v` as a wildcard value.
-void AliasDb::setWildcard(const Value* v) {
-  if (!shouldAnnotate(v)) {
-    return;
+c10::optional<Element*> AliasDb::setWildcard(const Value* v) {
+  auto maybe_wildcardElement = tryGetOrCreateWildcard(v->type());
+  if (!maybe_wildcardElement) {
+    return c10::nullopt;
   }
-  auto e = getOrCreateWildcard(v->type());
-  TORCH_INTERNAL_ASSERT(e != nullptr);
-  memoryDAG_->makePointerTo(getOrCreateElement(v), e);
+
+  auto wildcardElement = *maybe_wildcardElement;
+  // Making a value a wildcard means that all its potential memory locations
+  // may alias the wildcard set.
+  const MemoryLocations pointeeSet = getOrCreateElement(v)->getMemoryLocations();
+  for (const auto& pointee : pointeeSet) {
+    auto from = memoryDAG_->fromIndex(pointee);
+    // avoid cycles where the wildcard points to itself
+    if (from != wildcardElement) {
+      memoryDAG_->makePointerTo(from, wildcardElement);
+    }
+  }
+
+  // We also need to update the write index with new writes to the wildcard set.
+  for (auto& pr : writeIndex_) {
+    auto& writtenTo = pr.second;
+    if (writtenTo.intersects(pointeeSet)) {
+      writtenTo.set(wildcardElement->index);
+    }
+  }
+  isWriteCacheStale_ = true;
+  return wildcardElement;
 }
 
 void AliasDb::rebuildWriteCache() const {

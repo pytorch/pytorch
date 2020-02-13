@@ -14,11 +14,9 @@ namespace at {
 namespace native {
 
 #if defined(__HIP_PLATFORM_HCC__)
-constexpr int WARP_SIZE = 64;
 constexpr int MAX_BLOCK_SIZE = 256;
 
 #else
-constexpr int WARP_SIZE = 32;
 constexpr int MAX_BLOCK_SIZE = 1024;
 #endif
 

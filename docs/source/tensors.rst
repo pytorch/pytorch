@@ -8,7 +8,7 @@ torch.Tensor
 A :class:`torch.Tensor` is a multi-dimensional matrix containing elements of
 a single data type.
 
-Torch defines eight CPU tensor types and eight GPU tensor types:
+Torch defines nine CPU tensor types and nine GPU tensor types:
 
 ========================   ===========================================   ===========================   ================================
 Data type                  dtype                                         CPU tensor                    GPU tensor
@@ -21,6 +21,7 @@ Data type                  dtype                                         CPU ten
 16-bit integer (signed)    ``torch.int16`` or ``torch.short``            :class:`torch.ShortTensor`    :class:`torch.cuda.ShortTensor`
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
+Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 ========================   ===========================================   ===========================   ================================
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
@@ -122,7 +123,7 @@ view of a storage and defines numeric operations on it.
 
 .. warning::
    Current implementation of :class:`torch.Tensor` introduces memory overhead,
-   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors. 
+   thus it might lead to unexpectedly high memory usage in the applications with many tiny tensors.
    If this is your case, consider using one large structure.
 
 .. class:: Tensor()
@@ -145,10 +146,12 @@ view of a storage and defines numeric operations on it.
    .. automethod:: new_zeros
 
    .. autoattribute:: is_cuda
+   .. autoattribute:: is_quantized
    .. autoattribute:: device
    .. autoattribute:: grad
+      :noindex:
    .. autoattribute:: ndim
-   .. autoattribute:: T 
+   .. autoattribute:: T
 
    .. automethod:: abs
    .. automethod:: abs_
@@ -169,28 +172,37 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
    .. automethod:: argmin
    .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
+   .. automethod:: as_strided
    .. automethod:: atan
    .. automethod:: atan2
    .. automethod:: atan2_
    .. automethod:: atan_
    .. automethod:: backward
+      :noindex:
    .. automethod:: baddbmm
    .. automethod:: baddbmm_
    .. automethod:: bernoulli
    .. automethod:: bernoulli_
+   .. automethod:: bfloat16
    .. automethod:: bincount
+   .. automethod:: bitwise_not
+   .. automethod:: bitwise_not_
+   .. automethod:: bitwise_and
+   .. automethod:: bitwise_and_
+   .. automethod:: bitwise_or
+   .. automethod:: bitwise_or_
+   .. automethod:: bitwise_xor
+   .. automethod:: bitwise_xor_
    .. automethod:: bmm
    .. automethod:: bool
    .. automethod:: byte
-   .. automethod:: btrifact
-   .. automethod:: btrifact_with_info
-   .. automethod:: btrisolve
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -204,6 +216,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: clone
    .. automethod:: contiguous
    .. automethod:: copy_
+   .. automethod:: conj
    .. automethod:: cos
    .. automethod:: cos_
    .. automethod:: cosh
@@ -211,6 +224,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
+   .. automethod:: cummax
+   .. automethod:: cummin
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
@@ -218,11 +233,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: det
    .. automethod:: dense_dim
    .. automethod:: detach
+      :noindex:
    .. automethod:: detach_
+      :noindex:
    .. automethod:: diag
    .. automethod:: diag_embed
    .. automethod:: diagflat
    .. automethod:: diagonal
+   .. automethod:: fill_diagonal_
    .. automethod:: digamma
    .. automethod:: digamma_
    .. automethod:: dim
@@ -263,11 +281,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gather
    .. automethod:: ge
    .. automethod:: ge_
-   .. automethod:: gels
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
-   .. automethod:: gesv
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
@@ -275,6 +291,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: hardshrink
    .. automethod:: histc
    .. automethod:: ifft
+   .. automethod:: imag
    .. automethod:: index_add_
    .. automethod:: index_add
    .. automethod:: index_copy_
@@ -291,18 +308,21 @@ view of a storage and defines numeric operations on it.
    .. automethod:: irfft
    .. automethod:: is_contiguous
    .. automethod:: is_floating_point
-   .. automethod:: is_leaf
+   .. autoattribute:: is_leaf
+      :noindex:
    .. automethod:: is_pinned
    .. automethod:: is_set_to
    .. automethod:: is_shared
    .. automethod:: is_signed
-   .. automethod:: is_sparse
+   .. autoattribute:: is_sparse
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: le
    .. automethod:: le_
    .. automethod:: lerp
    .. automethod:: lerp_
+   .. automethod:: lgamma
+   .. automethod:: lgamma_
    .. automethod:: log
    .. automethod:: log_
    .. automethod:: logdet
@@ -314,7 +334,16 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: logsumexp
+   .. automethod:: logical_and
+   .. automethod:: logical_and_
+   .. automethod:: logical_not
+   .. automethod:: logical_not_
+   .. automethod:: logical_or
+   .. automethod:: logical_or_
+   .. automethod:: logical_xor
+   .. automethod:: logical_xor_
    .. automethod:: long
+   .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
    .. automethod:: lu
@@ -357,34 +386,41 @@ view of a storage and defines numeric operations on it.
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
-   .. automethod:: potrf
-   .. automethod:: potri
-   .. automethod:: potrs
+   .. automethod:: polygamma
+   .. automethod:: polygamma_
    .. automethod:: pow
    .. automethod:: pow_
    .. automethod:: prod
-   .. automethod:: pstrf
    .. automethod:: put_
    .. automethod:: qr
+   .. automethod:: qscheme
    .. automethod:: q_scale
    .. automethod:: q_zero_point
+   .. automethod:: q_per_channel_scales
+   .. automethod:: q_per_channel_zero_points
+   .. automethod:: q_per_channel_axis
    .. automethod:: random_
    .. automethod:: reciprocal
    .. automethod:: reciprocal_
+   .. automethod:: record_stream
    .. automethod:: register_hook
+      :noindex:
    .. automethod:: remainder
    .. automethod:: remainder_
+   .. automethod:: real
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
    .. automethod:: repeat_interleave
-   .. automethod:: requires_grad
+   .. autoattribute:: requires_grad
+      :noindex:
    .. automethod:: requires_grad_
    .. automethod:: reshape
    .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: retain_grad
+      :noindex:
    .. automethod:: rfft
    .. automethod:: roll
    .. automethod:: rot90
@@ -417,6 +453,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sparse_dim
    .. automethod:: sqrt
    .. automethod:: sqrt_
+   .. automethod:: square
+   .. automethod:: square_
    .. automethod:: squeeze
    .. automethod:: squeeze_
    .. automethod:: std
@@ -451,7 +489,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tril_
    .. automethod:: triu
    .. automethod:: triu_
-   .. automethod:: trtrs
    .. automethod:: trunc
    .. automethod:: trunc_
    .. automethod:: type
@@ -470,9 +507,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: where
    .. automethod:: zero_
 
-.. class:: ByteTensor()
+.. class:: BoolTensor()
 
-   The following methods are unique to :class:`torch.ByteTensor`.
+   The following methods are unique to :class:`torch.BoolTensor`.
 
    .. automethod:: all
    .. automethod:: any

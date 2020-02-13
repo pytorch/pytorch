@@ -9,11 +9,16 @@ namespace torch {
 namespace jit {
 
 Element::Element(MemoryDAG& dag_, const Value* value_, unsigned index_)
-  : dag(dag_), value(value_), index(index_) { }
+    : dag(dag_), index(index_), value(value_) {}
 
 const Element* MemoryDAG::fromIndex(unsigned x) const {
-  TORCH_INTERNAL_ASSERT(x < indexToElementMap.size());
-  return indexToElementMap[x].get();
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
+}
+
+Element* MemoryDAG::fromIndex(unsigned x) {
+  TORCH_INTERNAL_ASSERT(x < indexToElementMap_.size());
+  return indexToElementMap_[x].get();
 }
 
 bool MemoryDAG::mayAlias(Element* a, Element* b) const {
@@ -53,7 +58,7 @@ void MemoryDAG::collectAllContainedMemoryLocations(
     collectAllContainedMemoryLocations(fromIndex(mem_loc), cont);
   }
 
-  for (const auto& contained : elem->contained_elements) {
+  for (const auto& contained : elem->containedElements) {
     collectAllContainedMemoryLocations(fromIndex(contained), cont);
   }
 }
@@ -69,8 +74,8 @@ bool MemoryDAG::mayContainAliasImpl(const Element* a, const Element* b) const {
 }
 
 bool MemoryDAG::mayContainAlias(
-    const at::ArrayRef<Element*>& a,
-    const at::ArrayRef<Element*>& b) const {
+    const at::ArrayRef<Element*> a,
+    const at::ArrayRef<Element*> b) const {
   if (a.size() == 0 || b.size() == 0) {
     return false;
   }
@@ -88,21 +93,24 @@ bool MemoryDAG::mayContainAlias(
   return all_a_mlocs.intersects(all_b_mlocs);
 }
 
-// Make `v` point at `to`.
 void MemoryDAG::makePointerTo(Element* from, Element* to) {
   from->pointsTo.set(to->index);
+  from->cachedMemoryLocations_.clear();
+
   to->pointedFrom.set(from->index);
 }
 
 void MemoryDAG::addToContainedElements(Element* elem, Element* container) {
-  container->contained_elements.set(elem->index);
+  TORCH_INTERNAL_ASSERT(
+      elem != container, "Elements cannot contain themselves");
+  container->containedElements.set(elem->index);
 }
 
 // Give `v` a fresh alias (i.e. it does not point to any value)
 Element* MemoryDAG::makeFreshValue(const Value* v) {
-  indexToElementMap.emplace_back(
-    torch::make_unique<Element>(*this, v, indexToElementMap.size()));
-  return indexToElementMap.back().get();
+  indexToElementMap_.emplace_back(
+    torch::make_unique<Element>(*this, v, indexToElementMap_.size()));
+  return indexToElementMap_.back().get();
 }
 
 const MemoryLocations& Element::getMemoryLocations() const {

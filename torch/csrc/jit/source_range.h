@@ -3,10 +3,13 @@
 #include <c10/util/Optional.h>
 
 #include <algorithm>
-#include <memory>
 #include <iostream>
+#include <memory>
 namespace torch {
 namespace jit {
+
+class SourceRangeUnpickler;
+struct SourceRange;
 
 // Source represents a code segment. It keeps track of:
 //  - text : the text of the code segment
@@ -15,18 +18,25 @@ namespace jit {
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {
-  explicit Source(std::string text)
-      : text_(std::move(text)), filename_(c10::nullopt) {
+  explicit Source(
+      std::string text,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
+      : text_(std::move(text)),
+        filename_(c10::nullopt),
+        starting_line_no_(0),
+        gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
 
   Source(
       std::string text,
       c10::optional<std::string> filename,
-      size_t starting_line_no)
+      size_t starting_line_no,
+      std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
       : text_(std::move(text)),
         filename_(std::move(filename)),
-        starting_line_no_(starting_line_no) {
+        starting_line_no_(starting_line_no),
+        gen_ranges_(std::move(gen_ranges)) {
     calc_line_start_offsets();
   }
 
@@ -67,13 +77,16 @@ struct Source {
     return starting_line_no_;
   }
 
+  c10::optional<SourceRange> findSourceRangeThatGenerated(
+      const SourceRange& range);
+
  private:
   void calc_line_start_offsets() {
+    line_starting_offsets_.push_back(0);
     size_t pos = 0;
-    do {
-      line_starting_offsets_.push_back(pos);
-      pos++;
-    } while ((pos = text_.find('\n', pos)) != std::string::npos);
+    while ((pos = text_.find('\n', pos)) != std::string::npos) {
+      line_starting_offsets_.push_back(++pos);
+    }
   }
   std::string text_;
   c10::optional<std::string> filename_;
@@ -82,6 +95,8 @@ struct Source {
   // Starting offsets for lines into the source. e.g. line 0 starts at
   // line_starting_offsets_[0], etc.
   std::vector<size_t> line_starting_offsets_;
+
+  std::shared_ptr<SourceRangeUnpickler> gen_ranges_;
 };
 
 // A SourceRange is a view into a Source, that points to a subset of the source,
@@ -89,10 +104,7 @@ struct Source {
 struct CAFFE2_API SourceRange {
   SourceRange(std::shared_ptr<Source> source_, size_t start_, size_t end_)
       : source_(std::move(source_)), start_(start_), end_(end_) {}
-  explicit SourceRange(std::string string_range)
-      : source_(std::make_shared<Source>(std::move(string_range))),
-        start_(0),
-        end_(source_->text().size()) {}
+  SourceRange() : source_(nullptr), start_(0), end_(0) {}
 
   const std::string text() const {
     return source_->text().substr(start(), end() - start());
@@ -100,8 +112,14 @@ struct CAFFE2_API SourceRange {
   size_t size() const {
     return end() - start();
   }
-  static const size_t CONTEXT = 10;
+  static const size_t CONTEXT = 3;
   void highlight(std::ostream& out) const;
+  // Customizable version of 'highlight' method.
+  void print_with_context(
+      std::ostream& out,
+      size_t context,
+      bool highlight,
+      const std::string& funcname) const;
   const std::shared_ptr<Source>& source() const {
     return source_;
   }
@@ -116,28 +134,35 @@ struct CAFFE2_API SourceRange {
     highlight(ss);
     return ss.str();
   }
-  std::string wrapException(
-      const std::exception& e,
-      const std::string& additional = "") {
-    std::stringstream msg;
-    std::string what;
-    auto c10_error = dynamic_cast<const c10::Error*>(&e);
-    if (c10_error) {
-      what = c10_error->msg_without_backtrace();
-    } else {
-      what = e.what();
+
+  c10::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
+    if (!source_ || !source()->filename()) {
+      return c10::nullopt;
     }
-    msg << "\n" << what << ":\n";
-    if (!additional.empty()) {
-      msg << additional << ":\n";
-    }
-    highlight(msg);
-    return msg.str();
+
+    auto lineno = source_->lineno_for_offset(start_);
+    auto col_offset = (int)start_ - (int)source_->offset_for_line(lineno);
+    // TODO: c10::optional<>::value returns an rvalue ref so can't use it here??
+    return std::make_tuple<std::string, size_t, size_t>(
+        source_->filename().value_or(""),
+        source_->lineno_to_source_lineno(lineno),
+        (size_t)col_offset);
   }
-  void wrapAndRethrowException(
-      const std::exception& e,
-      const std::string& additional = "") {
-    throw std::runtime_error(wrapException(e, additional));
+
+  bool operator==(const SourceRange& rhs) const {
+    return start() == rhs.start() && end() == rhs.end() &&
+        source() == rhs.source();
+  }
+
+  bool operator!=(const SourceRange& rhs) const {
+    return !(*this == rhs);
+  }
+
+  c10::optional<SourceRange> findSourceRangeThatGenerated() const {
+    if (!source_) {
+      return c10::nullopt;
+    }
+    return source_->findSourceRangeThatGenerated(*this);
   }
 
  private:
@@ -150,6 +175,16 @@ inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {
   range.highlight(out);
   return out;
 }
+
+// A pair of (byte offset, SourceRange) describing a specific segment
+// of the output stream
+struct TaggedRange {
+  TaggedRange(size_t bytes, SourceRange range)
+      : bytes(bytes), range(std::move(range)) {}
+  size_t bytes;
+  SourceRange range;
+};
+using SourceRangeRecords = std::vector<TaggedRange>;
 
 } // namespace jit
 } // namespace torch

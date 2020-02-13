@@ -1,4 +1,4 @@
-#include "cuda_nccl_gpu.h"
+#include "caffe2/contrib/nccl/cuda_nccl_gpu.h"
 
 namespace caffe2 {
 namespace nccl {
@@ -28,8 +28,13 @@ class NCCLContext {
       // get stream priorities
       int lo_pri, hi_pri;
       CUDA_ENFORCE(cudaDeviceGetStreamPriorityRange(&lo_pri, &hi_pri));
+#ifndef __HIP_PLATFORM_HCC__
       CUDA_ENFORCE(cudaStreamCreateWithPriority(
           &streams_[i], cudaStreamNonBlocking, hi_pri));
+#else
+      CUDA_ENFORCE(cudaStreamCreateWithFlags(
+          &streams_[i], cudaStreamNonBlocking));
+#endif // __HIP_PLATFORM_HCC__
       CUDA_ENFORCE(cudaEventCreateWithFlags(
           &events_[i], cudaEventDefault | cudaEventDisableTiming));
     }

@@ -86,7 +86,7 @@ void fill_with_type(
 
 /*
  * @run_net: the predict net with parameter and input names
- * @input_dims: the input dimentions of all operator inputs of run_net
+ * @input_dims: the input dimensions of all operator inputs of run_net
  * @input_types: the input types of all operator inputs of run_net
  */
 class DataRandomFiller : public Filler {
@@ -105,7 +105,7 @@ class DataRandomFiller : public Filler {
       int input_index,
       const std::vector<std::vector<int64_t>>& input_dims) {
     Workspace ws;
-    for (size_t i = 0; i < op_def.input_size(); ++i) {
+    for (int i = 0; i < op_def.input_size(); ++i) {
       // CreateOperator requires all input blobs present
       ws.CreateBlob(op_def.input(i));
     }

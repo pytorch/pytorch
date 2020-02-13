@@ -1,12 +1,16 @@
 #ifndef CAFFE2_CORE_TENSOR_H_
 #define CAFFE2_CORE_TENSOR_H_
 
+#include <c10/macros/Macros.h>
 #include "caffe2/core/storage.h"
 #include "caffe2/core/tensor_impl.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
 #include "ATen/core/Tensor.h"
+#include <ATen/core/grad_mode.h>
+#endif
 #include <c10/core/TensorOptions.h>
 
 namespace caffe2 {
@@ -71,7 +75,7 @@ class CAFFE2_API Tensor final {
   explicit Tensor(at::Device device)
     : impl_(c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
         Storage::create_legacy(device, TypeMeta()),
-        c10::computeTensorTypeId(at::device(device).layout(at::kStrided))
+        c10::computeDispatchKey(at::device(device).layout(at::kStrided))
       )) {
   }
 
@@ -115,6 +119,7 @@ class CAFFE2_API Tensor final {
    * The tensor will share the same instance (data, strides, sizes, etc) but
    * a different subset of APIs would be available
    */
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   explicit Tensor(at::Tensor tensor)
       : impl_(std::move(tensor.impl_)) {
     enforce_invariants();
@@ -127,6 +132,7 @@ class CAFFE2_API Tensor final {
   explicit operator at::Tensor() && {
     return at::Tensor::wrap_tensor_impl(std::move(impl_));
   }
+#endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
@@ -189,7 +195,10 @@ class CAFFE2_API Tensor final {
    * 'async' parameter triggers async copy for CUDA tensors
    */
   void CopyFrom(const Tensor& src, bool async = false) {
-    AT_ASSERT(!impl_->is_variable());  // TODO: remove this when Variable and Tensor are merged
+    // TODO: only check `!impl_->requires_grad()` after Variable and Tensor are merged
+#if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+    AT_ASSERT(!(impl_->requires_grad() && at::GradMode::is_enabled()));
+#endif
     AT_ASSERTM(
         src.impl_->is_contiguous(),
         "Right now only copy of contiguous source Tensor is supported.");
@@ -519,7 +528,7 @@ class CAFFE2_API Tensor final {
     return impl_.get()->strides();
   }
 
-  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Any) const {
+  inline bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
     return impl_.get()->is_contiguous(memory_format);
   }
 
@@ -601,8 +610,6 @@ CAFFE2_API void ReinitializeAndCopyFrom(
     at::TensorOptions options,
     const Tensor& src,
     bool async = false);
-
-CAFFE_DECLARE_PREALLOCATED_KNOWN_TYPE(12, Tensor)
 
 using TensorCPU = Tensor;
 

@@ -82,25 +82,30 @@ class C10_API Error : public std::exception {
   }
 };
 
-class C10_API Warning {
-  using handler_t =
-      void (*)(const SourceLocation& source_location, const char* msg);
-
- public:
-  /// Issue a warning with a given message. Dispatched to the current
-  /// warning handler.
-  static void warn(SourceLocation source_location, std::string msg);
-  /// Sets the global warning handler. This is not thread-safe, so it should
-  /// generally be called once during initialization.
-  static void set_warning_handler(handler_t handler);
+class C10_API WarningHandler {
+  public:
+  virtual ~WarningHandler() noexcept(false) {}
   /// The default warning handler. Prints the message to stderr.
-  static void print_warning(
+  virtual void process(
       const SourceLocation& source_location,
-      const char* msg);
-
- private:
-  static handler_t warning_handler_;
+      const std::string& msg);
 };
+
+namespace Warning {
+
+/// Issue a warning with a given message. Dispatched to the current
+/// warning handler.
+C10_API void warn(SourceLocation source_location, const std::string& msg);
+/// Sets the global warning handler. This is not thread-safe, so it should
+/// generally be called once during initialization or while holding the GIL
+/// for programs that use python.
+/// User is responsible for keeping the WarningHandler alive until
+/// it is not needed.
+C10_API void set_warning_handler(WarningHandler* handler) noexcept(true);
+/// Gets the global warning handler.
+C10_API WarningHandler* get_warning_handler() noexcept(true);
+
+} // namespace Warning
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
@@ -109,6 +114,12 @@ class C10_API IndexError : public Error {
   using Error::Error;
 };
 
+
+// Used in ATen for non finite indices.  These turn into
+// ExitException when they cross to Python.
+class C10_API EnforceFiniteError : public Error {
+  using Error::Error;
+};
 
 // A utility function to return an exception std::string by prepending its
 // exception type before its what() content
@@ -137,6 +148,8 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // unsigned int (a.k.a uint32_t) and may cause a compile error with the message:
 // error C2397: conversion from 'long' to 'uint32_t' requires a narrowing conversion
 // Here the static cast is used to pass the build.
+// if this is used inside a lambda the __func__ macro expands to operator(),
+// which isn't very useful, but hard to fix in a macro so suppressing the warning.
 #define C10_THROW_ERROR(err_type, msg) \
   throw ::c10::err_type({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, msg)
 
@@ -189,7 +202,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike assert()).
 //
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_INTERNAL_ASSERT(cond, ...)      \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -231,18 +244,18 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // simply raises an exception, it does NOT unceremoniously quit the process
 // (unlike CHECK() from glog.)
 //
-#ifdef C10_MOBILE
-#define TORCH_CHECK(cond, ...)                \
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK_WITH(error_t, cond, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
+    C10_THROW_ERROR(error_t,                  \
         #cond " CHECK FAILED at "             \
         __FILE__                              \
     );                                        \
   }
 #else
-#define TORCH_CHECK(cond, ...)                              \
+#define TORCH_CHECK_WITH(error_t, cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(Error,                                  \
+    C10_THROW_ERROR(error_t,                                \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
         "Expected " #cond " to be true, but got false.  "   \
@@ -252,11 +265,26 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+#define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
+
+// Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
+// build, and does nothing in release build.  It is appropriate to use
+// in situations where you want to add an assert to a hotpath, but it is
+// too expensive to run this assert on production builds.
+#ifdef NDEBUG
+// Optimized version - generates no code.
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) \
+  while (false)           \
+  TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+#else
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
+#endif
+
 // TODO: We're going to get a lot of similar looking string literals
 // this way; check if this actually affects binary size.
 
 // Like TORCH_CHECK, but raises IndexErrors instead of Errors.
-#ifdef C10_MOBILE
+#ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK_INDEX(cond, ...)          \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
     C10_THROW_ERROR(Error,                    \
@@ -284,6 +312,15 @@ inline std::string if_empty_then(std::string x, std::string y) {
 //
 #define TORCH_WARN(...) \
   ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__))
+
+// Report a warning to the user only once.  Accepts an arbitrary number of extra
+// arguments which are concatenated into the warning message using operator<<
+//
+#define TORCH_WARN_ONCE(...) \
+  C10_UNUSED static const auto C10_ANONYMOUS_VARIABLE(torch_warn_once_) = [&] { \
+    ::c10::Warning::warn({__func__, __FILE__, static_cast<uint32_t>(__LINE__)}, ::c10::str(__VA_ARGS__)); \
+    return true; \
+  }()
 
 
 // ----------------------------------------------------------------------------
@@ -338,7 +375,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                    \
     ::c10::detail::deprecated_AT_CHECK();                 \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(__VA_ARGS__)); \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK
@@ -347,7 +384,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                              \
     ::c10::detail::deprecated_AT_ASSERT();                          \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
-  } while (false);
+  } while (false)
 
 // Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
 // both 0-ary and variadic calls, so having a separate message-accepting macro
@@ -361,7 +398,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ASSERTM();                                   \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__));     \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
@@ -371,14 +408,14 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                                        \
     ::c10::detail::deprecated_AT_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated for consistency with TORCH_CHECK.
 #define AT_INDEX_ERROR(...)                                                         \
   do {                                                                              \
     ::c10::detail::deprecated_AT_INDEX_ERROR();                                     \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_CHECK_INDEX(false, ::c10::str(__VA_ARGS__)));  \
-  } while (false);
+  } while (false)
 
 // Deprecated alias; this alias was deprecated because it wasn't clear to
 // people that you should use a macro with AT_ prefix inside the torch/csrc
@@ -387,7 +424,7 @@ inline void deprecated_AT_ASSERTM() {}
   do {                                                    \
     ::c10::detail::deprecated_AT_WARN();                  \
     C10_EXPAND_MSVC_WORKAROUND(TORCH_WARN(__VA_ARGS__));  \
-  } while (false);
+  } while (false)
 
 
 #endif // C10_UTIL_EXCEPTION_H_

@@ -1,15 +1,13 @@
 #include <gtest/gtest.h>
+#include <test/cpp/api/support.h>
 
-#include <torch/types.h>
-
-#include <ATen/Context.h>
-#include <ATen/Functions.h>
-#include <c10/core/TensorOptions.h>
+#include <torch/torch.h>
 
 #include <string>
 #include <vector>
 
 using namespace at;
+using namespace torch::test;
 
 // A macro so we don't lose location information when an assertion fails.
 #define REQUIRE_OPTIONS(device_, index_, type_, layout_)                  \
@@ -23,17 +21,11 @@ using namespace at;
   ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
   ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
   ASSERT_EQ(tensor.scalar_type(), (type_));                                \
-  ASSERT_TRUE(tensor.type().layout() == (layout_))
+  ASSERT_TRUE(tensor.options().layout() == (layout_))
 
 TEST(TensorOptionsTest, DefaultsToTheRightValues) {
   TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-}
-
-TEST(TensorOptionsTest, ReturnsTheCorrectType) {
-  auto options = TensorOptions().device(kCPU).dtype(kInt).layout(kSparse);
-  ASSERT_TRUE(
-      at::getType(options) == getNonVariableType(Backend::SparseCPU, kInt));
 }
 
 TEST(TensorOptionsTest, UtilityFunctionsReturnTheRightTensorOptions) {
@@ -66,10 +58,10 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTypes) {
   options = TensorOptions(kInt);
   REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
-  options = TensorOptions(getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
+  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kFloat));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
-  options = TensorOptions(getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kByte));
+  options = TensorOptions(getDeprecatedTypeProperties(Backend::SparseCPU, kByte));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -77,7 +69,7 @@ TEST(TensorOptionsTest, ConstructsWellFromCPUTensors) {
   auto options = empty(5, kDouble).options();
   REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
-  options = empty(5, getNonVariableDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
+  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCPU, kByte)).options();
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
@@ -129,29 +121,25 @@ TEST(DeviceTest, ParsesCorrectlyFromString) {
   }
 }
 
-struct DefaultDtypeTest : ::testing::Test {
-  DefaultDtypeTest() {
-    set_default_dtype(caffe2::TypeMeta::Make<float>());
-  }
-  ~DefaultDtypeTest() override {
-    set_default_dtype(caffe2::TypeMeta::Make<float>());
-  }
-};
+TEST(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
 
-TEST_F(DefaultDtypeTest, CanSetAndGetDefaultDtype) {
   ASSERT_EQ(at::get_default_dtype(), kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   ASSERT_EQ(at::get_default_dtype(), kInt);
 }
 
-TEST_F(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
+TEST(DefaultDtypeTest, NewTensorOptionsHasCorrectDefault) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
+
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   ASSERT_EQ(at::get_default_dtype(), kInt);
   TensorOptions options;
   ASSERT_EQ(options.dtype(), kInt);
 }
 
-TEST_F(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
+TEST(DefaultDtypeTest, NewTensorsHaveCorrectDefaultDtype) {
+  AutoDefaultDtypeMode dtype_mode(kFloat);
   set_default_dtype(caffe2::TypeMeta::Make<int>());
   {
     auto tensor = torch::ones(5);

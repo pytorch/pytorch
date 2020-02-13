@@ -1,11 +1,16 @@
 add_subdirectory(aten)
-add_subdirectory(gloo)
 add_subdirectory(nccl)
 add_subdirectory(opencl)
 add_subdirectory(prof)
 add_subdirectory(shm_mutex)
 if (USE_TENSORRT)
 add_subdirectory(tensorrt)
+endif()
+
+# Only build Gloo Caffe2 ops on Linux, as it hardcodes
+# the Linux-specific `gloo::transport::tcp` namespace.
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+add_subdirectory(gloo)
 endif()
 
 # Pass the src lists back to the parent

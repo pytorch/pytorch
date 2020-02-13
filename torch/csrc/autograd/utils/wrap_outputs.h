@@ -8,9 +8,12 @@
 
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/QScheme.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/tensor_qschemes.h>
+#include <torch/csrc/DynamicTypes.h>
 
 namespace torch { namespace autograd { namespace utils {
 
@@ -45,6 +48,10 @@ inline PyObject* wrap(THPDtype *dtype) {
   return (PyObject*)dtype;
 }
 
+inline PyObject* wrap(at::ScalarType scalarType) {
+  return wrap(getDtype(scalarType));
+}
+
 inline PyObject* wrap(THPLayout *layout) {
   Py_INCREF(layout);
   return (PyObject*)layout;
@@ -55,7 +62,13 @@ inline PyObject* wrap(at::Tensor tensor) {
 }
 
 inline PyObject* wrap(at::Scalar scalar) {
-  return wrap(make_variable(scalar_to_tensor(scalar)));
+  return wrap(scalar_to_tensor(scalar));
+}
+
+inline PyObject* wrap(at::QScheme qscheme) {
+  auto* thp_qscheme = torch::utils::getTHPQScheme(qscheme);
+  Py_INCREF(thp_qscheme);
+  return thp_qscheme;
 }
 
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor> tensors) {
@@ -112,6 +125,28 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, int64_t> tensors
   return r.release();
 }
 
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(5)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 4, wrap(std::get<4>(tensors)));
+  return r.release();
+}
+
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, float, at::Tensor, int64_t> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(5)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 4, wrap(std::move(std::get<4>(tensors))));
+  return r.release();
+}
+
 inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
   auto r = THPObjectPtr{PyTuple_New(4)};
   if (!r) throw python_error();
@@ -142,4 +177,12 @@ inline PyObject* wrap(at::TensorList tl) {
   return r.release();
 }
 
+inline PyObject* wrap(at::IntArrayRef list) {
+  auto r = THPObjectPtr{PyTuple_New(list.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < list.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(list[i]));
+  }
+  return r.release();
+}
 }}} // namespace torch::autograd::utils

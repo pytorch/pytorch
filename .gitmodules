@@ -81,7 +81,7 @@
 [submodule "third_party/sleef"]
     ignore = dirty
     path = third_party/sleef
-    url = https://github.com/zdevito/sleef
+    url = https://github.com/shibatch/sleef
 [submodule "third_party/ideep"]
     ignore = dirty
     path = third_party/ideep
@@ -114,3 +114,7 @@
 	path = third_party/tbb
 	url = https://github.com/01org/tbb
 	branch = tbb_2018
+[submodule "android/libs/fbjni"]
+    ignore = dirty
+    path = android/libs/fbjni
+    url = https://github.com/facebookincubator/fbjni.git

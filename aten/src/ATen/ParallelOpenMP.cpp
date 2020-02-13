@@ -1,4 +1,4 @@
-#ifdef AT_PARALLEL_OPENMP
+#if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
 
 #include <atomic>
@@ -20,12 +20,14 @@ void init_num_threads() {
   if (nthreads > 0) {
     set_num_threads(nthreads);
   } else {
-#if defined(_OPENMP) && defined(TH_BLAS_MKL)
+#if defined(_OPENMP) && defined(TH_BLAS_MKL) && !defined(TH_BLAS_MKL_SEQ)
     // If we are using MKL an OpenMP make sure the number of threads match.
     // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
     // size of the OpenMP thread pool, resulting in worse performance (and memory
     // leaks in GCC 5.4)
     omp_set_num_threads(mkl_get_max_threads());
+#elif defined(_OPENMP)
+    omp_set_num_threads(intraop_default_num_threads());
 #endif
   }
 }
@@ -79,6 +81,14 @@ bool in_parallel_region() {
 void intraop_launch(std::function<void()> func) {
   // execute inline in openmp case
   func();
+}
+
+std::shared_ptr<c10::ivalue::Future> intraop_launch_future(
+    std::function<void()> func) {
+  func();
+  auto future = std::make_shared<c10::ivalue::Future>(NoneType::get());
+  future->markCompleted();
+  return future;
 }
 
 } // namespace at

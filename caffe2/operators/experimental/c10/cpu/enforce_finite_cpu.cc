@@ -1,5 +1,5 @@
 #include <ATen/core/op_registration/op_registration.h>
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/math.h"
 
@@ -29,11 +29,11 @@ static auto registry = c10::RegisterOperators().op(
     c10::RegisterOperators::options()
       .kernel<
         decltype(enforce_finite_op_impl_cpu<float>),
-        &enforce_finite_op_impl_cpu<float>>(CPUTensorId()));
+        &enforce_finite_op_impl_cpu<float>>(DispatchKey::CPUTensorId));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::EnforceFinite",
     C10EnforceFinite_DontUseThisOpYet)
 

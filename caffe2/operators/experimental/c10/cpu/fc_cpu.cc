@@ -1,7 +1,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/operator_c10wrapper.h"
+#include "caffe2/core/export_c10_op_to_caffe2.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
@@ -131,11 +131,11 @@ class fc_op_cpu final : public c10::OperatorKernel {
 static auto registry = c10::RegisterOperators().op(
     "_c10_experimental::FullyConnected",
     c10::RegisterOperators::options()
-      .kernel<fc_op_cpu<float, CPUContext>>(CPUTensorId()));
+      .kernel<fc_op_cpu<float, CPUContext>>(DispatchKey::CPUTensorId));
 
 } // namespace
 
-REGISTER_C10_OPERATOR_FOR_CAFFE2_DISPATCH_CPU(
+C10_EXPORT_C10_OP_TO_CAFFE2_CPU(
     "_c10_experimental::FullyConnected",
     C10FC_DontUseThisOpYet)
 

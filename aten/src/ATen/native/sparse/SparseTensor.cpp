@@ -71,16 +71,16 @@ Tensor values_sparse(const Tensor& self) {
 /*** Helper methods ***/
 
 SparseTensor new_sparse(const TensorOptions& options) {
-  AT_ASSERT(!options.is_variable());  // TODO: remove this when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kSparse);
-  TensorTypeId type_id;
+  DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
-    type_id = SparseCUDATensorId();
+    dispatch_key = DispatchKey::SparseCUDATensorId;
   } else {
-    type_id = SparseCPUTensorId();
+    dispatch_key = DispatchKey::SparseCPUTensorId;
   }
   return detail::make_tensor<SparseTensorImpl>(
-      type_id, options.dtype());
+      DispatchKeySet(dispatch_key), options.dtype());
 }
 
 /** Actual dispatched creation methods ***/
@@ -116,7 +116,7 @@ SparseTensor new_with_dims_and_tensor_sparse(
 /** Public creation API that dispatch to methods above **/
 
 /** Empty init **/
-Tensor empty_sparse(IntArrayRef size, const TensorOptions& options) {
+Tensor empty_sparse(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   return new_with_dims_sparse(size.size(), 0, size, options);
 }
@@ -255,7 +255,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, A
 
 // NB: Deleted newWithSizeNd variants
 
-SparseTensor clone_sparse(const SparseTensor& self) {
+SparseTensor clone_sparse(const SparseTensor& self, c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
   SparseTensor other = new_with_dims_sparse(self.sparse_dim(), self.dense_dim(), self.sizes(), self.options());
   copy_into_sparse(other, self._indices(), self._values(), true);
   return other._coalesced_(self.is_coalesced());
@@ -281,6 +285,7 @@ namespace {
   }
 }
 
+// Invoked from native/Resize.cpp (no dynamic dispatch necessary)
 SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
@@ -318,12 +323,12 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim){
   Tensor values;
   if (self.dim() > 0) {
     std::vector<Tensor> ix = indices.chunk(indices.size(0), 0);
-    values = self.index(ix).squeeze(0).clone();
+    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
   } else {
     AT_ASSERT(nz.sizes().equals({0, 1}));
     // In this cases, indices is a clone of nz, which is a tensor of shape (0, 1).
     // Given sparse tensor invariants, values should be shape (1,)
-    values = self.unsqueeze(0).clone();
+    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
   }
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
@@ -349,7 +354,7 @@ SparseTensor& copy_sparse_(SparseTensor& self, const SparseTensor& src, bool non
 
 SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.defined());
-  AT_ASSERT(!self.is_variable());  // TODO: change this to check `.requires_grad()` and `GradMode::is_enabled()` when Variable and Tensor are merged
+  TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   AT_ASSERT(self.is_sparse());
 
   if (self.is_coalesced()) {
@@ -392,8 +397,8 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
       values.scalar_type(), "coalesce", [&] {
         int64_t prev = -1;
         int64_t blockSize = values.stride(0);
-        scalar_t* values_ptr = values.data<scalar_t>();
-        scalar_t* newValues_ptr = newValues.data<scalar_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
         for (int64_t j = 0; j < nnz; j++) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
@@ -438,7 +443,7 @@ void inline sparse_mask_out_cpu_kernel(
 ) {
   auto r_values_accessor = r_values.accessor<scalar_t, 1>();
   auto mask_indices_accessor = mask_indices.accessor<int64_t, 2>();
-  scalar_t* t_ptr = t.data<scalar_t>();
+  scalar_t* t_ptr = t.data_ptr<scalar_t>();
 
   at::parallel_for(0, r_nnz, 1000, [&](int64_t start, int64_t end) {
     for (auto i = start; i < end; i++) {

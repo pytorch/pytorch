@@ -11,6 +11,9 @@
 #include <THC/generic/THCStorage.cpp>
 #include <THC/THCGenerateBoolType.h>
 
+#include <THC/generic/THCStorage.cpp>
+#include <THC/THCGenerateBFloat16Type.h>
+
 #include <c10/util/intrusive_ptr.h>
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
@@ -56,7 +59,7 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->device().index();
 }
 
-THC_API THCStorage* THCStorage_new(
+THCStorage* THCStorage_new(
     THCState* state,
     caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
