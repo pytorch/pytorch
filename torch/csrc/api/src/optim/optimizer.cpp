@@ -117,16 +117,27 @@ void OptimizerBase::zero_grad() {
   }
 }
 
+// TODO: remove this function after all the optimizers use the new design
 const std::vector<Tensor>& OptimizerBase::parameters() const noexcept {
   return parameters_;
 }
 
+// TODO: remove this function after all the optimizers use the new design
 std::vector<Tensor>& OptimizerBase::parameters() noexcept {
   return parameters_;
 }
 
+// TODO: update size to return the sum of #params in all param_groups
 size_t OptimizerBase::size() const noexcept {
   return parameters_.size();
+}
+
+size_t OptimizerBase::_size_new_design() const noexcept {
+  size_t count = 0;
+  for (const auto& group : param_groups_) {
+    count += group.params().size();
+  }
+  return count;
 }
 
 OptimizerOptions& OptimizerBase::defaults() noexcept {
