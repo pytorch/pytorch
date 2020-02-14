@@ -389,7 +389,7 @@ TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, boo
       msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
                      modified_obj, " modified inplace.");
     } else {
-      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enable.");
+      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
     }
 
     if (diff_view_meta->allow_rebase_history == OnRebase::ERROR_REBASE) {
@@ -421,6 +421,8 @@ TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, boo
     }
 
     // We warn only once per view
+    // Note that if a Tensor is modified inplace from two threads at the same time, this is not thread safe and can warn
+    // multiple time. This is ok as it should be a rare event.
     diff_view_meta->allow_rebase_history = OnRebase::ALLOW_REBASE;
   }
 }

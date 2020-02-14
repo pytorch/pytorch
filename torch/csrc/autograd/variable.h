@@ -345,7 +345,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// We want to detect views followed by inplace as they are often forbidden to ensure
 /// correctness of the computed gradients. But since we want to only notify the user
 /// when both happen, we tag the DifferentiableViewMeta when the view is created
-/// via the `make_vairable_*_view()` functions. This tag is then checked by the
+/// via the `make_variable_*_view()` functions. This tag is then checked by the
 /// `check_inplace()` function from `VariableTypeUtils.h` that should be called before
 /// every inplace operation. To detect cases where other views are modified and this
 /// one is rebased by side effect, we also check in the `VariableHooks::grad_fn()`.
