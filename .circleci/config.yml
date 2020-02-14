@@ -1493,9 +1493,7 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install pillow==7.0.0 --progress-bar off
-            #install the latest version of PyTorch and TorchVision
-            pip install torch "torchvision>=0.5.0" --progress-bar off
+            pip install torch torchvision --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
@@ -2079,14 +2077,14 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
       # Pytorch iOS PR builds
-#      - pytorch_ios_build:
-#          name: pytorch_ios_11_2_1_x86_64_build
-#          context: org-member
-#          build_environment: "pytorch-ios-11.2.1-x86_64_build"
-#          ios_arch: "x86_64"
-#          ios_platform: "SIMULATOR"
-#          requires:
-#            - setup
+      - pytorch_ios_build:
+          name: pytorch_ios_11_2_1_x86_64_build
+          context: org-member
+          build_environment: "pytorch-ios-11.2.1-x86_64_build"
+          ios_arch: "x86_64"
+          ios_platform: "SIMULATOR"
+          requires:
+            - setup
       - pytorch_ios_build:
           name: pytorch_ios_11_2_1_arm64_build
           context: org-member

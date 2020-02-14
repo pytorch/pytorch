@@ -37,7 +37,7 @@ ${type_derived_method_definitions}
 
 #ifndef USE_STATIC_DISPATCH
 namespace {
-static auto registerer = torch::import()
+static auto registerer = torch::RegisterOperators()
   ${function_registrations};
 }
 #endif
