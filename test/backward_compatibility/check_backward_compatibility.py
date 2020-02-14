@@ -88,8 +88,9 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
+            if "torch.classes" in line or "RRef" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
+                # TODO Delete RRef special case after add the RRef type
                 continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])

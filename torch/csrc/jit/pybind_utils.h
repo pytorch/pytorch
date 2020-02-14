@@ -21,6 +21,9 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -565,7 +568,13 @@ inline IValue toIValue(
             c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
       }
     }
-    case TypeKind::RRefType:
+    case TypeKind::RRefType: {
+#ifdef USE_DISTRIBUTED
+      return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
+#else
+      AT_ERROR("RRef is only supported with the distributed package");
+#endif
+    }
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
