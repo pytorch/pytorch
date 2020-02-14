@@ -249,7 +249,6 @@ struct TORCH_CUDA_API RNNDescriptor
           mode,
           algo,
           datatype));
-#if CUDA_VERSION >= 9000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
@@ -260,7 +259,6 @@ struct TORCH_CUDA_API RNNDescriptor
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
-#endif
   }
 };
 
