@@ -9842,6 +9842,8 @@ class TestTorchDeviceType(TestCase):
                                r"For integral input tensors, argument alpha must not be a floating point number\.",
                                lambda: torch.add(m1, m2, alpha=1.0))
 
+    @dtypes(*(torch.testing.get_all_dtypes() + [torch.half]))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes() +  [torch.half]))
     def test_add_scalar(self, device, dtype):
         m1 = torch.tensor([1, 2], dtype=dtype, device=device)
         if dtype == torch.bool:
@@ -9908,6 +9910,8 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
             self.assertEqual(a1.mul(a2), a1 * a2)
 
+    @dtypes(*(torch.testing.get_all_dtypes() + [torch.half]))
+    @dtypesIfCUDA(*(torch.testing.get_all_dtypes() +  [torch.half]))
     def test_mul_scalar(self, device, dtype):
         m1 = torch.tensor([1, 2], dtype=dtype, device=device)
         if dtype == torch.bool:
