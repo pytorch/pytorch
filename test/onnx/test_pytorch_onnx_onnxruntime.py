@@ -1868,24 +1868,24 @@ class TestONNXRuntime(unittest.TestCase):
     def test_weight_norm(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
+        self.run_test(model, x, copy_model=False)  # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
         x = torch.randn(1, 1, 5, requires_grad=True)
-        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
+        self.run_test(model, x, copy_model=False)  # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3), dim=-2)
         x = torch.randn(1, 1, 5, requires_grad=True)
-        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
+        self.run_test(model, x, copy_model=False)  # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(3, 6, 3), name='weight')
         x = torch.randn(3, 3, 5, requires_grad=True)
-        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
+        self.run_test(model, x, copy_model=False)  # weight norm does not support the deepcopy protocol at the moment
 
     def test_weight_norm_nodim(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
+        self.run_test(model, x, copy_model=False)  # weight norm does not support the deepcopy protocol at the moment
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
