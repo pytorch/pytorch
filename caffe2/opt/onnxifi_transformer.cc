@@ -690,6 +690,30 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
     if ((op.type() == "Concat" || op.type() == "Reshape") &&
         op.output_size() == 2) {
       split_infos.emplace(op.output(1));
+    } else if (
+        op.type() == "SparseLengthsSum" ||
+        op.type() == "SparseLengthsSumFused8BitRowwise" ||
+        op.type() == "SparseLengthsWeightedSum" ||
+        op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+        op.type() == "SparseLengthsSumFused4BitRowwise" ||
+        op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
+      int weighted = (op.type() == "SparseLengthsWeightedSum" ||
+                      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+                      op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
+          ? 1
+          : 0;
+      const auto& indices_hint = shape_hints.at(op.input(1 + weighted));
+      const auto& lengths_hint = shape_hints.at(op.input(2 + weighted));
+      const auto& indices_shape = indices_hint.shape;
+      const auto& lengths_shape = lengths_hint.shape;
+      if ((indices_hint.getDimType(0) ==
+               TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX ||
+           indices_hint.getDimType(0) ==
+               TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT) &&
+          indices_shape.dims_size() == 1 && lengths_shape.dims_size() == 1 &&
+          indices_shape.dims(0) == lengths_shape.dims(0)) {
+        op.add_arg()->CopyFrom(MakeArgument<int>("length1", 1));
+      }
     }
   }
   onnxifi_net.clear_external_output();
