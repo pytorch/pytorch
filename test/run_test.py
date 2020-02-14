@@ -93,7 +93,6 @@ WINDOWS_BLACKLIST = [
 
 ROCM_BLACKLIST = [
     'test_cpp_extensions_aot',
-    'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_jit',
     'distributed/test_distributed',
     'test_multiprocessing',
