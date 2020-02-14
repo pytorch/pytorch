@@ -82,7 +82,7 @@ struct TORCH_API CompilationUnit {
     return true;
   }
 
-  // for historic reasons, these are defined in compiler.cpp
+  // for historic reasons, these are defined in ir_emitter.cpp
   // Returns the list of Function's just defined.
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,
