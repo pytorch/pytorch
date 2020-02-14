@@ -12,6 +12,18 @@ namespace at {
 namespace native {
 namespace templates {
 
+// The purpose of `update_from` and `update_to` is to find the closest valid int64_t number that can be used as actual `from`.
+// The current implementation of `random_` uses uint64_t arithmetics and casts the result to the target dtype(scalar_t).
+// This casting can result in generating numbers that happen to be greater or equal to `to` value. For instance:
+//
+//    auto actual = torch::empty({3, 3}, torch::half);
+//    actual.random_(0, 65504);
+//
+// If random's uint64_t arithmetics produces 65503 as a random value after casting to torch::half it becomes 65504
+// and violates the requirement that random value must be less than `to`. To resolve this issue `update_from` and `update_to`
+// moves `from` to the left and `to` to the right to the next closest value that won't go outside [from, to) after casting to
+// the target dtype. For `to` = 65504 it moves left for (1 << (log2(to) - 11 + 1)) = 32 and becomes 65472, which is previous
+// available number for torch::half dtype.
 template<typename scalar_t>
 int64_t update_from(int64_t from) {
   static_assert(
@@ -74,7 +86,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     // [from, std::numeric_limits<int64_t>::max()]
     int64_t to_inc = 0;
     if (isFloatingType(iter.dtype())) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] { 
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] {
         to_inc = std::numeric_limits<scalar_t>::max() > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
         from = update_from<scalar_t>(from);
         TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
