@@ -86,7 +86,7 @@ struct TORCH_API Tensor : public Val {
                      // and immutable.
 
   Tensor(DataType dt, const TensorDomain* _td = nullptr)
-      : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain(_td) {}
+      : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
 
   Tensor(const Tensor& other) = delete;
   Tensor& operator=(const Tensor& other) = delete;
@@ -112,11 +112,13 @@ struct TORCH_API Tensor : public Val {
     return new Tensor(DataType::Float, td);
   }
 
-  // protected:
+  const TensorDomain* domain() const noexcept { return domain_; }
+
+  private:
 
   // Implementation details:
   const c10::optional<TensorContiguity> contiguity_;
-  const TensorDomain* domain;
+  const TensorDomain* domain_;
 };
 
 struct TORCH_API TensorView : public Val {
@@ -128,11 +130,15 @@ struct TORCH_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(const Tensor* _tensor, const TensorDomain* _view)
-      : Val(ValType::TensorView), tensor(_tensor), view(_view) {}
+  TensorView(const Tensor* _tensor, const TensorDomain* _domain)
+      : Val(ValType::TensorView), tensor_(_tensor), domain_(_domain) {}
 
-  const Tensor* tensor;
-  const TensorDomain* view;
+  const Tensor* tensor() const noexcept { return tensor_; }
+  const TensorDomain* domain() const noexcept { return domain_; }
+
+private:
+  const Tensor* tensor_;
+  const TensorDomain* domain_;
 };
 
 /*
@@ -240,6 +246,9 @@ struct TORCH_API Reorder : public Expr {
 
 TORCH_API const TensorView* split(const Tensor*, int axis, int factor);
 TORCH_API const TensorView* merge(const Tensor*, int axis);
+
+TORCH_API const TensorView* split(const TensorView*, int axis, int factor);
+TORCH_API const TensorView* merge(const TensorView*, int axis);
 
 } // namespace fuser
 } // namespace jit

@@ -30,9 +30,10 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
  */
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
-    : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
-      domain(nullptr),
-      contiguity_(infer_contiguity_from_tensor_type(tensor_type)) {}
+    : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType()))
+    , contiguity_(infer_contiguity_from_tensor_type(tensor_type))
+    , domain_(nullptr)
+    {}
 
 Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
     : Tensor(jit_value->type()->cast<c10::TensorType>()) {}
@@ -81,9 +82,9 @@ Reorder::Reorder(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-const TensorView* split(const Tensor* tensor, int axis, int factor) {
+const TensorView* split(const TensorView* tv, int axis, int factor) {
   using size_type = std::vector<const IterDomain*>::size_type;
-  const TensorDomain* td = tensor->domain;
+  const TensorDomain* td = tv->domain();
   assert(axis > 0 && axis < td->size());
   const IterDomain* id = td->axis(axis);
 
@@ -112,16 +113,16 @@ const TensorView* split(const Tensor* tensor, int axis, int factor) {
       new_domain.push_back(idi);
     }
   }
-  return new TensorView(tensor, new TensorDomain(new_domain));
+  return new TensorView(tv->tensor(), new TensorDomain(new_domain));
 }
 
-const TensorView* merge(const Tensor* tensor, int axis) {
+const TensorView* merge(const TensorView* tv, int axis) {
   using size_type = std::vector<const IterDomain*>::size_type;
-  const TensorDomain* td = tensor->domain;
+  const TensorDomain* td = tv->domain();
   assert(axis >= 0 && axis + 1 < td->size());
   
-  const IterDomain* first = tensor->domain->axis(axis);
-  const IterDomain* second = tensor->domain->axis(axis);
+  const IterDomain* first = tv->domain()->axis(axis);
+  const IterDomain* second = tv->domain()->axis(axis);
 
   assert(
        (first->isReduction() && second->isReduction())
@@ -144,7 +145,15 @@ const TensorView* merge(const Tensor* tensor, int axis) {
         new_domain.push_back(merged_id);
     }
   }
-  return new TensorView(tensor, new TensorDomain(new_domain));
+  return new TensorView(tv->tensor(), new TensorDomain(new_domain));
+}
+
+const TensorView* split(const Tensor* tensor, int axis, int factor) {
+  return split(new TensorView(tensor, tensor->domain()), axis, factor);
+}
+
+const TensorView* merge(const Tensor* tensor, int axis) {
+  return merge(new TensorView(tensor, tensor->domain()), axis);
 }
 
 } // namespace fuser
