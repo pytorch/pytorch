@@ -196,7 +196,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
             // Propagate NaNs
             if (lhs.dtype() == kFloat32 && rhs.dtype() == kFloat32 && option) {
               result_v[i] = lhs_v[i];
-            } else if (std::(float)isnan(rhs_v[i])) {
+            } else if (std::isnan((float)rhs_v[i])) {
               result_v[i] = rhs_v[i];
             }
           } else {
