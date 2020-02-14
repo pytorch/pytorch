@@ -978,6 +978,10 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.bfloat16)
         self.assertEqual(bfloat16Tensor, expected)
 
+        complexTensor = torch.zeros(2, 2, dtype=torch.complex64)
+        expected = torch.tensor([[0., 0.], [0., 0.]], dtype=torch.complex64)
+        self.assertEqual(complexTensor, expected)
+
     def test_zeros_out(self):
         shape = (3, 4)
         out = torch.zeros(shape)
