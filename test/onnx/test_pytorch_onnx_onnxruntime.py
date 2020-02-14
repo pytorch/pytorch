@@ -534,6 +534,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Unsqueeze(), x)
 
+    def test_maxpool_default_stride(self):
+        class MaxPoolModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.max_pool2d(x, 2)
+
+        model = MaxPoolModel()
+        x = torch.randn(10, 20, 16, 50)
+        self.run_test(model, x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
@@ -570,6 +579,15 @@ class TestONNXRuntime(unittest.TestCase):
     def test_maxpool_dilation(self):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
         x = torch.randn(20, 16, 50)
+        self.run_test(model, x)
+
+    def test_avgpool_default_stride(self):
+        class AvgPoolModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.avg_pool2d(x, 2)
+
+        model = AvgPoolModel()
+        x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
     def test_avgpool(self):
@@ -1009,6 +1027,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
+        self.run_test(torch.jit.script(RandLike()), x)
 
     def test_random_like_dtype(self):
         class RandNLike(torch.nn.Module):
@@ -1294,6 +1313,15 @@ class TestONNXRuntime(unittest.TestCase):
         index_offset = torch.tensor(offset)
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
+
+    def test_take(self):
+        class TakeModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.take(x, y)
+
+        x = torch.randn(6, 4, 3, 3)
+        y = torch.tensor([4, 1, 7, 15, 63])
+        self.run_test(TakeModel(), (x, y))
 
     def test_topk(self):
         class MyModule(torch.nn.Module):
@@ -2536,7 +2564,22 @@ class TestONNXRuntime(unittest.TestCase):
             torch._C._check_onnx_proto(model.SerializeToString())
         self.assertRaises(RuntimeError, check_proto)
 
+    def test_split_tensor_scalar(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.split(x, x.size(1))
+        x = torch.randn(1, 2, 3, requires_grad=True)
+        self.run_test(SplitModel(), x)
 
+    def test_split_tensor_multi(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.split(x, torch.ones(3))
+        x = torch.randn(1, 2, 3, requires_grad=True)
+
+        def run_model():
+            SplitModel(x)
+        self.assertRaises(TypeError, run_model)            
 
     def _dispatch_rnn_test(self, name, *args, **kwargs):
         if name == 'elman':
