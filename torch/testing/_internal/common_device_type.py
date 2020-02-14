@@ -526,6 +526,10 @@ def skipCUDAIfNoMagma(fn):
 def skipCUDAIfRocm(fn):
     return skipCUDAIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")(fn)
 
+# Skips a test on CUDA when not using ROCm.
+def skipCUDAIfNotRocm(fn):
+    return skipCUDAIf(not TEST_WITH_ROCM, "test doesn't currently work on the CUDA stack")(fn)
+
 
 # Skips a test on CUDA if cuDNN is unavailable or its version is lower than requested.
 def skipCUDAIfCudnnVersionLessThan(version=0):
