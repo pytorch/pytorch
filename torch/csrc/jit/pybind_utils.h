@@ -560,8 +560,12 @@ inline IValue toIValue(
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else {
+        throw py::cast_error(
+            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
       }
     }
+    case TypeKind::RRefType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:

@@ -65,6 +65,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case QSchemeType::Kind:
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
+      case RRefType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
