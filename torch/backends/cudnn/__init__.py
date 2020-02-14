@@ -54,7 +54,7 @@ def _libcudnn():
             lib = find_cudnn_windows_lib()
         else:
             lib = ctypes.cdll.LoadLibrary(None)
-        if cuda is not None and hasattr(lib, 'cudnnGetErrorString'):
+        if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()
             compile_version = torch._C._cudnn_version()
