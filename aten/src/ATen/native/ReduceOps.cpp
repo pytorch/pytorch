@@ -974,4 +974,9 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
 std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
+
+Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+  return at::norm(self - other, p);
+}
+
 }} // namespace at::native
