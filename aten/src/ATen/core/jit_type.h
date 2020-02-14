@@ -38,6 +38,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(NumberType)             \
   _(FloatType)              \
   _(FutureType)             \
+  _(RRefType)               \
   _(IntType)                \
   _(NoneType)               \
   _(StringType)             \
@@ -789,6 +790,38 @@ struct CAFFE2_API FutureType
  private:
   FutureType(TypePtr elem) : SingleElementType(elem) {}
 };
+
+struct RRefType;
+using RRefTypePtr = std::shared_ptr<RRefType>;
+
+struct CAFFE2_API RRefType
+    : public SingleElementType<TypeKind::RRefType, RRefType> {
+  friend struct Type;
+  template <typename... T>
+  static RRefTypePtr create(TypePtr elem) {
+    return RRefTypePtr(
+        new RRefType(std::move(elem))); // NOLINT(modernize-make-shared)
+  }
+
+  std::string str() const override {
+    std::stringstream ss;
+    ss << "RRef(" << getElementType()->str() << ")";
+    return ss.str();
+  }
+  std::string python_str() const override {
+    std::stringstream ss;
+    ss << "RRef[" << getElementType()->python_str() << "]";
+    return ss.str();
+  }
+  TypePtr createWithContained(
+      std::vector<TypePtr> contained_types) const override {
+    return create(contained_types.at(0));
+  }
+
+ private:
+  RRefType(TypePtr elem) : SingleElementType(elem) {}
+};
+
 
 using ::torch::jit::Function;
 struct NamedType;
