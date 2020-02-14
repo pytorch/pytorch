@@ -36,11 +36,6 @@ namespace jit {
   _(ScheduleFuserThreeArg)      \
   _(ScheduleDynamicShape2D)     \
   _(TypeTest01)                 \
-  _(AsmjitIntImmTest)           \
-  _(AsmjitIntAddTest)           \
-  _(AsmjitIntSubTest)           \
-  _(AsmjitIntMulTest)           \
-  _(AsmjitIntDivTest)           \
   _(Cond01)                     \
   _(IfThenElse01)               \
   _(IfThenElse02)               \
