@@ -13788,7 +13788,7 @@ class TestTorchDeviceType(TestCase):
 
         if dtype in [torch.float, torch.double, torch.half]:
             min_val = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
-            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max / 2))
             froms = [min_val, -42, 0, 42]
             tos = [-42, 0, 42, max_val]
         elif dtype == torch.uint8:
@@ -13823,7 +13823,7 @@ class TestTorchDeviceType(TestCase):
         alpha = 0.1
 
         if dtype in [torch.float, torch.double, torch.half]:
-            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max) / 2)
             tos = [42, max_val]
         elif dtype == torch.bfloat16:
             tos = [42]

@@ -23,7 +23,7 @@ int64_t update_from(int64_t from) {
     int64_t from_ = std::abs(from + 1);
     int n = 0;
     while (from_ >>= 1) ++n;
-    from = from_plus_1 + (1L << (n - std::numeric_limits<scalar_t>::digits + 1));
+    from = from_plus_1 + (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return from;
 }
@@ -39,7 +39,7 @@ int64_t update_to(int64_t to) {
     int64_t to_ = std::abs(to - 1);
     int n = 0;
     while (to_ >>= 1) ++n;
-    to = to_minus_1 - (1 << (n - std::numeric_limits<scalar_t>::digits + 1));
+    to = to_minus_1 - (1LL << (n - std::numeric_limits<scalar_t>::digits + 1));
   }
   return to;
 }
@@ -58,8 +58,8 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
   uint64_t range = 0;
   auto iter = at::TensorIterator::nullary_op(self);
   if (to_opt.has_value()) {
-    int64_t to = *to_opt;
     // [from, to)
+    int64_t to = *to_opt;
     TORCH_CHECK(from < to, "random_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
     if (isFloatingType(iter.dtype())) {
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_update_from_to", [&] {
@@ -72,25 +72,25 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
     // [from, std::numeric_limits<int64_t>::max()]
+    int64_t to_inc = 0;
     if (isFloatingType(iter.dtype())) {
       AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] { 
-        const int64_t to_inc = std::numeric_limits<scalar_t>::max() > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
+        to_inc = std::numeric_limits<scalar_t>::max() > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
         from = update_from<scalar_t>(from);
         TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
-        range = to_inc - from + 1;
       });
     } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
       AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
         if (std::is_same<scalar_t, bool>::value) {
-          range = 2;
+          to_inc = static_cast<int64_t>(true);
         } else {
-          const auto to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
-          range = to_inc - from + 1;
+          to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
         }
       });
     } else {
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }
+    range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]

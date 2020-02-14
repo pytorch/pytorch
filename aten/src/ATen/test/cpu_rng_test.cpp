@@ -88,6 +88,15 @@ TEST_F(RNGTest, Random) {
   test_random<TestCPUGenerator, torch::kFloat64, double>(device);
 }
 
+// This test proves that Tensor.random_() distribution is able to generate unsigned 64 bit max value(64 ones)
+// https://github.com/pytorch/pytorch/issues/33299
+TEST_F(RNGTest, Random64bits) {
+  auto gen = new TestCPUGenerator(std::numeric_limits<uint64_t>::max());
+  auto actual = torch::empty({1}, torch::kInt64);
+  actual.random_(std::numeric_limits<int64_t>::min(), c10::nullopt, gen);
+  ASSERT_EQ(static_cast<uint64_t>(actual[0].item<int64_t>()), std::numeric_limits<uint64_t>::max());
+}
+
 TEST_F(RNGTest, Cauchy) {
   const auto median = 123.45;
   const auto sigma = 67.89;
