@@ -212,7 +212,7 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
-           !input->type()->expect<TensorType>()->isSummarized()) ||
+           !input->type()->expect<TensorType>()->isSummarized2()) ||
           input->node()->kind() == prim::Constant ||
           input->type()->isSubtypeOf(NumberType::get()) ||
           except.count(i) != 0) {
@@ -289,11 +289,13 @@ private:
      case prim::AutogradZero:
      case aten::rand_like:
      case aten::erf:
-     case aten::erfc: {
-       auto ttype = type->cast<TensorType>();
-       TORCH_INTERNAL_ASSERT(ttype);
-       return !ttype->isSummarized2() &&
-           checkSimpleBroadcastableInputs(n, ttype);
+     case aten::erfc:
+     case prim::inflate: {
+       // auto ttype = type->cast<TensorType>();
+       // TORCH_INTERNAL_ASSERT(ttype);
+       //  return !ttype->isSummarized2() &&
+       //      checkSimpleBroadcastableInputs(n, ttype);
+       checkInputs(n, no_exceptions);
      }
      case aten::cat:
        // TODO: re-enable
