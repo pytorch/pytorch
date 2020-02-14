@@ -1597,7 +1597,7 @@ class FoldConvBatchNorm2dHelper {
 
   std::unordered_map<script::ModulePtr,
                      std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
-  std::unordered_set<Graph*> visited_graph_;
+  std::unordered_map<Graph*, std::vector<std::tuple<std::string, std::string>>> conv_bn_names_;
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
@@ -1678,62 +1678,76 @@ graph(%self, %x):
 
       GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
       Graph* g = method.graph().get();
-      // not successful insert means it already exists in the set
-      bool visisted = !visited_graph_.insert(g).second;
-      for (const Match& match : matches) {
-        GRAPH_DEBUG("Checking next match...");
-        Node* matched_conv = match.nodes_map.at(pattern_conv);
-        Node* matched_bn = match.nodes_map.at(pattern_bn);
-        Node* matched_conv_submodule =
-          match.values_map.at(pattern_conv_submodule)->node();
-        Node* matched_bn_submodule =
-          match.values_map.at(pattern_bn_submodule)->node();
+      if (!conv_bn_names_.count(g)) {
+        // This is to make sure we don't visit one graph multiple times
+        conv_bn_names_[g] = {};
+        for (const Match& match : matches) {
+          GRAPH_DEBUG("Checking next match...");
+          Node* matched_conv = match.nodes_map.at(pattern_conv);
+          Node* matched_bn = match.nodes_map.at(pattern_bn);
+          Node* matched_conv_submodule =
+            match.values_map.at(pattern_conv_submodule)->node();
+          Node* matched_bn_submodule =
+            match.values_map.at(pattern_bn_submodule)->node();
 
-        TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
-        TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
+          TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
+          TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
 
+          const auto& conv_module_name = matched_conv_submodule->s(Symbol::attr("name"));
+          const auto& bn_module_name = matched_bn_submodule->s(Symbol::attr("name"));
+
+          script::Module conv_submodule =
+            current.attr(conv_module_name).toModule();
+          script::Module bn_submodule =
+            current.attr(bn_module_name).toModule();
+
+          ConvBNParameters params;
+          if (!tryExtractingConvBNParameters(
+                  conv_submodule, bn_submodule, params)) {
+            GRAPH_DEBUG(
+                "Conv and BN modules didn't have all required parameters or attributes...");
+            continue;
+          }
+          conv_bn_names_[g].push_back(
+              std::make_tuple(conv_module_name, bn_module_name));
+          // We are using a separate vector for saving Values we want to rewrite to
+          // make sure that the order in which we perform these transformations is
+          // deterministic. Iterating through keys of rewrite_map would result in
+          // non-determinism that might not manifest as a bug now, but can bite us
+          // later.
+          values_to_rewrite_.push_back(matched_bn->output());
+          rewrite_map_[matched_bn->output()] = matched_conv->output();
+          GRAPH_UPDATE(
+              "Rewriting %",
+              matched_bn->output()->debugName(),
+              " with %",
+              matched_conv->output()->debugName());
+
+          nodes_to_delete_.insert(matched_bn);
+          nodes_to_delete_.insert(matched_bn_submodule);
+          GRAPH_UPDATE("Deleting ", *matched_bn);
+          GRAPH_UPDATE("Deleting ", *matched_bn_submodule);
+
+          auto slot = conv_submodule.type()->getAttributeSlot("bias");
+          TORCH_CHECK(conv_submodule.type()->is_parameter(slot),
+                      "Expected conv module to have a bias parameter");
+        } // matches
+      }
+
+      for (const auto& conv_bn : conv_bn_names_.at(g)) {
         script::Module conv_submodule =
-          current.attr(matched_conv_submodule->s(Symbol::attr("name")))
+          current.attr(std::get<0>(conv_bn))
           .toModule();
         script::Module bn_submodule =
-          current.attr(matched_bn_submodule->s(Symbol::attr("name")))
+          current.attr(std::get<1>(conv_bn))
           .toModule();
 
         ConvBNParameters params;
-        if (!tryExtractingConvBNParameters(
-                conv_submodule, bn_submodule, params)) {
-          GRAPH_DEBUG(
-              "Conv and BN modules didn't have all required parameters or attributes...");
-          continue;
-        }
+        TORCH_INTERNAL_ASSERT(tryExtractingConvBNParameters(
+                                  conv_submodule, bn_submodule, params));
         auto new_w_b = computeUpdatedConvWeightAndBias(params);
         conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
-
-        if (visited) {
-          continue;
-        }
-        // We are using a separate vector for saving Values we want to rewrite to
-        // make sure that the order in which we perform these transformations is
-        // deterministic. Iterating through keys of rewrite_map would result in
-        // non-determinism that might not manifest as a bug now, but can bite us
-        // later.
-        values_to_rewrite_.push_back(matched_bn->output());
-        rewrite_map_[matched_bn->output()] = matched_conv->output();
-        GRAPH_UPDATE(
-            "Rewriting %",
-            matched_bn->output()->debugName(),
-            " with %",
-            matched_conv->output()->debugName());
-
-        nodes_to_delete_.insert(matched_bn);
-        nodes_to_delete_.insert(matched_bn_submodule);
-        GRAPH_UPDATE("Deleting ", *matched_bn);
-        GRAPH_UPDATE("Deleting ", *matched_bn_submodule);
-
-        auto slot = conv_submodule.type()->getAttributeSlot("bias");
-        TORCH_CHECK(conv_submodule.type()->is_parameter(slot),
-                   "Expected conv module to have a bias parameter");
-      } // matches
+      } // conv_bn module
     } // methods
   } // while
 }
