@@ -426,7 +426,7 @@ PyObject *THPVariable_get_base(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
   if (self->cdata.is_view()) {
-    return THPVariable_Wrap(self->cdata.base());
+    return THPVariable_Wrap(self->cdata._base());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
