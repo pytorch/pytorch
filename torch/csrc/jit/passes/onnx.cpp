@@ -285,7 +285,6 @@ void BlockToONNX(
 
     WithInsertPoint insert_point_guard(ctx.block);
     WithCurrentScope scope_guard(*ctx.block->owningGraph(), n->scope());
-    bool onnx_export = operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX;
     py::object raw_output = onnx.attr("_run_symbolic_function")(
         ctx.block->owningGraph(), n, py_inputs, env, operator_export_type);
 
