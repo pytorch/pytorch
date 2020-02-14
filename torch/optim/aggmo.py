@@ -24,12 +24,12 @@ class AggMo(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=[0.0, 0.9, 0.99], weight_decay=0):
-        if not 0.0 <= lr:
+        if lr <= 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         for i, mom in enumerate(momentum):
-            if not 0.0 <= momentum:
+            if mom < 0.0:
                 raise ValueError("Invalid momentum parameter at index {}: {}".format(i, mom))
-        if not 0.0 <= weight_decay:
+        if weight_decay < 0.0:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay)
         super(AggMo, self).__init__(params, defaults)
