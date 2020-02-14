@@ -31,7 +31,8 @@ Tensor& resize_cuda_(
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
-    .impl_unboxedOnlyKernel<decltype(resize_cuda_), &resize_cuda_>(DispatchKey::CUDATensorId))
+    .impl_unboxedOnlyKernel<decltype(resize_cuda_), &resize_cuda_>(DispatchKey::CUDATensorId)
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
   ;
 
 } // namespace
