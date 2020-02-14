@@ -10067,11 +10067,10 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(aRes[0], bRes[0])
             self.assertEqual(aRes[0], expected_output1)
 
-            # test inf and nan
+            # test inf and nan input
             x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
             xRes = op(x, 0)[0]
-            self.assertEqual(xRes.__repr__(), str(xRes))
-            self.assertExpectedInline(str(xRes), expected_output2)
+            self.assertEqual(xRes, expected_output2, allow_inf=True)
 
             # op shouldn't support values, indices with a dtype, device type or layout
             # different from that of input tensor
@@ -10105,15 +10104,15 @@ class TestTorchDeviceType(TestCase):
             # Check that output maintained correct shape
             self.assertEqual(raw_tensor.shape, raw_tensor.grad.shape)
 
-        expected_str_out = '''tensor([4., inf, inf, inf, inf, nan, nan])'''
+        expected_out = torch.tensor([4, inf, inf, inf, inf, nan, nan])
         test_ops(torch.cummax, "cummax", torch.tensor([[1, 0, 1],
                                                        [1, 0, 1],
-                                                       [1, 1, 1]]), expected_str_out)
+                                                       [1, 1, 1]]), expected_out)
 
-        expected_str_out = '''tensor([4.0000, 4.0000, 1.5000,   -inf,   -inf,    nan,    nan])'''
+        expected_out = torch.tensor([4, 4, 1.5, -inf, -inf, nan, nan])
         test_ops(torch.cummin, "cummin", torch.tensor([[1, 0, 1],
                                                        [0, 0, 0],
-                                                       [0, 0, 0]]), expected_str_out)
+                                                       [0, 0, 0]]), expected_out)
 
     def test_std_mean(self, device):
         x = torch.rand(100, 50, 20, device=device)

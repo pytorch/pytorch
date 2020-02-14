@@ -237,7 +237,8 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 
 template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
-          int self_dim_size, int self_stride, int values_stride, int indices_stride, Operation op) {
+          int self_dim_size, int self_stride, int values_stride, int indices_stride) {
+      Operation op;
       T1 out = self_data[0];
       int idx = 0;
       for(int i = 0; i < self_dim_size; i++) {
@@ -252,10 +253,10 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
 }
 
 void cummax_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
     self.scalar_type(), "cummax_cpu",
     [&] {
-      at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, std::greater_equal<scalar_t>(), cummax_cummin_helper<scalar_t, int64_t, std::greater_equal<scalar_t>>);
+      at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::greater_equal<scalar_t>>);
     });
 }
 
@@ -287,10 +288,10 @@ std::tuple<Tensor, Tensor> cummax(const Tensor& self, int64_t dim) {
 }
 
 void cummin_helper_cpu(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half,
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
     self.scalar_type(), "cummin_cpu",
     [&] {
-      at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, std::less_equal<scalar_t>(), cummax_cummin_helper<scalar_t, int64_t, std::less_equal<scalar_t>>);
+      at::native::tensor_dim_apply3<scalar_t, int64_t>(self, values, indices, dim, cummax_cummin_helper<scalar_t, int64_t, std::less_equal<scalar_t>>);
     });
 }
 

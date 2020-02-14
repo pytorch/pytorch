@@ -224,9 +224,12 @@ void argmin_kernel_cuda(TensorIterator& iter) {
   }
 }
 
-template<typename scalar_t, typename BinaryOperation>
-__device__ scalar_t binary_op_checking_nan(scalar_t lhs, scalar_t rhs, BinaryOperation binary_op) {
-  return (std::isnan(rhs) || (!std::isnan(lhs) && binary_op(rhs, lhs))) ? rhs : lhs;
+template<typename scalar_t, typename idx_t, typename BinaryOperation>
+__device__ void binary_op_update(const scalar_t lhs, scalar_t& rhs, const idx_t lhs_idx, idx_t& rhs_idx, BinaryOperation binary_op) {
+  if(!std::isnan(rhs) && (std::isnan(lhs) || !binary_op(rhs, lhs))) {
+    rhs = lhs;
+    rhs_idx = lhs_idx;
+  }
 }
 /* Perform an inclusive scan along the innermost dimension of a tensor.
  *
@@ -281,11 +284,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
 
         // Add the total value of all previous blocks to the first value of this block.
         if (threadIdx.x == 0) {
-          auto out = binary_op_checking_nan(block_total, row_buf[0], binary_op);
-          if(out == block_total) {
-            row_idx_buf[0] = block_idx_final;
-          }
-          row_buf[0] = out;
+          binary_op_update(block_total, row_buf[0], block_idx_final, row_idx_buf[0], binary_op);
         }
       }
       __syncthreads();
@@ -294,11 +293,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       for (int s = num_threads_x, d = 1; s >= 1; s >>= 1, d <<= 1) {
         if (row < num_rows && threadIdx.x < s) {
           int offset = (2 * threadIdx.x + 1) * d - 1;
-          auto out = binary_op_checking_nan(row_buf[offset], row_buf[offset + d], binary_op);
-          if(out == row_buf[offset]) {
-            row_idx_buf[offset + d] = row_idx_buf[offset];
-          }
-          row_buf[offset + d] = out;
+          binary_op_update(row_buf[offset], row_buf[offset + d], row_idx_buf[offset], row_idx_buf[offset + d], binary_op);
         }
         __syncthreads();
       }
@@ -307,11 +302,7 @@ __global__ void tensor_kernel_scan_innermost_dim_with_indices(const scalar_t *se
       for (int s = 2, d = num_threads_x / 2; d >= 1; s <<= 1, d >>= 1) {
         if (row < num_rows && threadIdx.x < s - 1) {
           int offset = 2 * (threadIdx.x + 1) * d - 1;
-          auto out = binary_op_checking_nan(row_buf[offset], row_buf[offset + d], binary_op);
-          if(out == row_buf[offset]) {
-            row_idx_buf[offset + d] = row_idx_buf[offset];
-          }
-          row_buf[offset + d] = out;
+          binary_op_update(row_buf[offset], row_buf[offset + d], row_idx_buf[offset], row_idx_buf[offset + d], binary_op);
         }
         __syncthreads();
       }
@@ -357,8 +348,8 @@ __global__ void tensor_kernel_scan_outer_dim_with_indices(scalar_t *self_, scala
       int64_t out_idx = 0;
 
       for (int64_t col = 0; col < row_size; ++col) {
-        out = binary_op_checking_nan(out, *self, binary_op);
-        if(out == *self){
+        if(std::isnan(*self) || (!std::isnan(out) && binary_op(*self, out))) {
+          out = *self;
           out_idx = col;
         }
         *values = out;

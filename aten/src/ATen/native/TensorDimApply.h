@@ -3,8 +3,8 @@
 namespace at {
   namespace native {
     //input tensors are non-zero dim and non-empty
-    template<typename T1, typename T2, typename Operation, typename Function>
-    void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Operation op, Function func) {
+    template<typename T1, typename T2, typename Function>
+    void tensor_dim_apply3(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim, Function func) {
       int ndims = self.dim();
       int tensor_dim_apply_has_finished = 0;
       std::vector<int64_t> counter(ndims, 0);
@@ -17,7 +17,7 @@ namespace at {
       int self_dim_size = self.size(dim);
 
       while(!tensor_dim_apply_has_finished) {
-        func(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride, op);
+        func(self_data, values_data, indices_data, self_dim_size, self_stride, values_stride, indices_stride);
         if(ndims == 1)
            break;
         for(int dim_i = 0; dim_i < ndims; dim_i++) {
