@@ -76,7 +76,8 @@ class TORCH_API DistAutogradContext {
   // variable.
   void accumulateGrad(
       const torch::autograd::Variable& variable,
-      const torch::Tensor& grad);
+      const torch::Tensor& grad,
+      size_t num_expected_refs);
 
   // Retrieve the GraphTask.
   std::shared_ptr<torch::autograd::GraphTask> retrieveGraphTask();

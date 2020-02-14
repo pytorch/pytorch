@@ -1799,6 +1799,76 @@ class DistAutogradTest(RpcAgentTestFixture):
                 )
                 local_grads = ret if ret else local_grads
 
+    @dist_init
+    def test_no_grad_copy(self):
+        '''
+        Similar to test in test_autograd.py.
+        '''
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad.data_ptr()
+                return grad, grad
+
+        class MyFuncSingleGrad(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp):
+                return inp
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFuncSingleGrad.static_grad_ptr = grad.data_ptr()
+                return grad
+
+        class NonContGradFunc(Function):
+            @staticmethod
+            def forward(ctx, inp1):
+                ctx.size = inp1.size()
+                return torch.tensor([1.])
+
+            @staticmethod
+            def backward(ctx, grad):
+                return torch.ones(1).expand(ctx.size)
+
+        a = torch.randn(5, 6, requires_grad=True)
+        b = torch.randn(5, 6, requires_grad=True)
+        # non-contiguous grad should be copied
+        with dist_autograd.context() as context_id:
+            dist_autograd.backward([NonContGradFunc.apply(MyFunc.apply(a, b))])
+            grads = dist_autograd.get_gradients(context_id)
+            self.assertFalse(grads[a].data_ptr() == MyFunc.static_grad_ptr)
+            self.assertFalse(grads[b].data_ptr() == MyFunc.static_grad_ptr)
+
+        # test case that should trigger no copy for a
+        with dist_autograd.context() as context_id:
+            dist_autograd.backward([MyFuncSingleGrad.apply(a)[1][0]])
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFuncSingleGrad.static_grad_ptr
+            p_a = grads[a].data_ptr()
+            # Verify there was no clone.
+            self.assertTrue(p_a == p_g)
+
+        # test case that should trigger no copy for one of a,b
+        with dist_autograd.context() as context_id:
+            dist_autograd.backward([MyFunc.apply(a, b)[1][0]])
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFunc.static_grad_ptr
+            p_a = grads[a].data_ptr()
+            p_b = grads[b].data_ptr()
+            # check a,b uses different grad buffer
+            self.assertFalse(p_a == p_b)
+            # check one of them is using the computed buffer
+            self.assertTrue(p_a == p_g or p_b == p_g)
+
 
 @unittest.skipIf(
     not torch._six.PY3,

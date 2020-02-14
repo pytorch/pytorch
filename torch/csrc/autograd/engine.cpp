@@ -295,33 +295,38 @@ auto Engine::thread_main(
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
   while (!reentrant_thread || graph_task->outstanding_tasks_ > 0) {
-    NodeTask task = queue->pop();
-    // This will only work if the worker is running a non backward task
-    // TODO Needs to be fixed this to work in all cases
-    if (task.isShutdownTask_) {
-      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
-      break;
-    }
-
     // local_graph_task represents the graph_task we retrieve from the queue.
     // The outer graph_task represents the overall graph_task we need to execute
     // for reentrant execution.
     std::shared_ptr<GraphTask> local_graph_task;
-    if (!(local_graph_task = task.base_.lock())) {
-      // Reentrant thread's graph task should not expire since we hold a
-      // reference to it in this method.
-      TORCH_INTERNAL_ASSERT(!reentrant_thread);
-      LOG(INFO) << "GraphTask for function " << task.fn_->name()
-                << " is no longer valid, skipping execution";
-      continue;
-    }
+    {
+      // Scope this block of execution since NodeTask is not needed after this
+      // block and can be deallocated (release any references to grad tensors
+      // as part of inputs_).
+      NodeTask task = queue->pop();
+      // This will only work if the worker is running a non backward task
+      // TODO Needs to be fixed this to work in all cases
+      if (task.isShutdownTask_) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+        break;
+      }
 
-    if (task.fn_ && !local_graph_task->has_error_.load()) {
-      AutoGradMode grad_mode(local_graph_task->grad_mode_);
-      try {
-        evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
-      } catch (std::exception& e) {
-        thread_on_exception(local_graph_task, task.fn_, e);
+      if (!(local_graph_task = task.base_.lock())) {
+        // Reentrant thread's graph task should not expire since we hold a
+        // reference to it in this method.
+        TORCH_INTERNAL_ASSERT(!reentrant_thread);
+        LOG(INFO) << "GraphTask for function " << task.fn_->name()
+                  << " is no longer valid, skipping execution";
+        continue;
+      }
+
+      if (task.fn_ && !local_graph_task->has_error_.load()) {
+        AutoGradMode grad_mode(local_graph_task->grad_mode_);
+        try {
+          evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
+        } catch (std::exception& e) {
+          thread_on_exception(local_graph_task, task.fn_, e);
+        }
       }
     }
 
@@ -787,14 +792,14 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   }
 
   try {
-    auto val = graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(val);
+    auto& val = graph_task_exec_post_processing(graph_task);
+    graph_task->future_result_->markCompleted(std::move(val));
   } catch (std::exception& e) {
     graph_task->future_result_->setError(e.what());
   }
 }
 
-const variable_list& Engine::graph_task_exec_post_processing(
+variable_list& Engine::graph_task_exec_post_processing(
     const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");

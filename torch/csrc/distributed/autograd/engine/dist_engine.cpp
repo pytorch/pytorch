@@ -206,9 +206,23 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
           return;
         }
 
-        // Accumulate all the gradients in the context.
         TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+
+        // Accumulate all the gradients in the context.
         for (size_t i = 0; i < grads.size(); i++) {
+          // Compute the number of references held to the same grad tensor that
+          // have already been processed. This ensures that if have multiple
+          // references to the same grad tensor in our grads list, all but one
+          // tensor would be cloned when we accumulate grad. This avoids a
+          // clone for the last reference of the grad in our grads list.
+          // See use_count check in AccumulateGrad::accumulateGradAndCallHooks.
+          size_t num_expected_refs = 1;
+          if (i != 0) {
+            for (int64_t j = i - 1; j >= 0; j--) {
+              num_expected_refs += (grads[j].is_same(grads[i]));
+            }
+          }
+
           // It is possible that the grad is not defined since a separate
           // invocation of the autograd engine on the same node might actually
           // compute this gradient. Also accumulate grads only for
@@ -218,7 +232,8 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
             auto& variable = std::static_pointer_cast<AccumulateGrad>(
                                  outputEdges[i].function)
                                  ->variable;
-            autogradContext->accumulateGrad(variable, grads[i]);
+            autogradContext->accumulateGrad(
+                variable, grads[i], num_expected_refs);
           }
         }
 

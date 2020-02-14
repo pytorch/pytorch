@@ -66,7 +66,8 @@ DistAutogradContext::recvFunctions() const {
 
 void DistAutogradContext::accumulateGrad(
     const torch::autograd::Variable& variable,
-    const torch::Tensor& grad) {
+    const torch::Tensor& grad,
+    size_t num_expected_refs) {
   TORCH_INTERNAL_ASSERT(grad.defined());
   TORCH_INTERNAL_ASSERT(variable.requires_grad());
 
@@ -85,6 +86,7 @@ void DistAutogradContext::accumulateGrad(
       variable,
       old_grad,
       grad,
+      num_expected_refs,
       /* has_post_hooks */ false,
       [this, &variable](at::Tensor&& grad_update) {
         accumulatedGrads_.insert(variable, grad_update);
