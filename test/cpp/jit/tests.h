@@ -91,9 +91,10 @@ namespace jit {
   _(GPU_FusionRegister)          \
   _(GPU_FusionTensor)            \
   _(GPU_FusionTensorContiguity)  \
-  _(GPU_FusionTDMerge)           \
-  _(GPU_FusionTDSplit)           \
-  _(GPU_FusionCastOp)     			 \
+  _(GPU_FusionTVSplit)           \
+  _(GPU_FusionTVMerge)           \
+  _(GPU_FusionTVReorder)         \
+  _(GPU_FusionCastOp)            \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

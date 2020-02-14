@@ -70,7 +70,11 @@ struct TORCH_API TensorDomain : public Val {
   std::vector<const IterDomain*>::size_type size() const {
     return domain.size();
   }
-  const IterDomain* axis(std::vector<const IterDomain*>::size_type i) const {
+
+  //i here is int, as we want to accept negative value and ::size_type can be a uint.
+  const IterDomain* axis(int i) const {
+    if(i < 0)
+      i+=size();
     assert(i >= 0 && i < size());
     return domain[i];
   }
@@ -244,11 +248,14 @@ struct TORCH_API Reorder : public Expr {
   const std::vector<int> pos2axis_;
 };
 
+TORCH_API const TensorView* split(const TensorView*, int axis, int factor);
 TORCH_API const TensorView* split(const Tensor*, int axis, int factor);
+
+TORCH_API const TensorView* merge(const TensorView*, int axis);
 TORCH_API const TensorView* merge(const Tensor*, int axis);
 
-TORCH_API const TensorView* split(const TensorView*, int axis, int factor);
-TORCH_API const TensorView* merge(const TensorView*, int axis);
+TORCH_API const TensorView* reorder(const TensorView*, std::unordered_map<int, int>);
+TORCH_API const TensorView* reorder(const Tensor*, std::unordered_map<int, int>);
 
 } // namespace fuser
 } // namespace jit
