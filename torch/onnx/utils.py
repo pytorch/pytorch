@@ -681,7 +681,6 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
 
         sym_registry.register_version('', opset_version)
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            print("register quant ops ===================================================")
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops('caffe2', opset_version)
 
@@ -715,7 +714,6 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                                   "torch.onnx.symbolic_opset{}.{} does not exist"
                                   .format(op_name, opset_version, op_name))
                 op_fn = sym_registry.get_registered_op(op_name, '', opset_version)
-                print("it's ok *************************************** ", op_fn)
                 return op_fn(g, *inputs, **attrs)
 
         elif ns == "prim":
