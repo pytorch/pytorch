@@ -430,6 +430,7 @@ class TestClassType(JitTestCase):
                 li = [NoMethod(), NoMethod()]
                 li.sort()
                 return li
+            test()
 
         @torch.jit.script
         class WrongLt(object):
@@ -446,6 +447,7 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
+            test()
 
     def test_class_inheritance(self):
         @torch.jit.script
