@@ -656,13 +656,15 @@ public:
     , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
     {}
 
-  template <typename Func, Func* f>
-  static CppFunction makeOptimized() {
+  // This static factory lets you create CppFunctions that (1) don't have boxing
+  // wrappers (because we don't support it yet) and (2) don't have schema
+  // inference (because some ops don't support it).
+  //
+  // TODO: Eliminate the necessity for this function entirely.
+  template <typename Func>
+  static CppFunction makeUnboxedOnly(Func* f) {
     return CppFunction(
-      // TODO: For some reason, the "optimized" codepath is still using the
-      // RuntimeFunction functor, which is kind of weird
       c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      // NB: disable function schema inference because some ops don't support it yet (TODO fix)
       /* schema */ nullptr
     );
   }
@@ -683,11 +685,6 @@ private:
 
   CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema);
 };
-
-// Create a CppFunction that has "optimized" unboxing wrappers, where
-// the inner unboxed function is inlined into the boxed version of the
-// kernel
-#define TORCH_OPTIMIZED_FN(f) CppFunction::makeOptimized<decltype(f), &f>()
 
 // Create a CppFunction which is associated with a specific dispatch key.
 // CppFunctions that are tagged with a DispatchKey don't get invoked /unless/
@@ -735,7 +732,9 @@ inline CppFunction dispatch(DeviceType t, Func&& raw_f) {
 //        .def("aten::mul", ...)
 //
 class CAFFE2_API Module final {
-  // TODO: Could store a std::string if you want to support dynamically computed
+  // Could be nullptr, in which case it represents the "top-level" namespace
+  // (all subsequent definitions must be explicitly namespaced).
+  // TODO: Could store a optional<std::string> if you want to support dynamically computed
   // namespaces; for now don't support
   const char* ns_;
 
@@ -753,16 +752,38 @@ public:
   Module(const Module&) = delete;
   Module& operator=(const Module&) = delete;
 
-  Module(Module&&);
-  Module& operator=(Module&&);
+  Module(Module&&) noexcept;
+  Module& operator=(Module&&) noexcept;
 
+  // Declare an operator with a schema, but don't provide any implementations
+  // for it.  You're expected to then provide implementations using the
+  // impl() method.
   Module&& def(const char* schema) &&;
-  Module&& def(const char* unqual_name, CppFunction&& f) &&;
 
+  // Convenience method to define an operator for a schema and then register
+  // an implementation for it.  def(n, f) is almost equivalent to def(n).override(f),
+  // except that if n is not a schema, then the schema is inferred from the
+  // static type of f.
+  Module&& def(const char* name_or_schema, CppFunction&& f) &&;
   template <typename Func>
-  Module&& def(const char* unqual_name, Func&& raw_f) && {
+  Module&& def(const char* name_or_schema, Func&& raw_f) && {
     CppFunction f(std::forward<Func>(raw_f));
-    return std::move(*this).def(unqual_name, std::move(f));
+    return std::move(*this).def(name_or_schema, std::move(f));
+  }
+
+  // Register an implementation for an operator.  You may register multiple
+  // implementations for a single operator at different dispatch keys
+  // (see torch::dispatch).  Implementations must have a corresponding
+  // declaration (from def), otherwise they are invalid.
+  //
+  // TODO: Make it possible to impl without providing a full schema.  Right
+  // now, if you have a def() with full schema, you can't impl() with only
+  // the name.
+  Module&& impl(const char* name, CppFunction&& f) &&;
+  template <typename Func>
+  Module&& impl(const char* name, Func&& raw_f) && {
+    CppFunction f(std::forward<Func>(raw_f));
+    return std::move(*this).impl(name, std::move(f));
   }
 };
 

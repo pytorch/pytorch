@@ -175,30 +175,42 @@ Module::Module(const char* ns)
   : ns_(ns)
   {}
 
-// NB: lives here to reduce link time
-Module::Module(Module&&) = default;
-Module& Module::operator=(Module&&) = default;
+Module::Module(Module&&) noexcept = default;
+Module& Module::operator=(Module&&) noexcept = default;
 
 
 Module&& Module::def(const char* schema) && {
-  register_.op(c10::RegisterOperators::options().schema(schema));
+  register_.op(c10::RegisterOperators::options()
+    .schema(schema)
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   return std::move(*this);
 }
 
-Module&& Module::def(const char* unqual_name, CppFunction&& f) && {
-  // TODO: slow!  Fix internal data structures so I don't have to paste the
-  // names together
-  std::string name;
-  if (ns_) {
+static std::string addNamespace(const char* ns, const char* unqual_name_or_schema) {
+  if (ns) {
+    // TODO: slow!  Fix internal data structures so I don't have to paste the
+    // names together
     std::ostringstream oss;
-    oss << ns_ << "::" << unqual_name;
-    name = oss.str();
+    oss << ns << "::" << unqual_name_or_schema;
+    return oss.str();
   } else {
-    name = unqual_name;
+    return unqual_name_or_schema;
   }
-  // To be destructively moved out of below
+}
+
+Module&& Module::def(const char* unqual_name, CppFunction&& f) && {
   register_.op(c10::RegisterOperators::options()
-    .schema(name)
+    .schema(addNamespace(ns_, unqual_name))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
+
+Module&& Module::impl(const char* unqual_name, CppFunction&& f) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, unqual_name))
+    // NB: Don't specify AliasAnalysis; the def() is expected to provide
+    // this
     .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
   return std::move(*this);
 }

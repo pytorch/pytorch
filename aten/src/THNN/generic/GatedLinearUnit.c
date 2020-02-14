@@ -10,29 +10,8 @@ void THNN_(GatedLinear_updateOutput)(
           THTensor *output,
           int dim)
 {
-  dim = at::maybe_wrap_dim(dim, input);
-  // size output to half of input
-  const int64_t nIn = THTensor_sizeLegacyNoScalars(input, dim);
-  THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
-      dim, nIn);
-
-  const int64_t inputSize = THTensor_(size)(input, dim) / 2;
-  std::vector<int64_t> newSizes = THTensor_sizesLegacyNoScalars(input);
-  newSizes[dim] = inputSize;
-  THTensor_(resize)(output, newSizes, {});
-
-  // halve tensor
-  THTensor *firstHalf = THTensor_(newNarrow)(input, dim, 0, inputSize);
-  THTensor *secondHalf = THTensor_(newNarrow)(input, dim, inputSize, inputSize);
-
-  // x = x1:cmul( sigmoid(x2) )
-  at::Tensor output_wrap = THTensor_wrap(output);
-  at::Tensor secondHalf_wrap = THTensor_wrap(secondHalf);
-  at::native::sigmoid_out(output_wrap, secondHalf_wrap);
-  THTensor_(cmul)(output, output, firstHalf);
-
-  c10::raw::intrusive_ptr::decref(firstHalf);
-  c10::raw::intrusive_ptr::decref(secondHalf);
+  TORCH_INTERNAL_ASSERT(false, "GatedLinear_updateOutput called, but this is just " \
+                        "a stub for nn.yaml parsing");
 }
 
 void THNN_(GatedLinear_updateGradInput)(
