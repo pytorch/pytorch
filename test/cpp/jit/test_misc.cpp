@@ -45,11 +45,11 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/script.h>
 #include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/script/ir_emitter.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
-#include <torch/script.h>
 
 #include "onnx/onnx_pb.h"
 
@@ -952,25 +952,21 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              push(stack, IValue());
-              return 0;
-            };
+          [](Stack& stack) {
+            push(stack, IValue());
+            return 0;
           },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              IValue a = pop(stack);
-              if (a.isNone()) {
-                push(stack, true);
-              } else {
-                push(stack, false);
-              }
-              return 0;
-            };
+          [](Stack& stack) {
+            IValue a = pop(stack);
+            if (a.isNone()) {
+              push(stack, true);
+            } else {
+              push(stack, false);
+            }
+            return 0;
           },
           aliasAnalysisFromSchema()),
   });
