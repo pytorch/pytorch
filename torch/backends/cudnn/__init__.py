@@ -105,12 +105,6 @@ def is_available():
     return torch._C.has_cudnn
 
 
-if cuda is not None:
-    dnn_lib = "cuDNN"
-else:
-    dnn_lib = "MIOpen"
-
-
 def is_acceptable(tensor):
     if not torch._C._get_cudnn_enabled():
         return False
@@ -118,7 +112,7 @@ def is_acceptable(tensor):
         return False
     if not is_available():
         warnings.warn(
-            "PyTorch was compiled without " + dnn_lib + " support. To use " + dnn_lib + ", rebuild "
+            "PyTorch was compiled without cuDNN/MIOpen support. To use cuDNN/MIOpen, rebuild "
             "PyTorch making sure the library is visible to the build system.")
         return False
     if _libcudnn() is None:
