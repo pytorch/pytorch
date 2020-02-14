@@ -1297,16 +1297,21 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
-def _get_num_workers():
+def _get_num_workers(verbose):
     max_jobs = os.environ.get('MAX_JOBS')
-    if max_jobs.isdigit():
+    if max_jobs is not None and max_jobs.isdigit():
+        if verbose:
+            print('Using envvar MAX_JOBS ({}) as the number of workers...'.format(max_jobs))
         return int(max_jobs)
+    if verbose:
+        print('Allowing ninja to set a default number of workers... '
+              '(overridable by setting the environment variable MAX_JOBS=N)')
     return None
 
 
 def _run_ninja_build(build_directory, verbose, error_prefix):
     command = ['ninja', '-v']
-    num_workers = _get_num_workers()
+    num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
     try:
