@@ -83,6 +83,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_dropout_random.*'  # opset 12 is not supported
                      '|test_einsum.*'  # opset 12 is not supported
                      '|test_.*training.*'  # training is not supported
+                     '|test_.*_loss.*'  # training is not supported
                      '|test_split_zero_size.*'  # unsupported case
                      '|test_constantofshape_int_shape_zero.*'  # unsupported case
                      '|test_constant_pad.*'  # 1d pad is not supported

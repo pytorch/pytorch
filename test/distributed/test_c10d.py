@@ -521,7 +521,7 @@ class RendezvousTCPTest(TestCase):
 
         end = time.time()
         time_diff = end - start
-        self.assertGreater(test_store_timeout.seconds * 4, time_diff)
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class TimeoutTest(TestCase):
