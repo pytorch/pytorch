@@ -52,7 +52,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    example_outputs=None, do_constant_folding=True,
                    dynamic_axes=None, test_with_inputs=None,
                    input_names=None, output_names=None,
-                   fixed_batch_size=False):
+                   fixed_batch_size=False, copy_model=True):
     model.eval()
 
     if input is None:
@@ -64,16 +64,22 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
         input_copy = copy.deepcopy(input)
-        model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
-        output = model_copy(*input_copy)
+        if copy_model:
+            model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+        else:
+            model_ = model
+        output = model_(*input_copy)
         if isinstance(output, torch.Tensor):
             output = (output,)
 
         # export the model to ONNX
         f = io.BytesIO()
         input_copy = copy.deepcopy(input)
-        model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
-        torch.onnx._export(model_copy, input_copy, f,
+        if copy_model:
+            model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+        else:
+            model_ = model
+        torch.onnx._export(model_, input_copy, f,
                            opset_version=self.opset_version,
                            example_outputs=output,
                            do_constant_folding=do_constant_folding,
@@ -94,8 +100,11 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if isinstance(test_input, torch.Tensor):
                     test_input = (test_input,)
                 test_input_copy = copy.deepcopy(test_input)
-                model_copy = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
-                output = model_copy(*test_input_copy)
+                if copy_model:
+                    model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+                else:
+                    model_ = model
+                output = model_(*test_input_copy)
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_test_with_input(ort_sess, test_input, output, rtol, atol)
@@ -115,8 +124,11 @@ class TestONNXRuntime(unittest.TestCase):
 
     def run_test(self, model, input, rtol=1e-3, atol=1e-7, do_constant_folding=True,
                  batch_size=2, use_gpu=True, dynamic_axes=None, test_with_inputs=None,
-                 input_names=None, output_names=None, fixed_batch_size=False):
-        model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+                 input_names=None, output_names=None, fixed_batch_size=False, copy_model=True):
+        if copy_model:
+            model_ = model.copy() if hasattr(model, 'copy') else copy.deepcopy(model)
+        else:
+            model_ = model
 
         def _run_test(m):
             return run_model_test(self, m, batch_size=batch_size,
@@ -124,7 +136,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   do_constant_folding=do_constant_folding,
                                   dynamic_axes=dynamic_axes, test_with_inputs=test_with_inputs,
                                   input_names=input_names, output_names=output_names,
-                                  fixed_batch_size=fixed_batch_size)
+                                  fixed_batch_size=fixed_batch_size, copy_model=copy_model)
         if self.is_script_test_enabled:
             script_model = torch.jit.script(model_)
             _run_test(script_model)
@@ -1856,24 +1868,24 @@ class TestONNXRuntime(unittest.TestCase):
     def test_weight_norm(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(model, x)
+        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3))
         x = torch.randn(1, 1, 5, requires_grad=True)
-        self.run_test(model, x)
+        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(1, 1, 3), dim=-2)
         x = torch.randn(1, 1, 5, requires_grad=True)
-        self.run_test(model, x)
+        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
 
         model = torch.nn.utils.weight_norm(torch.nn.Conv1d(3, 6, 3), name='weight')
         x = torch.randn(3, 3, 5, requires_grad=True)
-        self.run_test(model, x)
+        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
 
     def test_weight_norm_nodim(self):
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
         x = torch.randn(3, 4, 5, requires_grad=True)
-        self.run_test(model, x)
+        self.run_test(model, x, copy_model=False) # weight norm does not support the deepcopy protocol at the moment
 
     def test_flatten(self):
         class FlattenModel(torch.nn.Module):
