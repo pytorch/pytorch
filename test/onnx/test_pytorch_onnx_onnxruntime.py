@@ -2531,6 +2531,65 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_crossentropyloss(self):
+        class CrossEntropyLossNone(torch.nn.Module):
+            def forward(self, input, target):
+                loss = torch.nn.CrossEntropyLoss(reduction='none')
+                return loss(input, target)
+            
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.run_test(CrossEntropyLossNone(), input=(x, y))
+
+        class CrossEntropyLossNoneWeight(torch.nn.Module):
+            def forward(self, input, target, weight):
+                loss = torch.nn.CrossEntropyLoss(reduction='none')
+                return loss(input, target, weight)
+
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        w = torch.randn(5)
+        self.run_test(CrossEntropyLossNoneWeight(), input=(x, y, w))
+
+        class CrossEntropyLossSum(torch.nn.Module):
+            def forward(self, input, target):
+                loss = torch.nn.CrossEntropyLoss(reduction='sum')
+                return loss(input, target)
+
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.run_test(CrossEntropyLossSum(), input=(x, y))
+
+        class CrossEntropyLossSumWeight(torch.nn.Module):
+            def forward(self, input, target, weight):
+                loss = torch.nn.CrossEntropyLoss(reduction='sum')
+                return loss(input, target, weight)
+
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        w = torch.randn(5)
+        self.run_test(CrossEntropyLossSumWeight(), input=(x, y, w))
+
+        class CrossEntropyLossMean(torch.nn.Module):
+            def forward(self, input, target):
+                loss = torch.nn.CrossEntropyLoss()
+                return loss(input, target)
+
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        self.run_test(CrossEntropyLossMean(), input=(x, y))
+
+        class CrossEntropyLossMeanWeight(torch.nn.Module):
+            def forward(self, input, target, weight):
+                loss = torch.nn.CrossEntropyLoss()
+                return loss(input, target, weight)
+
+        x = torch.randn(3, 5, 2)
+        y = torch.empty(3, 2, dtype=torch.long).random_(5)
+        w = torch.randn(5)
+        self.run_test(CrossEntropyLossMeanWeight(), input=(x, y, w))
+
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
             @torch.jit.script_method
