@@ -543,4 +543,3 @@ from . import sparse
 from . import profiler
 from . import nvtx
 from .streams import Stream, Event
-from . import amp
