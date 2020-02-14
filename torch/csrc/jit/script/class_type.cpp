@@ -77,7 +77,7 @@ size_t ClassType::addAttribute(
              type->expect<OptionalType>()->getElementType()->kind() ==
                  TensorType::Kind) ||
             (type->kind() == NoneType::Kind),
-        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got:",
+        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
   if (is_module()) {
