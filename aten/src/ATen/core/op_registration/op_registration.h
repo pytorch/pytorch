@@ -610,22 +610,24 @@ private:
 //    // Define a schema for an operator, but provide no implementation
 //    .def("mul(Tensor self, Tensor other) -> Tensor")
 //
-//    // Define a operator with exactly one implementation for all backends
-//    .def("add", &add_impl)
+//    // Define a operator with exactly one implementation for all backends.
+//    // It's also OK to omit the schema in which case we'll infer it.
+//    .def("add(Tensor self, Tensor other) -> Tensor", &add_impl)
 //
-//    // Define an operator with multiple implementations per backends.  We'll
-//    // take care of calling the correct implementation depending on if we
-//    // get a CPU tensor or a CUDA tensor
-//    .def("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
-//    .def("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
+//    // Provide an implementation for a defined operator (you can
+//    // provide multiple; one per backend).  We'll take care of calling
+//    // the correct implementation depending on if we get a CPU
+//    // tensor or a CUDA tensor
+//    .impl("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
+//    .impl("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
 //
 //    // Define an "optimized" operator with extra inlining
 //    // (you can use this with torch::dispatch too); mostly only used for
 //    // our internal stuff
-//    .def("sub", TORCH_OPTIMIZED_FN(sub_impl))
+//    .impl("sub", TORCH_OPTIMIZED_FN(sub_impl))
 //
 // Also, you can omit the top level namespace and specify it explicitly in
-// the sub-definitions, e.g.,  torch::import().def("aten::mul")
+// the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
 
 
 // Represents a C++ function that implements an operator.  Most users won't
@@ -761,7 +763,7 @@ public:
   Module&& def(const char* schema) &&;
 
   // Convenience method to define an operator for a schema and then register
-  // an implementation for it.  def(n, f) is almost equivalent to def(n).override(f),
+  // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
   // except that if n is not a schema, then the schema is inferred from the
   // static type of f.
   Module&& def(const char* name_or_schema, CppFunction&& f) &&;
