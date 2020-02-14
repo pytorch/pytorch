@@ -8,6 +8,8 @@ namespace jit {
 
 namespace {
 
+#ifndef C10_MOBILE
+
 at::TypePtr noOpGetter(const std::string& /*unused*/) {
   return nullptr;
 }
@@ -23,6 +25,8 @@ void setGetCustomClassFn(GetCustomClassFnType fn) {
 at::TypePtr getCustomClass(const std::string& name) {
   return custom_class_fn.load()(name);
 }
+
+#endif  // C10_MOBILE
 
 } // namespace jit
 } // namespace torch

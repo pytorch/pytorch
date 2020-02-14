@@ -10,6 +10,8 @@ std::vector<c10::RegisterOperators>& registeredOps() {
   return ops;
 }
 
+#ifndef C10_MOBILE
+
 std::shared_ptr<script::CompilationUnit>& classCU() {
   static std::shared_ptr<script::CompilationUnit> cu =
       std::make_shared<script::CompilationUnit>();
@@ -23,7 +25,7 @@ bool isCustomClass(const c10::IValue& v) {
 
 namespace {
 
-TypePtr realCustomClassHandler(const std::string& name) {
+at::TypePtr realCustomClassHandler(const std::string& name) {
   return classCU()->get_type(name);
 }
 
@@ -35,6 +37,8 @@ int register_custom_class_handler() {
 };
 
 static int ensure_custom_class_handler_registered = register_custom_class_handler();
+
+#endif // C10_MOBILE
 
 } // namespace jit
 } // namespace torch
