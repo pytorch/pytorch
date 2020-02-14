@@ -461,6 +461,18 @@ void initPythonIRBindings(PyObject* module_) {
             return ss.str();
           })
       .def(
+          "callstack",
+          [](Node& n) {
+          std::vector<std::string> stack;
+            if(n.callstack()){
+              auto callstack = n.callstack()->get()->vec();
+              for (auto c : callstack) {
+                stack.push_back(c.first->qualname().qualifiedName());
+              }
+            }
+            return stack;
+          })
+      .def(
           "sourceRange",
           [](Node& n) {
             return n.sourceRange().str();
