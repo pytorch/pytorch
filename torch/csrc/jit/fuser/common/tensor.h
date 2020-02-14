@@ -3,6 +3,12 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
+/*
+ * TODO: Equivelancy checking of the nodes below. IterDomain will be the hardest
+ * as it will require checking through the graph producing the size, to find if
+ * the input nodes, and all following expressions match.
+ */ 
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -19,7 +25,7 @@ struct TORCH_API IterDomain : public Val {
       : Val(ValType::IterDomain, DataType::Int),
         size_(_size),
         parallel_method_(_parallel_method),
-        reduction_domain_(_reduction_domain) {}
+        is_reduction_domain_(_reduction_domain) {}
 
   IterDomain(
       const Val* int_size,
@@ -28,13 +34,13 @@ struct TORCH_API IterDomain : public Val {
       : Val(ValType::IterDomain, DataType::Int),
         size_(static_cast<const Int*>(int_size)),
         parallel_method_(_parallel_method),
-        reduction_domain_(_reduction_domain) {
+        is_reduction_domain_(_reduction_domain) {
     assert(int_size->isVal());
     assert(int_size->getDataType() == DataType::Int);
   }
 
   bool isReduction() const noexcept {
-    return reduction_domain_;
+    return is_reduction_domain_;
   }
   ParallelType parallel_method() const noexcept {
     return parallel_method_;
@@ -52,7 +58,7 @@ struct TORCH_API IterDomain : public Val {
  private:
   const Int* size_;
   const ParallelType parallel_method_;
-  const bool reduction_domain_;
+  const bool is_reduction_domain_;
 };
 
 struct TORCH_API TensorDomain : public Val {
@@ -152,8 +158,8 @@ private:
 struct TORCH_API Split : public Expr {
   ~Split() = default;
   Split(
-      const TensorDomain* _out,
-      const TensorDomain* _in,
+      const TensorView* _out,
+      const TensorView* _in,
       int _axis,
       const Int* _factor);
 
@@ -177,8 +183,8 @@ struct TORCH_API Split : public Expr {
   Split& operator=(Split&& other) = delete;
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
+  const TensorView* out_;
+  const TensorView* in_;
   const int axis_;
   const Int* factor_;
 };
@@ -191,7 +197,7 @@ struct TORCH_API Split : public Expr {
  */
 struct TORCH_API Merge : public Expr {
   ~Merge() = default;
-  Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis);
+  Merge(const TensorView* _out, const TensorView* _in, int _axis);
 
   Merge(const Merge& other) = delete;
   Merge& operator=(const Merge& other) = delete;
@@ -210,8 +216,8 @@ struct TORCH_API Merge : public Expr {
   }
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
+  const TensorView* out_;
+  const TensorView* in_;
   const int axis_;
 };
 
@@ -222,8 +228,8 @@ struct TORCH_API Merge : public Expr {
 struct TORCH_API Reorder : public Expr {
   ~Reorder() = default;
   Reorder(
-      const TensorDomain* _out,
-      const TensorDomain* _in,
+      const TensorView* _out,
+      const TensorView* _in,
       std::vector<int> _pos2axis);
 
   Reorder(const Reorder& other) = delete;
@@ -243,8 +249,8 @@ struct TORCH_API Reorder : public Expr {
   }
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
+  const TensorView* out_;
+  const TensorView* in_;
   const std::vector<int> pos2axis_;
 };
 

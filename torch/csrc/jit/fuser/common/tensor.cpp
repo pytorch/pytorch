@@ -50,8 +50,8 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
  */
 
 Split::Split(
-    const TensorDomain* _out,
-    const TensorDomain* _in,
+    const TensorView* _out,
+    const TensorView* _in,
     int _axis,
     const Int* _factor)
     : Expr(ExprType::Split),
@@ -64,7 +64,7 @@ Split::Split(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-Merge::Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis)
+Merge::Merge(const TensorView* _out, const TensorView* _in, int _axis)
     : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
   addOutput(_out);
   addInput(_in);
@@ -72,8 +72,8 @@ Merge::Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis)
 }
 
 Reorder::Reorder(
-    const TensorDomain* _out,
-    const TensorDomain* _in,
+    const TensorView* _out,
+    const TensorView* _in,
     std::vector<int> _pos2axis)
     : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{_pos2axis} {
   addOutput(_out);
@@ -92,27 +92,31 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
         "Splitting an axis of non-Serial iteration approach is not supported at this time. Parallelization strategy must be set after calling split.");
 
   std::vector<const IterDomain*> new_domain;
+
+  const Int* fact = new Int(factor);
+  const Int* one = new Int(1);
+  
   for (size_type i = 0; i < td->size(); i++) {
     if (i != axis)
       new_domain.push_back(td->axis(i));
     else {
-      const Int* fact = new Int(factor);
-      const Int* one = new Int(1);
       // outer loop size
       const Val* vo = add(div(sub(id->size(), one), fact), one);
 
       const Int* so = static_cast<const Int*>(vo);
 
       // outer loop IterDomain
-      const IterDomain* ido = new IterDomain(so);
+      const IterDomain* ido = new IterDomain(so, id->parallel_method(), id->isReduction());
       new_domain.push_back(ido);
 
       // inner loop IterDomain
-      const IterDomain* idi = new IterDomain(fact);
+      const IterDomain* idi = new IterDomain(fact, id->parallel_method(), id->isReduction());
       new_domain.push_back(idi);
     }
   }
-  return new TensorView(tv->tensor(), new TensorDomain(new_domain));
+  const TensorView* split_view = new TensorView(tv->tensor(), new TensorDomain(new_domain));
+  const Split* split_node = new Split(split_view, tv, axis, fact); //For record keeping
+  return split_view;
 }
 
 const TensorView* merge(const TensorView* tv, int axis) {
@@ -123,18 +127,12 @@ const TensorView* merge(const TensorView* tv, int axis) {
   const IterDomain* first = tv->domain()->axis(axis);
   const IterDomain* second = tv->domain()->axis(axis);
 
-  assert(
-      (first->isReduction() && second->isReduction()) ||
-      (!first->isReduction() && !second->isReduction()));
-
-  if (first->parallel_method() != ParallelType::Serial ||
-      second->parallel_method() != ParallelType::Serial)
-    throw std::runtime_error(
-        "Merging axis of non-Serial iteration approach is not supported at this time. Parallelization strategy must be set after calling merge.");
+  assert(first->isReduction() == second->isReduction());
+  assert(first->parallel_method() == second->parallel_method());
 
   const Val* merged_id_size = mul(first->size(), second->size());
   const IterDomain* merged_id =
-      new IterDomain(static_cast<const Int*>(merged_id_size));
+      new IterDomain(static_cast<const Int*>(merged_id_size), first->parallel_method(), first->isReduction());
 
   std::vector<const IterDomain*> new_domain;
   for (size_type i = 0; i < td->size(); i++) {
@@ -144,7 +142,9 @@ const TensorView* merge(const TensorView* tv, int axis) {
       new_domain.push_back(merged_id);
     }
   }
-  return new TensorView(tv->tensor(), new TensorDomain(new_domain));
+  const TensorView* new_tv = new TensorView(tv->tensor(), new TensorDomain(new_domain));
+  const Merge* merge_node = new Merge(new_tv, tv, axis); //For record keeping
+  return new_tv;
 }
 
 /*
@@ -235,7 +235,9 @@ const TensorView* reorder(
   for (int i = 0; i < pos2axis.size(); i++) {
     domain.push_back(tv->domain()->axis(pos2axis[i]));
   }
-  return new TensorView(tv->tensor(), new TensorDomain(domain));
+  const TensorView* reordered_view = new TensorView(tv->tensor(), new TensorDomain(domain));
+  const Reorder* merge_node = new Reorder(reordered_view, tv, pos2axis);
+  return reordered_view;
 }
 
 } // namespace fuser
