@@ -262,13 +262,12 @@ void testGPU_FusionTensorContiguity() {
   }
 }
 
-void testGPU_FusionTDSplit() {
+void testGPU_FusionTVSplit() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   const Tensor *t = Tensor::MakeDummyTensor(3);
-  std::cout << "A 3d tensor: " << t << std::endl;
 
   const TensorView *tv = split(t, 2, 2);
 
@@ -277,13 +276,12 @@ void testGPU_FusionTDSplit() {
   
 }
 
-void testGPU_FusionTDMerge() {
+void testGPU_FusionTVMerge() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   const Tensor *t = Tensor::MakeDummyTensor(3);
-  std::cout << "A 3d tensor: " << t << std::endl;
 
   const TensorView *tv = merge(t, 1);
 
@@ -292,6 +290,49 @@ void testGPU_FusionTDMerge() {
   
 }
 
+void testGPU_FusionTVReorder() {
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const Tensor *t = Tensor::MakeDummyTensor(3);
+
+  std::unordered_map<int, int> shift_right{
+    {-1, 0}
+  };
+  std::unordered_map<int, int> shift_left{
+    {0, -1}
+  };
+
+  std::unordered_map<int, int> shift_left_2{
+    {0, -1},
+    {1, 0},
+    {2, 1}
+  };
+
+  std::unordered_map<int, int> swap{
+    {0, 2},
+    {2, 0}
+  };
+
+  const TensorView *s_leftl = reorder(t, shift_left);
+  for(int i = 0; i < t->domain()->size(); i++)
+    TORCH_CHECK(t->domain()->axis(i) == s_leftl->domain()->axis(i-1));
+  
+  const TensorView *s_left2 = reorder(t, shift_left);
+  for(int i = 0; i < t->domain()->size(); i++)
+    TORCH_CHECK(t->domain()->axis(i) == s_left2->domain()->axis(i-1));
+
+  const TensorView *s_right = reorder(t, shift_right);
+  for(int i = 0; i < t->domain()->size(); i++)
+    TORCH_CHECK(t->domain()->axis(i-1) == s_right->domain()->axis(i));
+
+  const TensorView *rswap = reorder(t, swap);
+  TORCH_CHECK(t->domain()->axis(0) == rswap->domain()->axis(2));
+  TORCH_CHECK(t->domain()->axis(2) == rswap->domain()->axis(0));
+  TORCH_CHECK(t->domain()->axis(1) == rswap->domain()->axis(1));
+
+}
 
 void testGPU_Fusion() {}
 
