@@ -242,7 +242,8 @@ void ProcessGroupAgent::start() {
 }
 
 void ProcessGroupAgent::shutdown() {
-  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
+            << ".";
   std::unique_lock<std::mutex> lock{futureMutex_};
   if (!rpcRunning_.exchange(false)) {
     return;
@@ -263,6 +264,13 @@ void ProcessGroupAgent::shutdown() {
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  // Throw if we previously encountered an exception in ::listenLoop.
+  {
+    std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
+    if (listenLoopException_) {
+      std::rethrow_exception(listenLoopException_);
+    }
+  }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
@@ -533,6 +541,36 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::listenLoop() {
+  try {
+    listenLoopInternal();
+  } catch (const std::exception& e) {
+    // Error occured in listenLoop(). Stop receiving thread and store exception
+    // to indicate that the RPC agent is in an unhealthy state and we should
+    // shutdown.
+    LOG(ERROR) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
+               << e.what()
+               << " RPC agent is in an unhealthy state and unusable.";
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      listenLoopException_ = std::current_exception();
+    }
+  } catch (...) {
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      std::string unknownErrorMsg =
+          "Unknown exception occured in "
+          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+          "unusable.";
+      LOG(ERROR) << unknownErrorMsg;
+      listenLoopException_ =
+          std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
+    }
+  }
+}
+
+void ProcessGroupAgent::listenLoopInternal() {
   while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
