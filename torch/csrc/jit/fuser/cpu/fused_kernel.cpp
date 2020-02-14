@@ -214,7 +214,9 @@ static CompilerConfig& getConfig() {
 // this error occurs and only selectively disabling it.
 #ifdef _MSC_VER
 static std::string getArchFlags() {
-  if (InstructionSet::AVX512F()) {
+  if (InstructionSet::AVX512F() && InstructionSet::AVX512CD() &&
+      InstructionSet::AVX512BW() && InstructionSet::AVX512DQ() &&
+      InstructionSet::AVX512VL()) {
     return "/arch:AVX512";
   } else if (InstructionSet::AVX2()) {
     return "/arch:AVX2";
