@@ -85,6 +85,8 @@ using qcat_nhwc_fn = Tensor (*)(
     int64_t zero_point);
 using qtopk_fn = void(*)(Tensor&, Tensor&, const Tensor&, int64_t, int64_t, bool, bool);
 
+using qbatch_norm_fn = void(*)(int64_t, int64_t, int64_t, const int64_t, const int64_t, const Tensor&, const Tensor&, const Tensor&, Tensor&);
+
 // using qavg_pool2d_fn
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
@@ -101,6 +103,7 @@ DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_nhwc_stub);
 DECLARE_DISPATCH(qcat_nhwc_fn, qcat_relu_nhwc_stub);
 DECLARE_DISPATCH(qtopk_fn, qtopk_stub);
+DECLARE_DISPATCH(qbatch_norm_fn, qbatch_norm_stub);
 
 } // namespace native
 } // namespace at
