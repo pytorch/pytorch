@@ -6,9 +6,9 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
 #ifndef C10_MOBILE
+
+namespace {
 
 at::TypePtr noOpGetter(const std::string& /*unused*/) {
   return nullptr;

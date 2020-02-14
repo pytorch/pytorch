@@ -1,6 +1,7 @@
 #include <torch/custom_class.h>
 
 #include <atomic>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -37,6 +38,18 @@ int register_custom_class_handler() {
 };
 
 static int ensure_custom_class_handler_registered = register_custom_class_handler();
+
+#else // C10_MOBILE
+
+std::unordered_map<std::string. ClassTypePtr> mobileCustomClassRegistry
+
+void registerCustomClassForMobile(at::ClassTypePtr classTypePtr) {
+  mobileCustomClassRegistry[classTypePtr->name().qualifiedName()] = classTypePtr;
+}
+
+TORCH_API at::TypePtr getCustomClass(const std::string& name) {
+  return mobileCustomClassRegistry.at(name);
+}
 
 #endif // C10_MOBILE
 

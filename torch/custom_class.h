@@ -58,7 +58,6 @@ class class_ {
   class_(std::string className_) : className(std::move(className_)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
-#ifndef C10_MOBILE
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
     classTypePtr =
@@ -69,9 +68,11 @@ class class_ {
                               c10::StrongTypePtr(classCU(), classTypePtr)});
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
                               c10::StrongTypePtr(classCU(), classTypePtr)});
-
+#ifndef C10_MOBILE
     classCU()->register_type(classTypePtr);
-#endif  // C10_MOBILE
+#else  // C10_MOBILE
+    registerCustomClassForMobile(classTypePtr);
+#endif // C10_MOBILE
   }
 
   template <typename... Types>
