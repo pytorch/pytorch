@@ -51,7 +51,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   return futPtr;
 }
 
-std::shared_ptr<RRef> remoteTorchscript(
+c10::intrusive_ptr<RRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
@@ -92,7 +92,7 @@ std::shared_ptr<RRef> remoteTorchscript(
     return userRRefPtr;
   } else {
     auto ownerRRefPtr = ctx.createOwnerRRef(returnType);
-    // prevent this owner RRef be deleted due to other forks
+    // prevent this owner RRef from being deleted due to other forks
     ctx.addSelfAsFork(ownerRRefPtr);
 
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
@@ -108,10 +108,7 @@ std::shared_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         nullptr);
 
-    fm->addCallback([](const Message& message,
-                       const c10::optional<utils::FutureError>& futErr) {
-      callback::finishCreatingOwnerRRef(message, futErr);
-    });
+    fm->addCallback(callback::finishCreatingOwnerRRef);
     return ownerRRefPtr;
   }
 }

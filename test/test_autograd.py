@@ -3516,11 +3516,11 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
+        inp_change_err = "The {}th output of UnbindBackward is being modified inplace but this is not allowed"
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
+                 should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
         # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+        leaf_grad_err = "a leaf Variable that requires grad is being used in an in-place operation."
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3850,6 +3850,23 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
+    def test_custom_function_error(self):
+        class BadFw(Function):
+            @staticmethod
+            def backward(ctx, foo):
+                return foo
+
+        class BadBw(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo.clone()
+
+        inp = torch.rand(1, requires_grad=True)
+        with self.assertRaisesRegex(NotImplementedError, "must implement the forward"):
+            BadFw.apply(inp)
+
+        with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
+            BadBw.apply(inp).sum().backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
