@@ -723,6 +723,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 }
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
+
   Tensor result = at::empty({}, mat2.options());
   return bmm_out_sparse_cuda(result, self, mat2);
 }
@@ -803,52 +804,6 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   return cuda_data_type;
 }
 
-cusparseSpMatDescr_t sparseMatrixToCusparseSpMatDescr(
-  int64_t rows,
-  int64_t cols,
-  Tensor row_indices,
-  Tensor col_indices,
-  Tensor values
-) {
-  int64_t nnz = values.size(0);
-
-  TORCH_CHECK(row_indices.dim() == 1, "row_indices must be 1-D");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices must be 1-D");
-  TORCH_CHECK(values.dim() == 1, "values must be 1-D");
-  TORCH_CHECK(row_indices.is_contiguous(), "row_indices must be contiguous");
-  TORCH_CHECK(col_indices.is_contiguous(), "col_indices must be contiguous");
-  TORCH_CHECK(values.is_contiguous(), "values must be contiguous");
-  TORCH_CHECK(row_indices.is_cuda(), "row_indices must be CUDA");
-  TORCH_CHECK(col_indices.is_cuda(), "col_indices must be CUDA");
-  TORCH_CHECK(values.is_cuda(), "values must be CUDA");
-  TORCH_CHECK(row_indices.size(0) == nnz, "row_indices size must match values size");
-  TORCH_CHECK(col_indices.size(0) == nnz, "col_indices size must match values size");
-  TORCH_CHECK(row_indices.dtype() == ScalarType::Int, "row_indices must be int32")
-  TORCH_CHECK(col_indices.dtype() == ScalarType::Int, "col_indices must be int32")
-
-  cudaDataType cuda_data_type = getTensorCudaDataType(values);
-  void* row_indices_ptr = row_indices.data_ptr();
-  void* col_indices_ptr = col_indices.data_ptr();
-  void* values_ptr = values.data_ptr();
-
-  cusparseSpMatDescr_t sparse_descr;
-
-  TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
-    &sparse_descr,
-    rows,
-    cols,
-    nnz,
-    row_indices_ptr,
-    col_indices_ptr,
-    values_ptr,
-    CUSPARSE_INDEX_32I,
-    CUSPARSE_INDEX_BASE_ZERO,
-    cuda_data_type
-  ));
-
-  return sparse_descr;
-}
-
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -858,6 +813,12 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
   result.resize_({self.size(0), mat2.size(2), self.size(1)});
+
+  // TODO: I'm not sure if this is necessary or not. Does at::resize_()
+  //    ensure contiguity?
+  if (!result.is_contiguous()) {
+    result.copy_(result.clone(at::MemoryFormat::Contiguous));
+  }
 
   // Dense matrices have to be contiguous for cusparseSpMM to work
   const Tensor mat2_contig = mat2.is_contiguous() ? mat2 : mat2.clone(at::MemoryFormat::Contiguous);
@@ -907,49 +868,49 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
       mat_el_end_idx++;
 
       // Create tensors to view just the current set of matrices
-      const Tensor dense_matrix = mat2_contig[cur_mat_num];
       int64_t sparse_nnz = mat_el_end_idx - mat_el_begin_idx;
-      Tensor sparse_values = values.slice(0, mat_el_begin_idx, mat_el_end_idx);
-      Tensor sparse_row_indices = indices_dim1.slice(0, mat_el_begin_idx, mat_el_end_idx);
-      Tensor sparse_col_indices = indices_dim2.slice(0, mat_el_begin_idx, mat_el_end_idx);
-      cudaDataType cuda_data_type = getTensorCudaDataType(dense_matrix);
-
-      cusparseSpMatDescr_t sparse_descr = sparseMatrixToCusparseSpMatDescr(
-        dim_i,
-        dim_j,
-        sparse_row_indices,
-        sparse_col_indices,
-        sparse_values
-      );
-
-      cusparseDnMatDescr_t dense_descr;
-      TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-        &dense_descr,
-        dim_k,
-        dim_j,
-        dim_k,
-        dense_matrix.data_ptr(),
-        cuda_data_type,
-        CUSPARSE_ORDER_COL
-      ));
-
-      Tensor result_matrix = result[cur_mat_num];
-      cusparseDnMatDescr_t result_descr;
-      TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
-        &result_descr,
-        dim_i,
-        dim_k,
-        dim_i,
-        result_matrix.data_ptr(),
-        cuda_data_type,
-        CUSPARSE_ORDER_COL
-      ));
 
       AT_DISPATCH_FLOATING_TYPES(
         values.scalar_type(), "addmm_sparse_cuda", [&] {
+          cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
+          void* row_indices_ptr = indices_dim1.data_ptr()+(mat_el_begin_idx*sizeof(uint32_t));
+          void* col_indices_ptr = indices_dim2.data_ptr()+(mat_el_begin_idx*sizeof(uint32_t));
+          void* values_ptr = values.data_ptr()+(mat_el_begin_idx*sizeof(scalar_t));
+          cusparseSpMatDescr_t sparse_descr;
+          TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
+            &sparse_descr,
+            dim_i,
+            dim_j,
+            sparse_nnz,
+            row_indices_ptr,
+            col_indices_ptr,
+            values_ptr,
+            CUSPARSE_INDEX_32I,
+            CUSPARSE_INDEX_BASE_ZERO,
+            cuda_data_type
+          ));
+          cusparseDnMatDescr_t dense_descr;
+          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+            &dense_descr,
+            dim_k,
+            dim_j,
+            dim_k,
+            mat2_contig.data_ptr() + (sizeof(scalar_t)*dim_k*dim_j*cur_mat_num),
+            cuda_data_type,
+            CUSPARSE_ORDER_COL
+          ));
+          cusparseDnMatDescr_t result_descr;
+          TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
+            &result_descr,
+            dim_i,
+            dim_k,
+            dim_i,
+            result.data_ptr() + (sizeof(scalar_t)*dim_i*dim_k*cur_mat_num),
+            cuda_data_type,
+            CUSPARSE_ORDER_COL
+          ));
           scalar_t alpha_val = alpha.to<scalar_t>();
           scalar_t beta_val = beta.to<scalar_t>();
-
           TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
             cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -960,16 +921,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG2,
+            CUSPARSE_COOMM_ALG1,
             &workspace_buffer_sizes[cur_mat_num]
           ));
-
           if (workspace_buffer_sizes[cur_mat_num] > 0) {
             cudaMallocManaged(&(workspace_buffers[cur_mat_num]), workspace_buffer_sizes[cur_mat_num]);
           } else {
             workspace_buffers[cur_mat_num] = nullptr;
           }
-
           TORCH_CUDASPARSE_CHECK(cusparseSpMM(
             cusparse_handle,
             CUSPARSE_OPERATION_NON_TRANSPOSE,
@@ -980,14 +939,14 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG2,
+            CUSPARSE_COOMM_ALG1,
             workspace_buffers[cur_mat_num]
           ));
+          TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
+          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
+          TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
         }
       );
-      TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));
-      TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(dense_descr));
-      TORCH_CUDASPARSE_CHECK(cusparseDestroyDnMat(result_descr));
       mat_el_begin_idx = mat_el_end_idx;
     } else {
       workspace_buffers[cur_mat_num] = nullptr;
@@ -1007,7 +966,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   }
   delete [] workspace_buffers;
   delete [] workspace_buffer_sizes;
-  
   return result;
 }
 
