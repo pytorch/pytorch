@@ -1947,9 +1947,10 @@ int listMulIntLeftInPlace(Stack& stack) {
   if (n <= 0) {
     list.clear();
   } else if (n > 1) {
+    size_t list_size = list.size();
     for (auto i = 1; i < n; i++) {
-      for (T e : list) {
-        list.push_back(std::move(e));
+      for (size_t j = 0; j < list_size; j++) {
+        list.push_back(list.get(j));
       }
     }
   }
