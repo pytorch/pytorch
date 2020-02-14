@@ -28,7 +28,7 @@ class TORCH_API RRefContext {
   // hold py::object. The call-site is also responsible for resetting those
   // shared_ptr objects with a GIL. See comments at delForkOfOwner() for more
   // details.
-  static std::vector<std::shared_ptr<RRef>> destroyInstance(
+  static std::vector<c10::intrusive_ptr<RRef>> destroyInstance(
       bool ignoreRRefLeak = true);
 
   static void handleException(const c10::optional<utils::FutureError>& futErr);
@@ -60,27 +60,21 @@ class TORCH_API RRefContext {
   }
 
   // create a ``UserRRef`` owned by the worker ``ownerId``
-  std::shared_ptr<UserRRef> createUserRRef(
-      worker_id_t ownerId,
-      const TypePtr& type);
+  c10::intrusive_ptr<UserRRef> createUserRRef(worker_id_t ownerId, const TypePtr& type);
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
   // method, we pass type here to validate or help the rref creation.
-  std::shared_ptr<RRef> getOrCreateRRef(
-      const RRefForkData& rfd,
-      const TypePtr& type);
+  c10::intrusive_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd, const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
-  std::shared_ptr<OwnerRRef> getOrCreateOwnerRRef(
-      const RRefId& rrefId,
-      const TypePtr& type);
+  c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(const RRefId& rrefId, const TypePtr& type);
 
   // Create an empty owner rref of type.
-  std::shared_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
+  c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
 
-  std::shared_ptr<OwnerRRef> getOwnerRRef(const RRefId& rrefId);
+  c10::intrusive_ptr<OwnerRRef> getOwnerRRef(const RRefId& rrefId);
 
   // Adding the RRefId of an OwnerRRef into the forks_ map. This is useful when
   // making a remote call to self, which as for now, still goes through serde
@@ -92,9 +86,9 @@ class TORCH_API RRefContext {
   // and this could happen before the self remote call finishes. To prevent
   // that, this API adds the RRefId as a ForkId, which will then delete the
   // ForkId when the self remote is done.
-  void addSelfAsFork(std::shared_ptr<OwnerRRef>& rref);
+  void addSelfAsFork(c10::intrusive_ptr<OwnerRRef>& rref);
 
-  // Register a fork of the ``OwnerRRef``, and inserts a shared_ptr of the
+  // Register a fork of the ``OwnerRRef``, and inserts a intrusive_ptr of the
   // ``OwnerRRef`` in a map to keep it alive.
   void addForkOfOwner(const RRefId& rrefId, const ForkId& forkId);
   // Delete a fork of the ``OwnerRRef``. NB: this could trigger deletion on the
@@ -106,19 +100,19 @@ class TORCH_API RRefContext {
   // py::object, deleting it require GIL. The call site should guarded it with
   // a GIL and reset the shared_ptr. The GIL-guarded deletion is intentionally
   // left out of this function to avoid creating dependency on pybind.
-  std::shared_ptr<RRef> delForkOfOwner(
+  c10::intrusive_ptr<RRef> delForkOfOwner(
       const RRefId& rrefId,
       const ForkId& forkId);
 
   // Invoked when pickling an RRef to setup child/fork properly
-  RRefForkData prepareChildFork(const std::shared_ptr<RRef>& rref);
+  RRefForkData prepareChildFork(const c10::intrusive_ptr<RRef>& rref);
   // Invoked when unpickling an RRef to send RREF_FORK_REQUEST to owner and
   // send RREF_CHILD_ACCEPT to the parent.
   // NB: forkId is necessary here as the rref could be an OwnerRRef
   void notifyOwnerAndParentOfFork(
       const ForkId& forkId,
       worker_id_t parent,
-      const std::shared_ptr<RRef>& rref);
+      const c10::intrusive_ptr<RRef>& rref);
 
   // When a UserRRef is forked to another worker (user or owner), it is added
   // into pendingChildren_ to be held alive until it receives RREF_CHILD_ACCEPT
@@ -128,12 +122,12 @@ class TORCH_API RRefContext {
   // previously submitted rpc/remote calls are acked before sending out the
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
-  void addPendingChild(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void addPendingChild(const ForkId& forkId, const c10::intrusive_ptr<RRef>& rref);
   void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
-  void addPendingUser(const ForkId& forkId, const std::shared_ptr<RRef>& rref);
+  void addPendingUser(const ForkId& forkId, const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
   void delUser(
@@ -146,7 +140,7 @@ class TORCH_API RRefContext {
  private:
   RRefContext(std::shared_ptr<RpcAgent>);
 
-  std::shared_ptr<UserRRef> createUserRRef(
+  c10::intrusive_ptr<UserRRef> createUserRRef(
       worker_id_t ownerId,
       const RRefId& rrefId,
       const ForkId& forkId,
@@ -162,7 +156,7 @@ class TORCH_API RRefContext {
   const std::shared_ptr<RpcAgent> agent_;
   mutable std::mutex mutex_;
   // Keep OwnerRRefs alive until there is no living UserRRefs.
-  std::unordered_map<RRefId, std::shared_ptr<RRef>, RRefId::Hash> owners_;
+  std::unordered_map<RRefId, c10::intrusive_ptr<RRef>, RRefId::Hash> owners_;
   // A conditional variable to block getOwnerRRef() calls until the
   // corresponding OwnerRRef has been created and inserted into the owners_ map.
   // The method getOwnerRRef() is triggered by rref.to_here() messages. The
@@ -184,7 +178,7 @@ class TORCH_API RRefContext {
       RRefId::Hash>
       forks_;
 
-  // The follow two maps keep UserRRefs alive by holding a shared_ptr to the
+  // The follow two maps keep UserRRefs alive by holding a intrusive_ptr to the
   // RRef instances. A UserRRef must be added into this map if any of the
   // following two conditions is true:
   //
@@ -193,7 +187,7 @@ class TORCH_API RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence kept alive
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
-  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash> pendingUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.
@@ -201,7 +195,7 @@ class TORCH_API RRefContext {
   //     In this case, this UserRRef cannot send out RREF_USER_DELETE message,
   //     as it could potentially trigger the OwnerRRef been deleted before the
   //     owner learns about the forked child.
-  std::unordered_map<ForkId, std::shared_ptr<RRef>, ForkId::Hash>
+  std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
       pendingChildren_;
 
   std::mutex destroyedMutex_;
