@@ -5307,6 +5307,55 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             foo = dummy.grad
             self.assertEqual(len(w), 1)
 
+    def test_normal_shape(self):
+        for device in torch.testing.get_all_device_types():
+            tensor1 = torch.rand(1, device=device)
+            tensor4 = torch.rand(4, device=device)
+            tensor120 = torch.rand(120, device=device)
+            tensor2145 = torch.rand(2, 1, 4, 5, device=device)
+            tensor2345 = torch.rand(2, 3, 4, 5, device=device)
+            tensor2345_non_contiguous = torch.rand(2, 4, 3, 5, device=device).permute(0, 2, 1, 3)
+            tensor2345_channels_last = tensor2345.contiguous(memory_format=torch.channels_last)
+            output2345 = torch.zeros(2, 3, 4, 5, device=device)
+            output345 = torch.zeros(3, 4, 5, device=device)
+
+            # inputs have same size
+            self.assertEqual(torch.normal(tensor2345, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345_non_contiguous, tensor2345).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345, tensor2345_channels_last).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2345_non_contiguous, tensor2345_channels_last).size(), (2, 3, 4, 5))
+
+            # scalar case
+            self.assertEqual(torch.normal(tensor2345, 2).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(2, tensor2345).size(), (2, 3, 4, 5))
+
+            # inputs are expandable tensors
+            self.assertEqual(torch.normal(tensor2345, tensor1).size(), (2, 3, 4, 5))
+            self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
+
+            # inputs are non-expandable tensors, but they have same number of elements
+            # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
+            self.assertWarnsRegex(
+                lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
+                "deprecated and the support will be removed")
+            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+
+            # inputs are non-expandable tensors and they don't have same number of elements
+            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+                torch.normal(tensor2345, tensor4)
+
+            # output and inputs are size compatible
+            self.assertEqual(torch.normal(tensor2345, tensor2345, out=output2345).size(), (2, 3, 4, 5))
+
+            # output and inputs are not size compatible
+            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+                # inputs are expandable but have different broadcasted size than output
+                torch.normal(tensor2345, tensor2145, out=output345)
+            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+                # inputs are not expandable but reshapeable, output size is not the same as mean
+                torch.normal(tensor2345, tensor120, out=output345)
+
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
