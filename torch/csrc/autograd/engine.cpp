@@ -392,6 +392,10 @@ void GraphTask::set_exception(
       fn->metadata()->print_stack();
     }
     has_error_ = true;
+    // Careful: setting the future_result_ can trigger DistAutogradContext to
+    // resetGraphTask(), sometimes deleting this underlying GraphTask.
+    // Don't touch *this after setError() below, and release the lock early, to
+    // avoid unlocking this->mutex_ after setting the future.
     std::shared_ptr<FutureVariableList> future_result = future_result_;
     lock.unlock();
     if (!future_result->completed()) {
