@@ -994,7 +994,7 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
     return FastSetupType::CONTIGUOUS;
   }
   if (is_channels_last) {
-      return FastSetupType::CHANNELS_LAST;
+    return FastSetupType::CHANNELS_LAST;
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
