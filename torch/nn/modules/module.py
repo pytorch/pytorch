@@ -349,6 +349,14 @@ class Module(object):
         """
         return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
+    def bfloat16(self):
+        r"""Casts all floating point parameters and buffers to ``bfloat16`` datatype.
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.bfloat16() if t.is_floating_point() else t)
+
     def to(self, *args, **kwargs):
         r"""Moves and/or casts the parameters and buffers.
 
