@@ -31,9 +31,9 @@ class AnyValue {
   AnyValue& operator=(AnyValue&&) = default;
 
   /// Copy construction and assignment is allowed.
-  AnyValue(const AnyValue& other) : content_(std::move(other.content_->clone())) {}
+  AnyValue(const AnyValue& other) : content_(other.content_->clone()) {}
   AnyValue& operator=(const AnyValue& other) {
-    content_ = std::move(other.content_->clone());
+    content_ = other.content_->clone();
     return *this;
   }
 
@@ -81,7 +81,7 @@ class AnyValue {
   }
 
  private:
-  friend class AnyModulePlaceholder;
+  friend struct AnyModulePlaceholder;
   friend struct TestAnyValue;
 
   /// \internal
