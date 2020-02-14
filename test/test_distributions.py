@@ -3892,6 +3892,10 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif domain is constraints.unit_interval:
             return x.uniform_()
+        elif isinstance(domain, constraints.interval):
+            x = x.uniform_()
+            x = x.mul_(domain.upper_bound - domain.lower_bound).add_(domain.lower_bound)
+            return x
         elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)
