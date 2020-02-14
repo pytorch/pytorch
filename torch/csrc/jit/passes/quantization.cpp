@@ -1437,7 +1437,7 @@ class FoldConvBatchNorm2dHelper {
 
   std::unordered_map<script::ModulePtr,
                      std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
-  std::unordered_set<Graph*> folded_graph_;
+  std::unordered_set<Graph*> visited_graph_;
   std::unordered_map<Value*, Value*> rewrite_map_;
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
@@ -1519,7 +1519,7 @@ graph(%self, %x):
       GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
       Graph* g = method.graph().get();
       // not successful insert means it already exists in the set
-      bool visisted = !folded_graph_.insert(g).second;
+      bool visisted = !visited_graph_.insert(g).second;
       for (const Match& match : matches) {
         GRAPH_DEBUG("Checking next match...");
         Node* matched_conv = match.nodes_map.at(pattern_conv);
