@@ -93,8 +93,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const t
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv){
-  assert(tv->tensor->domain != nullptr);
-  return os << tv->tensor << " -> "<<tv->view;
+  assert(tv->domain() != nullptr);
+  return os << tv->tensor() << " -> "<<tv->domain();
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){
@@ -122,8 +122,8 @@ std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
   os << "%T" << t->name(); 
   if(t->getDataType().has_value())
     os << " scalar_type: " << *(t->getDataType());
-  if(t->domain != nullptr)
-    os << " " << t->domain;
+  if(t->domain() != nullptr)
+    os << " " << t->domain();
   if(t->hasContiguityInfo())
     os << " " << &t->getContiguityInfo().value();
   return os;

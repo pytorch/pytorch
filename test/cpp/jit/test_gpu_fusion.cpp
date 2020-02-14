@@ -209,12 +209,12 @@ void testGPU_FusionTensor() {
   auto fuser_tensor  = new Tensor(tensor_type);
   TORCH_CHECK(fuser_tensor->hasContiguityInfo() == 1);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float); 
-  TORCH_CHECK(fuser_tensor->domain == nullptr);
+  TORCH_CHECK(fuser_tensor->domain() == nullptr);
   
   auto fuser_null_tensor  = new Tensor(DataType::Int);
   TORCH_CHECK(fuser_null_tensor->hasContiguityInfo() == 0);
   TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int); 
-  TORCH_CHECK(fuser_null_tensor->domain == nullptr);
+  TORCH_CHECK(fuser_null_tensor->domain() == nullptr);
 }
 
 void testGPU_FusionTensorContiguity() {
