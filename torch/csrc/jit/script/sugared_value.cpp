@@ -54,6 +54,16 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
       emitBuiltinCall(loc, *m.graph(), symbol, inputs, attributes, self));
 }
 
+// older versions of gcc/clang have a bug where enums can't be used as keys
+// in a map by default
+// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
+struct EnumClassHash {
+  template <typename T>
+  std::size_t operator()(T t) const {
+    return static_cast<std::size_t>(t);
+  }
+};
+
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
@@ -67,22 +77,31 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
           Symbol::aten(builtin_cast_methods().at(field)),
           NamedValue(loc, "self", value_));
     }
-    // functions that are just direct property lookups on tensor
-    // must be registered as prim::<name>(Tensor t) -> <return_type>
-    static const std::unordered_set<std::string> fields = {
-        "dtype",
-        "device",
-        "grad",
-        "data",
-        "shape",
-        "is_cuda",
-        "is_sparse",
-        "is_mkldnn",
-        "is_quantized",
-        "requires_grad",
-        "layout",
-    };
-    if (fields.count(field)) {
+  }
+  // accessing properties of Tensor and Device that are implemented as
+  // prim:: operators
+  using PropertiesLookup = std::
+      unordered_map<TypeKind, std::unordered_set<std::string>, EnumClassHash>;
+  static const PropertiesLookup builtin_properties = {
+      {TypeKind::TensorType,
+       {
+           "dtype",
+           "device",
+           "grad",
+           "data",
+           "shape",
+           "is_cuda",
+           "is_sparse",
+           "is_mkldnn",
+           "is_quantized",
+           "requires_grad",
+           "layout",
+       }},
+      {TypeKind::DeviceObjType, {"type", "index"}}};
+  auto kind = value_->type()->kind();
+  auto builtin_entry = builtin_properties.find(kind);
+  if (builtin_entry != builtin_properties.end()) {
+    if (builtin_entry->second.count(field) > 0) {
       auto r =
           m.graph()->insert(Symbol::fromQualString("prim::" + field), {value_});
       return std::make_shared<SimpleValue>(r);

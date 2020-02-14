@@ -35,16 +35,20 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
 
   m.def(
       "ObserveHistogramOfOutput",
-      [](const string& out_file_name, int dump_freq, bool mul_nets) {
+      [](const string& out_file_name,
+         int dump_freq,
+         bool mul_nets,
+         string op_filter) {
         AddGlobalNetObserverCreator(
-            [out_file_name, dump_freq, mul_nets](NetBase* net) {
+            [out_file_name, dump_freq, mul_nets, op_filter](NetBase* net) {
               return make_unique<HistogramNetObserver>(
-                  net, out_file_name, 2048, dump_freq, mul_nets);
+                  net, out_file_name, 2048, dump_freq, mul_nets, op_filter);
             });
       },
       pybind11::arg("out_file_name"),
       pybind11::arg("dump_freq") = -1,
-      pybind11::arg("mul_nets") = false);
+      pybind11::arg("mul_nets") = false,
+      pybind11::arg("op_filter") = "");
 
   m.def(
       "AddHistogramObserver",
