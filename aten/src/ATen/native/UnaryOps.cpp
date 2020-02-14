@@ -31,13 +31,13 @@
 namespace at {
 namespace native {
 
-static inline ScalarType promoteIntToFloats(ScalarType in_dtype) {
+static inline ScalarType promoteIntToFloats(const Tensor& self) {
   // These promotion rules are for Unary Ops Int to Float conversions
   // Based on NumPy's conversion rules
   // For discussion: https://github.com/pytorch/pytorch/issues/28703
   ScalarType dtype;
 
-  switch(in_dtype) {
+  switch(self.scalar_type()) {
     case kChar:
       dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
       break;
@@ -52,6 +52,7 @@ static inline ScalarType promoteIntToFloats(ScalarType in_dtype) {
       break;
     case kBool:
       dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+      break;
     default:
       dtype = ScalarType::Undefined;
       break;
@@ -79,10 +80,10 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   // This enables int-to-float implicit dtype conversions
-  ScalarType promoted_dtype = promoteIntToFloats(self.scalar_type());
+  ScalarType promoted_dtype = promoteIntToFloats(self);
 
   // dtype is set to Undefined if no int-to-float conversion
-  if (dtype != ScalarType::Undefined) {
+  if (promoted_dtype != ScalarType::Undefined) {
     Tensor result = at::empty({0}, self.options().dtype(promoted_dtype));
     return out_impl(result, self.to(promoted_dtype));
   } else {
