@@ -1611,11 +1611,8 @@ class FoldConvBatchNorm2dHelper {
   /**
    * In this step we find all Conv2d - BatchNorm2d patterns in the graph
    * and extract the corresponding parameters for these two modules,
-   * and record all the necessary modifications of the graph without
+   * and record informations for the modifications of the graph without
    * actually performing these modifications.
-   * Also we'll remove the bias attribute if it is non-Parameter
-   * and None, since in the transform step we'll add a bias Parameter
-   * of type Tensor
    */
   void analyze(script::Module& module);
   /**
@@ -1725,7 +1722,7 @@ graph(%self, %x):
       GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
       Graph* g = method.graph().get();
       // not successful insert means it already exists in the set
-      bool is_folded_graph = !folded_graph_.insert(g).second;
+      bool visisted = !folded_graph_.insert(g).second;
       for (const Match& match : matches) {
         GRAPH_DEBUG("Checking next match...");
         Node* matched_conv = match.nodes_map.at(pattern_conv);
@@ -1755,7 +1752,7 @@ graph(%self, %x):
         auto new_w_b = computeUpdatedConvWeightAndBias(params);
         conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
 
-        if (is_folded_graph) {
+        if (visited) {
           continue;
         }
         // We are using a separate vector for saving Values we want to rewrite to
