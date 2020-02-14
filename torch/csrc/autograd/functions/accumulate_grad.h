@@ -29,9 +29,10 @@ struct TORCH_API AccumulateGrad : public Node {
       const at::Tensor& new_grad,
       size_t num_expected_refs,
       bool has_post_hooks,
-      std::function<void(at::Tensor&&)> update_grad_fn);
+      const std::function<void(at::Tensor&&)>& update_grad_fn);
 
   Variable variable;
 };
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

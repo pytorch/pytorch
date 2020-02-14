@@ -252,7 +252,7 @@ struct TORCH_API Engine {
  std::shared_ptr<ThreadPoolShared> thread_pool_shared_;
 
 private:
- variable_list& graph_task_exec_post_processing(
+ void graph_task_exec_post_processing(
      const std::shared_ptr<GraphTask>& graph_task);
  void mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task);
 };

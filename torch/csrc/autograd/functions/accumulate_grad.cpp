@@ -28,7 +28,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     const at::Tensor& new_grad,
     size_t num_expected_refs,
     bool has_post_hooks,
-    std::function<void(at::Tensor&&)> update_grad_fn) {
+    const std::function<void(at::Tensor&&)>& update_grad_fn) {
   // Copy since we need to work with non-const Tensor. Grab the original
   // use_count beforehand though.
   size_t new_grad_use_count = new_grad.use_count();

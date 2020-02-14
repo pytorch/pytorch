@@ -792,14 +792,16 @@ void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
   }
 
   try {
-    auto& val = graph_task_exec_post_processing(graph_task);
-    graph_task->future_result_->markCompleted(std::move(val));
+    // Run post processing, before marking the future as complete.
+    graph_task_exec_post_processing(graph_task);
+    graph_task->future_result_->markCompleted(
+        std::move(graph_task->captured_vars_));
   } catch (std::exception& e) {
     graph_task->future_result_->setError(e.what());
   }
 }
 
-variable_list& Engine::graph_task_exec_post_processing(
+void Engine::graph_task_exec_post_processing(
     const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
@@ -830,8 +832,6 @@ variable_list& Engine::graph_task_exec_post_processing(
       default_stream.wait(event);
     }
   }
-
-  return graph_task->captured_vars_;
 }
 
 // note that when python is present, this base engine will be overriden
