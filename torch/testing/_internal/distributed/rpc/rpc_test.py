@@ -1757,7 +1757,7 @@ class RpcJitTest(RpcAgentTestFixture):
     def test_local_rref_with_script_module(self):
         # create a local RRef that hold a ScriptModule
         script_mod = MyScriptModule()
-        rref_module = rpc.RRef(script_mod._c)
+        rref_module = rpc.RRef(script_mod)
 
         @torch.jit.script
         def rref_script_module(rref_module):
