@@ -1233,61 +1233,6 @@ bool AliasDb::writesToWildcard(Node* n) const {
   return false;
 }
 
-bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
-  // WARNING: by adding a case to this list, you are asserting that you have
-  // added a case for the unschematized node in AliasDb::analyze
-  const static std::unordered_set<Symbol> handled = {
-      prim::If,
-      prim::Loop,
-      prim::FusionGroup,
-      prim::DifferentiableGraph,
-      prim::Constant,
-      prim::Uninitialized,
-      prim::DictConstruct,
-      prim::ListConstruct,
-      prim::TupleConstruct,
-      prim::AutogradZero,
-      prim::FusedConcat,
-      prim::GradOf,
-      prim::MMTreeReduce,
-      prim::MMBatchSide,
-      prim::BroadcastSizes,
-      prim::ChunkSizes,
-      prim::Function,
-      prim::TupleUnpack,
-      prim::TupleIndex,
-      prim::TupleSlice,
-      prim::ListUnpack,
-      prim::PythonOp,
-      prim::ConstantChunk,
-      prim::BroadcastingChunk,
-      prim::fork,
-      prim::CreateObject,
-      prim::AutogradAdd,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::profile,
-      prim::Print,
-      prim::CallFunction,
-      prim::CallMethod,
-      aten::wait,
-      prim::isinstance,
-      prim::unchecked_cast,
-  };
-
-  // Operators that should not be used by alias analysis
-  const static std::unordered_set<Symbol> purposefully_not_handled = {
-      prim::Load,
-      prim::Store,
-      prim::Drop,
-      at::onnx::Reshape,
-      at::onnx::Shape,
-      prim::AutogradAdd,
-  };
-
-  return handled.count(symbol) || purposefully_not_handled.count(symbol);
-}
-
 bool AliasDb::mayAliasWildcard(const Value* v) const {
   if (auto e = getWildcard(v->type())) {
     return memoryDAG_->mayAlias(elementMap_.at(v), e);
