@@ -544,6 +544,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);
+#ifdef USE_DISTRIBUTED
+  } else if (
+      obj.ptr() == py::module::import("torch.distributed.rpc.api").attr("_invoke_rpc_torchscript").ptr()) {
+    return SpecialFormValue::create(prim::rpc_async);
+#endif
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";

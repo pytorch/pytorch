@@ -228,6 +228,9 @@ struct PythonPrintImpl {
     if (use.user->kind() == prim::fork)
       return false;
 
+    if (use.user->kind() == prim::rpc_async)
+      return false;
+
     // isinstance appearing in an if expression
     // causes type refinement to occur, but we have
     // already handled the refinement and inserted cast

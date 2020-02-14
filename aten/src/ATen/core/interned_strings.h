@@ -127,6 +127,7 @@ namespace c10 {
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

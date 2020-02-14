@@ -2454,6 +2454,28 @@ struct to_ir {
 
         return std::make_shared<SimpleValue>(expr);
       }
+      case prim::rpc_async: {
+        auto& inputs_trees = apply.inputs().tree()->trees();
+        if (inputs_trees.size() < 3) {
+          throw ErrorReport(apply)
+              << "Expected at least 3 arguments to "
+              << "rpc_async(dst_worker_name, user_func_qual_name, user_func, *args, **kwargs)";
+        }
+        auto dst_worker_name = emitSugaredExpr(Expr(inputs_trees[0]), 1);
+        auto user_func_qual_name = emitSugaredExpr(Expr(inputs_trees[1]), 1);
+        auto user_func = emitSugaredExpr(Expr(inputs_trees[2]), 1);
+        TreeList args_trees(inputs_trees.begin() + 3, inputs_trees.end());
+        auto inputs = getNamedValues(args_trees, true);
+        auto attributes = emitAttributes(apply.attributes());
+        return emitRpcAsyncExpr(
+            apply.range(),
+            dst_worker_name,
+            user_func_qual_name,
+            user_func,
+            args_trees,
+            inputs,
+            attributes);
+      }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -2711,6 +2733,57 @@ struct to_ir {
     Value* node_output =
         fork_node->output()->setType(FutureType::create(out_type));
     return std::make_shared<SimpleValue>(node_output);
+  }
+
+  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(
+      SourceRange loc,
+      const std::shared_ptr<SugaredValue>& dst_worker_name,
+      const std::shared_ptr<SugaredValue>& user_func_qual_name,
+      const std::shared_ptr<SugaredValue>& user_func,
+      TreeList args_trees,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes) {
+    auto graphPtr = method.graph();
+    Node* rpc_async_node = graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
+                    ->setSourceRange(loc);
+    TypePtr output_type;
+    {
+      WithInsertPoint insert(rpc_async_node);
+      rpc_async_node->addInput(dst_worker_name->asValue(loc, method));
+      rpc_async_node->addInput(user_func_qual_name->asValue(loc, method));
+      // The call is _invoke_rpc_torchscript(dstWorkerName, qualifiedName,
+      // args, kwargs), so only 2 inputs are added, no attributes.
+      for (auto& input : inputs) {
+        rpc_async_node->addInput(input.value(*graphPtr));
+      }
+    }
+    Value* rpc_async_node_output =
+        rpc_async_node->output();
+
+    // Build a temporary sub-block to get output type.
+    auto sub_block = rpc_async_node->addBlock();
+
+    Value *node_output;
+    {
+      WithInsertPoint guard(sub_block);
+
+      // Do similar work in getNamedValues(),
+      // from a Var that is known to be a Tuple.
+      std::vector<NamedValue> inputValues;
+      auto entries = emitSugaredExpr(Expr(args_trees[0]), 1)
+                         ->asTuple(args_trees[0]->range(), method);
+      for (const auto& entry : entries) {
+        inputValues.emplace_back(
+            args_trees[0]->range(), entry->asValue(args_trees[0]->range(), method));
+      }
+
+      auto output_sugared_value = user_func->call(loc, method, inputValues, attributes, 1);
+      auto output_value = output_sugared_value->asValue(loc, method);
+      rpc_async_node_output->setType(FutureType::create(output_value->type()));
+    }
+    rpc_async_node->eraseBlock(0);
+
+    return std::make_shared<SimpleValue>(rpc_async_node_output);
   }
 
   Value* emitSimpleExpr(

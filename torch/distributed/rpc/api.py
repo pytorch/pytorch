@@ -456,7 +456,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
         fut = _invoke_rpc_torchscript(
-            dst_worker_info.name, torch._jit_internal._qualified_name(func), *args, **kwargs
+            dst_worker_info.name, torch._jit_internal._qualified_name(func), func, args, kwargs
         )
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
@@ -657,7 +657,7 @@ def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None):
 
 
 @_require_initialized
-def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
+def _rpc_async_torchscript(to, user_func_qualified_name, user_func, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -666,10 +666,11 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
 
     Arguments:
         to (str): name of the destination worker.
-        qualified_name (str): qualifited name of python function annotated with
+        user_func_qualified_name (str): qualifited name of python function annotated with
                               @torch.jit.script
                               (like ``moduleName::torchScriptFuncName``)
                               can be sent over RPC more efficiently.
+        user_func (object): the function being called remotely.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -707,7 +708,7 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None):
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    fut = _invoke_rpc_torchscript(to, qualified_name, *args, **kwargs)
+    fut = _invoke_rpc_torchscript(to, user_func_qualified_name, user_func, args, kwargs)
     return fut
 
 
