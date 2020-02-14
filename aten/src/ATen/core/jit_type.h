@@ -540,6 +540,9 @@ struct CAFFE2_API TensorType : public Type {
   }
 
   TensorTypePtr merge(TensorTypePtr other) const;
+  TensorTypePtr merge(
+      const at::Tensor& t,
+      std::map<int64_t, size_t>& symbols2dims) const;
 
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist
@@ -549,11 +552,20 @@ struct CAFFE2_API TensorType : public Type {
     return scalar_type_ && device_ && sizes_.isComplete() && strides_.isComplete();
   }
 
+  bool isComplete2() const {
+    return scalar_type_ && device_ && sizes_.isComplete();
+  }
+
   // this property is used by GuardElimination
   // please see `checkInputs` for more details
   bool isSummarized() const {
     return !(isComplete() && requiresGrad().has_value() &&
              undefined().has_value());
+  }
+
+  bool isSummarized2() const {
+    return !(
+        isComplete2() && requiresGrad().has_value() && undefined().has_value());
   }
 
   TensorTypePtr withUndefined() {

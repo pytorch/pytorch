@@ -168,6 +168,10 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
 
   // profile until a graph is ready
   if (!pr_->ready()) {
+    const static auto merge = std::getenv("PYTORCH_MERGE");
+    if (merge) {
+      GRAPH_DUMP("Profiled Graph (merge): ", pr_->graph());
+    }
     return *profiling_plan_;
   }
 

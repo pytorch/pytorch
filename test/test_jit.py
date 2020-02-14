@@ -4015,6 +4015,50 @@ class TestFrontend(JitTestCase):
 
 class TestScript(JitTestCase):
 
+
+    def test_symbolic_shapes(self):
+        with enable_profiling_mode():
+            torch._C._jit_set_num_profiled_runs(2)
+
+            def simple_add(a, b):
+                return a + b
+
+            def sym_shape(a, b, c):
+                t1 = a + b
+                t2 = t1 * c
+                return t1 - t2
+
+            j = torch.jit.script(sym_shape)
+            #j = torch.jit.script(simple_add)
+
+            # a = torch.ones(7, 1, 4)
+            # b = torch.ones(7, 5, 1)
+            # c = torch.ones(7, 5, 4)
+
+            a = torch.ones(7, 1)
+            b = torch.ones(7, 5)
+            #b = torch.ones(1)
+
+            # (7, 1, 4)
+            # (7, 5, 1)
+            # (7, 5, 1)
+
+            j(a, a, b)
+            j(a, b, a)
+            j(a, a, b)
+            #j(a, b, b)
+            #j(b, b, b)
+
+            # j(c, b, c)
+            # j(a, b, a)
+            # j(c, b, c)
+            # j(a, b, a)
+
+
+
+
+
+
     def test_request_bailout(self):
         with enable_profiling_mode():
 

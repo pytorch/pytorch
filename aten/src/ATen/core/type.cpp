@@ -35,6 +35,23 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
+
+    const static auto printAttrs = std::getenv("PYTORCH_PRINT_ATTRS");
+    if (printAttrs) {
+      out << "[";
+      out
+          << (value->requiresGrad().has_value()
+                  ? (*value->requiresGrad() ? "R" : "!R")
+                  : "R?");
+      out << " ";
+      // dtype, device, sz, ss, req, undef
+      out
+          << (value->undefined().has_value()
+                  ? (*value->undefined() ? "U" : "!U")
+                  : "U?");
+      out << "]";
+    }
+
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
@@ -491,6 +508,46 @@ TensorTypePtr TensorType::merge(TensorTypePtr other) const {
   auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
   auto undef = merge_primitive(undefined(), other->undefined());
   return TensorType::create(scalar_type, dev, sz, srs, gr, undef);
+}
+
+// static size_t bind(std::map<int64_t, size_t>& symbols2dims, int64_t symbol,
+// val size_t) {
+
+// }
+
+TensorTypePtr TensorType::merge(
+    const at::Tensor& t,
+    std::map<int64_t, size_t>& symbols2dims) const {
+  auto scalar_type = merge_primitive(scalarType(), {t.scalar_type()});
+  auto dev = merge_primitive(device(), {t.device()});
+  auto new_sizes = t.sizes();
+  std::vector<c10::optional<int64_t>> new_symbols;
+
+  if (new_sizes.size() == sizes().size()) {
+    for (size_t i = 0; i < new_sizes.size(); i++) {
+      auto symbol = sizes()[i];
+      if (!symbol.has_value()) {
+        new_symbols.push_back(c10::nullopt);
+      } else {
+        // refactor into bind
+        TORCH_INTERNAL_ASSERT(*symbol < 0);
+        if (symbols2dims.count(symbol.value()) == 0) {
+          symbols2dims[symbol.value()] = new_sizes[i];
+          new_symbols.push_back(symbol);
+        } else {
+          new_symbols.push_back(
+              (symbols2dims[symbol.value()] == new_sizes[i]) ? symbol
+                                                             : c10::nullopt);
+        }
+      }
+    }
+  }
+
+  auto srs = strides(); // todo fix
+  auto gr = merge_primitive(requiresGrad(), {t.requires_grad()});
+  auto undef = merge_primitive(undefined(), {false});
+  return TensorType::create(
+      scalar_type, dev, VaryingShape{new_symbols}, srs, gr, undef);
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {

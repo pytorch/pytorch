@@ -140,8 +140,9 @@ struct GuardElimination {
     // to remove a guard on ops' outputs
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
+      GRAPH_DEBUG("eliminateRedundantGuards ", getHeader(n));
       if (n->kind() == prim::Guard && guardsOutput(n) &&
-          removableGuard(n->inputs().at(0)->node())) {
+          removableGuard(n->inputs().at(0)->node(), n->output()->type())) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
@@ -155,6 +156,51 @@ struct GuardElimination {
         }
       }
     }
+  }
+
+  bool checkSimpleBroadcastableInputs(Node* n, TensorTypePtr type) {
+    auto bced_sizes = *type->sizes().concrete_sizes();
+    for (auto input : n->inputs()) {
+      if (input->node()->kind() == prim::Constant ||
+          input->type()->isSubtypeOf(NumberType::get())) {
+        continue;
+      }
+
+      if (input->node()->kind() != prim::Guard) {
+        GRAPH_DEBUG("%", input->debugName(), " isn't a guard!");
+        return false;
+      }
+
+      TORCH_INTERNAL_ASSERT(input->type()->cast<TensorType>());
+      auto isizes = input->type()->cast<TensorType>()->sizes();
+      // even rank isn't fixed
+      if (!isizes.size().has_value()) {
+        GRAPH_DEBUG("%", input->debugName(), "'s rank isn't fixed!");
+        return false;
+      }
+
+      // TODO: just copy and pad isizes as needed
+      auto padding_size = bced_sizes.size() - *isizes.size();
+
+      for (size_t i = 0; i < bced_sizes.size(); i++) {
+        auto input_dim =
+            (i < padding_size) ? c10::nullopt : isizes[i - padding_size];
+        if (input_dim.has_value() && *input_dim != bced_sizes[i]) {
+          GRAPH_DEBUG(
+              i,
+              "-th dimension of %",
+              input->debugName(),
+              " doesn't match output ",
+              getHeader(n),
+              " i.e. ",
+              *input_dim,
+              " != ",
+              bced_sizes[i]);
+          return false;
+        }
+      }
+    }
+    return true;
   }
 
   // `checkInputs` check the invariants specified in `removableGuard`
@@ -211,100 +257,107 @@ private:
   //   Guards can be removed if all inputs are guarded and `isSummarized()`
   //   returns
   //   false or inputs are `prim::Constant`
-  bool removableGuard(Node *n) {
+ bool removableGuard(Node* n, TypePtr type) {
+   GRAPH_DEBUG("Running removableGuard for ", getHeader(n));
+   const static auto no_exceptions = std::unordered_set<size_t>{};
+   switch (n->kind()) {
+     case aten::add:
+     case aten::sub:
+     case aten::mul:
+     case aten::div:
+     case aten::t:
+     case aten::sigmoid:
+     case aten::tanh:
+     case aten::mm:
+     case aten::min:
+     case aten::max:
+     case aten::type_as:
+     case aten::ge:
+     case aten::gt:
+     case aten::lt:
+     case aten::le:
+     case aten::eq:
+     case aten::ne:
+     case aten::neg:
+     case aten::size:
+     case aten::abs:
+     case aten::sign:
+     case aten::pow:
+     case aten::relu:
+     case aten::threshold:
+     case prim::AutogradAdd:
+     case prim::AutogradZero:
+     case aten::rand_like:
+     case aten::erf:
+     case aten::erfc: {
+       auto ttype = type->cast<TensorType>();
+       TORCH_INTERNAL_ASSERT(ttype);
+       return !ttype->isSummarized2() &&
+           checkSimpleBroadcastableInputs(n, ttype);
+     }
+     case aten::cat:
+       // TODO: re-enable
+       return false;
+       // check that the dimension argument is constant
+       return n->input(1)->node()->kind() == prim::Constant &&
+           n->input(0)->node()->kind() == prim::ListConstruct &&
+           // no extra nodes in between aten::cat and prim::ListConstruct
+           n->prev() == n->input(0)->node() &&
+           // check the inputs to prim::ListConstruct (not aten::cat)
+           checkInputs(n->input(0)->node(), no_exceptions);
+     case aten::clamp:
+       // TODO: re-enable
+       return false;
+       // the second and third args do not affect shapes
+       return checkInputs(n, std::unordered_set<size_t>{1, 2});
+     // after some optimizations we might end up with two Guards back-to-back
+     // which case we can remove the one whose input is also prim::Guard
+     case aten::_grad_sum_to_size:
+       // TODO: re-enable
+       // skip checking size argument
+       if (checkInputs(n, std::unordered_set<size_t>{1})) {
+         auto asize = n->input(1)->node();
+         if (asize->kind() == prim::Constant) {
+           return true;
+         } else if (asize->matches("aten::size(Tensor self) -> int[]")) {
+           // aten::size is effectively a constant
+           if (asize->input()
+                   ->type()
+                   ->expect<TensorType>()
+                   ->sizes()
+                   .concrete_sizes()) {
+             return true;
+           }
+         }
+       }
+       return false;
 
-    const static auto no_exceptions = std::unordered_set<size_t>{};
-    switch (n->kind()) {
-    case aten::add:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::t:
-    case aten::sigmoid:
-    case aten::tanh:
-    case aten::mm:
-    case aten::min:
-    case aten::max:
-    case aten::type_as:
-    case aten::ge:
-    case aten::gt:
-    case aten::lt:
-    case aten::le:
-    case aten::eq:
-    case aten::ne:
-    case aten::neg:
-    case prim::ConstantChunk:
-    case aten::size:
-    case aten::abs:
-    case aten::sign:
-    case aten::pow:
-    case aten::relu:
-    case aten::threshold:
-    case aten::avg_pool2d:
-    case prim::AutogradAdd:
-    case prim::AutogradZero:
-    case aten::rand_like:
-    case aten::erf:
-    case aten::erfc:
-      return checkInputs(n, no_exceptions);
-    case aten::cat:
-      // check that the dimension argument is constant
-      return n->input(1)->node()->kind() == prim::Constant &&
-             n->input(0)->node()->kind() == prim::ListConstruct &&
-             // no extra nodes in between aten::cat and prim::ListConstruct
-             n->prev() == n->input(0)->node() &&
-             // check the inputs to prim::ListConstruct (not aten::cat)
-             checkInputs(n->input(0)->node(), no_exceptions);
-    case aten::clamp:
-      // the second and third args do not affect shapes
-      return checkInputs(n, std::unordered_set<size_t>{1, 2});
-    // after some optimizations we might end up with two Guards back-to-back
-    // which case we can remove the one whose input is also prim::Guard
-    case aten::_grad_sum_to_size:
-      // skip checking size argument
-      if (checkInputs(n, std::unordered_set<size_t>{1})) {
-        auto asize = n->input(1)->node();
-        if (asize->kind() == prim::Constant) {
-          return true;
-        } else if (asize->matches("aten::size(Tensor self) -> int[]")) {
-          // aten::size is effectively a constant
-          if (asize->input()
-                  ->type()
-                  ->expect<TensorType>()
-                  ->sizes()
-                  .concrete_sizes()) {
-            return true;
-          }
-        }
-      }
-      return false;
-
-    // this is checked by one of the tests in test_jit_fuser.py
-    case prim::ListUnpack: {
-      // check if the input is a constant chunk
-      // used for LSTM fusions
-      auto chunk = n->input(0)->node();
-      if (chunk->kind() != aten::chunk) {
-        return false;
-      }
-      return checkInputs(chunk, no_exceptions);
-    }
-    // this is checked by one of the tests in test_jit_fuser.py
-    case aten::broadcast_tensors: {
-      auto list_construct = n->input(0)->node();
-      if (list_construct->kind() != prim::ListConstruct) {
-        return false;
-      }
-      return checkInputs(list_construct, no_exceptions);
-    }
-    case prim::Guard:
-    case prim::GradOf:
-      return true;
-    default:
-      GRAPH_DEBUG("cannot remove ", n->kind().toQualString());
-      return false;
-    }
-  }
+     // this is checked by one of the tests in test_jit_fuser.py
+     case prim::ListUnpack: {
+       // check if the input is a constant chunk
+       // used for LSTM fusions
+       auto chunk = n->input(0)->node();
+       if (chunk->kind() != aten::chunk) {
+         return false;
+       }
+       return checkInputs(chunk, no_exceptions);
+     }
+     // this is checked by one of the tests in test_jit_fuser.py
+     case aten::broadcast_tensors: {
+       auto list_construct = n->input(0)->node();
+       if (list_construct->kind() != prim::ListConstruct) {
+         return false;
+       }
+       return checkInputs(list_construct, no_exceptions);
+     }
+     case prim::Guard:
+     case prim::GradOf:
+       return true;
+     default:
+       GRAPH_DEBUG("cannot remove ", n->kind().toQualString());
+       return false;
+   }
+ }
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
