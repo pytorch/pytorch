@@ -93,8 +93,7 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const t
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv){
-  assert(tv->domain() != nullptr);
-  return os << tv->tensor() << " -> "<<tv->domain();
+  return os << tv->domain();
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){

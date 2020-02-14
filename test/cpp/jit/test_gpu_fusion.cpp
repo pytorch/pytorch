@@ -271,8 +271,7 @@ void testGPU_FusionTVSplit() {
 
   const TensorView *tv = split(t, 2, 2);
 
-  std::cout<<"Split view: "<<tv<<std::endl;
-  std::cout<<"Fusion code: "<<fusion<<std::endl;
+  std::cout<<"Split fusion output: "<<fusion<<std::endl;
   
 }
 
@@ -285,8 +284,7 @@ void testGPU_FusionTVMerge() {
 
   const TensorView *tv = merge(t, 1);
 
-  std::cout<<"Merged view: "<<tv<<std::endl;
-  std::cout<<"Fusion code: "<<fusion<<std::endl;
+  std::cout<<"Merge fusion output: "<<fusion<<std::endl;
   
 }
 
