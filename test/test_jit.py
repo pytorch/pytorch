@@ -4026,7 +4026,7 @@ class TestScript(JitTestCase):
             def sym_shape(a, b, c):
                 t1 = a + b
                 t2 = t1 * c
-                return t1 - t2
+                return t2
 
             j = torch.jit.script(sym_shape)
             #j = torch.jit.script(simple_add)
@@ -4043,7 +4043,7 @@ class TestScript(JitTestCase):
             # (7, 5, 1)
             # (7, 5, 1)
 
-            j(a, a, b)
+            j(b, b, a)
             j(a, b, a)
             j(a, a, b)
             #j(a, b, b)

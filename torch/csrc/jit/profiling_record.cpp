@@ -77,7 +77,7 @@ static void unprofileBlock(Block* start_block) {
 }
 
 int64_t ProfilingRecord::toSymbol(size_t val) {
-  if (dims2symbols_.count(val) == 0) {
+  if (dims2symbols_.count(val) == 0 || val == 1) {
     int64_t new_sym = -dims2symbols_.size() - 1;
     dims2symbols_[val] = new_sym;
     return new_sym;
@@ -130,7 +130,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
           auto symbols = fmap(t.toTensor().sizes(), [this](size_t dim) {
             return this->toSymbol(dim);
           });
-          pttp = pttp->withSizesStrides(symbols, std::vector<int64_t> {} /* properly compute contiguity instead of just strides */);
+          pttp = pttp->withSymbolicShapes(symbols);
           first = false;
           pno->setType(pttp);
         } else {

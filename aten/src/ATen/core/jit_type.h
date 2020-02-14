@@ -384,14 +384,22 @@ struct CAFFE2_API TensorType : public Type {
     return TensorTypePtr(new TensorType(t));
   }
 
-  static TensorTypePtr create(c10::optional<at::ScalarType> scalar_type,
-                              c10::optional<Device> device,
-                              const VaryingShape &sizes,
-                              const VaryingStrides &strides,
-                              c10::optional<bool> requires_grad,
-                              c10::optional<bool> undefined = false) {
-    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides,
-                                        requires_grad, undefined));
+  static TensorTypePtr create(
+      c10::optional<at::ScalarType> scalar_type,
+      c10::optional<Device> device,
+      const VaryingShape& sizes,
+      const VaryingStrides& strides,
+      const VaryingStrides& contiguity,
+      c10::optional<bool> requires_grad,
+      c10::optional<bool> undefined = false) {
+    return TensorTypePtr(new TensorType(
+        scalar_type,
+        device,
+        sizes,
+        strides,
+        contiguity,
+        requires_grad,
+        undefined));
   }
 
   static TensorTypePtr create(
@@ -404,6 +412,7 @@ struct CAFFE2_API TensorType : public Type {
         device,
         VaryingShape(dim),
         VaryingShape(dim),
+        VaryingShape(dim),
         requires_grad);
   }
 
@@ -413,11 +422,14 @@ struct CAFFE2_API TensorType : public Type {
       at::ScalarType scalar_type,
       at::Device device,
       at::IntArrayRef sizes) {
+    auto strides = contiguousStridesOf(sizes);
+    auto contNstrides = contiguityStrideIndices(sizes, strides);
     return create(
         scalar_type,
         device,
         VaryingShape(sizes),
-        VaryingShape(contiguousStridesOf(sizes)),
+        VaryingStrides(std::get<1>(contNstrides)),
+        VaryingStrides(std::get<0>(contNstrides)),
         c10::nullopt);
   }
   static TensorTypePtr create(
@@ -425,11 +437,13 @@ struct CAFFE2_API TensorType : public Type {
       at::Device device,
       at::IntArrayRef sizes,
       at::IntArrayRef strides) {
+    auto contNstrides = contiguityStrideIndices(sizes, strides);
     return create(
         scalar_type,
         device,
         VaryingShape(sizes),
-        c10::VaryingShape(strides),
+        VaryingStrides(std::get<1>(contNstrides)),
+        VaryingStrides(std::get<0>(contNstrides)),
         c10::nullopt);
   }
   static TypePtr fromNumberType(TypePtr typ);
@@ -445,6 +459,11 @@ struct CAFFE2_API TensorType : public Type {
   const VaryingStrides& strides() const {
     return strides_;
   }
+
+  const VaryingStrides& contiguity() const {
+    return contiguity_;
+  }
+
   c10::optional<at::Device> device() const {
     return device_;
   }
@@ -467,9 +486,9 @@ struct CAFFE2_API TensorType : public Type {
 
     auto rt = rhs.expect<TensorType>();
     return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-           strides() == rt->strides() && device() == rt->device() &&
-           requiresGrad() == rt->requiresGrad() &&
-           undefined() == rt->undefined();
+        strides() == rt->strides() && contiguity() == rt->contiguity() &&
+        device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
+        undefined() == rt->undefined();
   }
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
@@ -512,8 +531,16 @@ struct CAFFE2_API TensorType : public Type {
       at::IntArrayRef sizes,
       at::IntArrayRef strides) const {
     auto cloned = clone();
+    auto contNstrides = contiguityStrideIndices(sizes, strides);
     cloned->sizes_ = VaryingShape(sizes);
-    cloned->strides_ = VaryingStrides(strides);
+    cloned->contiguity_ = VaryingStrides(std::get<0>(contNstrides));
+    cloned->strides_ = VaryingStrides(std::get<1>(contNstrides));
+    return cloned;
+  }
+
+  TensorTypePtr withSymbolicShapes(at::IntArrayRef sizes) const {
+    auto cloned = clone();
+    cloned->sizes_ = VaryingShape(sizes);
     return cloned;
   }
 
@@ -532,6 +559,7 @@ struct CAFFE2_API TensorType : public Type {
   TensorTypePtr contiguous() const {
     auto cloned = clone();
     if (auto concrete_sizes = sizes().concrete_sizes()) {
+      // TODO: fix
       cloned->strides_ = VaryingShape(contiguousStridesOf(*concrete_sizes));
     } else  {
       cloned->strides_ = VaryingShape(sizes().size());
@@ -587,28 +615,14 @@ struct CAFFE2_API TensorType : public Type {
   static const TypeKind Kind = TypeKind::TensorType;
 
  private:
-  TensorType(const at::Tensor& tensor)
-      : Type(TypeKind::TensorType),
-        scalar_type_(tensor.scalar_type()),
-        device_(tensor.device()),
-        sizes_(tensor.sizes().size()),
-        strides_(tensor.sizes().size()),
-        requires_grad_(tensor.requires_grad()),
-        undefined_(!tensor.defined()) {
-    // any updates to `isSubtypeOf`, TensorType c-tor or
-    // `isCompatibleWithInCurrentExecutionContext` need to maintain the
-    // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
-    //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
-    if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
-      sizes_ = tensor.sizes().vec();
-      strides_ = tensor.strides().vec();
-    }
-  }
+  TensorType(const at::Tensor& tensor);
+
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
       const VaryingShape& sizes,
       const VaryingStrides& strides,
+      const VaryingStrides& contiguity,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false)
       : Type(TypeKind::TensorType),
@@ -616,12 +630,19 @@ struct CAFFE2_API TensorType : public Type {
         device_(device),
         sizes_(sizes),
         strides_(strides),
+        contiguity_(contiguity),
         requires_grad_(requires_grad),
         undefined_(undefined) {}
 
   TensorTypePtr clone() const {
     return TensorTypePtr(new TensorType(
-        scalar_type_, device_, sizes_, strides_, requires_grad_, undefined_));
+        scalar_type_,
+        device_,
+        sizes_,
+        strides_,
+        contiguity_,
+        requires_grad_,
+        undefined_));
   }
 
   static std::vector<int64_t> contiguousStridesOf(at::IntArrayRef sizes) {
@@ -635,10 +656,14 @@ struct CAFFE2_API TensorType : public Type {
     return strides;
   }
 
+  static std::tuple<std::vector<int64_t>, std::vector<int64_t>>
+  contiguityStrideIndices(at::IntArrayRef sizes, at::IntArrayRef strides);
+
   c10::optional<at::ScalarType> scalar_type_;
   c10::optional<at::Device> device_;
   VaryingShape sizes_;
   VaryingStrides strides_;
+  VaryingStrides contiguity_;
   c10::optional<bool> requires_grad_;
   // we exploit the fact certain tensors must be zero in the autograd to
   // optimize gradient computation. Such zero tensors are currently implemented
