@@ -116,7 +116,9 @@ DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .def("${schema_string}", CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.def("${schema_string}", torch::dispatch(DispatchKey::${Backend}TensorId, CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
+.def("${schema_string}", torch::dispatch(
+    DispatchKey::${Backend}TensorId,
+    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .def("${schema_string}", &TypeDefault::${type_wrapper_name})
