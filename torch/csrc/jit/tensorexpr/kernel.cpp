@@ -630,7 +630,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       Var index = tensor.arg(0);
       Var outer;
       Var inner;
-      tensor.SplitWithMask(index, 1024, true, &outer, &inner);
+      tensor.SplitWithMask(index, 512, true, &outer, &inner);
       tensor.GPUExecConfig({outer}, {inner});
     }
   }
