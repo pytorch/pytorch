@@ -3,7 +3,6 @@ import re
 import yaml
 import pprint
 import sys
-import copy
 
 try:
     # use faster C loader if available
