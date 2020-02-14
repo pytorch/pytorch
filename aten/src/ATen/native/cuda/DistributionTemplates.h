@@ -207,8 +207,8 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_range_kernel(TensorIterator& iter, RNG* gen) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_full_64_range_kernel_cuda", [&] {
+void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
         std::is_same<scalar_t, float>::value) { // and half?
@@ -226,7 +226,7 @@ void random_full_64_range_kernel(TensorIterator& iter, RNG* gen) {
         },
         random_func);
     } else {
-      TORCH_CHECK(false, "random_full_64_range_kernel_cuda handles only int64, double and float");
+      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cuda handles only int64, double and float");
     }
   });
 }
@@ -237,7 +237,7 @@ struct RandomFromToKernel {
     random_from_to_kernel(iter, range, base, gen);
   }
   void operator()(TensorIterator& iter, RNG* gen) {
-    random_full_64_range_kernel(iter, gen);
+    random_full_64_bits_range_kernel(iter, gen);
   }
 };
 
@@ -309,6 +309,8 @@ void random_kernel(TensorIterator& iter, RNG* gen) {
           random_func);
       }
     });
+  } else {
+    TORCH_CHECK(false, "random_kernel_cuda handles only integral, floating-point and boolean types");
   }
 }
 

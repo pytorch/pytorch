@@ -49,7 +49,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   return futPtr;
 }
 
-std::shared_ptr<UserRRef> remoteTorchscript(
+c10::intrusive_ptr<UserRRef> remoteTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,

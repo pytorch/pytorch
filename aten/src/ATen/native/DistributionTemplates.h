@@ -14,6 +14,10 @@ namespace templates {
 
 template<typename scalar_t>
 int64_t update_from(int64_t from) {
+  static_assert(
+    std::is_floating_point<scalar_t>::value ||
+    std::is_same<scalar_t, at::Half>::value ||
+    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
   const auto from_plus_1 = static_cast<int64_t>(static_cast<scalar_t>(from + 1));
   if (from_plus_1 < from) {
     int64_t from_ = std::abs(from + 1);
@@ -26,6 +30,10 @@ int64_t update_from(int64_t from) {
 
 template<typename scalar_t>
 int64_t update_to(int64_t to) {
+  static_assert(
+    std::is_floating_point<scalar_t>::value ||
+    std::is_same<scalar_t, at::Half>::value ||
+    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
   const auto to_minus_1 = static_cast<int64_t>(static_cast<scalar_t>(to - 1));
   if (to_minus_1 >= to) {
     int64_t to_ = std::abs(to - 1);
@@ -60,24 +68,29 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         TORCH_CHECK(from < to, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " >= to=", to);
       });
     }
-    range = to - from;
+    range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
     // [from, std::numeric_limits<int64_t>::max()]
-    AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] {
-      if (std::is_same<scalar_t, bool>::value) {
-        range = 2;
-      } else {
-        const auto t_max_val = std::numeric_limits<scalar_t>::max();
-        const auto int64_max_val = static_cast<int64_t>(static_cast<scalar_t>(std::numeric_limits<int64_t>::max()));
-        const int64_t to_inc = std::is_floating_point<scalar_t>::value ? int64_max_val : static_cast<int64_t>(t_max_val);
-        if (std::is_floating_point<scalar_t>::value) {
-          from = update_from<scalar_t>(from);
-          TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
-        }
+    if (isFloatingType(iter.dtype())) {
+      AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "random_from_to_range_calc", [&] { 
+        const int64_t to_inc = std::numeric_limits<scalar_t>::max() > std::numeric_limits<int64_t>::max() ? std::numeric_limits<int64_t>::max() : static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
+        from = update_from<scalar_t>(from);
+        TORCH_CHECK(from < to_inc, "random_ expects 'from' casted to dtype to be less than or equal to 'to_inc' casted to dtype, but got from=", from, " > to_inc=", to_inc);
         range = to_inc - from + 1;
-      }
-    });
+      });
+    } else if (isIntegralType(iter.dtype(), /*includeBool=*/true)) {
+      AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, self.scalar_type(), "random_from_to_range_calc", [&] {
+        if (std::is_same<scalar_t, bool>::value) {
+          range = 2;
+        } else {
+          const auto to_inc = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
+          range = to_inc - from + 1;
+        }
+      });
+    } else {
+      TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
+    }
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else {
     // [std::numeric_limits<int64_t>::lowest(), std::numeric_limits<int64_t>::max()]

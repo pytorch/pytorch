@@ -123,7 +123,7 @@ DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(normal_stub);
 DEFINE_DISPATCH(random_stub);
 DEFINE_DISPATCH(random_from_to_stub);
-DEFINE_DISPATCH(random_full_64_range_stub);
+DEFINE_DISPATCH(random_full_64_bits_range_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -285,7 +285,7 @@ struct RandomFromToStub {
     random_from_to_stub(iter.device_type(), iter, range, from, gen);
   }
   void operator()(TensorIterator& iter, RNG* gen) {
-    random_full_64_range_stub(iter.device_type(), iter, gen);
+    random_full_64_bits_range_stub(iter.device_type(), iter, gen);
   }
 };
 

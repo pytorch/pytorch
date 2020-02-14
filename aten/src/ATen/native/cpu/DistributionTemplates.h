@@ -36,8 +36,8 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // from(inclusive) = std::numeric_limits<int64_t>::lowest()
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
-void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random_full_64_range_kernel_cpu", [&] {
+void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* generator) {
+  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
@@ -46,7 +46,7 @@ void random_full_64_range_kernel(TensorIterator& iter, RNG* generator) {
         return static_cast<int64_t>(generator->random64()); // use all 64 bits and cast it to signed(!!!) int64_t and only after that to scalar_t implicitly
       });
     } else {
-      TORCH_CHECK(false, "random_full_64_range_kernel_cpu handles only int64, double and float");
+      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double and float");
     }
   });
 }
@@ -57,7 +57,7 @@ struct RandomFromToKernel {
     random_from_to_kernel(iter, range, base, gen);
   }
   void operator()(TensorIterator& iter, RNG* gen) {
-    random_full_64_range_kernel(iter, gen);
+    random_full_64_bits_range_kernel(iter, gen);
   }
 };
 
@@ -92,6 +92,8 @@ void random_kernel(TensorIterator& iter, RNG* generator) {
         });
       }
     });
+  } else {
+    TORCH_CHECK(false, "random_kernel_cpu handles only integral, floating-point and boolean types");
   }
 }
 
