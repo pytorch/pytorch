@@ -944,7 +944,7 @@ bool TensorIterator::fast_set_up() {
             op.tensor = at::empty_strided(shape_, operands_[i_defined].tensor.strides(), op.options());
             op.current_dtype = op.target_dtype;
           }
-          else if (op.is_output && resize_outputs_ && !op.is_read_write) {
+          else if (resize_outputs_ && !op.is_read_write) {
             // Check whether output tensor needs restride, output's stride can be different than input tensors
             if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
               op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
@@ -994,10 +994,7 @@ FastSetupType TensorIterator::compute_fast_setup_type() {
     return FastSetupType::CONTIGUOUS;
   }
   if (is_channels_last) {
-    if (requires_channels_last_output_) {
       return FastSetupType::CHANNELS_LAST;
-    }
-    return FastSetupType::NONE;
   }
   if (is_non_overlapping_and_dense) {
     int64_t prev = -1;
