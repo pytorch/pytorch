@@ -1814,16 +1814,19 @@ struct to_ir {
     }
   }
 
-  const char* getAugMagicMethod(const AugAssign& stmt) {
+  // Get a pair of <in place magic method name, out of place magic method name>
+  // since the out of place method is called if the in place method is not
+  // present
+  std::pair<const char*, const char*> getAugMagicMethod(const AugAssign& stmt) {
     switch (stmt.aug_op()) {
       case '+':
-        return "__iadd__";
+        return std::make_pair("__iadd__", "__add__");
       case '-':
-        return "__isub__";
+        return std::make_pair("__isub__", "__sub__");
       case '/':
-        return "__itruediv__";
+        return std::make_pair("__itruediv__", "__truediv__");
       case '*':
-        return "__imul__";
+        return std::make_pair("__imul__", "__mul__");
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1884,8 +1887,19 @@ struct to_ir {
     } else if (lhsValue->type()->kind() == TypeKind::ClassType) {
       // Call `__iadd__` so updates happen in place on class types
       // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
-      auto magic_method_name = getAugMagicMethod(stmt);
+      const char* magic_method_name;
+      const char* in_place_method_name;
+      const char* out_of_place_method_name;
+      std::tie(in_place_method_name, out_of_place_method_name) =
+          getAugMagicMethod(stmt);
       const auto rhs = emitExpr(stmt.rhs());
+
+      if (lhsValue->type()->expect<ClassType>()->getMethod(
+              in_place_method_name)) {
+        magic_method_name = in_place_method_name;
+      } else {
+        magic_method_name = out_of_place_method_name;
+      }
 
       // Insert call to magic method
       auto sugared_magic_method = makeMagic(

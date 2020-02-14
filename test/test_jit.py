@@ -5276,11 +5276,26 @@ def foo(x):
                 # type: (SomeClass) -> bool
                 return self.num == other.num
 
+        @torch.jit.script
+        class SomeOutOfPlaceClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __add__(self, x):
+                # type: (int)
+                self.num = x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
         class Child(nn.Module):
             def __init__(self):
                 super().__init__()
                 self.x = 2
                 self.o = SomeClass()
+                self.oop = SomeOutOfPlaceClass()
                 self.list = [1, 2, 3]
 
         class A(nn.Module):
@@ -5291,8 +5306,11 @@ def foo(x):
             def forward(self):
                 self.child.x += 1
                 self.child.o += 5
-                self.child.list += [4, 5, 6]
-                return self.child.x, self.child.o, self.child.list
+                self.child.oop += 5
+                some_list = [1, 2]
+                self.child.list += some_list
+                self.child.list *= 2
+                return self.child.x, self.child.o, self.child.list, self.child.oop
 
         a = A()
         sa = torch.jit.script(A())
