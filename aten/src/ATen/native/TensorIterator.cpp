@@ -945,6 +945,12 @@ bool TensorIterator::fast_set_up() {
             op.current_dtype = op.target_dtype;
           }
           else if (resize_outputs_ && !op.is_read_write) {
+            // Note: This restride logic is for some of the tensor types, eg. qtensor.
+            //       These tensor class allocate a contigious output tensor directly no matter
+            //       what memory format the input tensors are. So we need to restride output here for fast setup.
+            //       We will revisit this logic when doing the TensorIterator refactor work and
+            //       it would probably be better to move this logic out of TensorIterator.
+
             // Check whether output tensor needs restride, output's stride can be different than input tensors
             if (i != i_defined && !op.tensor.strides().equals(operands_[i_defined].tensor.strides())) {
               op.tensor.as_strided_(op.tensor.sizes(), operands_[i_defined].tensor.strides());
