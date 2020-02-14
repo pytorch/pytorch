@@ -334,6 +334,47 @@ void testGPU_FusionTVReorder() {
 
 }
 
+void testGPU_FusionEquality(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Float* fval1 = new Float();
+  const Float* fval1_copy = fval1;
+  Float* fval2 = new Float();
+  Float* fone = new Float(1.0);
+
+  TORCH_CHECK(fval1->same_as(fval1_copy));
+  TORCH_CHECK(!fval1->same_as(fval2));
+  TORCH_CHECK(!fone->same_as(fval1));
+  TORCH_CHECK(fone->same_as(new Float(1.0)));
+
+  Int* ival1 = new Int();
+  const Int* ival1_copy = ival1;
+  Int* ival2 = new Int();
+  Int* ione = new Int(1);
+
+  TORCH_CHECK(ival1->same_as(ival1_copy));
+  TORCH_CHECK(!ival1->same_as(ival2));
+  TORCH_CHECK(!ione->same_as(ival1));
+  TORCH_CHECK(ione->same_as(new Int(1)));
+
+  const BinaryOp* add1 = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
+  const BinaryOp* add1_copy = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
+  const BinaryOp* sub1 = new BinaryOp(BinaryOpType::Sub, new Float(), fval1, ival1);
+
+  const UnaryOp* neg1 = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
+  const UnaryOp* neg2 = new UnaryOp(UnaryOpType::Neg, new Float(), fval2);
+  const UnaryOp* neg1_copy = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
+
+  TORCH_CHECK(add1->same_as(add1_copy));
+  TORCH_CHECK(!add1->same_as(sub1));
+
+  TORCH_CHECK(neg1->same_as(neg1_copy));
+  TORCH_CHECK(!static_cast<const Expr*>(neg1)->same_as(add1));
+  TORCH_CHECK(!neg1->same_as(neg2));
+
+}
+
 void testGPU_Fusion() {}
 
 }} // torch::jit

@@ -115,12 +115,14 @@ struct TORCH_API Statement {
   Fusion* fusion() const noexcept { return fusion_; }
   StmtNameType name() const noexcept { return name_; }
 
+  virtual bool same_as(const Statement* other) const {
+    return this == other;
+  }
+
 protected:
   StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
   Fusion* fusion_ = nullptr;
 };
-
-TORCH_API std::ostream& operator<<(std::ostream& out, const Statement* const stmt);
 
 /*
 * A Val represents a "value." These are objects, like tensors, scalars, and
@@ -155,6 +157,8 @@ public:
 
   const Expr* getOrigin();
 
+  bool same_as(const Val* other) const { return this == other;}
+
 protected:
   const ValType vtype_;
   const DataType dtype_;
@@ -171,10 +175,10 @@ struct TORCH_API IRInputOutput {
   const std::deque<const Val*>& inputs() const noexcept { return inputs_; }
   const std::deque<const Val*>& outputs() const noexcept{ return outputs_; }
 
-  const Val* getInput(const std::deque<const Val*>::size_type idx) const {
+  const Val* input(const std::deque<const Val*>::size_type idx) const {
     return inputs_[idx];
   }
-  const Val* getOutput(const std::deque<const Val*>::size_type idx) const {
+  const Val* output(const std::deque<const Val*>::size_type idx) const {
     return outputs_[idx];
   }
 
@@ -250,6 +254,12 @@ struct TORCH_API Float : public Val {
   bool isConst() const { return maybe_value_.has_value(); }
   c10::optional<float> value() const noexcept { return maybe_value_; }
 
+  virtual bool same_as(const Float* other) const {
+    if(isConst() && other->isConst())
+      return *value() == *(other->value());
+    return this == other;
+  }
+
 private:
   c10::optional<float> maybe_value_;
 };
@@ -275,6 +285,12 @@ struct TORCH_API Int : public Val {
   bool isSymbolic() const { return !(maybe_value_.has_value()); }
   bool isConst() const { return maybe_value_.has_value(); }
   c10::optional<int> value() const noexcept { return maybe_value_; }
+
+  virtual bool same_as(const Int* other) const {
+    if(isConst() && other->isConst())
+      return *value() == *(other->value());
+    return this == other;
+  }
 
 private:
   c10::optional<int> maybe_value_;
@@ -311,6 +327,18 @@ public:
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
   ExprType type() const noexcept { return type_; }
 
+  virtual bool same_as(const Expr* other) const {
+    if(getExprType() != other->getExprType())
+      return false;
+    if(inputs().size() != other->inputs().size()
+    || outputs().size() != other->outputs().size())
+      return false;
+    for(int i=0; i<inputs().size(); i++){
+      if(!input(i)->same_as(other->input(i)))
+        return false;
+    }
+    return true;
+  }
 
 private:
   ExprType type_;
@@ -334,6 +362,12 @@ struct TORCH_API UnaryOp : public Expr {
   const Val* in()  const noexcept { return in_; }
   
   UnaryOpType type() const noexcept { return unary_op_type_; }
+
+  bool same_as(const UnaryOp* other) const {
+    if(this->type() != other->type())
+      return false;
+    return static_cast<const Expr*>(this)->same_as(other);
+  }
 
 private:
   const UnaryOpType unary_op_type_;
@@ -361,6 +395,12 @@ struct TORCH_API BinaryOp : public Expr {
   const Val* rhs() const noexcept { return rhs_; }
   
   BinaryOpType type() const noexcept { return binary_op_type_; }
+
+  bool same_as(const BinaryOp* other) const {
+    if(type() != other->type())
+      return false;
+    return static_cast<const Expr*>(this)->same_as(other);
+  }
 
 private:
   const BinaryOpType binary_op_type_;
