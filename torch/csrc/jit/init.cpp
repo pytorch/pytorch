@@ -54,6 +54,7 @@
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/python_tree_views.h>
+#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <c10/macros/Export.h>
@@ -380,6 +381,14 @@ void initJITBindings(PyObject* module) {
               return match.type();
             }
             return nullptr;
+          })
+      .def(
+          "_jit_get_trigger_value",
+          [](const std::string& trigger_name) {
+            using namespace torch::jit::tensorexpr;
+            ExecutionTrigger* trigger =
+                ExecutionTriggerList::GetInstance().FindByName(trigger_name);
+            return trigger->value();
           })
       .def(
           "_jit_fuser_get_fused_kernel_code",

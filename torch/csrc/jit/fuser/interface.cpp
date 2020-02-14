@@ -15,6 +15,9 @@ namespace detail {
 // Note: CPU fusion is currently disabled due to test flakiness
 bool cpu_fuser_enabled = false;
 
+// TODO: DO-NOT-SUBMIT-TO-MASTER: change this to true when moving to master.
+bool gpu_fuser_enabled = false;
+
 } // namespace detail
 
 int64_t registerFusion(const Node* fusion_group) {
@@ -33,7 +36,8 @@ bool canFuseOnCPU() {
 }
 
 bool canFuseOnGPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CUDA);
+  return fuser::hasFusionBackend(at::DeviceType::CUDA) &&
+      detail::gpu_fuser_enabled;
 }
 
 void overrideCanFuseOnCPU(bool value) {
