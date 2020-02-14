@@ -198,23 +198,55 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a) -> scalar_t {
-      return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec one_vec(static_cast<scalar_t>(1));
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
+          return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+          auto cmp = (a > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+          }
+        });
   });
 }
 
 void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a, scalar_t b) -> scalar_t {
-      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
+          return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
+          auto cmp = (b > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+          }
+        }
+    );
   });
 }
 
