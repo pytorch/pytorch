@@ -63,7 +63,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   void start() override;
 
-  void shutdown() override;
+  void shutdownImpl() override;
 
   ~ProcessGroupAgent() override;
 

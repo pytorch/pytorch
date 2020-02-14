@@ -47,8 +47,4 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   return out;
 }
 
-Tensor dist_cuda(const Tensor &self, const Tensor& other, Scalar p){
-    return at::norm(self - other, p);
-}
-
 }}  // namespace at::native
