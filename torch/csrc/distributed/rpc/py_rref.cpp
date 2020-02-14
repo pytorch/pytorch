@@ -156,6 +156,13 @@ PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   return PyRRef(std::move(rref));
 }
 
+c10::IValue PyRRef::toIValue() {
+  // cast to RRefInterface to hold it into IValue
+  auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
+  return IValue(rrefPtr);
+}
+
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
