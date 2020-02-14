@@ -2,12 +2,11 @@
 #include <ATen/native/BinaryOps.h>
 
 #include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/Parallel.h>
+#include <ATen/native/cpu/Loops.h>
 
 #include <torch/library.h>
 
@@ -803,34 +802,15 @@ bool equal_cpu(const Tensor& self, const Tensor& other) {
     return false;
   }
   std::atomic<bool> equal{true};
-  if (self.is_contiguous() && other.is_contiguous()) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBool, kBFloat16, self.scalar_type(), "equal_cpu", [&]() {
-      int64_t numel = self.numel();
-      scalar_t *sp = self.data_ptr<scalar_t>();
-      scalar_t *op = other.data_ptr<scalar_t>();
-
-      at::parallel_for(0, numel, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-        for (auto i = start; i < end; ++i) {
-          if (!equal) {
-            break;
-          }
-          if (sp[i] != op[i]) {
-            equal = false;
-            break;
-          }
-        }
-      });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBool, self.scalar_type(), "equal_cpu", [&]() {
+    Tensor result;
+    auto iter = TensorIterator::binary_op(result, self, other);
+    cpu_kernel(iter,[&](scalar_t x, scalar_t y) -> scalar_t {
+      if (x != y) {
+        equal = false;
+      }
     });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBool, kBFloat16, self.scalar_type(), "equal_cpu", [&]() {
-      CPU_tensor_apply2<scalar_t, scalar_t>(
-        self, other, [&](const scalar_t& x, const scalar_t& y) {
-          if (x != y) {
-            equal = false;
-          }
-      });
-    });
-  }
+  });
   return equal.load();
 }
 
