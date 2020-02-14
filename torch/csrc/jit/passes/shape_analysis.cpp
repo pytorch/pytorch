@@ -353,7 +353,7 @@ class ShapePropagator {
   }
 
   bool canPropagateShapeByRunningIt(Node* node) {
-    if (cannot_propagate_shape_by_running_it.find(node)) {
+    if (node->isMemberOf(cannot_propagate_shape_by_running_it)) {
       return false;
     }
 
@@ -393,7 +393,7 @@ class ShapePropagator {
   bool PropagateShapeOnNodeByRunningIt(Node* node) {
     if (!canPropagateShapeByRunningIt(node))
       return false;
-    auto op = getOperation(node);
+    auto op = node->getOperation();
     Stack stack;
 
     for (auto input : node->inputs()) {
@@ -494,7 +494,7 @@ class ShapePropagator {
       list_type = input_base_type->cast<ListType>();
     }
 
-    at::ScalarType default_type = scalarTypeFromJitType(input_base_type);
+    at::optional<at::ScalarType> default_type = tryScalarTypeFromJitType(input_base_type);
     if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
       auto inp = toIValue(node->inputs().at(*grad_index));
       if (inp == c10::nullopt) {
@@ -576,10 +576,12 @@ class ShapePropagator {
         }
         return;
       }
-      case prim::ImplicitTensorToNum:
       case aten::Bool:
       case aten::Int:
       case aten::Float:
+      case aten::ScalarImplicit:
+      case aten::FloatImplicit:
+      case aten::IntImplicit:
         return; // correct num type is already set
       case prim::NumToTensor: {
         TypePtr typ = node->input()->type();
@@ -1504,7 +1506,7 @@ class ShapePropagator {
     // First, try to match one of the registered formulas to their operator
     // sets.
     for (auto& entry : shape_formulas) {
-      if (entry.first.find(node)) {
+      if (node->isMemberOf(entry.first)) {
         auto types = entry.second(node);
         if (types.empty()) {
           return false;
