@@ -15,8 +15,8 @@ import random
 cat_configs_short = op_bench.config_list(
     attr_names=['sizes', 'N', 'dim'],
     attrs=[
-        [(1,    1,      1), 2, 0],
-        [(512,  512,    2), 2, 1],
+        [(1,    1,      1), 2, 0], # noqa
+        [(512,  512,    2), 2, 1], # noqa
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
@@ -27,22 +27,22 @@ cat_configs_short = op_bench.config_list(
 cat_configs_long = op_bench.config_list(
     attr_names=['sizes', 'N', 'dim'],
     attrs=[
-        [(2**10,    2**10,      2), 2, 0],
-        [(2**10+1,  2**10-1,    2), 2, 1],
-        [(2**10,    2**10,      2), 2, 2],
+        [(2**10,    2**10,      2), 2, 0], # noqa
+        [(2**10+1,  2**10-1,    2), 2, 1], # noqa
+        [(2**10,    2**10,      2), 2, 2], # noqa
 
-        [[ lambda: random.randint(2**6, 2**7),      2**7-17,    2**6+1],
+        [[ lambda: random.randint(2**6, 2**7),      2**7-17,    2**6+1], # noqa
             5, 0],
-        [[ 2**6+2**5,   lambda: random.randint(2**6, 2**7),     2**6],
+        [[ 2**6+2**5,   lambda: random.randint(2**6, 2**7),     2**6], # noqa
             5, 1],
-        [[ 2**7,        2**6,       lambda: random.randint(2**6, 2**7)],
+        [[ 2**7,        2**6,       lambda: random.randint(2**6, 2**7)], # noqa
             5, 2],
 
-        [[lambda: random.randint(2**5, 2**6),       2**5,       2**6],
-              50, 0],
-        [[2**5,         lambda: random.randint(2**5, 2**6),     2**6],
+        [[lambda: random.randint(2**5, 2**6),       2**5,       2**6], # noqa
+            50, 0],
+        [[2**5,         lambda: random.randint(2**5, 2**6),     2**6], # noqa
             50, 1],
-        [[2**5+1,       2**6+1,         lambda: random.randint(2**5, 2**6)],
+        [[2**5+1,       2**6+1,         lambda: random.randint(2**5, 2**6)], # noqa
             50, 2],
     ],
     cross_product_configs={
@@ -55,9 +55,9 @@ cat_configs_long = op_bench.config_list(
 cat_configs_multidim = op_bench.config_list(
     attr_names=['sizes', 'N', 'dim'],
     attrs=[
-        [(2**6,     2**5,   2**2,   2**4,   2**5), 2, 2],
-        [(2**4,     2**5,   2**2,   2**4,   2**5), 8, 2],
-        [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17, 4],
+        [(2**6,     2**5,   2**2,   2**4,   2**5), 2, 2], # noqa
+        [(2**4,     2**5,   2**2,   2**4,   2**5), 8, 2], # noqa
+        [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17, 4], # noqa
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],
