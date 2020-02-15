@@ -244,9 +244,21 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
-#else
+#else // USE_MOBILE_CLASSTYPE
+
+// This file exists because we need to reference module.h, which we can't from
+// c10. Sigh...
+FunctionType::FunctionType(Function* function)
+    : NamedType(TypeKind::FunctionType, "") {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented on mobile");
+}
+
+ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented on mobile");
+}
+
 bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   return Type::isSubtypeOfExt(rhs, why_not);
 }
-#endif
+#endif // USE_MOBILE_CLASSTYPE
 } // namespace c10
