@@ -155,19 +155,6 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
-inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, Tensor result) {
-  pybind11::gil_scoped_release no_gil;
-  OptionalDeviceGuard device_guard(device_of(result));
-  return at::range_out(result, start, end, step);
-}
-
-inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const TensorOptions& options) {
-  torch::utils::maybe_initialize_cuda(options);
-  pybind11::gil_scoped_release no_gil;
-  DeviceGuard device_guard(options.device());
-  return torch::range(start, end, step, options);
-}
-
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
@@ -366,7 +353,6 @@ static PyMethodDef torch_functions[] = {
   {"hsmm", (PyCFunction)(void(*)(void))THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"nonzero", (PyCFunction)(void(*)(void))THPVariable_nonzero, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"randint", (PyCFunction)(void(*)(void))THPVariable_randint, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"range", (PyCFunction)(void(*)(void))THPVariable_range, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)(void(*)(void))THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"sparse_coo_tensor", (PyCFunction)(void(*)(void))THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)(void(*)(void))THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},

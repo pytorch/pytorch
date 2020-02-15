@@ -656,24 +656,6 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Tensor range(
-    Scalar start,
-    Scalar end,
-    Scalar step,
-    const TensorOptions& options) {
-  Tensor result = at::empty({0}, options);
-  return at::range_out(result, start, end, step);
-}
-
-Tensor range(
-    Scalar start,
-    Scalar end,
-    const TensorOptions& options) {
-  return at::native::range(start, end, 1, options);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
