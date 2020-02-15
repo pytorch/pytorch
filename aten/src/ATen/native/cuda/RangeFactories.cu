@@ -13,7 +13,7 @@
 namespace {
 
 constexpr int num_threads = C10_WARP_SIZE * 2;
-constexpr int thread_work_size = 4;
+constexpr int thread_work_size = 1;
 constexpr int block_work_size = thread_work_size * num_threads;
 
 template<typename index_t, typename func_t>

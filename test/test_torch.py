@@ -10517,7 +10517,7 @@ class TestTorchDeviceType(TestCase):
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
 
-    @skipIf(not TEST_LARGE_TENSOR)
+    @unittest.skipIf(not TEST_LARGE_TENSOR)
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
