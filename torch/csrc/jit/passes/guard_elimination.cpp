@@ -247,6 +247,16 @@ private:
     case aten::erf:
     case aten::erfc:
       return checkInputs(n, no_exceptions);
+    case aten::slice:
+      return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+             // check that the dimension argument is constant
+             n->input(1)->node()->kind() == prim::Constant &&
+             // the start offset is constant
+             n->input(2)->node()->kind() == prim::Constant &&
+             // the end offset is constant
+             n->input(3)->node()->kind() == prim::Constant &&
+             // the stride is constant
+             n->input(4)->node()->kind() == prim::Constant;
     case aten::cat:
       // check that the dimension argument is constant
       return n->input(1)->node()->kind() == prim::Constant &&
