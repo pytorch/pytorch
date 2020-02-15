@@ -271,18 +271,27 @@ inline InferredType tryToInferContainerType(py::handle input) {
       element_type = *unified_type;
     }
     return InferredType(ListType::create(element_type));
-  } else {
-    // TODO: this message is not correct anymore, since this InferredType is
-    // used from a bunch of circumstances unrelated to tracing. We can re-use
-    // this instead of the attribute_failure stuff in concreteType
-    return InferredType(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
-        "are supported ",
-        "as inputs or outputs of traced functions",
-        ", but instead got value of type ",
-        py::str(input.get_type().attr("__name__")),
-        "."));
   }
+
+#ifdef USE_DISTRIBUTED
+  if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
+    auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
+    return InferredType(RRefType::create(rref_ivalue.type()));
+  }
+#else
+  AT_ERROR("RRef is only supported with the distributed package");
+#endif
+
+  // TODO: this message is not correct anymore, since this InferredType is
+  // used from a bunch of circumstances unrelated to tracing. We can re-use
+  // this instead of the attribute_failure stuff in concreteType
+  return InferredType(c10::str(
+      "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+      "are supported ",
+      "as inputs or outputs of traced functions",
+      ", but instead got value of type ",
+      py::str(input.get_type().attr("__name__")),
+      "."));
 }
 
 inline IValue toIValue(
