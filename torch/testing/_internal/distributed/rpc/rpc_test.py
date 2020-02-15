@@ -265,21 +265,16 @@ class MyScriptClass:
     def __init__(self):
         self.a = 10
 
-@torch.jit.interface
-class MyModuleInterface(torch.nn.Module):
-    def forward(self):
-        # type: () -> Tensor
-        pass
 
 class MyScriptModule(torch.jit.ScriptModule):
     def __init__(self):
         super().__init__()
-        self.a = torch.randn(10)
+        self.a = 10
 
     @torch.jit.script_method
-    def forward(self):
-        # type: () -> Tensor
-        return self.a
+    def my_method(self):
+        self.a = 11
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -826,7 +821,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_function_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
 
     @dist_init
@@ -834,7 +829,7 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             fut.wait()
 
     @dist_init
@@ -852,12 +847,11 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function_exception(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
+        with self.assertRaisesRegex(RuntimeError, r"one_arg\(\) expected at most"):
             ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
 
         with self.assertRaisesRegex(
-            Exception, r"one_arg\(\) expected at most"
+            RuntimeError, r"one_arg\(\) expected at most"
         ):
             rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
 
@@ -891,17 +885,15 @@ class RpcTest(RpcAgentTestFixture):
         ):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().forward),
+                _qualified_name(MyScriptModule().my_method),
                 args=(),
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
             ret = rpc.rpc_sync(
-                'worker{}'.format(dst_rank),
-                MyScriptModule().forward,
-                args=())
-
+                "worker{}".format(dst_rank), MyScriptModule().my_method, args=()
+            )
 
     @dist_init
     def test_nested_rpc(self):
@@ -1113,11 +1105,11 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
         # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             rref.to_here()
         # check ref to itself
         rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             rref.to_here()
 
     @dist_init
@@ -1714,14 +1706,16 @@ class RpcTest(RpcAgentTestFixture):
 
         if self.rank == 0:
             # func exists on caller, but not callee.
-            # TODO: Need to enhance RemoteException to return the correct
-            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
             # wait for remote end to remove the binding of foo_add func.
             wait_for_value_future()
             # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
             self.assertTrue(hasattr(this_module, "foo_add"))
-            with self.assertRaisesRegex(Exception, "AttributeError"):
+            with self.assertRaisesRegex(
+                AttributeError, "RPC pickler does not serialize"
+            ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+        self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
 
 @unittest.skipIf(
     sys.version_info < (3, 0),
@@ -1735,36 +1729,23 @@ class RpcJitTest(RpcAgentTestFixture):
         rref_var = rpc_return_rref("worker{}".format(dst_rank))
 
         @torch.jit.script
-        def rref_to_here(rref_var):
+        def rref_tensor_to_here(rref_var):
             # type: (RRef[Tensor]) -> Tensor
-            t = rref_var.to_here()
-            return t + 1
+            return rref_var.to_here()
 
-        local_ret = rref_to_here(rref_var)
+        res = rref_tensor_to_here(rref_var)
+        self.assertEqual(res, torch.ones(2, 2) + 1)
 
     @dist_init
-    def test_remote_script_module(self):
-        @torch.jit.ignore
-        def my_script_module_init():
-            # type: () -> MyModuleInterface
-            return MyScriptModule()
-
-        @torch.jit.script
-        def construct_my_script_module():
-            # type: () -> MyModuleInterface
-            return my_script_module_init()
-
+    def test_rref_is_owner(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        ref_script_module = rpc.remote(
-            "worker{}".format(self.rank),
-            construct_my_script_module,
-            args=())
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
 
         @torch.jit.script
-        def run_ref_script_module(ref_script_module):
-            # type: (RRef[MyModuleInterface]) -> Tensor
-            module = ref_script_module.to_here()
-            return module.forward()
+        def rref_tensor_is_owner(rref_var):
+            # type: (RRef[Tensor]) -> bool
+            return rref_var.is_owner()
 
-        local_ret = run_ref_script_module(ref_script_module)
+        res = rref_tensor_is_owner(rref_var)
+        self.assertEqual(res, False)

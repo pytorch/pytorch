@@ -4,6 +4,7 @@ import sys
 import random
 import string
 import unittest
+import io
 try:
     import unittest.mock as mock
 except ImportError:
@@ -48,7 +49,7 @@ from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionT
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm
 
 from torch.nn import MultiheadAttention
 
@@ -5752,7 +5753,7 @@ class TestNN(NNTestCase):
         # does not throw an error
         m.cuda()
         # recompute the weight and make sure that module can be used
-        setattr(m, "weight_hh_l0", weight_orig.cuda())
+        m.weight_hh_l0 = weight_orig.cuda()
         inp = inp.cuda()
         # otherwise, subsequent warnings will be hidden, and further tests rely on them
         warnings.simplefilter("always")
@@ -5804,11 +5805,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
     def test_RNN_dropout_state(self):
-        import sys
-        if sys.version_info[0] == 2:
-            import cPickle as pickle
-        else:
-            import pickle
         for p in (0, 0.1234):
             for train in (True, False):
                 for cuda in (True, False):
@@ -5829,8 +5825,10 @@ class TestNN(NNTestCase):
                     output1, hy1 = rnn(input, hx)
                     output2, hy2 = rnn(input, hx)
 
-                    rnn_pickle = pickle.dumps(rnn)
-                    rnn2 = pickle.loads(rnn_pickle)
+                    buf = io.BytesIO()
+                    rnn_pickle = torch.save(rnn, buf)
+                    buf.seek(0)
+                    rnn2 = torch.load(buf)
                     rnn2.flatten_parameters()
                     output3, hy3 = rnn2(input, hx)
 
@@ -10310,6 +10308,11 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_eval(device)
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_batchnorm_eval_bfloat16(self, device):
+        self._test_batchnorm_eval(device, torch.bfloat16)
+
     def _test_batchnorm_simple_average(self, device, dtype):
         module = nn.BatchNorm1d(3, momentum=None).to(dtype=dtype, device=device)
         zeros = torch.zeros(3, dtype=dtype, device=device)
@@ -10647,6 +10650,34 @@ class TestNNDeviceType(NNTestCase):
                                                                   torch.zeros(3, device=device)))
 
     @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_activations_bfloat16(self, device):
+        def test(activation):
+            # fp32 compute
+            input1 = torch.randn(5, dtype=torch.float32, device=device, requires_grad=True)
+            grad_input1 = torch.randn(5, device=device)
+            out1 = activation(input1)
+            out1.backward(grad_input1)
+
+            # bfloat16 compute
+            activation2 = activation.bfloat16()
+            input2 = input1.detach().bfloat16().requires_grad_()
+            grad_input2 = grad_input1.bfloat16()
+            out2 = activation2(input2)
+            out2.backward(grad_input2)
+
+            self.assertEqual(out1, out2, prec=1e-2)
+            self.assertEqual(input1.grad.data, input2.grad.data, prec=1e-2)
+
+        test(torch.nn.ReLU())
+        test(torch.nn.Threshold(0.1, 20))
+        test(torch.nn.ELU())
+        test(torch.nn.Softplus())
+        test(torch.nn.Hardshrink())
+        test(torch.nn.Softshrink())
+        test(torch.nn.LeakyReLU())
+
+    @onlyCUDA    
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
     def test_conv_cudnn_nhwc(self, device):

@@ -84,7 +84,7 @@ class _BatchNorm(_NormBase):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
@@ -435,7 +435,7 @@ class SyncBatchNorm(_BatchNorm):
         self._check_input_dim(input)
 
         # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that if gets updated
+        # (when it is available) only so that it gets updated
         # in ONNX graph when this node is exported to ONNX.
         if self.momentum is None:
             exponential_average_factor = 0.0
