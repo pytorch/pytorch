@@ -186,6 +186,8 @@ public:
 
   const Expr* getOrigin();
 
+  //TODO: We want to make this more sophisticated. A value being the same as another
+  //value should be evaluated based on the DAG that created it, and that DAGs leaf nodes
   bool same_as(const Val* other) const { return this == other;}
 
 protected:

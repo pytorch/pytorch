@@ -82,7 +82,7 @@ Reorder::Reorder(
 }
 
 const TensorView* split(const TensorView* tv, int axis, int factor) {
-  using size_type = std::vector<const IterDomain*>::size_type;
+  
   const TensorDomain* td = tv->domain();
   assert(axis > 0 && axis < td->size());
   const IterDomain* id = td->axis(axis);
@@ -96,7 +96,7 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
   const Int* fact = new Int(factor);
   const Int* one = new Int(1);
   
-  for (size_type i = 0; i < td->size(); i++) {
+  for (decltype(td->size()) i = 0; i < td->size(); i++) {
     if (i != axis)
       new_domain.push_back(td->axis(i));
     else {
@@ -120,7 +120,6 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
 }
 
 const TensorView* merge(const TensorView* tv, int axis) {
-  using size_type = std::vector<const IterDomain*>::size_type;
   const TensorDomain* td = tv->domain();
   assert(axis >= 0 && axis + 1 < td->size());
 
@@ -135,7 +134,7 @@ const TensorView* merge(const TensorView* tv, int axis) {
       new IterDomain(static_cast<const Int*>(merged_id_size), first->parallel_method(), first->isReduction());
 
   std::vector<const IterDomain*> new_domain;
-  for (size_type i = 0; i < td->size(); i++) {
+  for (decltype(td->size()) i = 0; i < td->size(); i++) {
     if (i < axis || i > axis + 1)
       new_domain.push_back(td->axis(i));
     else if (i == axis) {

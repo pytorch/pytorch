@@ -4,9 +4,8 @@
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
 /*
- * TODO: Equivelancy checking of the nodes below. IterDomain will be the hardest
- * as it will require checking through the graph producing the size, to find if
- * the input nodes, and all following expressions match.
+ * TODO: improve implementation bool IterDomain::same_as(const IterDomain*) const 
+ * TODO: Add testing of same_as functions for these nodes
  */ 
 
 namespace torch {
@@ -37,6 +36,14 @@ struct TORCH_API IterDomain : public Val {
         is_reduction_domain_(_reduction_domain) {
     assert(int_size->isVal());
     assert(int_size->getDataType() == DataType::Int);
+  }
+
+  bool same_as(const IterDomain* other) const {
+    return(
+         isReduction() == other->isReduction()
+      && parallel_method() == other->parallel_method()
+      && size()->same_as(other->size())
+    );
   }
 
   bool isReduction() const noexcept {
@@ -77,6 +84,18 @@ struct TORCH_API TensorDomain : public Val {
     return domain.size();
   }
 
+  bool same_as(const TensorDomain* other) const {
+    if(size() != other->size())
+      return false;
+
+    for(decltype(size()) i = 0; i<size(); i++)
+      if( !(axis(i)->same_as(other->axis(i))) )
+        return false;
+
+    return true;
+      
+  }
+
   //i here is int, as we want to accept negative value and ::size_type can be a uint.
   const IterDomain* axis(int i) const {
     if(i < 0)
@@ -85,6 +104,7 @@ struct TORCH_API TensorDomain : public Val {
     return domain[i];
   }
 
+
  private:
   const std::vector<const IterDomain*> domain;
 };
@@ -92,8 +112,7 @@ struct TORCH_API TensorDomain : public Val {
 struct TORCH_API Tensor : public Val {
   ~Tensor() = default;
 
-  Tensor() = delete; // Don't ever want a default constructor, Vals are unique
-                     // and immutable.
+  Tensor() = delete;
 
   Tensor(DataType dt, const TensorDomain* _td = nullptr)
       : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
@@ -108,6 +127,8 @@ struct TORCH_API Tensor : public Val {
 
   Tensor(const std::shared_ptr<Value>& jit_value);
   
+
+  //TODO: implement   bool same_as(const Tensor* other) const
   bool hasContiguityInfo() const;
 
   const c10::optional<TensorContiguity>& getContiguityInfo() const;
@@ -146,6 +167,13 @@ struct TORCH_API TensorView : public Val {
   const Tensor* tensor() const noexcept { return tensor_; }
   const TensorDomain* domain() const noexcept { return domain_; }
 
+  bool same_as(const TensorView* other){
+    return(
+         tensor()->same_as(other->tensor())
+      && domain()->same_as(other->domain())
+    );
+  }
+
 private:
   const Tensor* tensor_;
   const TensorDomain* domain_;
@@ -174,6 +202,15 @@ struct TORCH_API Split : public Expr {
   }
   const Val* factor() const noexcept {
     return factor_;
+  }
+
+  bool same_as(const Split* other){
+    return(
+         out()->same_as(other->out())
+      && in()->same_as(other->in())
+      && axis() == other->axis()
+      && factor()->same_as(other->factor())
+    );
   }
 
   Split(const Split& other) = delete;
@@ -215,6 +252,14 @@ struct TORCH_API Merge : public Expr {
     return axis_;
   }
 
+  bool same_as(const Merge* other){
+    return(
+         out()->same_as(other->out())
+      && in()->same_as(other->in())
+      && axis() == other->axis()
+    );
+  }
+
  private:
   const TensorView* out_;
   const TensorView* in_;
@@ -246,6 +291,14 @@ struct TORCH_API Reorder : public Expr {
   }
   const std::vector<int> pos2axis() const noexcept {
     return pos2axis_;
+  }
+
+  bool same_as(const Merge* other){
+    //Implicitly in and out matching means pos2axis matches
+    return(
+         out()->same_as(other->out())
+      && in()->same_as(other->in())
+    );
   }
 
  private:

@@ -23,7 +23,10 @@ struct Fusion;
 struct TORCH_API BaseMutator {
 
   void mutate(Fusion* fusion);
-  const Statement* mutate(const Statement* const statement);
+  const Statement* mutate(const Statement* const);
+  
+  const Statement* mutate(const Val* const);
+  const Statement* mutate(const Expr* const);
 
   const Statement* mutate(const UnaryOp* const);
   const Statement* mutate(const BinaryOp* const);
