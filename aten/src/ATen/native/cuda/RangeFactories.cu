@@ -69,7 +69,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
 
-      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int64_t ind) -> scalar_t {
         scalar_t val = scalar_start + step * ind;
         return val;
       });
@@ -80,7 +80,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int64_t ind) -> scalar_t {
         scalar_t val = scalar_start + step * ind;
         return val;
       });
@@ -122,7 +122,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
 
-      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
         scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
         return val;
       });
@@ -134,7 +134,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
           scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
           return val;
         });
@@ -177,7 +177,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
                 "performing the operation.");
     Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
@@ -247,7 +247,7 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
                 "performing the operation.");
     Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
