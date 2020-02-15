@@ -39,7 +39,15 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
   return stream;
 }
 
-// This mirrors `count_specified_dimensions` in torch/csrc/autograd/python_variable_indexing.cpp
+// NOTE: Why do we mirror instead of replace the `count_specified_dimensions` function
+// in torch/csrc/autograd/python_variable_indexing.cpp? It's because
+// `count_specified_dimensions` is on the hot path of Python tensor multi-dim indexing
+// (i.e. it's called by `applySlicing` which is called by `THPVariable_getitem` /
+// `THPVariable_setitem` when handling indexing of more than one dimension). If we were
+// to merge the Python/C++ `count_specified_dimensions` function, on the Python side
+// we would have to construct a `std::vector` container to be consumed by the C++
+// `count_specified_dimensions` function, which adds 100s of nanoseconds overhead and
+// is undesirable.
 int64_t count_specified_dimensions(ArrayRef<TensorIndex> indices) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
