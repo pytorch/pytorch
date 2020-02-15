@@ -1686,6 +1686,40 @@ Value* Graph::insertUncheckedCast(Value* v, TypePtr type) {
   return n->output();
 }
 
+Value* Graph::insertToList(Value* v, TypePtr type) {
+  int dim = 0;
+  TypePtr ptr = type;
+
+  // Unwrap the type to determine the number of dimensions.
+  while (auto list_type = ptr->cast<ListType>()) {
+    ptr = list_type->getElementType();
+    ++dim;
+  }
+
+  // Encode the base element type as an integer.
+  int elem_ty = 0;
+  if (ptr == IntType::get()) {
+    elem_ty = 0;
+  } else if (ptr == FloatType::get()) {
+    elem_ty = 1;
+  } else if (ptr == BoolType::get()) {
+    elem_ty = 2;
+  } else {
+    TORCH_CHECK(
+        false,
+        ptr->python_str(),
+        " is not one of the supported element types for tolist: int, float, bool");
+  }
+
+  // Pass in the number of dimensions and base element type as arguments
+  // to the op.
+  Value* dim_val = insertConstant(IValue(dim));
+  Value* elem_ty_val = insertConstant(IValue(elem_ty));
+  Node* n = insertNode(create(prim::tolist, {v, dim_val, elem_ty_val}));
+  n->output()->setType(std::move(type));
+  return n->output();
+}
+
 Value* Graph::insertFunctionCall(
     Function* callee,
     const script::MatchedSchema& matched) {
