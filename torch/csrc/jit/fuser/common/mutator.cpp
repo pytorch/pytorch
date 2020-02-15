@@ -78,32 +78,84 @@ void BaseMutator::mutate(Fusion* fusion) {
   }
 }
 
-const Statement* BaseMutator::mutate(const TensorDomain* const t) {
-  throw std::runtime_error("Not implemented yet.");
+/*
+ * TODO: Test the below mutator functions
+ */
+
+const Statement* BaseMutator::mutate(const TensorDomain* const td) {
+  
+  std::vector<const IterDomain*> dom;
+  bool mutated = false;
+  for(decltype(td->size()) i = 0; i<td->size(); i++){
+    const IterDomain* id = static_cast<const IterDomain*>(mutate(td->axis(i)));
+    if(!id->same_as(td->axis(i))){
+      mutated = true;
+    }
+  }
+  
+  if(mutated)
+    return new TensorDomain(dom);
+  return td;
+  
 }
 
-const Statement* BaseMutator::mutate(const TensorView* const t) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const TensorView* const tv) {
+  const Tensor* t = static_cast<const Tensor*>(mutate(tv->tensor()));
+  const TensorDomain* td = static_cast<const TensorDomain*>( mutate(tv->domain()));
+
+  if(!(  tv->tensor()->same_as(t)
+      && tv->domain()->same_as(td)))
+      return new TensorView(t, td);
+ return tv;
 }
 
-const Statement* BaseMutator::mutate(const IterDomain* const t) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const IterDomain* const id) {
+  const Int* s = static_cast<const Int*>(mutate(id->size()));
+  if(!s->same_as(id->size()))
+    return new IterDomain(s, id->parallel_method(), id->isReduction());
+  return id;
 }
 
 const Statement* BaseMutator::mutate(const Tensor* const t) {
-  throw std::runtime_error("Not implemented yet.");
+  return t; //I believe tensor should never be mutated.
 }
 
-const Statement* BaseMutator::mutate(const Split* const split) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Split* const s) {
+  const TensorView* o = static_cast<const TensorView*>(mutate(s->out()));
+  const TensorView* i = static_cast<const TensorView*>(mutate(s->in()));
+  const Int* fact = static_cast<const Int*>(mutate(s->factor()));
+
+  if(!(
+       o->same_as(s->out())
+    && i->same_as(s->in())
+    && fact->same_as(s->factor())
+  ))
+    return new Split(o, i, s->axis(), fact);
+  return s;
 }
 
-const Statement* BaseMutator::mutate(const Merge* const merge) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Merge* const m) {
+  const TensorView* o = static_cast<const TensorView*>(mutate(m->out()));
+  const TensorView* i = static_cast<const TensorView*>(mutate(m->in()));
+
+  if(!(
+       o->same_as(m->out())
+    && i->same_as(m->in())
+  ))
+    return new Merge(o, i, m->axis());
+  return m;
 }
 
-const Statement* BaseMutator::mutate(const Reorder* const reorder) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Reorder* const ro) {
+  const TensorView* o = static_cast<const TensorView*>(mutate(ro->out()));
+  const TensorView* i = static_cast<const TensorView*>(mutate(ro->in()));
+
+  if(!(
+       o->same_as(ro->out())
+    && i->same_as(ro->in())
+  ))
+    return new Reorder(o, i, ro->pos2axis());
+  return ro;
 }
 
 } // namespace fuser
