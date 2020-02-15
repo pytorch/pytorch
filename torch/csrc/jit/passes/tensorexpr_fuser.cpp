@@ -112,20 +112,13 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
-    return c10::nullopt;                    \
+    return false;                           \
   }
 
-c10::optional<Node*> tryMerge(
+bool canMerge(
     Node* consumer,
     Node* producer,
     AliasDb& aliasDb) {
-  GRAPH_DEBUG(
-      "Trying producer ",
-      producer->kind().toQualString(),
-      " and consumer ",
-      consumer->kind().toQualString(),
-      ":\n");
-
   // Only handle complete tensor types
   for (torch::jit::Value* output : consumer->outputs()) {
     REQ(output->isCompleteTensor());
@@ -141,27 +134,9 @@ c10::optional<Node*> tryMerge(
        consumer->kind() == getTensorExprSymbol()));
 
   // Alias checks
-  // Requirement:
-  // - moveAfterTopologicallyValid(consumer, producer)
-  // - One of:
-  //   1) Both are in-place ops
-  //   2) Consumer is in-place, producer !hasInputWriters
-  //   3) Producer is in-place, consumer !hasOutputWriters
   REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
 
-  // 1)
-  if (!(aliasDb.isMutable(consumer) && aliasDb.isMutable(producer))) {
-    // 2)
-    if (aliasDb.isMutable(consumer)) {
-      REQ(!aliasDb.hasInputWriters(producer));
-      // 3)
-    } else if (aliasDb.isMutable(producer)) {
-      REQ(!aliasDb.hasOutputWriters(consumer));
-    }
-  }
-
-  // Ops that return aliases can only be folded if this is the
-  // only use.
+  // Ops that return aliases can only be folded if this is the only use.
   if (producer->kind() == aten::slice ||
       producer->kind() == aten::unsqueeze ||
       producer->kind() == prim::ConstantChunk) {
@@ -180,37 +155,61 @@ c10::optional<Node*> tryMerge(
 
     // Don't initiate a fusion group just for a constant operand
     REQ(producer->kind() != prim::Constant);
-
-    consumer =
-        SubgraphUtils::createSingletonSubgraph(consumer, getTensorExprSymbol());
   }
 
   if (producer->kind() == aten::cat) {
     REQ(producer->inputs()[0]->node()->kind() == prim::ListConstruct);
     REQ(producer->inputs()[0]->uses().size() == 1);
     REQ(producer->inputs()[1]->node()->kind() == prim::Constant);
+  } else if (consumer->kind() == aten::cat) {
+    REQ(consumer->inputs()[0]->node()->kind() == prim::ListConstruct);
+    REQ(consumer->inputs()[0]->uses().size() == 1);
+    REQ(consumer->inputs()[1]->node()->kind() == prim::Constant);
+  }
+
+  return true;
+}
+#undef REQ
+
+Node *getOrCreateTensorExprSubgraph(Node *n) {
+  if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
+    return n;
+  }
+  return SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+}
+
+c10::optional<Node*> tryMerge(
+    Node* consumer,
+    Node* producer,
+    AliasDb& aliasDb) {
+  GRAPH_DEBUG(
+      "Trying producer ",
+      producer->kind().toQualString(),
+      " and consumer ",
+      consumer->kind().toQualString(),
+      ":\n");
+
+  if (!canMerge(consumer, producer, aliasDb)) {
+    return c10::nullopt;
+  }
+
+  consumer = getOrCreateTensorExprSubgraph(consumer);
+
+  if (producer->kind() == aten::cat) {
     Node* listconstruct = producer->inputs()[0]->node();
-    Node* constant = producer->inputs()[1]->node();
+
     aliasDb.moveAfterTopologicallyValid(consumer, producer);
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-    auto& subgraph = consumer->g(attr::Subgraph);
-    Node* new_const = subgraph->createClone(constant, [](Value*) -> Value* { return nullptr; } );
-    subgraph->insertNode(new_const);
+
     aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
-    if (consumer->kind() == aten::cat) {
-      REQ(consumer->inputs()[0]->node()->kind() == prim::ListConstruct);
-      REQ(consumer->inputs()[0]->uses().size() == 1);
-      REQ(consumer->inputs()[1]->node()->kind() == prim::Constant);
-    }
     aliasDb.moveAfterTopologicallyValid(consumer, producer);
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
   }
 
   return consumer;
 }
-#undef REQ
 
 std::pair<graph_node_list::iterator, bool> scanNode(
     Node* consumer,
