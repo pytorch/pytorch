@@ -3,7 +3,13 @@
 
 #include <ATen/detail/FunctionTraits.h>
 
-namespace at { namespace native { namespace modern { namespace detail {
+namespace at { namespace native {
+
+constexpr int num_threads = C10_WARP_SIZE * 2;
+constexpr int thread_work_size = 4;
+constexpr int block_work_size = thread_work_size * num_threads;
+
+namespace modern { namespace detail {
 
 template<typename func_t, int remaining=function_traits<func_t>::arity-1>
 struct has_same_arg_types {
@@ -96,7 +102,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
-      modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
+      modern::launch_kernel(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
