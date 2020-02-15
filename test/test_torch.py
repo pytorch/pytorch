@@ -32,6 +32,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
     PYTORCH_CUDA_MEMCHECK
+from torch.testing._internal.common_cuda import TEST_CUDA
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -50,6 +51,11 @@ if TEST_LIBROSA:
     import librosa
 
 SIZE = 100
+
+TEST_LARGE_TENSOR = TEST_CUDA
+if TEST_CUDA:
+    total_memory = torch.cuda.get_device_properties(0).total_memory
+    TEST_LARGE_TENSOR = total_memory_in_gb >= (2 ** 31) * 8
 
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
@@ -10510,6 +10516,16 @@ class TestTorchDeviceType(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
+
+    @skipIf(not TEST_LARGE_TENSOR)
+    def test_range_factories_64bit_indexing(self, device):
+        bigint = 2 ** 31 + 1
+        t = torch.arange(bigint, dtype=torch.long, device=device)
+        self.assertEqual(t[-1].item(), bigint - 1)
+        t = torch.linspace(0, bigint, bigint + 1, dtype=torch.long, device=device)
+        self.assertEqual(t[-1].item(), bigint)
+        t = torch.logspace(0, 31, bigint, 2, dtype=torch.long, device=device)
+        self.assertEqual(t[-1].item(), 2 ** 31)
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
