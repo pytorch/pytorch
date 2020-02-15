@@ -352,6 +352,16 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
+class largeTensorTest(skipCUDAIf):
+
+    def __init__(self, size):
+        if isinstance(size, str):
+            assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+            size = 1024 ** 3 * int(size[:-2])
+        valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
+        super(largeTensorTest, self).__init__(valid, "Not enough memory")
+
+
 class expectedFailure(object):
 
     def __init__(self, device_type):
