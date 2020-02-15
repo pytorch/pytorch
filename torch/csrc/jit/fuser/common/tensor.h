@@ -167,7 +167,7 @@ struct TORCH_API TensorView : public Val {
   const Tensor* tensor() const noexcept { return tensor_; }
   const TensorDomain* domain() const noexcept { return domain_; }
 
-  bool same_as(const TensorView* other){
+  bool same_as(const TensorView* other) const{
     return(
          tensor()->same_as(other->tensor())
       && domain()->same_as(other->domain())
@@ -191,20 +191,20 @@ struct TORCH_API Split : public Expr {
       int _axis,
       const Int* _factor);
 
-  const Val* out() const noexcept {
+  const TensorView* out() const noexcept {
     return out_;
   }
-  const Val* in() const noexcept {
+  const TensorView* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
     return axis_;
   }
-  const Val* factor() const noexcept {
+  const Int* factor() const noexcept {
     return factor_;
   }
 
-  bool same_as(const Split* other){
+  bool same_as(const Split* other) const{
     return(
          out()->same_as(other->out())
       && in()->same_as(other->in())
@@ -242,17 +242,17 @@ struct TORCH_API Merge : public Expr {
   Merge(Merge&& other) = delete;
   Merge& operator=(Merge&& other) = delete;
 
-  const Val* out() const noexcept {
+  const TensorView* out() const noexcept {
     return out_;
   }
-  const Val* in() const noexcept {
+  const TensorView* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
     return axis_;
   }
 
-  bool same_as(const Merge* other){
+  bool same_as(const Merge* other) const{
     return(
          out()->same_as(other->out())
       && in()->same_as(other->in())
@@ -283,17 +283,17 @@ struct TORCH_API Reorder : public Expr {
   Reorder(Reorder&& other) = delete;
   Reorder& operator=(Reorder&& other) = delete;
 
-  const Val* out() const noexcept {
+  const TensorView* out() const noexcept {
     return out_;
   }
-  const Val* in() const noexcept {
+  const TensorView* in() const noexcept {
     return in_;
   }
   const std::vector<int> pos2axis() const noexcept {
     return pos2axis_;
   }
 
-  bool same_as(const Merge* other){
+  bool same_as(const Merge* other) const{
     //Implicitly in and out matching means pos2axis matches
     return(
          out()->same_as(other->out())
