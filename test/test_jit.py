@@ -4016,6 +4016,18 @@ class TestFrontend(JitTestCase):
 class TestScript(JitTestCase):
 
 
+    def test_strides(self):
+        def strides(a):
+            return a.t()
+
+        with enable_profiling_mode():
+            j = torch.jit.script(strides)
+            a = torch.ones(3, 4)
+            j(a)
+            j(a)
+
+
+
     def test_symbolic_shapes(self):
         with enable_profiling_mode():
             torch._C._jit_set_num_profiled_runs(2)

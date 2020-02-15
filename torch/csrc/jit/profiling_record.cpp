@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -130,6 +131,7 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
           auto symbols = fmap(t.toTensor().sizes(), [this](size_t dim) {
             return this->toSymbol(dim);
           });
+          GRAPH_DEBUG("pttp = ", *pttp);
           pttp = pttp->withSymbolicShapes(symbols);
           first = false;
           pno->setType(pttp);

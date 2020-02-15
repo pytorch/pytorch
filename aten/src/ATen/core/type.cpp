@@ -32,6 +32,44 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
+
+    const static auto printStrides = std::getenv("PRINT_STRIDES");
+    if (printStrides) {
+      if (auto ndim = value->strides().size()) {
+        out << "{";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          if (auto s = value->strides()[i]) {
+            out << *s;
+          } else {
+            out << "*";
+          }
+        }
+        out << "}";
+      }
+    }
+
+    const static auto printContiguity = std::getenv("PRINT_CONT");
+    if (printContiguity) {
+      if (auto ndim = value->contiguity().size()) {
+          out << "[";
+          for (size_t i = 0; i < *ndim; ++i) {
+            if (i > 0) {
+              out << ", ";
+            }
+            if (auto s = value->contiguity()[i]) {
+              out << *s;
+            } else {
+              out << "*";
+            }
+          }
+          out << "]";
+      }
+    }
+
+
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
@@ -707,8 +745,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
     contiguityStrideIndices(at::IntArrayRef sizes, at::IntArrayRef strides) {
   auto contiguity_bool = findContiguous(sizes, strides);
   std::unordered_map<size_t, size_t> strides2indices;
-  for (size_t i = 0; i < sizes.size(); i++) {
-    strides2indices.insert({i, sizes[i]});
+  for (size_t i = 0; i < strides.size(); i++) {
+    strides2indices.insert({strides[i], i});
   }
   std::vector<int64_t> strides_vec(strides.begin(), strides.end());
   std::sort(strides_vec.begin(), strides_vec.end());
@@ -716,9 +754,9 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
   std::vector<int64_t> stride_indices;
   std::vector<int64_t> contiguity;
   for (auto s : strides_vec) {
-    stride_indices.push_back(strides2indices[s]);
+    stride_indices.push_back(strides2indices.at(s));
     contiguity.push_back(
-        static_cast<size_t>(contiguity_bool[strides2indices[s]]));
+        static_cast<size_t>(contiguity_bool[strides2indices.at(s)]));
   }
 
   return std::make_tuple(contiguity, stride_indices);
