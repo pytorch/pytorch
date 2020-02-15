@@ -3,10 +3,42 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/FunctionTraits.h>
 #include <cmath>
 #include <limits>
 
-#include <ATen/native/cuda/Loops.cuh>
+namespace {
+
+constexpr int num_threads = C10_WARP_SIZE * 2;
+constexpr int thread_work_size = 4;
+constexpr int block_work_size = thread_work_size * num_threads;
+
+template<typename index_t, typename func_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::return_type *data) {
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
+    if (idx < N) {
+      data[idx] = f(idx);
+    }
+  }
+}
+
+template<typename index_t, typename func_t>
+void gpu_kernel_with_index(Tensor &output, f) {
+  int64_t N = output.numel();
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  using scalar_t = typename function_traits<func_t>::return_type;
+  if (N < std::numeric_limits<int>::max()) {
+    elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+  } else {
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+  }
+}
+
+}  // namespace
 
 namespace at {
 namespace native {
@@ -37,8 +69,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
         scalar_t val = scalar_start + step * ind;
         return val;
       });
@@ -49,8 +80,7 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
         scalar_t val = scalar_start + step * ind;
         return val;
       });
@@ -92,8 +122,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
         scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
         return val;
       });
@@ -105,7 +134,6 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
       gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
           scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
           return val;
@@ -149,8 +177,7 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
                 "performing the operation.");
     Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    auto iter = TensorIterator::nullary_op(r);
-    gpu_kernel_with_index(iter, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
@@ -220,8 +247,7 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
                 "performing the operation.");
     Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    auto iter = TensorIterator::nullary_op(r);
-    gpu_kernel_with_index(iter, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
