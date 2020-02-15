@@ -5,18 +5,24 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-const Statement* BaseMutator::mutate(const Statement* const statement) {
-  // throw std::runtime_error("Could not identify statement. Did you update
-  // dispatch_mutator in ir.cpp?");
-  return statement->dispatch_mutator(this);
+const Statement* BaseMutator::mutate(
+    const Statement* const statement) {
+  if (statement->isVal())
+    return mutate(static_cast<const Val*>(statement));
+  else if (statement->isExpr())
+    return mutate(static_cast<const Expr*>(statement));
+  else
+    throw std::runtime_error("Could not detect type in mutate(const Statement*).");
+}
+const Statement* BaseMutator::mutate(const Val* const val) {
+  return val->dispatch_mutator(this);
+}
+
+const Statement* BaseMutator::mutate(const Expr* const expr) {
+  return expr->dispatch_mutator(this);
 }
 
 const Statement* BaseMutator::mutate(const Float* const f) {
-  if (!f->isSymbolic())
-    if (*(f->value()) == 1.0) {
-      Float* f2 = new Float(0.0);
-      return f2;
-    }
   return f;
 }
 
@@ -28,7 +34,13 @@ const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
   const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
   const Val* in = static_cast<const Val*>(uop->in()->dispatch_mutator(this));
   // TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-  if (out != uop->out() || in != uop->in())
+  if 
+  (
+    !(
+         out->same_as(uop->out())
+      && in->same_as(uop->in())
+    )
+  )
     return new UnaryOp(uop->type(), out, in);
   return uop;
 }
@@ -37,8 +49,14 @@ const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
   const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
   const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this));
   const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
-  // TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-  if (out != bop->out() || lhs != bop->lhs() || rhs != bop->rhs())
+  if
+  (
+    !(
+         out != bop->out()
+      && lhs != bop->lhs()
+      && rhs != bop->rhs()
+    )
+  )
     return new BinaryOp(bop->type(), out, lhs, rhs);
   return bop;
 }
