@@ -46,14 +46,6 @@ Expr::Expr(const ExprType _type) : type_{_type} {
   this->fusion_ = fusion;
 }
 
-<<<<<<< HEAD
-Add::Add(const Val* _out, const Val* _lhs, const Val* _rhs)
-    : Expr(ExprType::Add), out_{_out}, lhs_{_lhs}, rhs_{_rhs} {
-  addOutput(_out);
-  addInput(_lhs);
-  addInput(_rhs);
-  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
-=======
 UnaryOp::UnaryOp(
     const UnaryOpType _type
   , const Val* _out
@@ -83,7 +75,6 @@ BinaryOp::BinaryOp(
     addInput(_lhs);
     addInput(_rhs);
     this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
->>>>>>> Create BinaryOp and UnaryOp Exprs.
 }
 
 Statement::~Statement() {}
@@ -124,13 +115,13 @@ void Statement::dispatch(T handler) const {
   if (isVal()) {
     switch (*getValType()) {
       case ValType::TensorDomain:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        ptr(handler)->handle(static_cast<const TensorDomain*>(this));
         return;
       case ValType::TensorView:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        ptr(handler)->handle(static_cast<const TensorView*>(this));
         return;
       case ValType::IterDomain:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
+        ptr(handler)->handle(static_cast<const IterDomain*>(this));
         return;
       case ValType::Tensor:
         ptr(handler)->handle(static_cast<const Tensor*>(this));
@@ -160,10 +151,27 @@ void Statement::dispatch(T handler) const {
         return;
 =======
       case ExprType::UnaryOp:
+<<<<<<< HEAD
         return ptr(handler)->handle(static_cast<const UnaryOp*>(this));
       case ExprType::BinaryOp:
         return ptr(handler)->handle(static_cast<const BinaryOp*>(this));
 >>>>>>> Create BinaryOp and UnaryOp Exprs.
+=======
+        ptr(handler)->handle(static_cast<const UnaryOp*>(this));
+    		return;
+      case ExprType::BinaryOp:
+        ptr(handler)->handle(static_cast<const BinaryOp*>(this));
+		    return;
+      case ExprType::Split:
+        ptr(handler)->handle(static_cast<const Split*>(this));
+		    return;
+      case ExprType::Merge:
+        ptr(handler)->handle(static_cast<const Merge*>(this));
+		    return;
+      case ExprType::Reorder:
+        ptr(handler)->handle(static_cast<const Reorder*>(this));
+		    return;
+>>>>>>> Update dispatch for split/merge/reorder. Add comment on adding a Val/Expr.
       default:
         throw std::runtime_error("Unknown exprtype in dispatch!");
     }
@@ -226,6 +234,12 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
         return ptr(mutator)->mutate(static_cast<const UnaryOp*>(this));
       case ExprType::BinaryOp:
         return ptr(mutator)->mutate(static_cast<const BinaryOp*>(this));
+      case ExprType::Split:
+        return ptr(mutator)->mutate(static_cast<const Split*>(this));
+      case ExprType::Merge:
+        return ptr(mutator)->mutate(static_cast<const Merge*>(this));
+      case ExprType::Reorder:
+        return ptr(mutator)->mutate(static_cast<const Reorder*>(this));
       default:
         throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
     }

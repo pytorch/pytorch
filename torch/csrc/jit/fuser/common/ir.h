@@ -58,6 +58,20 @@ namespace fuser {
  *     a runtime constant like batch normalizations momentum
  *     a "symbolic" tensor like one passed down from the JIT
  *     a memory buffer for device code
+ * 
+ * Adding a Val:
+ * Right now adding a Val is quite involved. Val's can be defined in ir.h or in their own header file.
+ * Val's classes must be uppercase. The following is what is currently needed for Val definitions:
+ * 1) Definition inheriting from Val
+ *     - Members must be at minimum private, often they should be const and private.
+ *     - Accessor functions for members
+ *     - Must cal Val constructor, Val constructor registers with fusion
+ * 2) Statement::dispatch and Statement::dispatch_mutator in ir.cpp must be updated
+ * 3) Virtual handle functions must be added to iter_visitor.h/.cpp
+ * 4) Mutator fucntions must be added to mutator.h/.cpp
+ * 5) Printing functions should be added to iriostream.h/.cpp
+ * 6) An enum value should be added to ValType in type.h
+ * 7) A string entry should be added in val_type_string_map
  *
  * IRInputOutput:
  * A function on Vals. Has inputs and outputs that are all Vals. Anything that connects
@@ -67,16 +81,31 @@ namespace fuser {
  *     a thread all reduce
  *     for loops
  * 
- * Expr:
- * Expr should be simple IRInputOutput nodes. We may want to even specialize them to be limited
- * to maximum 2 inputs and a single output. For now we're using it for things like binary and
- * unary operations.
+ * Expr
+ * Expr is an IRInputOutput node. It takes multiple inputs and does *an* operation. There are specializations
+ * of BinaryOp which takes 2 inputs and produces 1 output, and UnaryOp which takes 1 input and produces 1 output.
  *
- * For now this IR is static single assignment. Values can only be defined once. If they are re-defined
- * the original definition should be deleted from the program, as opposed to an ordered redefinition of
- * the value in the program. Since for now the IR will be provided to us as a graph and we will translate
- * it, this should be easier of a framework to work in. We in theory could support a non SSA interface
- * and translate to SSA, but that's outside the scope of this work for now.
+ * The IR is static single assignment (SSA). Values can only be defined once. If they are re-defined
+ * the original definition is deleted from the program, as opposed to an ordered redefinition of
+ * the value in the program.
+ * 
+ * Adding an Expr:
+ * Right now adding an Expr is quite involved. Expr's can be defined in ir.h or in their own header file.
+ * Expr's classes must be uppercase. The following is what is currently needed for Expr definitions:
+ * 1) Definition inheriting from Expr.
+ *    - Members must at minimum be private/protected, and often const if they must never be changed
+ *    - Accessor functions for members
+ *    - Constructors need to register with the Fusion after inputs/outputs are defined
+ *    - Implementation of bool same_as(...)
+ * 2) Statement::dispatch and Statement::dispatch_mutator in ir.cpp must be updated to include
+ *         dispatch on the added Expr.
+ * 3) Virtual handle functions must be added to iter_visitor.h/.cpp
+ * 4) Mutator fucntions must be added to mutator.h/.cpp
+ * 5) Lower case convenience functions can be added to arith.h/.cpp
+ * 6) Printing functions should be added to iriostream.h/.cpp
+ * 7) An enum value should be added to ExprType in type.h
+ * 8) A string entry should be added in expr_type_string_map
+ * 
  */
 
 
