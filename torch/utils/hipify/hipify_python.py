@@ -711,7 +711,7 @@ RE_INCLUDE = re.compile(r"#include .*\n")
 def extract_arguments(start, string):
     """ Return the list of arguments in the upcoming function parameter closure.
         Example:
-        string (input): '(blocks, threads, 0, c10::cuda::getCurrentCUDAStream())'
+        string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
         arguments (output):
             '[{'start': 1, 'end': 7},
             {'start': 8, 'end': 16},
