@@ -198,23 +198,55 @@ void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
 
 void elu_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a) -> scalar_t {
-      return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec one_vec(static_cast<scalar_t>(1));
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
+          return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
+          auto cmp = (a > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
+          }
+        });
   });
 }
 
 void elu_backward_kernel(TensorIterator& it, Scalar alpha, Scalar scale, Scalar input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    cpu_kernel(it, [=](scalar_t a, scalar_t b) -> scalar_t {
-      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
-    });
+    const Vec negcoef_vec(negcoef);
+    const Vec negiptcoef_vec(negiptcoef);
+    const Vec poscoef_vec(poscoef);
+    const Vec zero_vec(static_cast<scalar_t>(0));
+    cpu_kernel_vec(
+        it,
+        [negcoef, negiptcoef, poscoef](scalar_t a, scalar_t b) -> scalar_t {
+          return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+        },
+        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec](Vec a, Vec b) -> Vec {
+          auto cmp = (b > zero_vec);
+          if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
+            return a * poscoef_vec;
+          } else {
+            return Vec::blendv(a * negiptcoef_vec * (b + negcoef_vec), a * poscoef_vec, cmp);
+          }
+        }
+    );
   });
 }
 
@@ -296,7 +328,7 @@ void hardshrink_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void softshrink_kernel(TensorIterator& iter, Scalar lambd) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softshrink_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
       return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
@@ -320,7 +352,7 @@ void shrink_backward_kernel(TensorIterator& iter, Scalar lambd) {
 }
 
 void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_backward_cpu", [&] {
     auto min_val = min.to<scalar_t>();
     auto max_val = max.to<scalar_t>();
     cpu_kernel_vec(
@@ -373,24 +405,44 @@ static void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
 }
 
 void softplus_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-      return (a * beta) > threshold ? a
-          : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
-    });
+    const Vec beta_vec(beta);
+    const Vec threshold_vec(threshold);
+    cpu_kernel_vec(
+        iter,
+        [beta, threshold](scalar_t a) -> scalar_t {
+          return (a * beta) > threshold ? a
+            : static_cast<scalar_t>(std::log1p(std::exp(a * beta))) / beta;
+        },
+        [beta_vec, threshold_vec](Vec a) -> Vec {
+          return Vec::blendv((a * beta_vec).exp().log1p() / beta_vec, a, (a * beta_vec) > threshold_vec);
+        }
+    );
   });
 }
 
 void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar threshold_) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "softplus_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softplus_backward_cpu", [&]() {
+    using Vec = Vec256<scalar_t>;
     auto beta = beta_.to<scalar_t>();
     auto threshold = threshold_.to<scalar_t>();
-    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
-      scalar_t z = std::exp(b * beta);
-      return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
-    });
+    const Vec beta_vec(beta);
+    const Vec threshold_vec(threshold);
+    const Vec one_vec(static_cast<scalar_t>(1.0));
+    cpu_kernel_vec(
+        iter,
+        [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {
+          scalar_t z = std::exp(b * beta);
+          return (b * beta) > threshold ? a : a * (z - scalar_t(1.)) / z;
+        },
+        [beta_vec, one_vec, threshold_vec](Vec a, Vec b) -> Vec {
+          const Vec z = (b * beta_vec).exp();
+          return Vec::blendv(a * (z - one_vec) / z, a, (b * beta_vec) > threshold_vec);
+        }
+    );
   });
 }
 

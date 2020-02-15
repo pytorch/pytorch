@@ -184,9 +184,15 @@ static void slow_conv3d_update_output_frame(
     int64_t output_depth,
     int64_t output_height,
     int64_t output_width) {
-  unfolded3d_copy_kernel_cpu(
-      finput,
+  Unfold3dCopyCPU(
       input,
+      n_input_plane,
+      input_depth,
+      input_height,
+      input_width,
+      output_depth,
+      output_height,
+      output_width,
       kernel_depth,
       kernel_height,
       kernel_width,
@@ -196,25 +202,17 @@ static void slow_conv3d_update_output_frame(
       pad_depth,
       pad_height,
       pad_width,
-      n_input_plane,
-      input_depth,
-      input_height,
-      input_width,
-      output_depth,
-      output_height,
-      output_width);
-
+      &finput);
   auto output2d = output.reshape(
       {n_output_plane, output_depth * output_height * output_width});
   if (bias.defined()) {
-    for (int64_t i = 0; i < n_output_plane; i++) {
+    for (int64_t i = 0; i < n_output_plane; ++i) {
       output[i].fill_(bias[i].item());
     }
+    output2d.addmm_(weight, finput, 1, 1);
   } else {
-    output.zero_();
+    at::mm_out(output2d, weight, finput);
   }
-
-  output2d.addmm_(weight, finput, 1, 1);
 }
 
 void slow_conv3d_backward_update_grad_input_frame(
@@ -650,14 +648,37 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
-Tensor & slow_conv3d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+Tensor& slow_conv3d_out(
+    Tensor& output,
+    const Tensor& self,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding) {
   Tensor finput = at::empty({0}, self.options());
   Tensor fgrad_input = at::empty({0}, self.options());
-  return std::get<0>(at::slow_conv3d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+  return std::get<0>(at::slow_conv3d_forward_out(
+      output,
+      finput,
+      fgrad_input,
+      self,
+      weight,
+      kernel_size,
+      bias,
+      stride,
+      padding));
 }
 
-Tensor slow_conv3d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
-  return std::get<0>(at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding));
+Tensor slow_conv3d(
+    const Tensor& self,
+    const Tensor& weight,
+    IntArrayRef kernel_size,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding) {
+  return std::get<0>(at::slow_conv3d_forward(
+      self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native
