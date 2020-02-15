@@ -4,6 +4,8 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
+#include <ATen/native/quantized/cpu/packed_params.h>
+
 struct QnnpackOperatorDeleter {
   void operator()(pytorch_qnnp_operator_t op) {
     pytorch_qnnp_delete_operator(op);
@@ -19,13 +21,63 @@ struct QnnpackOperatorDeleter {
 // scale value changes then we requantize bias with the updated scale.
 // For inference we expect the graph to be static so the input scale should
 // not change across consecutive inference calls.
-struct PackedLinearWeightsQnnp {
+struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
+  PackedLinearWeightsQnnp(
+      std::unique_ptr<qnnpack::PackBMatrix> w,
+      at::Tensor orig_weight,
+      at::Tensor bias,
+      c10::optional<double> input_scale,
+      double w_scale,
+      int64_t w_zp)
+      : w(std::move(w)),
+        orig_weight(std::move(orig_weight)),
+        bias(std::move(bias)),
+        input_scale(std::move(input_scale)),
+        w_scale(w_scale),
+        w_zp(w_zp) {}
+
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
   at::Tensor bias;
   c10::optional<double> input_scale;
   double w_scale;
   int64_t w_zp;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  std::string backend() override {
+    return "QNNPACK";
+  }
+
+  std::string bit_width() override {
+    return "INT8";
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
 struct PackedConvWeightsQnnp {

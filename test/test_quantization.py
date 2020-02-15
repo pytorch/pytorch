@@ -160,7 +160,6 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
                          self.calib_data)
         checkQuantized(model)
 
-
     def test_nested2(self):
         model = AnnotatedSubNestedModel()
         model = prepare(model)
