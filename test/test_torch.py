@@ -55,7 +55,7 @@ SIZE = 100
 TEST_LARGE_TENSOR = TEST_CUDA
 if TEST_CUDA:
     total_memory = torch.cuda.get_device_properties(0).total_memory
-    TEST_LARGE_TENSOR = total_memory_in_gb >= (2 ** 31) * 8
+    TEST_LARGE_TENSOR = total_memory >= (2 ** 31) * 8
 
 
 # This is intentionally prefixed by an underscore. Otherwise pytest will try to
@@ -10517,7 +10517,7 @@ class TestTorchDeviceType(TestCase):
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
 
-    @unittest.skipIf(not TEST_LARGE_TENSOR)
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough mem")
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
