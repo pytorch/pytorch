@@ -31,7 +31,7 @@ void gpu_kernel_with_index(Tensor &output, f) {
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::return_type;
-  if (N < std::numeric_limits<int>::max()) {
+  if (N <= std::numeric_limits<int>::max()) {
     elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
   } else {
     elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
