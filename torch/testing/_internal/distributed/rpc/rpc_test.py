@@ -1770,3 +1770,5 @@ class RpcJitTest(RpcAgentTestFixture):
 
         module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
         res = module_with_rrefs()
+        res_hat = [torch.ones(2, 2) + 1 for _ in range(4)]
+        self.assertEquals(res, res_hat)
