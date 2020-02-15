@@ -360,7 +360,6 @@ IGNORED_TORCH_FUNCTIONS = (
     torch.randn,
     torch.randint,
     torch.randperm,
-    torch.range,
     torch.sparse_coo_tensor,
     torch.zeros,
 )

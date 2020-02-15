@@ -4228,9 +4228,9 @@ class TestTransforms(TestCase):
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = (torch.range(1, 100).view(-1, 100) - 1) / 100
-        x3 = torch.range(1, 100).view(-1, 100)
+        x1 = -1 * torch.arange(1.0, 101.0).view(-1, 100)
+        x2 = (torch.arange(1.0, 101.0).view(-1, 100) - 1) / 100
+        x3 = torch.arange(1.0, 101.0).view(-1, 100)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.cat([x1, x2, x3], dim=dim)
@@ -4243,9 +4243,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.range(1, 100).view(-1, 100)
-        y3 = torch.range(1, 100).view(-1, 100)
+        y1 = torch.arange(1.0, 101.0).view(-1, 100)
+        y2 = torch.arange(1.0, 101.0).view(-1, 100)
+        y3 = torch.arange(1.0, 101.0).view(-1, 100)
         y = torch.cat([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4262,9 +4262,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_cat_transform_non_uniform(self):
-        x1 = -1 * torch.range(1, 100).view(-1, 100)
-        x2 = torch.cat([(torch.range(1, 100).view(-1, 100) - 1) / 100,
-                        torch.range(1, 100).view(-1, 100)])
+        x1 = -1 * torch.arange(1.0, 101.0).view(-1, 100)
+        x2 = torch.cat([(torch.arange(1.0, 101.0).view(-1, 100) - 1) / 100,
+                        torch.arange(1.0, 101.0).view(-1, 100)])
         t1 = ExpTransform()
         t2 = CatTransform([AffineTransform(1, 100), identity_transform], dim=0)
         dim = 0
@@ -4277,9 +4277,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100).view(-1, 100)
-        y2 = torch.cat([torch.range(1, 100).view(-1, 100),
-                        torch.range(1, 100).view(-1, 100)])
+        y1 = torch.arange(1.0, 101.0).view(-1, 100)
+        y2 = torch.cat([torch.arange(1.0, 101.0).view(-1, 100),
+                        torch.arange(1.0, 101.0).view(-1, 100)])
         y = torch.cat([y1, y2], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4294,9 +4294,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
-        x1 = -1 * torch.range(1, 100)
-        x2 = (torch.range(1, 100) - 1) / 100
-        x3 = torch.range(1, 100)
+        x1 = -1 * torch.arange(1.0, 101.0)
+        x2 = (torch.arange(1.0, 101.0) - 1) / 100
+        x3 = torch.arange(1.0, 101.0)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.stack([x1, x2, x3], dim=dim)
@@ -4309,9 +4309,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.stack([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.range(1, 100)
-        y2 = torch.range(1, 100)
-        y3 = torch.range(1, 100)
+        y1 = torch.arange(1.0, 101.0)
+        y2 = torch.arange(1.0, 101.0)
+        y3 = torch.arange(1.0, 101.0)
         y = torch.stack([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.stack([t1.codomain.check(y1),

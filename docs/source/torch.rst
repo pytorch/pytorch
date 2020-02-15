@@ -43,7 +43,6 @@ Creation Ops
 .. autofunction:: ones
 .. autofunction:: ones_like
 .. autofunction:: arange
-.. autofunction:: range
 .. autofunction:: linspace
 .. autofunction:: logspace
 .. autofunction:: eye

@@ -558,7 +558,7 @@ class CatTransform(Transform):
     in a way compatible with :func:`torch.cat`.
 
     Example::
-       x0 = torch.cat([torch.range(1, 10), torch.range(1, 10)], dim=0)
+       x0 = torch.cat([torch.arange(1.0, 11.0), torch.arange(1.0, 11.0)], dim=0)
        x = torch.cat([x0, x0], dim=0)
        t0 = CatTransform([ExpTransform(), identity_transform], dim=0, lengths=[10, 10])
        t = CatTransform([t0, t0], dim=0, lengths=[20, 20])
@@ -636,7 +636,7 @@ class StackTransform(Transform):
     in a way compatible with :func:`torch.stack`.
 
     Example::
-       x = torch.stack([torch.range(1, 10), torch.range(1, 10)], dim=1)
+       x = torch.stack([torch.arange(1.0, 11.0), torch.arange(1.0, 11.0)], dim=1)
        t = StackTransform([ExpTransform(), identity_transform], dim=1)
        y = t(x)
     """

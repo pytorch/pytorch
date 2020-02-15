@@ -100,40 +100,6 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   return result;
 }
 
-Tensor& range_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "range_cpu", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, false>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-
-    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
-             std::isfinite(static_cast<double>(xend)),
-             "unsupported range: ", xstart, " -> ", xend);
-    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-             "upper bound and larger bound inconsistent with step sign");
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
-    if (result.numel() != size) {
-      result.resize_({size});
-    }
-    Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data_ptr<scalar_t>();
-
-    at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = p_begin;
-      for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-        data_ptr[i] = xstart + is * xstep;
-      }
-    });
-    if (!result.is_contiguous()) {
-      result.copy_(r);
-    }
-  });
-
-  return result;
-}
-
 Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;

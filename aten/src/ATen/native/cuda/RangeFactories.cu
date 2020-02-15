@@ -121,51 +121,6 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   return result;
 }
 
-Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "range_cuda", [&]() {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
-    auto xstep = step.to<accscalar_t>();
-
-    TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-    TORCH_CHECK(std::isfinite(static_cast<double>(xstart)) &&
-             std::isfinite(static_cast<double>(xend)),
-             "unsupported range: ", xstart, " -> ", xend);
-    TORCH_CHECK(((xstep > 0) && (xend >= xstart)) || ((xstep < 0) && (xend <= xstart)),
-             "upper bound and larger bound inconsistent with step sign");
-    int64_t size = static_cast<int64_t>(((xend - xstart) / xstep) + 1);
-
-    if (result.numel() != size) {
-      result.resize_({size});
-    }
-    // Using TensorIter, output no longer need to be contiguous
-    // We still need to check if there is internal overlap
-    // YES: error out, TOO_HARD: fallback to copy behavior, NO: use result directly
-    auto overlap = has_internal_overlap(result);
-    TORCH_CHECK(overlap != MemOverlap::YES,
-                "unsupported operation: more than one element of the written-to tensor "
-                "refers to a single memory location. Please clone() the tensor before "
-                "performing the operation.");
-    Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
-
-    auto iter = TensorIterator::nullary_op(r);
-    gpu_kernel_with_index(iter, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
-        accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
-        accscalar_t val = xstart + inc;
-        return static_cast<scalar_t>(val);
-    });
-
-    if(overlap == MemOverlap::TOO_HARD) {
-      result.copy_(r);
-    }
-
-  });
-
-  AT_CUDA_CHECK(cudaGetLastError());
-  return result;
-}
-
 Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;

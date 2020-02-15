@@ -2230,15 +2230,6 @@
     CPU: randperm_out_cpu
     CUDA: randperm_out_cuda
 
-- func: range.step(Scalar start, Scalar end, Scalar step=1, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-
-- func: range(Scalar start, Scalar end, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-
-- func: range.out(Scalar start, Scalar end, Scalar step=1, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: range_cpu_out
-    CUDA: range_cuda_out
-
 - func: reciprocal(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True

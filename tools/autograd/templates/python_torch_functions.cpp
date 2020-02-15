@@ -168,37 +168,6 @@ inline Tensor dispatch_range(Scalar start, Scalar end, Scalar step, const Tensor
   return torch::range(start, end, step, options);
 }
 
-static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-  });
-
-  ParsedArgs<8> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    PyErr_WarnEx(PyExc_UserWarning, "torch.range is deprecated in favor of torch.arange "
-        "and will be removed in 0.5. Note that arange generates values in [start; end), "
-        "not [start; end].", 1);
-    if (r.isNone(3)) {
-      const auto options = TensorOptions()
-          .dtype(r.scalartype(4))
-          .device(r.device(6))
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
-      return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), options));
-    } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
-      return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
-    }
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 inline Tensor dispatch_randint(int64_t high, IntArrayRef size, Generator * generator, Tensor result) {
   pybind11::gil_scoped_release no_gil;
   return at::randint_out(result, high, size, generator);
