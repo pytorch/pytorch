@@ -93,18 +93,18 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
 
 static inline void extractTensorsFromSlice(
   PyObject* obj,
-  Tensor& start_tensor,
-  Tensor& stop_tensor,
-  Tensor& step_tensor) {
+  Tensor* start_tensor_ptr,
+  Tensor* stop_tensor_ptr,
+  Tensor* step_tensor_ptr) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
-    start_tensor = THPVariable_Unpack(sliceobj->start);
+    (*start_tensor_ptr) = THPVariable_Unpack(sliceobj->start);
   }
   if (THPVariable_Check(sliceobj->stop)) {
-    stop_tensor = THPVariable_Unpack(sliceobj->stop);
+    (*stop_tensor_ptr) = THPVariable_Unpack(sliceobj->stop);
   }
   if (THPVariable_Check(sliceobj->step)) {
-    step_tensor = THPVariable_Unpack(sliceobj->step);
+    (*step_tensor_ptr) = THPVariable_Unpack(sliceobj->step);
   }
 }
 
@@ -164,7 +164,7 @@ static inline Variable applySlicing(
         }
         if (is_tracing) {
           Tensor start_tensor, stop_tensor, step_tensor;
-          extractTensorsFromSlice(obj, start_tensor, stop_tensor, step_tensor);
+          extractTensorsFromSlice(obj, &start_tensor, &stop_tensor, &step_tensor);
           recordSliceTrace(start_tensor, stop_tensor, step_tensor);
         }
         return at::indexing::TensorIndex({start, stop, step});
@@ -291,7 +291,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     }
     if (is_tracing) {
       Tensor start_tensor, stop_tensor, step_tensor;
-      extractTensorsFromSlice(index, start_tensor, stop_tensor, step_tensor);
+      extractTensorsFromSlice(index, &start_tensor, &stop_tensor, &step_tensor);
       recordSliceTrace(start_tensor, stop_tensor, step_tensor);
     }
     return THPVariable_Wrap(at::indexing::applySlice(
@@ -398,7 +398,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     }
     if (is_tracing) {
       Tensor start_tensor, stop_tensor, step_tensor;
-      extractTensorsFromSlice(index, start_tensor, stop_tensor, step_tensor);
+      extractTensorsFromSlice(index, &start_tensor, &stop_tensor, &step_tensor);
       recordSliceTrace(start_tensor, stop_tensor, step_tensor);
     }
     at::indexing::handleSimpleTypesInSingleDimIndexingSet(
