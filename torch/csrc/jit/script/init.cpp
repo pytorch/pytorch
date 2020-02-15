@@ -720,7 +720,10 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def(
           "__getattr__",
-          [](Object& self, const std::string& name) {
+          [](Object& self, const std::string& name) -> py::object {
+            if (name == "__qualname__") {
+              return py::cast(self.type()->name()->name());
+            }
             if (auto method = self.find_method(name)) {
               return py::cast(*method);
             }

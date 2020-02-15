@@ -11,10 +11,12 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
 #include <torch/csrc/jit/custom_class.h>
+#ifndef C10_MOBILE
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
+#endif  // C10_MOBILE
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
@@ -47,7 +49,7 @@ class class_ {
 
   std::string className;
   std::string qualClassName;
-  ClassTypePtr classTypePtr;
+  at::ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
   const std::string topModule = "__torch__.torch";
@@ -56,18 +58,27 @@ class class_ {
   class_(std::string className_) : className(std::move(className_)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
+#ifndef C10_MOBILE
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
     classTypePtr =
-        ClassType::create(c10::QualifiedName(qualClassName), classCU());
-    classTypePtr->addAttribute("capsule", CapsuleType::get());
+        at::ClassType::create(c10::QualifiedName(qualClassName), classCU());
+    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
                               c10::StrongTypePtr(classCU(), classTypePtr)});
     c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
                               c10::StrongTypePtr(classCU(), classTypePtr)});
-
+    
     classCU()->register_type(classTypePtr);
+#else  // C10_MOBILE
+    // We currently represent custom classes as torchscript classes with a
+    // capsule attribute
+    classTypePtr =
+        at::ClassType::create(c10::QualifiedName(qualClassName), std::weak_ptr<at::CompilationUnit>());
+
+    registerCustomClassForMobile(classTypePtr);
+#endif // C10_MOBILE
   }
 
   template <typename... Types>
@@ -126,6 +137,7 @@ class class_ {
         detail::wrap_func<CurClass, decltype(setstate_wrapper)>(
             std::move(setstate_wrapper)));
 
+#ifndef C10_MOBILE
     // type validation
     auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
     auto format_getstate_schema = [&getstate_schema]() {
@@ -156,6 +168,7 @@ class class_ {
         arg_type->python_str(),
         " but expected ",
         ser_type->python_str());
+#endif  // C10_MOBILE
 
     return *this;
   }
@@ -163,11 +176,14 @@ class class_ {
  private:
   template <typename Func>
   void defineMethod(std::string name, Func func) {
-    auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
+#ifndef C10_MOBILE
     ensure_c10_registerer_defined();
+#endif  // C10_MOBILE
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
+#ifndef C10_MOBILE
+    auto graph = std::make_shared<Graph>();
     auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
     auto ops = torch::jit::getAllOperatorsFor(func_symbol);
     TORCH_CHECK(ops.size() == 1);
@@ -197,6 +213,7 @@ class class_ {
 
     auto method = classCU()->create_function(qualClassName + "." + name, graph);
     classTypePtr->addMethod(method);
+#endif  // C10_MOBILE
   }
 };
 

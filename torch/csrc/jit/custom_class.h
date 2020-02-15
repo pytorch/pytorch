@@ -6,6 +6,8 @@
 namespace torch {
 namespace jit {
 
+#ifndef C10_MOBILE
+
 TORCH_API at::TypePtr getCustomClass(const std::string& name);
 
 TORCH_API bool isCustomClass(const c10::IValue& v);
@@ -19,6 +21,14 @@ using GetCustomClassFnType = at::TypePtr (*)(const std::string&);
 TORCH_API void setGetCustomClassFn(GetCustomClassFnType fn);
 
 TORCH_API int register_custom_class_handler();
+
+#else // C10_MOBILE
+
+void registerCustomClassForMobile(at::ClassTypePtr classTypePtr);
+
+TORCH_API at::TypePtr getCustomClass(const std::string& name);
+
+#endif // C10_MOBILE
 
 } // namespace jit
 } // namespace torch

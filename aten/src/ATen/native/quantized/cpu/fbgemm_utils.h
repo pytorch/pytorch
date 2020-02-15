@@ -6,6 +6,7 @@
 #include "fbgemm/QuantUtils.h"
 
 #include <ATen/Tensor.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 #include <c10/core/QScheme.h>
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
@@ -17,18 +18,106 @@
 // of the A rows. The column offsets are needed for the asymmetric quantization
 // (affine quantization) of input matrix.
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
-struct FBGEMM_API PackedLinearWeight {
+struct FBGEMM_API PackedLinearWeight : public LinearPackedParamsBase {
+  PackedLinearWeight(
+      std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w,
+      c10::optional<at::Tensor> bias,
+      std::vector<int32_t> col_offsets,
+      std::vector<float> w_scale,
+      std::vector<int32_t> w_zp,
+      c10::QScheme q_scheme)
+      : w(std::move(w)),
+        bias(std::move(bias)),
+        col_offsets(std::move(col_offsets)),
+        w_scale(std::move(w_scale)),
+        w_zp(std::move(w_zp)),
+        q_scheme(std::move(q_scheme)) {}
   std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w;
   c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
   std::vector<float> w_scale;
   std::vector<int32_t> w_zp;
   c10::QScheme q_scheme;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(at::Tensor input) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  std::string backend() override {
+    return "FBGEMM";
+  }
+
+  std::string bit_width() override {
+    return "INT8";
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
-struct FBGEMM_API PackedLinearWeightFp16 {
+struct FBGEMM_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
+  PackedLinearWeightFp16(
+      std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
+      c10::optional<at::Tensor> bias)
+      : w(std::move(w)), bias(std::move(bias)) {}
+
   std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w;
   c10::optional<at::Tensor> bias;
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
+  at::Tensor apply_dynamic(at::Tensor input) override;
+  at::Tensor apply_dynamic_relu(at::Tensor input) override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  std::string backend() override {
+    return "FBGEMM";
+  }
+
+  std::string bit_width() override {
+    return "FP16";
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  template <bool ReluFused>
+  at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
 template <int kSpatialDim = 2>
