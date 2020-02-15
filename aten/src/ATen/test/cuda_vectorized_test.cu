@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
-#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
+using namespace at::native;
 using namespace at::native::memory;
+
 __managed__ double4 buffer1[1024];
 __managed__ double4 buffer2[1024];
 
@@ -71,9 +73,9 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 // defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
-  using vectorized = policies<64, 4>::vectorized<vec_size>;
+  using vectorized = policies::vectorized<vec_size>;
   auto policy = vectorized();
-  scalar_t buf[vectorized::thread_work_size];
+  scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   policy.load(accessor, src + 256 * blockIdx.x);
   policy.store(accessor, dst + 256 * blockIdx.x);

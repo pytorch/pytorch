@@ -199,8 +199,8 @@ struct has_same_arg_types<func_t, -1> {
 
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(nt)
+template<typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -217,8 +217,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
+  int idx = block_work_size * blockIdx.x + tid;
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
@@ -229,50 +228,49 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   // fetch data
-  return_t results[vt];
-  arg_t args[vt][nargs];
+  return_t results[thread_work_size];
+  arg_t args[thread_work_size][nargs];
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * nt);
+        args[i][j] = *(args_base[j] + i * num_threads);
       }
     }
   }
 
   // compute
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
   // store data
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
+      *(result_base + i * num_threads) = results[i];
     }
   }
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
+template<typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+  elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
-template<int nt, int vt, typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
+template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
 
 } // namespace modern

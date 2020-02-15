@@ -245,20 +245,20 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   constexpr int arity = traits::arity;
 
   // compute base pointers for this block
-  int idx = policy_t::block_work_size * blockIdx.x;
+  int idx = block_work_size * blockIdx.x;
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   detail::pointers<args_t> args_base;
   detail::static_unroll<compute_base_ptrs, arity>::with_args(args_base, data, idx);
 
-  return_t results[policy_t::thread_work_size];
-  args_t args[policy_t::thread_work_size];
+  return_t results[thread_work_size];
+  args_t args[thread_work_size];
 
   // load
   detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
 
   // compute
   #pragma unroll
-  for (int i = 0; i < policy_t::thread_work_size; i++) {
+  for (int i = 0; i < thread_work_size; i++) {
     results[i] = c10::guts::apply(f, args[i]);
   }
 
@@ -267,40 +267,38 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   policy.store(result_accessor, result_base);
 }
 
-template<int vec_size, int num_threads, int thread_work_size, typename func_t, typename array_t>
+template<int vec_size, typename func_t, typename array_t>
 C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   using return_t = typename function_traits<func_t>::result_type;
-  using policies = memory::policies<num_threads, thread_work_size>;
-  int remaining = N - policies::common::block_work_size * blockIdx.x;
+  int remaining = N - block_work_size * blockIdx.x;
 
-  if (remaining < policies::common::block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, data, typename policies::checked_unroll(remaining));
+  if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
+    elementwise_kernel_helper(f, data, typename memory::policies::checked_unroll(remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper(f, data, typename policies::template vectorized<vec_size>());
+    elementwise_kernel_helper(f, data, typename memory::policies::template vectorized<vec_size>());
   }
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t>
+template<typename func_t, typename array_t>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   int vec_size = detail::can_vectorize_up_to<func_t>(data);
   switch (vec_size) {
   case 4:
-    elementwise_kernel<4, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   case 2:
-    elementwise_kernel<2, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<2, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   case 1:
-    elementwise_kernel<1, nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+    elementwise_kernel<1, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
     break;
   default:
     TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
