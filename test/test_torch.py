@@ -10522,10 +10522,13 @@ class TestTorchDeviceType(TestCase):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
         self.assertEqual(t[-1].item(), bigint - 1)
+        del t
         t = torch.linspace(0, bigint, bigint + 1, dtype=torch.long, device=device)
         self.assertEqual(t[-1].item(), bigint)
+        del t
         t = torch.logspace(0, 31, bigint, 2, dtype=torch.long, device=device)
         self.assertEqual(t[-1].item(), 2 ** 31)
+        del t
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
