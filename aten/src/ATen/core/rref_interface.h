@@ -27,7 +27,7 @@ class C10_EXPORT RRefInterface : public c10::intrusive_ptr_target {
   // Returns true if this is the ``OwnerRRef``
   virtual bool isOwner() const = 0;
 
-  virtual TypePtr type() const = 0;
+  virtual const TypePtr type() const = 0;
 };
 
 }

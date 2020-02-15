@@ -725,6 +725,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 elif n.kindOf("value") == "is":
                     value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
                     return g.op("Constant", value_t=value)
+                elif n.kindOf("value") == "fs":
+                    value = torch.stack([torch.tensor(v) for v in n["value"]]) if n["value"] else []
+                    return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
                 else:
@@ -857,7 +860,11 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets
+
+    for version in _onnx_stable_opsets:
+        if version >= opset_version:
+            sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):

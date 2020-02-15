@@ -78,18 +78,15 @@ py::object PyRRef::toHere() {
   } else {
     // toHere() calls python_rpc_handler which acquires GIL when UserRRef holds
     // a python object
-    std::vector<IValue> rawValues =
+    IValue value =
         c10::static_intrusive_pointer_cast<UserRRef>(rref_)->toHere();
-    IValue value;
     if (rref_->isPyObj()) {
-      value = jit::toIValue(
-          PythonRpcHandler::getInstance().deserialize(
-              SerializedPyObj::fromIValues(std::move(rawValues))),
-          PyObjectType::get());
+      // python_rpc_handler deserialization will acquires GIL.
+      auto rfr_values = value.toTuple()->elements();
+      return PythonRpcHandler::getInstance().deserialize(
+        SerializedPyObj::fromIValues(rfr_values)
+      );
     } else {
-      value = std::move(rawValues).front();
-    }
-    {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
       pybind11::gil_scoped_acquire ag;
@@ -123,7 +120,8 @@ std::string PyRRef::str() const {
     ss << "OwnerRRef(" << rref_->rrefId() << ")";
   } else {
     ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
+       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId()
+       << ")";
   }
   return ss.str();
 }
@@ -141,10 +139,9 @@ py::tuple PyRRef::pickle() const {
 PyRRef PyRRef::unpickle(const py::tuple& pyTuple) {
   auto& ctx = RRefContext::getInstance();
   auto rrefForkData = fromPyTuple(pyTuple);
-  c10::intrusive_ptr<RRef> rref;
   TypePtr rrefType =
       PythonRpcHandler::getInstance().parseTypeFromStr(rrefForkData.typeStr_);
-  rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
+  c10::intrusive_ptr<RRef> rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
   ctx.notifyOwnerAndParentOfFork(
       rrefForkData.forkId_, rrefForkData.parent_, rref);
   return PyRRef(std::move(rref));
@@ -155,6 +152,7 @@ c10::IValue PyRRef::toIValue() {
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
 }
+
 
 } // namespace rpc
 } // namespace distributed

@@ -69,7 +69,7 @@ class ProcessGroupAgent : public RpcAgent {
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
-  TypeResolver getTypeResolver() override;
+  TypeResolver& getTypeResolver() override;
 
  protected:
   // This method wraps the destination information and the message into a
@@ -140,8 +140,15 @@ class ProcessGroupAgent : public RpcAgent {
   void handleSend(const SendWork& work);
   // put RecvWork into a queue and notify the worker thread
   void enqueueRecv(RecvWork work);
-  // receiving messages
+  // Loop for receiving messages. Calls listenLoopInternal and handles errors
+  // such as timeouts on the process group.
+  virtual void listenLoopInternal();
+  // Main function for receiving messages
   void listenLoop();
+  // exception_pointer correspnding to an exception raised in listenLoop (if
+  // there is one), and lock to guard access.
+  std::exception_ptr listenLoopException_;
+  std::mutex listenLoopExceptionMutex_;
   // poll for timed out RPCs
   void pollTimedOutRPCs();
   // process timed out futures

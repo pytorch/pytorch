@@ -563,6 +563,9 @@ inline IValue toIValue(
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else {
+        throw py::cast_error(
+            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
       }
     }
     case TypeKind::RRefType: {
@@ -753,7 +756,7 @@ inline py::object toPyObject(IValue ivalue) {
         c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
             ivalue.toRRef())));
 #else
-    AT_ERROR("RRef is only supported with the distributed package");
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else {
     AT_ERROR(

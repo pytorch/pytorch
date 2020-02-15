@@ -92,7 +92,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     return userRRefPtr;
   } else {
     auto ownerRRefPtr = ctx.createOwnerRRef(returnType);
-    // prevent this owner RRef be deleted due to other forks
+    // prevent this owner RRef from being deleted due to other forks
     ctx.addSelfAsFork(ownerRRefPtr);
 
     auto scriptRemoteCall = std::make_unique<ScriptRemoteCall>(
@@ -108,26 +108,11 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         true /*forceGradRecording*/,
         nullptr);
 
-    // The callback is the same as finishCreatingOwnerRRef() in
-    // python_functions.py, the difference is that ownerRRefPtr created here
-    // always holds an IValue, no need to explicitly hold GIL and clear
-    // deletedRRef. Not calling finishCreatingOwnerRRef() because it is not
-    // necessary to introduce python dependency in this file.
-    fm->addCallback([](const Message& message,
-                       const c10::optional<utils::FutureError>& futErr) {
-      RRefContext::handleException(futErr);
-      auto rr = RemoteRet::fromMessage(message);
-      TORCH_INTERNAL_ASSERT(
-          rr->rrefId() == rr->forkId(),
-          "Expecting an OwnerRRef as RemoteRet but got a fork.");
-      auto& refCtx = RRefContext::getInstance();
-      refCtx.delForkOfOwner(rr->rrefId(), rr->rrefId());
-    });
+    fm->addCallback(callback::finishCreatingOwnerRRef);
     return ownerRRefPtr;
   }
 }
 
 } // namespace rpc
-
 } // namespace distributed
 } // namespace torch

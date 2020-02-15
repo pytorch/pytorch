@@ -130,11 +130,12 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
            "this class.";
     AT_ERROR(err.str());
   } else if (ivalue.isRRef()) {
-    #ifdef USE_DISTRIBUTED
-      pushRRef(ivalue);
-    #else
-      TORCH_INTERNAL_ASSERT(false, "RRef pickling is only supported with the distributed package");
-    #endif
+#ifdef USE_DISTRIBUTED
+    pushRRef(ivalue);
+#else
+    TORCH_CHECK(
+        false, "RRef pickling is only supported with the distributed package");
+#endif
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -142,13 +143,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 
 void Pickler::pushDevice(const IValue& ivalue) {
   auto device = ivalue.toDevice();
-  auto it = memoized_devices_map_.find(device.str());
+  auto deviceStr = device.str();
+  auto it = memoized_devices_map_.find(deviceStr);
   if (it == memoized_devices_map_.end()) {
     pushGlobal("torch", "device");
-    pushString(ivalue.toDevice().str());
+    pushString(deviceStr);
     push<PickleOpCode>(PickleOpCode::TUPLE1);
     push<PickleOpCode>(PickleOpCode::REDUCE);
-    memoized_devices_map_[device.str()] = pushNextBinPut();
+    memoized_devices_map_[deviceStr] = pushNextBinPut();
   } else {
     pushBinGet(it->second);
   }
@@ -201,7 +203,7 @@ void Pickler::pushIValue(const IValue& ivalue) {
     pushIValueImpl(ivalue);
 
     memoized_ivalues_.push_back(ivalue);
-    memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
+    memoized_ivalue_map_[ptr] = pushNextBinPut();
   } else {
     pushIValueImpl(ivalue);
   }

@@ -96,7 +96,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-std::vector<IValue> UserRRef::toHere() {
+IValue UserRRef::toHere() {
   auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -126,7 +126,13 @@ std::vector<IValue> UserRRef::toHere() {
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;
   auto& rrefFetchRet = static_cast<RRefFetchRet&>(rpc);
-  return rrefFetchRet.values();
+  if (isPyObj()) {
+    // wrap python serialized vector of ivalues into tuple, this
+    // made the C++ toHere interface to return single IValue
+    return ivalue::Tuple::create(rrefFetchRet.values());
+  } else {
+    return rrefFetchRet.values().front();
+  }
 }
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////

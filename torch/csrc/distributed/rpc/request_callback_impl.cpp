@@ -121,6 +121,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       ownerRRef->setValue(std::move(stack.front()));
       if (rrefId != forkId) {
+        // Caller is a user and callee is the owner, add fork
+        //
+        // NB: rrefId == forkId is true if and only if calling remote to self.
+        // In that case both the caller and the callee will access the
+        // OwnerRRef. Hence, on the callee side (here), it should not call
+        // addForkOfOwner as it is not a fork. To allow callee to distinguish
+        // when this request is sent to self, the caller will set forkId using
+        // rrefId (OwnerRRef does not have a forkId anyway).
         ctx.addForkOfOwner(rrefId, forkId);
       }
       return wrap(RemoteRet(rrefId, forkId).toMessage());
@@ -156,7 +164,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref =
+          ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -181,7 +190,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref =
+          ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         auto value = rref->getValue();
         py::object pyValue;
@@ -312,7 +322,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // Now execute the autograd graph using the "distributed engine."
       auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
-          autogradContext, sendFunction);
+          autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(
