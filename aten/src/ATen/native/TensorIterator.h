@@ -132,6 +132,13 @@ struct CAFFE2_API OperandInfo {
 
 struct SplitUntil32Bit;
 
+enum class FastSetupType : uint8_t {
+  NONE,
+  CONTIGUOUS,
+  CHANNELS_LAST,
+  NON_OVERLAPPING_DENSE
+};
+
 enum class CommonDTypeStrategy : uint8_t {
   NONE, // Do not compute a common dtype
   CHECK, // Compute and validate a common dtype but don't promote.
@@ -360,8 +367,8 @@ protected:
   void compute_types();
   std::tuple<Device, ScalarType, bool> compute_common_type();
   void allocate_outputs();
-  void fast_set_up();
-  bool can_use_fast_set_up();
+  bool fast_set_up();
+  FastSetupType compute_fast_setup_type();
   void compute_names();
   void propagate_names_to_outputs();
   void coalesce_dimensions();
