@@ -65,7 +65,7 @@ THCStorage* THCStorage_new(
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
       data_type,
       0,
-      state->cudaDeviceAllocator,
+      c10::cuda::CUDACachingAllocator::get(),
       true).release();
   return storage;
 }
