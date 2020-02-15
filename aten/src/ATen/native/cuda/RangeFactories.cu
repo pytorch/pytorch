@@ -123,7 +123,7 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
+      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
           scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
           return val;
         });
