@@ -475,7 +475,7 @@ class ModelForFusion(nn.Module):
         super(ModelForFusion, self).__init__()
         self.conv1 = nn.Conv2d(3, 2, 5, bias=None).to(dtype=torch.float)
         self.bn1 = nn.BatchNorm2d(2).to(dtype=torch.float)
-        self.relu1 = nn.ReLU(inplace=False).to(dtype=torch.float)
+        self.relu1 = nn.ReLU(inplace=True).to(dtype=torch.float)
         self.sub1 = SubModelForFusion()
         self.sub2 = SubModelWithoutFusion()
         self.fc = nn.Linear(72, 10).to(dtype=torch.float)
