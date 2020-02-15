@@ -260,6 +260,23 @@ def one_arg(value):
     return value + 1
 
 
+class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
+    def __init__(self, dst_worker):
+        super().__init__()
+        self.rrefs = []
+        for _ in range(4):
+            self.rrefs.append(rpc_return_rref(dst_worker))
+
+    @torch.jit.script_method
+    def forward(self):
+        # type: () -> List[Tensor]
+        return_list = []
+        for rref in self.rrefs:
+            return_list.append(rref.to_here())
+
+        return return_list
+
+
 @torch.jit.script
 class MyScriptClass:
     def __init__(self):
@@ -281,6 +298,17 @@ class MyScriptModule(torch.jit.ScriptModule):
     def forward(self):
         # type: () -> Tensor
         return self.a
+
+
+def create_local_rref():
+    script_mod = MyScriptModule()
+    return rpc.RRef(script_mod)
+
+
+@torch.jit.script
+def rref_myscriptmodule_forward(rref_module):
+    # type: (RRef[MyModuleInterface]) -> Tensor
+    return rref_module.to_here().forward()
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -1754,17 +1782,28 @@ class RpcJitTest(RpcAgentTestFixture):
         self.assertEqual(res, False)
 
     @dist_init
+    def test_my_script_module_with_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
+        res = module_with_rrefs()
+        res_hat = [torch.ones(2, 2) + 1 for _ in range(4)]
+        self.assertEquals(res, res_hat)
+
+
+    @dist_init
     def test_local_rref_with_script_module(self):
-        # create a local RRef that hold a ScriptModule
-        script_mod = MyScriptModule()
-        rref_module = rpc.RRef(script_mod)
+        n = self.rank + 1
+        dst_rank = n % self.world_size
 
-        @torch.jit.script
-        def rref_script_module(rref_module):
-            # type: (RRef[MyModuleInterface]) -> Tensor
-            return rref_module.to_here().forward()
+        # create a local RRef on dst_rank that holds a ScriptModule
+        rref_module_sync = rpc.rpc_sync("worker{}".format(dst_rank), create_local_rref, args=())
 
-        # pass the local created RRef module to jit
-        res = rref_script_module(rref_module)
+        # pass the dst_rank local created RRef module to jit function
+        # this ensures that the RRef created in the dst_rank worker
+        # is holding a valid IValue with ScriptModule type instead of
+        # a blind PyObjectType
+        res = rref_myscriptmodule_forward(rref_module_sync)
 
-        self.assertEqual(res, script_mod.forward())
+        self.assertEqual(res, MyScriptModule().forward())

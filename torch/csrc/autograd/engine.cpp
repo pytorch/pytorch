@@ -386,16 +386,22 @@ void Engine::thread_on_exception(
 void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    if (!future_result_->completed()) {
-      future_result_->setError(e.what());
+    // Careful: setting the future_result_ can trigger DistAutogradContext to
+    // resetGraphTask(), sometimes deleting this underlying GraphTask.
+    // Don't touch *this after setError() below, and release the lock early, to
+    // avoid unlocking this->mutex_ after setting the future.
+    std::shared_ptr<FutureVariableList> future_result = future_result_;
+    lock.unlock();
+    if (!future_result->completed()) {
+      future_result->setError(e.what());
     } else {
-      TORCH_INTERNAL_ASSERT(future_result_->hasError());
+      TORCH_INTERNAL_ASSERT(future_result->hasError());
     }
   }
 }

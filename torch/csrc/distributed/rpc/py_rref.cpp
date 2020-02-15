@@ -73,7 +73,7 @@ PyRRef::PyRRef(const py::object& value)
           elem_type = type_inferred.type();
         } else {
           // Otherwise it's a pure pyobject, create the RRef
-          // that holds a IValue of an pyobject
+          // that holds an IValue of an pyobject
           elem_type = PyObjectType::get();
         }
         auto rref =
@@ -82,7 +82,6 @@ PyRRef::PyRRef(const py::object& value)
         IValue ivalue = jit::toIValue(std::move(copy), elem_type);
         rref->setValue(std::move(ivalue));
         return rref;
-
       }()) {}
 
 bool PyRRef::isOwner() const {
