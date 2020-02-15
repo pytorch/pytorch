@@ -152,7 +152,6 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   return self.set_requires_grad(_requires_grad);
 }
 
-// yf225 TODO: also see if we need to handle the JIT path: https://github.com/pytorch/pytorch/pull/26332/files
 void retain_grad(const Tensor & self) {
   TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
   if (self.is_leaf()) {  // no-op for leaves
