@@ -354,20 +354,11 @@ class skipCUDAIf(skipIf):
 
 # Only runs on cuda, and only run when there is enough GPU RAM
 def largeCUDATensorTest(size):
-
-    class largeTensorTest_(skipCUDAIf):
-
-        def __init__(self, size):
-            if isinstance(size, str):
-                assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
-                size = 1024 ** 3 * int(size[:-2])
-            valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
-            super(largeTensorTest_, self).__init__(not valid, "Not enough memory")
-
-    def f(test):
-        return largeTensorTest_(size)(onlyCUDA(test))
-
-    return f
+    if isinstance(size, str):
+        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        size = 1024 ** 3 * int(size[:-2])
+    valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
+    return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
 
 
 class expectedFailure(object):
