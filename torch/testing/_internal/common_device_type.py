@@ -352,7 +352,8 @@ class skipCUDAIf(skipIf):
         super(skipCUDAIf, self).__init__(dep, reason, device_type='cuda')
 
 
-def largeTensorTest(size):
+# Only runs on cuda, and only run when there is enough GPU RAM
+def largeCUDATensorTest(size):
 
     class largeTensorTest_(skipCUDAIf):
 

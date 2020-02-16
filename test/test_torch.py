@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK, largeTensorTest
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -10562,7 +10562,7 @@ class TestTorchDeviceType(TestCase):
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
 
-    @largeTensorTest('16GB')
+    @largeCUDATensorTest('16GB')
     def test_range_factories_64bit_indexing(self, device):
         bigint = 2 ** 31 + 1
         t = torch.arange(bigint, dtype=torch.long, device=device)
