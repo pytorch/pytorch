@@ -218,7 +218,6 @@ static CompilerConfig& getConfig() {
 //  AVX512    6
 extern "C" int __isa_available;
 static std::string getArchFlags() {
-// The AVX-512 vectorizer won't work until VS 2019 16.3
   if (__isa_available >= 6) {
     return "/arch:AVX512";
   } else if (__isa_available >= 5) {
