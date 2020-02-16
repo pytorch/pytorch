@@ -218,6 +218,10 @@ static CompilerConfig& getConfig() {
 //  AVX512    6
 extern "C" int __isa_available;
 static std::string getArchFlags() {
+// Temporaily disable AVX512 because it is not working.
+  if (__isa_available >= 6) {
+    __isa_available = 5;
+  }
   if (__isa_available >= 6) {
     return "/arch:AVX512";
   } else if (__isa_available >= 5) {
@@ -231,7 +235,7 @@ static std::string getArchFlags() {
 static const std::string arch_flags = getArchFlags();
 static const std::string compile_string =
     "cd /D \"" + temp_dir + "\" && "
-    "${cxx} /nologo /MD /Ox " + arch_flags + " /LD /EHsc "
+    "${cxx} /nologo /MD /O2 " + arch_flags + " /LD /EHsc "
     "${fopenmp} \"${cpp_file}\" /link /out:\"${so_file}\"";
 #else
 static const std::string compile_string =
