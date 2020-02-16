@@ -1027,6 +1027,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
+        self.run_test(torch.jit.script(RandLike()), x)
 
     def test_random_like_dtype(self):
         class RandNLike(torch.nn.Module):
@@ -1905,6 +1906,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_size_as_list(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                out = []
+                split_sizes = [input.shape[0] - 1, 1]
+                for ob in input.split(split_sizes):
+                    out.append(ob)
+                return torch.cat(out, dim=0)
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_dynamic(self):
