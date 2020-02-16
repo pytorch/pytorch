@@ -28,11 +28,10 @@ struct Value;
 
 namespace fuser {
 
-// TODO: add comment explaining structure
-// TODO: Add casting function
-// TODO: Add more binary ops, maybe reduce to single class (div, mul, mod, sub, LT)
-// TODO: Add unary ops, maybe reduce to single class (casting)
-// TODO: Add more types (int32, int64)
+/*
+ * TODO: Add more types (int32, int64)
+ * // TODO: add regions (e.g. loop exprs have bodies)
+ */
 
 /* 
  * This file defines the basic IR structure.
@@ -190,6 +189,12 @@ public:
   //value should be evaluated based on the DAG that created it, and that DAGs leaf nodes
   bool same_as(const Val* other) const { return this == other;}
 
+  template <typename T>
+  void dispatch(T handler) const;
+
+  template <typename T>
+  const Statement* dispatch_mutator(T mutator) const;
+
 protected:
   const ValType vtype_;
   const DataType dtype_;
@@ -327,8 +332,6 @@ private:
   c10::optional<int> maybe_value_;
 };
 
-// TODO: improve input/output model to track dataflow
-// TODO: add regions (e.g. loop exprs have bodies)
 /*
 * A Expr represents a "computation." These are functions that may take inputs
 * and produce outputs.
@@ -370,6 +373,12 @@ public:
     }
     return true;
   }
+
+  template <typename T>
+  void dispatch(T handler) const;
+
+  template <typename T>
+  const Statement* dispatch_mutator(T mutator) const;
 
 private:
   ExprType type_;

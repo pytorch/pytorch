@@ -147,7 +147,7 @@ const TensorView* merge(const TensorView* tv, int axis) {
 }
 
 /*
- * TODO: How doi we coordinate the uses of tensor and the tensorview used here,
+ * TODO: How do we coordinate the uses of tensor and the tensorview used here,
  * Do we only support these operations on tensorview? Do we replace all
  * instances of tensor with the tensorview created here?
  */
@@ -156,6 +156,7 @@ const TensorView* split(const Tensor* tensor, int axis, int factor) {
 }
 
 const TensorView* merge(const Tensor* tensor, int axis) {
+  
   return merge(new TensorView(tensor, tensor->domain()), axis);
 }
 
