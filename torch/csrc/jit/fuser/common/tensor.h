@@ -152,6 +152,19 @@ struct TORCH_API Tensor : public Val {
   const TensorDomain* domain_;
 };
 
+//void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
+  /*
+   * TODO:
+   * Recursive compute_at:
+   * Recurse backward from consumer, to producer, make sure there's a dependency chain there.
+   * After recursing, recurse again, and call ComputeAt for all tensors between producer and consumer.
+   * 
+   * Assert direct consumer/producer relationship.
+   * Compute at modifies the consumer, not the producer.
+   * 
+   */
+//}
+
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
 
@@ -162,7 +175,12 @@ struct TORCH_API TensorView : public Val {
   TensorView& operator=(TensorView&& other) = delete;
 
   TensorView(const Tensor* _tensor, const TensorDomain* _domain)
-      : Val(ValType::TensorView), tensor_(_tensor), domain_(_domain) {}
+      : Val(ValType::TensorView)
+      , tensor_(_tensor)
+      , domain_(_domain)
+      , compute_at_view_(nullptr)
+      , compute_at_axis_(-1) {
+      }
 
   const Tensor* tensor() const noexcept { return tensor_; }
   const TensorDomain* domain() const noexcept { return domain_; }
@@ -174,9 +192,20 @@ struct TORCH_API TensorView : public Val {
     );
   }
 
+  const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
+  int getComputeAtAxis() const noexcept { return compute_at_axis_; }
+  void computeAt(const TensorView* tv, int axis) {
+    compute_at_view_ = tv;
+    compute_at_axis_ = axis;
+    //ComputeAt_impl(tv, this, axis);
+  }
+
 private:
   const Tensor* tensor_;
   const TensorDomain* domain_;
+  const TensorView* compute_at_view_;
+  int compute_at_axis_;
+
 };
 
 /*

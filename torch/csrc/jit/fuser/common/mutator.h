@@ -45,4 +45,18 @@ struct TORCH_API BaseMutator {
 
 };
 
+struct TORCH_API ReplaceAll : public BaseMutator{
+
+  const Statement* mutate(const Val* const);
+
+  TORCH_API static void instancesOf(const Val* const instance, const Val* const with);
+
+private:
+  ReplaceAll(const Val* _instance, const Val* const _with):instance_(_instance), with_(_with){}
+
+  const Val* instance_;
+  const Val* with_;
+
+};
+
 }}} // torch::jit::fuser

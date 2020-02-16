@@ -30,12 +30,7 @@ std::vector<const Statement*> IterVisitor::next(const Expr* const expr) {
 }
 
 void IterVisitor::handle(const Statement* const stmt) {
-  if (stmt->isVal())
-    handle(static_cast<const Val*>(stmt));
-  else if (stmt->isExpr())
-    handle(static_cast<const Expr*>(stmt));
-  else
-    throw std::runtime_error("Unknown statment type in IterVisitor::handle(Statment).");
+  stmt->dispatch(this);
 }
 
 void IterVisitor::handle(const Expr* const expr) {
@@ -83,9 +78,9 @@ void IterVisitor::traverse(const Fusion* const fusion, bool from_outputs_only, b
     for(const Val* out : fusion->outputs())
       outputs_to_visit.push(out);
   }else 
-    for (const auto it : fusion->vals()) {
-      if (fusion->uses().find(it) ==
-          fusion->uses().end()) // never used, must be output or unused val
+    for (const Val* it : fusion->vals()) {
+      const std::set<const Expr*>& uses = fusion->uses(it);
+      if(uses.empty())
         outputs_to_visit.push(it);
     }
 

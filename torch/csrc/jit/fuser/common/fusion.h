@@ -277,9 +277,10 @@ struct TORCH_API Fusion : public IRInputOutput {
     return expr_set_;
   }
 
-  const std::unordered_map<const Val*, std::set<const Expr*>>& uses() const
-      noexcept {
-    return uses_;
+  const std::set<const Expr*>& uses(const Val* val) const {
+    if(uses_.find(val) != uses_.end())
+      return uses_.find(val)->second;
+    return std::move(std::set<const Expr*>());
   }
 
   const Expr* origin(const Val* val) const {

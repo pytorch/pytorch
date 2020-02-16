@@ -42,7 +42,7 @@ void testGPU_FusionSimpleArith(){
   Float* f1 = new Float(1.f);
   Float* f2 = new Float{2.f};
   Float* f3 = new Float();
-  
+
   BinaryOp* an_add = new BinaryOp(BinaryOpType::Add, f3, f1, f2);
   std::cout<<"Explicit add construction of 1.f + 2.f: "<<fusion<<std::endl;
 
@@ -55,7 +55,7 @@ void testGPU_FusionContainer(){
   
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
-  auto f3 = binary_op(BinaryOpType::Add, f1, f2);
+  auto f3 =add(f1, f2);
   std::cout<<"Implicit add construction of 1.f + 2.f : "<<fusion1<<std::endl;
 
   Fusion fusion2;
@@ -382,6 +382,27 @@ void testGPU_FusionEquality(){
   TORCH_CHECK(!static_cast<const Expr*>(neg1)->same_as(add1));
   TORCH_CHECK(!neg1->same_as(neg2));
 
+}
+
+void testGPU_FusionReplaceAll(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  
+  Float* f1 = new Float{1.f};
+  Float* f2 = new Float();
+  Float* f4 = new Float();
+  const Float* f3 = static_cast<const Float*>( add(f1, f2) );
+  std::cout<<fusion<<std::endl;
+  ReplaceAll::instancesOf(f3, f4);
+  std::cout<<fusion<<std::endl;
+  /*
+  const Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
+  std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
+  ZeroMutator mutator;
+  BaseMutator* base_mutator = &mutator;
+  base_mutator->mutate(&fusion);
+  std::cout<<"Replaced: "<<fusion<<std::endl;
+  */
 }
 
 void testGPU_Fusion() {}

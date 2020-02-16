@@ -95,7 +95,8 @@ namespace jit {
   _(GPU_FusionTVMerge)           \
   _(GPU_FusionTVReorder)         \
   _(GPU_FusionCastOp)            \
-  _(GPU_FusionEquality)            \
+  _(GPU_FusionEquality)          \
+  _(GPU_FusionReplaceAll)        \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

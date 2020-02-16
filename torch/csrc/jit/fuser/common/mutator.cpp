@@ -7,12 +7,7 @@ namespace fuser {
 
 const Statement* BaseMutator::mutate(
     const Statement* const statement) {
-  if (statement->isVal())
-    return mutate(static_cast<const Val*>(statement));
-  else if (statement->isExpr())
-    return mutate(static_cast<const Expr*>(statement));
-  else
-    throw std::runtime_error("Could not detect type in mutate(const Statement*).");
+  return statement->dispatch_mutator(this);
 }
 const Statement* BaseMutator::mutate(const Val* const val) {
   return val->dispatch_mutator(this);
@@ -158,6 +153,39 @@ const Statement* BaseMutator::mutate(const Reorder* const ro) {
     return new Reorder(o, i, ro->pos2axis());
   return ro;
 }
+
+#include <torch/csrc/jit/fuser/common/mutator.h>
+const Statement* ReplaceAll::mutate(const Val* const val){
+  if(val->same_as(instance_)){
+    std::cout<<"replace?"<<std::endl;
+    return with_;
+  }
+  std::cout<<"Don't replace "<<val<<" with "<<with_<<std::endl;
+  return val;
+}
+
+void ReplaceAll::instancesOf(const Val* const instance, const Val* const with){
+
+  std::set<const Expr*> exprs_containing_val;
+
+  Fusion *fusion = FusionGuard::getCurFusion();
+  const Expr* orig = fusion->origin(instance);
+  if(orig != nullptr)
+    exprs_containing_val.emplace(orig);
+
+  const std::set<const Expr*> exprs = fusion->uses(instance);
+  for(const Expr* expr : exprs)
+    exprs_containing_val.emplace(expr);
+
+  ReplaceAll ra(instance, with);
+
+  std::cout<<"Exprs to check : "<<exprs_containing_val.size()<<std::endl;
+  std::cout<<"Base val dispatch?"<<std::endl;
+  for(const Expr* expr : exprs_containing_val)
+    expr->dispatch_mutator(static_cast<BaseMutator*>(&ra));
+
+}
+
 
 } // namespace fuser
 } // namespace jit
