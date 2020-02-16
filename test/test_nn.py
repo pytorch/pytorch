@@ -3586,7 +3586,7 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @largeCUDATensorTest('12GB')
-    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
+    def test_adaptive_pooling_avg_nhwc_launch_config_backward(self, _):
         input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
         grad = torch.randint(1, 10, (1, 32, 10, 32), dtype=torch.float32, device="cuda")
@@ -3608,7 +3608,7 @@ class TestNN(NNTestCase):
         self.assertEqual(input.grad, ref_input.grad)
 
     @largeCUDATensorTest('12GB')
-    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
+    def test_adaptive_pooling_avg_nhwc_launch_config_forward(self, _):
         input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
         pool = torch.nn.AdaptiveAvgPool2d((2 ** 17 + 1, 32)).cuda()
