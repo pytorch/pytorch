@@ -14,32 +14,34 @@ void IRPrinter::print(Stmt stmt) {
 
 // TODO: change whether to include the parenthesis to the parent expression,
 // we need to look at the operator precedence to make the output simpler.
-#define BINARY_ACCEPT(os, v, op_str) \
-  os << "(";                         \
-  v->lhs().accept(this);             \
-  os << " " << op_str << " ";        \
-  v->rhs().accept(this);             \
-  os << ")";
+template <typename Op>
+void IRPrinter::visitBinaryOp(const BinaryOpNode<Op>* v, const std::string& op_str) {
+  os() << "(";
+  v->lhs().accept(this);
+  os() << " " << op_str << " ";
+  v->rhs().accept(this);
+  os() << ")";
+}
 
 void IRPrinter::visit(const Add* v) {
-  BINARY_ACCEPT(os(), v, "+");
+  visitBinaryOp(v, "+");
 }
 
 void IRPrinter::visit(const Sub* v) {
-  BINARY_ACCEPT(os(), v, "-");
+  visitBinaryOp(v, "-");
 }
 
 void IRPrinter::visit(const Mul* v) {
-  BINARY_ACCEPT(os(), v, "*");
+  visitBinaryOp(v, "*");
 }
 
 void IRPrinter::visit(const Div* v) {
-  BINARY_ACCEPT(os(), v, "/");
+  visitBinaryOp(v, "/");
 }
 
 void IRPrinter::visit(const Mod* v) {
   if (v->dtype() == kInt32) {
-    BINARY_ACCEPT(os(), v, "%");
+    visitBinaryOp(v, "%");
   } else if (v->dtype() == kFloat32) {
     os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
   } else {

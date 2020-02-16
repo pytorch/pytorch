@@ -1068,33 +1068,6 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
   c10::raw::intrusive_ptr::decref(rowS);
 }
 
-accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
-{
-  scalar_t sum;
-  if (value == INFINITY) {
-    sum = -1.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
-    return sum;
-  } else if (value == -INFINITY) {
-    sum = INFINITY;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
-    return sum;
-  } else if (value == 0.0) {
-    sum = 0.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum += (*tensor_data - *src_data != 0.0););
-    return sum;
-  } else {
-    sum = 0.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum += TH_MATH_NAME(pow)(
-                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-    return TH_MATH_NAME(pow)(sum, 1.0/value);
-  }
-}
-
 accreal THTensor_(meanall)(THTensor *tensor)
 {
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);

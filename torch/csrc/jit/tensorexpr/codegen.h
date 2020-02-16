@@ -126,7 +126,7 @@ class RegisterCodeGenList {
   RegisterCodeGenList() {}
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
-      StmtFactoryMethod stmt_factory_method);
+      const StmtFactoryMethod& stmt_factory_method);
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
   RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 

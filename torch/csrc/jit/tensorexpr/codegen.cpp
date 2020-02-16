@@ -29,7 +29,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
 
 void RegisterCodeGenList::AddStmtFactoryMethod(
     const std::string& name,
-    StmtFactoryMethod stmt_factory_method) {
+    const StmtFactoryMethod& stmt_factory_method) {
   auto insert_ret =
       stmt_factory_methods_.insert(std::make_pair(name, stmt_factory_method));
   if (!insert_ret.second) {

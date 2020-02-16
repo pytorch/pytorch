@@ -63,6 +63,9 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
 
  private:
+  template <typename Op>
+  void visitBinaryOp(const BinaryOpNode<Op>* v, const std::string& op_str);
+
   std::ostream& raw_os() {
     return printer_os_;
   }

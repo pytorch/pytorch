@@ -31,13 +31,20 @@ KernelArena* KernelArena::GetCurrentKernelArena() {
   return current_arena;
 }
 
-KernelScope::KernelScope() {
+KernelScope::KernelScope() : owning_(true) {
   old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
   KernelArena::SetCurrentKernelArena(new KernelArena);
 }
 
+KernelScope::KernelScope(KernelArena* arena_) : owning_(false) {
+  old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
+  KernelArena::SetCurrentKernelArena(arena_);
+}
+
 KernelScope::~KernelScope() {
-  delete KernelArena::GetCurrentKernelArena();
+  if (owning_) {
+    delete KernelArena::GetCurrentKernelArena();
+  }
   KernelArena::SetCurrentKernelArena(old_kernel_arena_);
 }
 
