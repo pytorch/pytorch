@@ -10611,11 +10611,15 @@ class TestTorchDeviceType(TestCase):
                                               [0, 0, 0, 0]], device=device))
 
     def test_scatter_add_non_unique_index(self, device):
-        input = torch.ones(3, 2, device=device)
-        index = torch.ones([[0, 0, 1], [0, 0, 1]], device=device)
-        src = torch.ones(3, 2, device=device)
+        height = 2
+        width = 65536
+        input = torch.ones(height, width, device=device)
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        src = torch.ones(height, width, device=device)
         input.scatter_add_(0, index, src)
-        self.assertEqual(input, torch.tensor([[3, 3, 1], [1, 1, 3]], device=device))
+
+        self.assertEqual(input,
+                         torch.tensor([[3],[1]], device=device).repeat(1, width))
 
     def test_scatter_bool(self, device):
         x = torch.tensor([[True, True, True], [True, True, True]], device=device)
