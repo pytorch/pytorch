@@ -94,6 +94,16 @@ void testGPU_FusionCastOp(){
   TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
 }
 
+class ZeroMutator : public BaseMutator{
+public:
+  const Statement* mutate(const Float* f){
+    if(f->isConst() && *(f->value()) == 1.0)
+      return new Float(0.0);
+    return f;
+  }
+
+};
+
 void testGPU_FusionMutator(){
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -102,8 +112,9 @@ void testGPU_FusionMutator(){
   Int* i1 = new Int{3};
   const Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
   std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
-  BaseMutator mutator;
-  mutator.mutate(&fusion);
+  ZeroMutator mutator;
+  BaseMutator* base_mutator = &mutator;
+  base_mutator->mutate(&fusion);
   std::cout<<"Replaced: "<<fusion<<std::endl;
   
 }
