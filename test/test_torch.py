@@ -10610,6 +10610,34 @@ class TestTorchDeviceType(TestCase):
                                               [1, 0, 0, 0],
                                               [0, 0, 0, 0]], device=device))
 
+    def test_scatter_reduce_operations_to_large_input(self, device):
+        test_data = [
+            (torch.zeros(4, 4, device=device), torch.ones(2, 2, device=device),
+             torch.tensor([[1], [2]], device=device, dtype=torch.long),
+             torch.tensor([[0, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [-1, 0, 0, 0],
+                           [0, 0, 0, 0]], device=device), "subtract"),
+            (torch.tensor([2], device=device).repeat(4, 4),
+             torch.tensor([2], device=device).repeat(2, 2),
+             torch.tensor([[1], [2]], device=device, dtype=torch.long),
+             torch.tensor([[2, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [4, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device), "multiply"),
+            (torch.tensor([2], device=device).repeat(4, 4),
+             torch.tensor([2], device=device).repeat(2, 2),
+             torch.tensor([[1], [2]], device=device, dtype=torch.long),
+             torch.tensor([[2, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [1, 2, 2, 2],
+                           [2, 2, 2, 2]], device=device), "divide")
+        ]
+
+        for input, src, index, result, operation in test_data:
+            input.scatter_(0, index, src, reduce=operation)
+            self.assertEqual(input, result)
+
     def test_scatter_add_non_unique_index(self, device):
         height = 2
         width = 65536
@@ -10620,6 +10648,28 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(input,
                          torch.tensor([[3],[1]], device=device).repeat(1, width))
+
+    def test_scatter_subtract_non_unique_index(self, device):
+        height = 2
+        width = 65536
+        input = torch.ones(height, width, device=device)
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        src = torch.ones(height, width, device=device)
+        input.scatter_(0, index, src, reduce="subtract")
+
+        self.assertEqual(input,
+                         torch.tensor([[-1],[1]], device=device).repeat(1, width))
+
+    def test_scatter_multiply_non_unique_index(self, device):
+        height = 2
+        width = 65536
+        input = torch.ones(height, width, device=device)
+        index = torch.zeros(height, width, dtype=torch.long, device=device)
+        src = torch.ones(height, width, device=device)
+        input.scatter_(0, index, src, reduce="multiply")
+
+        self.assertEqual(input,
+                         torch.tensor([[-1],[1]], device=device).repeat(1, width))
 
     def test_scatter_bool(self, device):
         x = torch.tensor([[True, True, True], [True, True, True]], device=device)

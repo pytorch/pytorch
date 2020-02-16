@@ -213,7 +213,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
           " with size ", self_dim_size);
         self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
       }
-    }, /*serial_exec=*/true
+    }, /*serial_exec=*/false
   );
 }
 
