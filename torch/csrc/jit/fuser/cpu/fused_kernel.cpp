@@ -6,10 +6,6 @@
 #include <torch/csrc/jit/fuser/cpu/temp_file.h>
 #include <torch/csrc/utils/memory.h>
 
-#ifdef _MSC_VER
-#include <torch/csrc/jit/fuser/cpu/msvc_arch.h>
-#endif
-
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -213,14 +209,21 @@ static CompilerConfig& getConfig() {
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
 #ifdef _MSC_VER
+// According to https://stackoverflow.com/a/29178079, we are able to
+// detect which arch level is supported by the vectorizer using
+// the macro __isa_available. It is added during runtime.
+// The result of __isa_available and the corresponding arch:
+//  AVX       4
+//  AVX2      5
+//  AVX512    6
+extern "C" int __isa_available;
 static std::string getArchFlags() {
-  if (InstructionSet::AVX512F() && InstructionSet::AVX512CD() &&
-      InstructionSet::AVX512BW() && InstructionSet::AVX512DQ() &&
-      InstructionSet::AVX512VL()) {
+// The AVX-512 vectorizer won't work until VS 2019 16.3
+  if (__isa_available >= 6) {
     return "/arch:AVX512";
-  } else if (InstructionSet::AVX2()) {
+  } else if (__isa_available >= 5) {
     return "/arch:AVX2";
-  } else if (InstructionSet::AVX()) {
+  } else if (__isa_available >= 4) {
     return "/arch:AVX";
   } else {
     return "";
