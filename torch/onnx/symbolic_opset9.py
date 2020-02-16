@@ -1107,6 +1107,12 @@ def selu(g, input):
     return g.op("Selu", input)
 
 
+@parse_args('v', 't')
+def celu(g, input, alpha):
+    input_alpha = div(g, input, alpha)
+    return mul(g, g.op("Elu", input_alpha, alpha_f=1.), alpha)
+
+
 @parse_args('v', 'i', 'v')
 def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
