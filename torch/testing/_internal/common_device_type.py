@@ -359,7 +359,7 @@ class largeTensorTest(skipCUDAIf):
             assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
             size = 1024 ** 3 * int(size[:-2])
         valid = torch.cuda.is_available() and torch.cuda.get_device_properties(0).total_memory >= size
-        super(largeTensorTest, self).__init__(valid, "Not enough memory")
+        super(largeTensorTest, self).__init__(not valid, "Not enough memory")
 
 
 class expectedFailure(object):
