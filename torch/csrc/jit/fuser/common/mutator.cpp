@@ -33,7 +33,7 @@ const Statement* BaseMutator::mutate(const Int* const i) {
 const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
   const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
   const Val* in = static_cast<const Val*>(uop->in()->dispatch_mutator(this));
-  // TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
+
   if 
   (
     !(
@@ -62,20 +62,21 @@ const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
 }
 
 void BaseMutator::mutate(Fusion* fusion) {
-  std::vector<const Expr*> new_exprs;
   std::vector<const Expr*> orig_exprs = fusion->exprs();
 
-  for (std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++) {
-    const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);
-    assert(new_stmt->isExpr());
-    new_exprs.push_back(static_cast<const Expr*>(new_stmt));
-  }
+  /*
+   * We go through all the exprs, in topologically sorted order. We call mutate on them
+   * which could insert nodes, removes nodes, or both. These operations modify the dag
+   * and the Fusion will keep track of what has/hasn't been changed by the origin dependency
+   * tracking that it does. If an operation is added, and its output node is a val which
+   * previously was the output of another expresion, that older expresion will be removed
+   * as we can only assign a Val once due to our SSA restriction. Therefore we don't need
+   * to manually track what expressions stayed constant or were changed.
+   */
 
-  for (std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++) {
-    if (orig_exprs[i] != new_exprs[i]) {
-      fusion->removeExpr(orig_exprs[i]);
-    }
-  }
+  for(const Statement* stmt : orig_exprs)
+    stmt->dispatch_mutator(this);
+
 }
 
 /*

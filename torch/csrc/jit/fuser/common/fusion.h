@@ -127,6 +127,8 @@ struct TORCH_API Fusion : public IRInputOutput {
     if (!inFusion(expr))
       throw std::runtime_error(
           "Cannot remove expr as it is not registered with this fusion.");
+      // If we hit this error too frequently, we could lighten the restrictions so that removing something
+      // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
 
     for (auto out : expr->outputs())
       if (origin_.find(out) != origin_.end())
@@ -238,7 +240,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       registerVal(output);
       auto it = origin_.find(output);
       if (it != origin_.end()) {
-        origin_.erase(it);
+        removeExpr(it->second); //will also remove origin entry
       }
 
       origin_[output] = expr;
