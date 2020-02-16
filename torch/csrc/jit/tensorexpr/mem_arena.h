@@ -24,20 +24,23 @@ class KernelArena {
 };
 
 // A RAII convenience wrapper on top of a kernel.
-// It creates a Kernel and sets it as the current Kernel, as long as this
-// KernelScope object is alive. After that, the previous Kernel is set as
-// current.
+// It either creates or takes an existing Kernel and sets it as the current
+// Kernel. When this object is destroyed, the previous Kernel is set as current,
+// and the created kernel is freed. If the kernel was passed, it stays alive.
 class KernelScope {
  public:
   TORCH_API KernelScope();
+  TORCH_API KernelScope(KernelArena* arena_);
   TORCH_API ~KernelScope();
 
  private:
   KernelScope(const KernelScope&) = delete;
   KernelScope& operator=(const KernelScope&) = delete;
-  KernelArena* kernel_arena_ = nullptr;     // owned, created in constructor
+  KernelArena* kernel_arena_ = nullptr; // arena to be used in this scope
   KernelArena* old_kernel_arena_ =
       nullptr; // previous arena, will be restored in destructor
+  bool owning_ = false; // determines whether the arena will be freed along with
+                        // the scope object
 };
 
 // The base object managed by the Kernel.
