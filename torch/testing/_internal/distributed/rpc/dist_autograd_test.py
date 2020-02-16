@@ -1869,6 +1869,82 @@ class DistAutogradTest(RpcAgentTestFixture):
             # check one of them is using the computed buffer
             self.assertTrue(p_a == p_g or p_b == p_g)
 
+    @dist_init
+    def test_no_grad_copy_sparse(self):
+        # create autograd function that saves grad pointer as class static
+        class MyFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                MyFunc.static_grad_ptr = grad._values().data_ptr()
+                return grad, grad
+
+        class NonContGradFunc(Function):
+            static_grad_ptr = None
+
+            @staticmethod
+            def forward(ctx, inp1, inp2):
+                return inp1 + inp2
+
+            @staticmethod
+            def backward(ctx, grad):
+                # Create a sparse tensor with non-contigous indices and values
+                # and return as grad.
+                v = torch.rand(1, 3)
+                i = torch.ones(1, 1, dtype=torch.long)
+                nv = v.expand(8, 3)
+                ni = i.expand(1, 8)
+                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                MyFunc.static_grad_ptr = ngrad._values().data_ptr()
+                return ngrad, ngrad
+
+        a = torch.randn(10, 3, requires_grad=True)
+        b = torch.randn(10, 3, requires_grad=True)
+        input = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.tensor([0, 4])
+        import torch.nn.functional as F
+
+        # test case that should trigger no copy for one of a,b
+        with dist_autograd.context() as context_id:
+            emb_matrix = MyFunc.apply(a, b)
+            loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+            dist_autograd.backward([loss], retain_graph=True)
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFunc.static_grad_ptr
+            p_a = grads[a]._values().data_ptr()
+            p_b = grads[b]._values().data_ptr()
+            # check a,b uses different grad buffer
+            self.assertFalse(p_a == p_b)
+            # check one of them is using the computed buffer
+            self.assertTrue(p_a == p_g or p_b == p_g)
+
+            # Run backwards multiple times.
+            for i in range(100):
+                dist_autograd.backward([loss], retain_graph=True)
+
+        # non-contiguous indices and value should not trigger copy either.
+        with dist_autograd.context() as context_id:
+            emb_matrix = NonContGradFunc.apply(a, b)
+            loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
+            dist_autograd.backward([loss], retain_graph=True)
+            grads = dist_autograd.get_gradients(context_id)
+            p_g = MyFunc.static_grad_ptr
+            p_a = grads[a]._values().data_ptr()
+            p_b = grads[b]._values().data_ptr()
+            # check a,b uses different grad buffer
+            self.assertFalse(p_a == p_b)
+            # check one of them is using the computed buffer
+            self.assertTrue(p_a == p_g or p_b == p_g)
+
+            # Run backwards multiple times.
+            for i in range(100):
+                dist_autograd.backward([loss], retain_graph=True)
+
 
 @unittest.skipIf(
     not torch._six.PY3,
