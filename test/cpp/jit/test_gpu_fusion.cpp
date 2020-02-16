@@ -271,6 +271,56 @@ void testGPU_FusionTensorContiguity() {
       }
     }
   }
+
+  {
+    // contiguity across size-1 dimension
+    auto tensor = at::randn({4, 1, 4});
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    auto dim = sizes.size();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK(t_c.rank() == sizes.size());
+    auto b_dims = t_c.getBroadcastDims();
+    TORCH_CHECK(b_dims.size() == 0);
+    TORCH_CHECK(t_c.getFCD() == 2);
+    TORCH_CHECK(t_c.hasContiguousFCD());
+    for (int i = 0; i < dim; i++) {
+      TORCH_CHECK(!t_c.isBroadcastDim(i));
+      if (i < dim - 1) {
+        TORCH_CHECK(t_c.canCollapseToHigher(i));
+      }
+    }
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({4, 4, 4}).split(1, 1)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK(!(t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((t_c.canCollapseToHigher(1)));
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({4, 1, 8}).split(4, 2)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK((t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((!t_c.canCollapseToHigher(1)));
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({8, 1, 4}).split(4, 0)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK((t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((t_c.canCollapseToHigher(1)));
+  }
 }
 
 void testGPU_FusionTVSplit() {

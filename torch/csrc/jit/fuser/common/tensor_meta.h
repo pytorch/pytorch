@@ -17,6 +17,7 @@ namespace fuser {
  Issues that we are not solving:
    1. strides for trivial dimensions (size-1 dimension);
    2. memory overlap / interleave;
+ TODO: docs explaining the protocol; what is stored and how does merge work
  */
 struct TORCH_API TensorContiguity {
 
@@ -53,15 +54,15 @@ struct TORCH_API TensorContiguity {
   //   returns -1 if FCD doesn't exist (e.g. fully broadcast)
   int getFCD() const;
   // Check if FCD exist and has stride == 1.
-  bool contiguousFCD() const;
+  bool hasContiguousFCD() const;
 
   // This is used to support rational binding;
   int getAxisByStride(int order) const;
-  std::vector<int> getAxesOrderedByStride() const;
+  const std::vector<int>& getAxesOrderedByStride() const;
 
   // TODO: we should encode this to a single integer with restricted rank.
-  std::vector<int> getContiguityTag() const;
-  std::vector<int> getSortedAxesTag() const;
+  const std::vector<int>& getContiguityTag() const;
+  const std::vector<int>& getSortedAxesTag() const;
 
   // TODO: merge two contiguity info;
   void merge(const TensorContiguity& tc);
