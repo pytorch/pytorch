@@ -167,7 +167,7 @@ int TensorContiguity::getFCD() const {
   return -1;
 }
 
-bool TensorContiguity::contiguousFCD() const {
+bool TensorContiguity::hasContiguousFCD() const {
   for (int i = 0; i < contiguity_.size(); i++) {
     if (contiguity_[i] == (-contiguity_.size() - 1))
       return true;
@@ -180,15 +180,15 @@ int TensorContiguity::getAxisByStride(int order) const {
   return sorted_axes_[order];
 }
 
-std::vector<int> TensorContiguity::getAxesOrderedByStride() const {
+const std::vector<int>& TensorContiguity::getAxesOrderedByStride() const {
   return sorted_axes_;
 }
 
-std::vector<int> TensorContiguity::getContiguityTag() const {
+const std::vector<int>& TensorContiguity::getContiguityTag() const {
   return contiguity_;
 }
 
-std::vector<int> TensorContiguity::getSortedAxesTag() const {
+const std::vector<int>& TensorContiguity::getSortedAxesTag() const {
   return sorted_axes_;
 }
 
