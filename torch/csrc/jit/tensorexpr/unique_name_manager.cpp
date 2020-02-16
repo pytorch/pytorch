@@ -23,7 +23,7 @@ const std::string& UniqueNameManager::get_unique_name(const Variable* v) {
     name_hint = "v" + name_hint;
   }
   int& count = unique_name_count_[name_hint];
-  while (1) {
+  while (true) {
     // Even if with a new count, this name might already be used. For example
     // ("x", 1) could collidewith ("x_1", 0)
     int count_v = count++;
