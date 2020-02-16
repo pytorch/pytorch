@@ -239,7 +239,11 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
   throw std::runtime_error("Unknown stmttype in dispatch_mutator!");
 }
 
-// Handler template instantiations
+/*
+ * Handler template instantiations. These should only have to be done on base classes.
+ * Actual visitors/mutators should inhereit from these classes and call ->dispatch(this)
+ * to avoid needing an explicit instantiation.
+ */
 template void Statement::dispatch(IterVisitor) const;
 template void Statement::dispatch(IterVisitor*) const;
 template void Val::dispatch(IterVisitor) const;
