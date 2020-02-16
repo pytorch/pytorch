@@ -31,6 +31,9 @@ __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename func
 template<typename func_t>
 void gpu_kernel_with_index(at::Tensor &output, func_t f) {
   int64_t N = output.numel();
+  if (N == 0) {
+    return;
+  }
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
   using scalar_t = typename function_traits<func_t>::result_type;
