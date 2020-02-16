@@ -310,7 +310,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
-      modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
+      modern::launch_kernel(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
