@@ -94,6 +94,11 @@ inline void setStrided(
 
   /* size and stride */
   AT_ASSERT(size.size() == stride.size());
+
+  for(auto val : stride){
+    TORCH_CHECK(val >= 0, "Negative strides are not supported at the moment");
+  }
+
   if (self_->sizes() == size && self_->strides() == stride) {
     return;
   }
