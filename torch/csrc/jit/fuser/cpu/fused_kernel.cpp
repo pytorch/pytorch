@@ -145,7 +145,7 @@ intptr_t run(const std::string& cmd) {
     comspec = "C:\\Windows\\System32\\cmd.exe";
   }
   // Constructing the command line
-  const char* a[] = {"/c", cmd.c_str()};
+  const char* a[] = {"/c", cmd.c_str(), nullptr};
   // Constructing the env array
   // If `env_list` is not empty, then add char pointers ending with nullptr.
   // Otherwise, it will be nullptr, which implies the default env.
@@ -256,14 +256,11 @@ static void runCompiler(
   env.s("cpp_file", cpp_file);
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
-#ifdef _MSC_VER
-  std::string cat_string = "cmd /c type \"${cpp_file}\"";
-  std::string res = format(cat_string, env);
-  system(res.c_str());
-  intptr_t r = run(result);
-#else
+// #ifdef _MSC_VER
+//   intptr_t r = run(result);
+// #else
   int r = system(result.c_str());
-#endif
+// #endif
   if (config.openmp && r != 0) {
     std::cerr
         << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
@@ -274,7 +271,9 @@ static void runCompiler(
 }
 
 #ifdef _MSC_VER
-static const std::string disas_string = "dumpbin /DISASM:NOBYTES \"${so_file}\"";
+static const std::string disas_string = 
+    "cd /D \"" + temp_dir + "\" && "
+    "dumpbin /DISASM:NOBYTES \"${so_file}\"";
 #else
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
