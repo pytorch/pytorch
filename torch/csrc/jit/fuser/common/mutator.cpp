@@ -154,13 +154,9 @@ const Statement* BaseMutator::mutate(const Reorder* const ro) {
   return ro;
 }
 
-#include <torch/csrc/jit/fuser/common/mutator.h>
 const Statement* ReplaceAll::mutate(const Val* const val){
-  if(val->same_as(instance_)){
-    std::cout<<"replace?"<<std::endl;
+  if(val->same_as(instance_))
     return with_;
-  }
-  std::cout<<"Don't replace "<<val<<" with "<<with_<<std::endl;
   return val;
 }
 
@@ -179,8 +175,6 @@ void ReplaceAll::instancesOf(const Val* const instance, const Val* const with){
 
   ReplaceAll ra(instance, with);
 
-  std::cout<<"Exprs to check : "<<exprs_containing_val.size()<<std::endl;
-  std::cout<<"Base val dispatch?"<<std::endl;
   for(const Expr* expr : exprs_containing_val)
     expr->dispatch_mutator(static_cast<BaseMutator*>(&ra));
 
