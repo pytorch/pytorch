@@ -913,6 +913,34 @@ class TestSparse(TestCase):
         test_shape(10, 100, 0, 0)
         test_shape(10, 100, 0, 20)
 
+    def test_bmm(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j])[0])
+                b_list.append(torch.randn([dim_j, dim_k]))
+
+            a = torch.stack(a_list)
+            b = torch.stack(b_list)
+            ab = a.bmm(b)
+
+            # Compare each matrix against result from mm()
+            for mat_idx in range(num_mats):
+                a_mat = a_list[mat_idx]
+                b_mat = b_list[mat_idx]
+                ab_mat_bmm = ab[mat_idx]
+                ab_mat_mm = a_mat.mm(b_mat)
+                self.assertEqual(ab_mat_bmm, ab_mat_mm)
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+
     @cpu_only
     def test_saddmm(self):
         def test_shape(di, dj, dk, nnz):
