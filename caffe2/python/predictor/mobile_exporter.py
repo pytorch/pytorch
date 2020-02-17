@@ -1,5 +1,5 @@
 ## @package mobile_exporter
-# Module caffe2.python.mobile_exporter
+# Module caffe2.python.predictor.mobile_exporter
 
 from __future__ import absolute_import
 from __future__ import division
