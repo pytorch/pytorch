@@ -232,12 +232,16 @@ void slow_conv3d_backward_update_grad_input_frame(
   auto grad_output_2d = grad_output.reshape(
       {grad_output.size(0),
        grad_output.size(1) * grad_output.size(2) * grad_output.size(3)});
-  fgrad_input.addmm_(weight, grad_output_2d, 0, 1);
-
-  grad_input.zero_();
-  unfolded3d_acc_kernel_cpu(
+  at::mm_out(fgrad_input, weight, grad_output_2d);
+  Unfold3dAccCPU(
       fgrad_input,
-      grad_input,
+      grad_input.size(0),
+      grad_input.size(1),
+      grad_input.size(2),
+      grad_input.size(3),
+      grad_output.size(1),
+      grad_output.size(2),
+      grad_output.size(3),
       kernel_depth,
       kernel_height,
       kernel_width,
@@ -247,13 +251,7 @@ void slow_conv3d_backward_update_grad_input_frame(
       pad_depth,
       pad_height,
       pad_width,
-      grad_input.size(0),
-      grad_input.size(1),
-      grad_input.size(2),
-      grad_input.size(3),
-      grad_output.size(1),
-      grad_output.size(2),
-      grad_output.size(3));
+      &grad_input);
 }
 
 void slow_conv3d_backward_out_cpu_template(
