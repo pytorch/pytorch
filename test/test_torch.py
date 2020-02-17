@@ -22,7 +22,6 @@ from random import randrange
 from torch import multiprocessing as mp
 from torch.testing._internal.common_methods_invocations import tri_tests_args, run_additional_tri_tests, \
     _compare_trilu_indices
-from torch.testing._internal.common_utils import BytesIOContext
 from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
@@ -11115,31 +11114,24 @@ class TestTorchDeviceType(TestCase):
             expected.backward(g0)
             self.assertTrue(torch.allclose(x.grad, y.grad))
 
-    def _brute_cdist(self, x, y, p=2):
-        r1 = x.shape[-2]
-        r2 = y.shape[-2]
-        if r1 == 0 or r2 == 0:
-            return torch.empty(r1, r2, device=x.device)
-        return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
-
     def test_pdist_norm_forward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        self._pdist_single(self, shape, device, p, dtype, trans, grad_check=False)
+                        self._pdist_single(shape, device, p, dtype, trans, grad_check=False)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
         for dtype in [torch.float32, torch.float64]:
-            self._pdist_single(self, (1000, 2), device, 2, dtype, trans=False, grad_check=False)
+            self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
     @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
-                    _pdist_single(self, shape, device, p, torch.float64, trans, grad_check=True)
+                    self._pdist_single(shape, device, p, torch.float64, trans, grad_check=True)
 
     @skipIfRocm
     def test_pdist_norm_large(self, device):
