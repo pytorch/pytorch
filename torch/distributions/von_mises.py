@@ -46,10 +46,7 @@ def _log_modified_bessel_fn(x, order=0):
     y = 3.75 / x
     large = x - 0.5 * x.log() + _eval_poly(y, _COEF_LARGE[order]).log()
 
-    mask = (x < 3.75)
-    result = large
-    if mask.any():
-        result[mask] = small[mask]
+    result = torch.where(x < 3.75, small, large)
     return result
 
 
