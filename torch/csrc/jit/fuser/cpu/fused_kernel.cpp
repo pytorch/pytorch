@@ -218,11 +218,6 @@ static CompilerConfig& getConfig() {
 //  AVX512    6
 extern "C" int __isa_available;
 static std::string getArchFlags() {
-// Temporaily disable AVX512 because it is not working.
-  std::cout << "__isa_available:" << __isa_available << std::endl;
-  if (__isa_available > 5) {
-    __isa_available = 5;
-  }
   if (__isa_available >= 6) {
     return "/arch:AVX512";
   } else if (__isa_available >= 5) {
@@ -256,11 +251,12 @@ static void runCompiler(
   env.s("cpp_file", cpp_file);
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
-// #ifdef _MSC_VER
-//   intptr_t r = run(result);
-// #else
+#ifdef _MSC_VER
+  std::cout << "command: " << result << std::endl;
+  intptr_t r = run(result);
+#else
   int r = system(result.c_str());
-// #endif
+#endif
   if (config.openmp && r != 0) {
     std::cerr
         << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
@@ -271,9 +267,7 @@ static void runCompiler(
 }
 
 #ifdef _MSC_VER
-static const std::string disas_string = 
-    "cd /D \"" + temp_dir + "\" && "
-    "dumpbin /DISASM:NOBYTES \"${so_file}\"";
+static const std::string disas_string = "dumpbin /DISASM:NOBYTES \"${so_file}\"";
 #else
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
