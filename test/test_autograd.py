@@ -2329,7 +2329,7 @@ class TestAutograd(TestCase):
             gradcheck(func_eigvecs, [B])
             gradgradcheck(func_eigvecs, [B])
 
-        for dims in [(3, 3), (5, 5)]:
+        for dims in [(3, 3), (5, 3, 3), (4, 3, 2, 2)]:
             run_test(dims)
 
     @skipIfNoLapack
