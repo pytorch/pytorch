@@ -814,6 +814,11 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
 
   result.resize_({self.size(0), mat2.size(2), self.size(1)});
 
+  if ((self._nnz() == 0) || (mat2.size(1) == 0) || (mat2.size(2) == 0)) {
+    result.zero_().transpose_(1,2);
+    return result;
+  }
+
   // TODO: I'm not sure if this is necessary or not. Does at::resize_()
   //    ensure contiguity?
   if (!result.is_contiguous()) {
@@ -859,7 +864,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   // tensor inputs, performing a matrix multiply with each
   for (
     int64_t cur_mat_num = 0;
-    (cur_mat_num < num_matrices) && (mat_el_begin_idx < nnz);
+    (cur_mat_num < num_matrices);
     cur_mat_num++
   ) {
     int64_t mat_el_end_idx = mat_el_end_indices[cur_mat_num];
@@ -950,6 +955,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
       mat_el_begin_idx = mat_el_end_idx;
     } else {
       workspace_buffers[cur_mat_num] = nullptr;
+      result[cur_mat_num].zero_();
     }
   }
   // Need to transpose the result matrices since cusparse stores
