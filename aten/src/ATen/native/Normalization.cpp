@@ -11,7 +11,7 @@
 
 #include <vector>
 
-static const int MIOPEN_DIM_MAX = 4;
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
@@ -168,7 +168,7 @@ void batch_norm_cpu_inference_channels_last(Tensor& output, const Tensor& input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
   // No need to use parallel_for as this function is supposed to be
   // memory-limited.
-  // Keep the loop struture simple to make sure compiler vetorization kicks in.
+  // Keep the loop struture simple to make sure compiler vectorization kicks in.
   if (n_channel != 1) {
     for (int64_t n = 0; n < n_batch; ++n) {
       for (int64_t i = 0; i < image_size; ++i) {
@@ -487,6 +487,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   bool use_miopen = (input.is_cuda()
                && input.dim() <= MIOPEN_DIM_MAX
                && input.scalar_type() != at::kDouble
+               && input.scalar_type() != at::kBFloat16
                && (weight.scalar_type() != at::kHalf)
                && weight.defined() && bias.defined()
                && ((running_mean.defined() && running_var.defined())

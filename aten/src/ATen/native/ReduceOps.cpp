@@ -694,10 +694,6 @@ Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
     in = self.reshape({-1});
     keepdim = false;
   }
-  if (self.options().backend() != Backend::CPU && self.options().backend() != Backend::CUDA) {
-    Tensor ignored = at::empty({0}, self.options());
-    return std::get<1>(at::max_out(ignored, result, in, dim.value_or(0), keepdim));
-  }
   auto itr = make_reduction("argmax", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
   argmax_stub(itr.device_type(), itr);
@@ -718,10 +714,6 @@ Tensor& argmin_out(Tensor& result, const Tensor& self, c10::optional<int64_t> di
   } else {
     in = self.reshape({-1});
     keepdim = false;
-  }
-  if (self.options().backend() != Backend::CPU && self.options().backend() != Backend::CUDA) {
-    Tensor ignored = at::empty({0}, self.options());
-    return std::get<1>(at::min_out(ignored, result, in, dim.value_or(0), keepdim));
   }
   auto itr = make_reduction("argmin", result, in, dim.value_or(0), keepdim,
       self.scalar_type(), at::kLong);
@@ -982,4 +974,9 @@ std::tuple<Tensor, Tensor> cummin(const Tensor& self, Dimname dim) {
 std::tuple<Tensor&, Tensor&> cummin_out(Tensor& values, Tensor& indices, const Tensor& self, Dimname dim) {
   return at::cummin_out(values, indices, self, dimname_to_position(self, dim));
 }
+
+Tensor dist(const Tensor &self, const Tensor& other, Scalar p){
+  return at::norm(self - other, p);
+}
+
 }} // namespace at::native
