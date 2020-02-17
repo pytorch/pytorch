@@ -956,7 +956,7 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& vals, Tensor& vecs, const Tensor& s
   // So this is the work-around to make it passes the test and does not break the
   // previous codes.
   vecs.resize_as_(vecs_tmp);
-  if (vecs.is_contiguous()) {
+  if (vecs.is_contiguous() && (eigenvectors)) {
     vecs.transpose_(-2,-1);
   }
   vecs.copy_(vecs_tmp);

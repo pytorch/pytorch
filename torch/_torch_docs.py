@@ -1860,7 +1860,7 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 .. note::
     Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    for :func:`torch.symeig`
+    for cases where the eigenvalues are all real
 
 Args:
     input (Tensor): the square matrix of shape :math:`(*, n, n)`  where * is zero or more
