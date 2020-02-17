@@ -43,7 +43,7 @@ void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* generator) {
         std::is_same<scalar_t, double>::value ||
         std::is_same<scalar_t, float>::value) {
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
-        return static_cast<int64_t>(generator->random64()); // use all 64 bits and cast it to signed(!!!) int64_t and only after that to scalar_t implicitly
+        return static_cast<scalar_t>(static_cast<int64_t>(generator->random64()));
       });
     } else {
       TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double and float");
@@ -68,11 +68,11 @@ void random_kernel(TensorIterator& iter, RNG* generator) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_kernel_fp_cpu", [&] {
       if (std::is_same<scalar_t, double>::value) {
         cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+          return static_cast<scalar_t>(generator->random64() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
         });
       } else {
         cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1);
+          return static_cast<scalar_t>(generator->random() % static_cast<uint64_t>((1ULL << std::numeric_limits<scalar_t>::digits) + 1));
         });
       }
     });
@@ -80,15 +80,15 @@ void random_kernel(TensorIterator& iter, RNG* generator) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_kernel_int_cpu", [&] {
       if (std::is_same<scalar_t, int64_t>::value) {
         cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
+          return static_cast<scalar_t>(generator->random64() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
         });
       } else if (std::is_same<scalar_t, bool>::value) {
         cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return generator->random() & 1;
+          return static_cast<scalar_t>(generator->random() & 1);
         });
       } else {
         cpu_serial_kernel(iter, [generator]() -> scalar_t {
-          return generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1);
+          return static_cast<scalar_t>(generator->random() % (static_cast<uint64_t>(std::numeric_limits<scalar_t>::max()) + 1));
         });
       }
     });
