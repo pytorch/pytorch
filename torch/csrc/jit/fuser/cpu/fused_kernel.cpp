@@ -252,7 +252,6 @@ static void runCompiler(
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
 #ifdef _MSC_VER
-  std::cout << "command: " << result << std::endl;
   intptr_t r = run(result);
 #else
   int r = system(result.c_str());
