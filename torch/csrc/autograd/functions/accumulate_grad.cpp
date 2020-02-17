@@ -51,6 +51,18 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // call_function in Engine.cpp will temporarily bump the refcount by one,
       // hence the addition of has_post_hooks.
       update_grad_fn(new_grad_copy.detach());
+    } else if (
+        !GradMode::is_enabled() && new_grad_copy.is_sparse() &&
+        new_grad_use_count <= num_expected_refs + has_post_hooks) {
+      // Can't detach sparse tensor (since metadata changes are not allowed
+      // after detach), so just create a new one for the grad which is a
+      // shallow copy. We need a shallow copy so that modifying the original
+      // grad tensor doesn't modify the grad we accumulate.
+      update_grad_fn(at::sparse_coo_tensor(
+          new_grad_copy._indices(),
+          new_grad_copy._values(),
+          new_grad_copy.sizes(),
+          new_grad_copy.options()));
     } else {
       if (new_grad_copy.is_sparse()) {
         update_grad_fn(new_grad_copy.clone());
@@ -62,9 +74,9 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     // This case is not strictly necessary, but it makes the first-order only case
     // slightly more efficient.
     if (variable_grad.is_sparse() && !new_grad_copy.is_sparse()) {
-      // If `grad_variable` is sparse and `new_grad_copy` is not sparse, their
+      // If `variable_grad` is sparse and `new_grad_copy` is not sparse, their
       // sum is not sparse, and we must change the TensorImpl type of
-      // `grad_variable` for it to store the result. However, changing the
+      // `variable_grad` for it to store the result. However, changing the
       // TensorImpl type of a tensor requires changing the tensor itself, and
       // thus in this case we have to change the grad tensor.
       update_grad_fn(new_grad_copy + variable_grad);
@@ -72,13 +84,13 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // In this case we can avoid changing the grad tensor. There are three
       // scenarios when we'll hit this case:
       //
-      // 1. `grad_variable` is sparse, and `new_grad_copy` is sparse.
-      // 2. `grad_variable` is dense, and `new_grad_copy` is sparse.
-      // 3. `grad_variable` is dense, and `new_grad_copy` is dense.
+      // 1. `variable_grad` is sparse, and `new_grad_copy` is sparse.
+      // 2. `variable_grad` is dense, and `new_grad_copy` is sparse.
+      // 3. `variable_grad` is dense, and `new_grad_copy` is dense.
       //
-      // In all of these three cases, `grad_variable += new_grad_copy` is a
-      // valid operation which adds `new_grad_copy` to `grad_variable` in place.
-      // `grad_variable` is thus still referring to the same tensor after the
+      // In all of these three cases, `variable_grad += new_grad_copy` is a
+      // valid operation which adds `new_grad_copy` to `variable_grad` in place.
+      // `variable_grad` is thus still referring to the same tensor after the
       // operation.
       variable_grad += new_grad_copy;
     }
