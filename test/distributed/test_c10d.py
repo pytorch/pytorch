@@ -475,6 +475,13 @@ class RendezvousFileTest(TestCase):
 
 
 class RendezvousTCPTest(TestCase):
+
+    def create_tcp_url(self):
+        addr = "localhost"
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        return url
+
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
@@ -488,9 +495,7 @@ class RendezvousTCPTest(TestCase):
 
     @retry_on_address_already_in_use_error
     def test_nominal(self):
-        addr = 'localhost'
-        port = common.find_free_port()
-        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        url = self.create_tcp_url()
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -501,6 +506,22 @@ class RendezvousTCPTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_address_already_in_use_error
+    def test_tcp_store_timeout_set(self):
+        url = self.create_tcp_url()
+        test_store_timeout = timedelta(seconds=1)
+        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        store0, rank0, size0 = next(gen0)
+        # this should time out in ~1s. If the timeout passed into rendezvous was
+        # not respected, it will take much longer to timeout.
+        start = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            store0.get("nonexistant key")
+
+        end = time.time()
+        time_diff = end - start
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class TimeoutTest(TestCase):
