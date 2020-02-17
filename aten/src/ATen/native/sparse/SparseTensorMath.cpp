@@ -1418,7 +1418,7 @@ Tensor any_sparse(const Tensor& self) {
 }
 
 Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
-  Tensor result = at::empty({self.size(0), self.size(1), mat2.size(2)}, mat2.options());
+  Tensor result = at::empty({}, mat2.options());
   return bmm_out_sparse_cpu(result, self, mat2);
 }
 
@@ -1426,6 +1426,10 @@ Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
 // Array must be sorted from lowest to highest
 template<typename scalar_t>
 scalar_t binary_search_rightmost(scalar_t search_val, scalar_t* sorted_arr, int64_t length, bool* found) {
+  if (length == 0) {
+    *found = false;
+    return -1;
+  }
   // Since upper_bound finds the first value greater than our
   // target value, we need to subtract its result by 1 to get
   // the value we actually want
@@ -1454,6 +1458,13 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
 
   TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+
+  result.resize_({self.size(0), self.size(1), mat2.size(2)});
+
+  if (self._nnz() == 0) {
+    result.zero_();
+    return result;
+  }
 
   // First need to coalesce to get all of the first dimension indices
   // in order since we'll be sending each matrix into the MM operation
@@ -1485,18 +1496,25 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   int64_t num_matrices = self_coalesced.size(0);
 
   // Iterate through each set of 2D matrices within the 3D
-  // tensor inputs, performing a matrix multiply with each
-  for (int64_t cur_mat_num = indices_dim0[0];
-    (cur_mat_num < num_matrices) && (mat_el_begin_idx < nnz);
+  // tensor inputs, performing a matrix multiply with each one.
+  int64_t start_mat_num = indices_dim0[0];
+  for (int64_t cur_mat_num = 0; 
+    (cur_mat_num < num_matrices);
     cur_mat_num++
   ) {
-    bool mat_end_found;
+    // If there are sparse matrices at the beginning or end that
+    // have all zero elements, we need to zero out the result matrix.
+    if ((cur_mat_num < start_mat_num) || (mat_el_begin_idx >= nnz)) {
+      result[cur_mat_num].zero_();
+      continue;
+    }
 
     // Search for the range of sparse tensor elements that
     // correspond to the current matrix number. We already know
     // where the current matrix begins, so we just need to find
     // the end. The search excludes everything to the left of
     // the starting point, for best performance
+    bool mat_end_found;
     int64_t mat_el_end_idx = binary_search_rightmost(
       cur_mat_num,
       indices_dim0+mat_el_begin_idx,
@@ -1527,6 +1545,11 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
           }
       );
       mat_el_begin_idx = mat_el_end_idx;
+
+    // If no elements for this sparse matrix are found, then
+    // it's a zero matrix and we need to zero out the result
+    } else {
+      result[cur_mat_num].zero_();
     }
   }
   return result;
