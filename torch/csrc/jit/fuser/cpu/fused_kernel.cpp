@@ -259,7 +259,7 @@ static void runCompiler(
 #ifdef _MSC_VER
   std::string cat_string = "cmd /c type \"${cpp_file}\"";
   std::string res = format(cat_string, env);
-  system(res);
+  system(res.c_str());
   intptr_t r = run(result);
 #else
   int r = system(result.c_str());
