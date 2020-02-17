@@ -134,16 +134,19 @@ TEST(AutogradAPITests, RetainGrad) {
 
   // Gradient should be accumulated
   out.backward({}, /*keep_graph=*/true);
-  ASSERT_VARIABLE_EQ(h1.data() * 2, h1.grad().data());
+  ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
   out.backward({}, /*keep_graph=*/true);
-  ASSERT_VARIABLE_EQ(h1.data() * 4, h1.grad().data());
+  ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
 
-  input.grad().data().zero_();
+  {
+    torch::NoGradGuard no_grad;
+    input.grad().zero_();
+  }
   // It should be a no-op for leaves
   input.retain_grad();
   input.retain_grad();
   out.backward();
-  ASSERT_VARIABLE_EQ(input.data() * 18, input.grad().data());
+  ASSERT_VARIABLE_EQ(input * 18, input.grad());
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
