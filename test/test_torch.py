@@ -13101,8 +13101,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @dtypes(torch.double)
     def test_batch_eig(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_matrix,\
-                                                         random_symmetric_pd_matrix
+        from torch.testing._internal.common_utils import random_symmetric_matrix, random_symmetric_pd_matrix
 
         def run_test(dims, eigenvectors):
             # M^{-1} A for M symmetric posdef and A symmetric is one way to
