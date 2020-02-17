@@ -254,8 +254,7 @@ struct PeepholeOptimizeImpl {
           node->output()->replaceAllUsesWith(input_node->input());
           changed_ = true;
         }
-      } else if (node->matches("aten::size(Tensor self) -> int[]") ||
-                 node->kind() == prim::shape) {
+      } else if (node->matches("aten::size(Tensor self) -> int[]")) {
         if (auto ptt = node->input()->type()->cast<TensorType>()) {
           if (auto sizes = ptt->sizes().concrete_sizes()) {
             WithInsertPoint guard(node);
