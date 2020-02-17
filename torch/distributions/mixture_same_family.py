@@ -140,14 +140,14 @@ class MixtureSameFamily(Distribution):
         cdf_x = self.component_distribution.cdf(x)
         mix_prob = self.mixture_distribution.probs
 
-        return torch.sum(cdf_x * mix_prob[None], dim=-1)
+        return torch.sum(cdf_x * mix_prob, dim=-1)
 
     def log_prob(self, x):
         x = self._pad(x)
         log_prob_x = self.component_distribution.log_prob(x)  # [S, B, k]
         log_mix_prob = torch.log_softmax(self.mixture_distribution.logits,
                                          dim=-1)  # [B, k]
-        return torch.logsumexp(log_prob_x + log_mix_prob[None], dim=-1)  # [S, B]
+        return torch.logsumexp(log_prob_x + log_mix_prob, dim=-1)  # [S, B]
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
