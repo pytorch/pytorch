@@ -888,39 +888,43 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
       AT_DISPATCH_FLOATING_TYPES(
         values.scalar_type(), "addmm_sparse_cuda", [&] {
           cudaDataType cuda_data_type = getTensorCudaDataType(mat2_contig);
-          void* row_indices_ptr = indices_dim1.data_ptr()+(mat_el_begin_idx*sizeof(uint32_t));
-          void* col_indices_ptr = indices_dim2.data_ptr()+(mat_el_begin_idx*sizeof(uint32_t));
-          void* values_ptr = values.data_ptr()+(mat_el_begin_idx*sizeof(scalar_t));
+          uint32_t* row_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim1.data_ptr())[mat_el_begin_idx];
+          uint32_t* col_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim2.data_ptr())[mat_el_begin_idx];
+          scalar_t* values_ptr = &reinterpret_cast<scalar_t*>(values.data_ptr())[mat_el_begin_idx];
+          // void* values_ptr = values.data_ptr()+(mat_el_begin_idx*sizeof(scalar_t));
+
           cusparseSpMatDescr_t sparse_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
             &sparse_descr,
             dim_i,
             dim_j,
             sparse_nnz,
-            row_indices_ptr,
-            col_indices_ptr,
-            values_ptr,
+            reinterpret_cast<void*>(row_indices_ptr),
+            reinterpret_cast<void*>(col_indices_ptr),
+            reinterpret_cast<void*>(values_ptr),
             CUSPARSE_INDEX_32I,
             CUSPARSE_INDEX_BASE_ZERO,
             cuda_data_type
           ));
+          scalar_t* mat2_ptr = &reinterpret_cast<scalar_t*>(mat2_contig.data_ptr())[dim_k*dim_j*cur_mat_num];
           cusparseDnMatDescr_t dense_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
             &dense_descr,
             dim_k,
             dim_j,
             dim_k,
-            mat2_contig.data_ptr() + (sizeof(scalar_t)*dim_k*dim_j*cur_mat_num),
+            reinterpret_cast<void*>(mat2_ptr),
             cuda_data_type,
             CUSPARSE_ORDER_COL
           ));
+          scalar_t* result_ptr = &reinterpret_cast<scalar_t*>(result.data_ptr())[dim_i*dim_k*cur_mat_num];
           cusparseDnMatDescr_t result_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
             &result_descr,
             dim_i,
             dim_k,
             dim_i,
-            result.data_ptr() + (sizeof(scalar_t)*dim_i*dim_k*cur_mat_num),
+            reinterpret_cast<void*>(result_ptr),
             cuda_data_type,
             CUSPARSE_ORDER_COL
           ));
