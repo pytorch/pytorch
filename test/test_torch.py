@@ -13097,6 +13097,61 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.double)
+    def test_batch_eig(self, device, dtype):
+        from torch.testing._internal.common_utils import random_symmetric_matrix,\
+                                                         random_symmetric_pd_matrix
+
+        def run_test(dims, eigenvectors):
+            # M^{-1} A for M symmetric posdef and A symmetric is one way to
+            # guarantee real eigenvalues
+            A = random_symmetric_matrix(dims[-1], *dims[:-1], dtype=dtype, device=device)
+            M = random_symmetric_pd_matrix(dims[-1], *dims[:-1], dtype=dtype, device=device)
+            x = torch.solve(A, M)[0]
+
+            oute = torch.empty(dims + (2,), dtype=dtype, device=device)
+            outv = torch.empty(dims[:-1] + dims[-1:] * 2, dtype=dtype, device=device)
+            torch.eig(x, eigenvectors=eigenvectors, out=(oute, outv))
+
+            # real eigenvalues check
+            oute_imag = oute[...,-1]
+            self.assertEqual(torch.zeros_like(oute_imag, device=device), oute_imag, "Eigenvectors not all real")
+
+            if eigenvectors:
+                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute[...,0])), outv.inverse())
+                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.(-1)')
+            else:
+                eigvals, _ = torch.eig(x, eigenvectors=True)
+                self.assertEqual(eigvals, oute, 'Eigenvalues mismatch')
+                self.assertEqual(torch.empty(0, device=device, dtype=dtype), outv, 'Eigenvector matrix not empty')
+
+            rese, resv = x.eig(eigenvectors=eigenvectors)
+            self.assertEqual(rese, oute, "outputs of eig and eig with out don't match")
+            self.assertEqual(resv, outv, "outputs of eig and eig with out don't match")
+
+            # test non-contiguous
+            A = random_symmetric_matrix(dims[-1], *dims[:-1], dtype=dtype, device=device)
+            M = random_symmetric_pd_matrix(dims[-1], *dims[:-1], dtype=dtype, device=device)
+            x = torch.solve(A, M)[0].contiguous()
+            n_dim = len(dims) + 1
+            # Reverse the batch dimensions and the matrix dimensions and then concat them
+            x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
+            assert not x.is_contiguous(), "x is intentionally non-contiguous"
+            rese, resv = torch.eig(x, eigenvectors=eigenvectors)
+            if eigenvectors:
+                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese[...,0])), resv.inverse())
+                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.(-1)')
+            else:
+                eigvals, _ = torch.eig(x, eigenvectors=True)
+                self.assertEqual(eigvals, rese, 'Eigenvalues mismatch')
+                self.assertEqual(torch.empty(0, device=device, dtype=dtype), resv, 'Eigenvector matrix not empty')
+
+        batch_dims_set = [(), (3,), (3, 5), (5, 3, 5)]
+        for batch_dims, eigenvectors, upper in product(batch_dims_set, (True, False), (True, False)):
+            run_test(batch_dims + (5,), eigenvectors)
+
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_ger(self, device, dtype):
