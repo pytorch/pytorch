@@ -486,20 +486,20 @@ void random_kernel_cuda(TensorIterator& iter, uint64_t range, int64_t base, Gene
    });
 }
 
-void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  at::native::templates::cuda::random_from_to_kernel(iter, range, base, gen);
-}
+// void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen_) {
+//   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+//   at::native::templates::cuda::random_from_to_kernel(iter, range, base, gen);
+// }
 
-void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  at::native::templates::cuda::random_full_64_bits_range_kernel(iter, gen);
-}
+// void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen_) {
+//   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+//   at::native::templates::cuda::random_full_64_bits_range_kernel(iter, gen);
+// }
 
-void random_kernel(TensorIterator& iter, Generator* gen_) {
-  auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  at::native::templates::cuda::random_kernel(iter, gen);
-}
+// void random_kernel(TensorIterator& iter, Generator* gen_) {
+//   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
+//   at::native::templates::cuda::random_kernel(iter, gen);
+// }
 
 void normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
@@ -791,8 +791,8 @@ REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel_cuda);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
-REGISTER_DISPATCH(random_stub, &random_kernel);
-REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
+// REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
+// REGISTER_DISPATCH(random_stub, &random_kernel);
+// REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 
 }} // namespace at::native

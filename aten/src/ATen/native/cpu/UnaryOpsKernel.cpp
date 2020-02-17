@@ -465,23 +465,23 @@ void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
   }
 }
 
-static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_from_to_kernel(iter, range, base, generator);
-}
+// static void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, Generator* gen) {
+//   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+//   templates::cpu::random_from_to_kernel(iter, range, base, generator);
+// }
 
-static void random_kernel(TensorIterator& iter, Generator* gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_kernel(iter, generator);
-}
+// static void random_kernel(TensorIterator& iter, Generator* gen) {
+//   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+//   templates::cpu::random_kernel(iter, generator);
+// }
 
-// This is the special kernel to handle single specific case:
-// from(inclusive) = std::numeric_limits<int64_t>::lowest()
-// to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
-static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  templates::cpu::random_full_64_bits_range_kernel(iter, generator);
-}
+// // This is the special kernel to handle single specific case:
+// // from(inclusive) = std::numeric_limits<int64_t>::lowest()
+// // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
+// static void random_full_64_bits_range_kernel(TensorIterator& iter, Generator* gen) {
+//   CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
+//   templates::cpu::random_full_64_bits_range_kernel(iter, generator);
+// }
 
 static void rsqrt_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
@@ -568,9 +568,9 @@ REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 REGISTER_DISPATCH(normal_stub, &normal_kernel);
-REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
-REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
-REGISTER_DISPATCH(random_stub, &random_kernel);
+// REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
+// REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
+// REGISTER_DISPATCH(random_stub, &random_kernel);
 REGISTER_DISPATCH(abs_stub, &abs_kernel);
 REGISTER_DISPATCH(angle_stub, &angle_kernel);
 REGISTER_DISPATCH(real_stub, &real_kernel);
