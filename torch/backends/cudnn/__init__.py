@@ -161,12 +161,12 @@ def set_flags(_enabled, _benchmark, _deterministic, _verbose):
                   verbose)
     verbose = _verbose
     torch._C._set_cudnn_enabled(_enabled)
-    torch._C._set_cudnn_benchmark(_benchmark if cuda is not None else False)
-    torch._C._set_cudnn_deterministic(_deterministic if cuda is not None else False)
+    torch._C._set_cudnn_benchmark(_benchmark)
+    torch._C._set_cudnn_deterministic(_deterministic)
     return orig_flags
 
 @contextmanager
-def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
+def flags(enabled=False, benchmark=(False if cuda is not None else True), deterministic=False, verbose=False):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
     try:
