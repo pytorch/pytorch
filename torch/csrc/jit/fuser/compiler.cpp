@@ -68,11 +68,12 @@ size_t nCompiledKernels() {
 }
 
 int debugFuser() {
-  if (debug_fusion < 0) {
-    const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
-    debug_fusion = debug_env ? atoi(debug_env) : 0;
-  }
-  return debug_fusion;
+  // if (debug_fusion < 0) {
+  //   const char* debug_env = getenv("PYTORCH_FUSION_DEBUG");
+  //   debug_fusion = debug_env ? atoi(debug_env) : 0;
+  // }
+  // return debug_fusion;
+  return 2;
 }
 
 // If the given node is used once by a chunk node, returns that node.

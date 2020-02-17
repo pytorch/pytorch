@@ -219,7 +219,8 @@ static CompilerConfig& getConfig() {
 extern "C" int __isa_available;
 static std::string getArchFlags() {
 // Temporaily disable AVX512 because it is not working.
-  if (__isa_available >= 6) {
+  std::cout << "__isa_available:" << __isa_available << std::endl;
+  if (__isa_available > 5) {
     __isa_available = 5;
   }
   if (__isa_available >= 6) {
@@ -256,6 +257,9 @@ static void runCompiler(
   env.s("so_file", so_file);
   std::string result = format(compile_string, env);
 #ifdef _MSC_VER
+  std::string cat_string = "cmd /c type \"${cpp_file}\"";
+  std::string res = format(cat_string, env);
+  system(res);
   intptr_t r = run(result);
 #else
   int r = system(result.c_str());
