@@ -446,12 +446,7 @@ void testGPU_FusionReplaceAll(){
   ReplaceAll::instancesOf(f3, f4);
   std::cout<<fusion<<std::endl;
   /*
-  const Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
-  std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
-  ZeroMutator mutator;
-  BaseMutator* base_mutator = &mutator;
-  base_mutator->mutate(&fusion);
-  std::cout<<"Replaced: "<<fusion<<std::endl;
+  
   */
 }
 
