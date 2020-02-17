@@ -868,7 +868,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   size_t* workspace_buffer_sizes = new size_t[num_matrices];
   void** workspace_buffers = new void*[num_matrices];
 
-  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG1 : CUSPARSE_COOMM_ALG2;
+  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG2 : CUSPARSE_COOMM_ALG1;
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
