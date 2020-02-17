@@ -438,16 +438,27 @@ void testGPU_FusionReplaceAll(){
   Fusion fusion;
   FusionGuard fg(&fusion);
   
+  Float* f0 = new Float();
   Float* f1 = new Float{1.f};
-  Float* f2 = new Float();
-  Float* f4 = new Float();
-  const Float* f3 = static_cast<const Float*>( add(f1, f2) );
-  std::cout<<fusion<<std::endl;
-  ReplaceAll::instancesOf(f3, f4);
-  std::cout<<fusion<<std::endl;
-  /*
+  Float* f2 = new Float{2.f};
+  Float* f3 = new Float();
+  const Float* f4 = static_cast<const Float*>( add(f1, f0) );
   
-  */
+  //replace the output f4 with f3
+  ReplaceAll::instancesOf(f4, f3);
+  
+  //f3 should now have an origin function
+  TORCH_CHECK(fusion.origin(f3) != nullptr);
+
+  //Should have removed f4 completely so we shouldn't have any other expr than f3 construction
+  TORCH_CHECK(fusion.exprs().size() == 1);
+
+  //Replace constant Float's of value 1.f with 2.f
+  ReplaceAll::instancesOf(f1, f2);
+  const BinaryOp* bop = static_cast<const BinaryOp*> (fusion.origin(f3));
+  //make sure the binary op (origin of f3) actually changed to 2.f
+  TORCH_CHECK(static_cast<const Float*>(bop->lhs())->same_as(new Float{2.f}));
+  
 }
 
 void testGPU_Fusion() {}

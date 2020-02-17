@@ -26,8 +26,8 @@ const Statement* BaseMutator::mutate(const Int* const i) {
 }
 
 const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
-  const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
-  const Val* in = static_cast<const Val*>(uop->in()->dispatch_mutator(this));
+  const Val* out = static_cast<const Val*>( mutate(uop->out()) );
+  const Val* in = static_cast<const Val*>( mutate(uop->in()) );
 
   if 
   (
@@ -41,9 +41,9 @@ const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
 }
 
 const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
-  const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
-  const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this));
-  const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
+  const Val* out = static_cast<const Val*>( mutate(bop->out()) );
+  const Val* lhs = static_cast<const Val*>( mutate(bop->lhs()) );
+  const Val* rhs = static_cast<const Val*>( mutate(bop->rhs()) );
   if
   (
     !(
@@ -70,7 +70,7 @@ void BaseMutator::mutate(Fusion* fusion) {
    */
 
   for(const Statement* stmt : orig_exprs)
-    stmt->dispatch_mutator(this);
+    mutate(stmt);
 
 }
 
@@ -176,7 +176,9 @@ void ReplaceAll::instancesOf(const Val* const instance, const Val* const with){
   ReplaceAll ra(instance, with);
 
   for(const Expr* expr : exprs_containing_val)
-    expr->dispatch_mutator(static_cast<BaseMutator*>(&ra));
+    static_cast<BaseMutator*>(&ra)->mutate(expr);
+
+  fusion->removeVal(instance);
 
 }
 

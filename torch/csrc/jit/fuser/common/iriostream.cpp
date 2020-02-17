@@ -24,7 +24,6 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Fusion* const fusion) {
-  std::cout<<"Fusion has "<< fusion->exprs().size() << "exprs" << std::endl;
   for (const Expr* expr : fusion->exprs()){
     os << expr << std::endl;
   }
