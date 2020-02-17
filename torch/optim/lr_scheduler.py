@@ -306,7 +306,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return [base_lr for base_lr in self.base_lrs]
+            return list(self.base_lrs)
 
 
 class StepLR(_LRScheduler):

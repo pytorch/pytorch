@@ -281,8 +281,8 @@ def processKernelLaunches(string, stats):
 
         return kernel_positions
 
-    # Grab positional ranges of all kernel launchces
-    get_kernel_positions = [k for k in find_kernel_bounds(string)]
+    # Grab positional ranges of all kernel launches
+    get_kernel_positions = list(find_kernel_bounds(string))
     output_string = string
 
     # Replace each CUDA kernel with a HIP kernel.
