@@ -13115,11 +13115,11 @@ class TestTorchDeviceType(TestCase):
             torch.eig(x, eigenvectors=eigenvectors, out=(oute, outv))
 
             # real eigenvalues check
-            oute_imag = oute[...,-1]
+            oute_imag = oute[..., -1]
             self.assertEqual(torch.zeros_like(oute_imag, device=device), oute_imag, "Eigenvectors not all real")
 
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute[...,0])), outv.inverse())
+                x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute[..., 0])), outv.inverse())
                 self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.(-1)')
             else:
                 eigvals, _ = torch.eig(x, eigenvectors=True)
@@ -13140,7 +13140,7 @@ class TestTorchDeviceType(TestCase):
             assert not x.is_contiguous(), "x is intentionally non-contiguous"
             rese, resv = torch.eig(x, eigenvectors=eigenvectors)
             if eigenvectors:
-                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese[...,0])), resv.inverse())
+                x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese[..., 0])), resv.inverse())
                 self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.(-1)')
             else:
                 eigvals, _ = torch.eig(x, eigenvectors=True)
