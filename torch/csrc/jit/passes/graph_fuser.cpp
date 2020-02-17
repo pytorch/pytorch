@@ -85,6 +85,10 @@ bool isSimpleMap(Node* node) {
       "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
       "aten::mul(Tensor self, Scalar other) -> Tensor",
       "aten::div(Tensor self, Scalar other) -> Tensor",
+      "aten::add(Scalar self, Tensor other, Scalar alpha) -> Tensor",
+      "aten::sub(Scalar self, Tensor other, Scalar alpha) -> Tensor",
+      "aten::mul(Scalar self, Tensor other) -> Tensor",
+      "aten::div(Scalar self, Tensor other) -> Tensor",
 
       "aten::eq(Tensor self, Tensor other) -> Tensor",
       "aten::eq(Tensor self, Scalar other) -> Tensor",
