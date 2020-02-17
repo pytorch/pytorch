@@ -918,8 +918,13 @@ class TestSparse(TestCase):
             a_list = []
             b_list = []
             for mat_idx in range(num_mats):
-                a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j])[0])
-                b_list.append(torch.randn([dim_j, dim_k]))
+                a_mat = self._gen_sparse(2, nnz, [dim_i, dim_j])[0]
+                b_mat = torch.randn([dim_j, dim_k])
+                if self.is_cuda:
+                    a_mat = a_mat.cuda()
+                    b_mat = b_mat.cuda()
+                a_list.append(a_mat)
+                b_list.append(b_mat)
 
             a = torch.stack(a_list)
             b = torch.stack(b_list)
@@ -939,6 +944,31 @@ class TestSparse(TestCase):
         test_shape(10, 0, 100, 99, 0)
         test_shape(10, 10, 0, 100, 0)
         test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
+        test_shape(10, 10, 100, 0, 20)
+
+    @cuda_only
+    def test_bmm_deterministic(self):
+        def test_shape(num_mats, dim_i, dim_j, dim_k, nnz):
+            a_list = []
+            b_list = []
+            for mat_idx in range(num_mats):
+                a_list.append(self._gen_sparse(2, nnz, [dim_i, dim_j])[0])
+                b_list.append(torch.randn([dim_j, dim_k]))
+
+            a = torch.stack(a_list).cuda()
+            b = torch.stack(b_list).cuda()
+            ab_nondeterministic = a.bmm(b, deterministic=False)
+            ab_deterministic = a.bmm(b, deterministic=True)
+            self.assertEqual(ab_nondeterministic, ab_deterministic)
+
+        test_shape(10, 10, 100, 99, 20)
+        test_shape(10, 100, 1000, 200, 20)
+        test_shape(10, 64, 10000, 300, 20)
+        test_shape(10, 0, 100, 99, 0)
+        test_shape(10, 10, 0, 100, 0)
+        test_shape(10, 10, 100, 0, 0)
+        test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
 
     @cpu_only

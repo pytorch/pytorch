@@ -722,10 +722,14 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 }
 
-Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
-
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
   Tensor result = at::empty({}, mat2.options());
-  return bmm_out_sparse_cuda(result, self, mat2);
+  return bmm_out_sparse_cuda(result, self, mat2, deterministic);
+}
+
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({}, mat2.options());
+  return bmm_out_sparse_cuda(result, self, mat2, false);
 }
 
 __global__ void search_end_matrix_indices_cuda_kernel(
@@ -805,6 +809,10 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 }
 
 Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+  return bmm_out_sparse_cuda(result, self, mat2, false);
+}
+
+Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
@@ -859,6 +867,8 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   int64_t mat_el_begin_idx = 0;
   size_t* workspace_buffer_sizes = new size_t[num_matrices];
   void** workspace_buffers = new void*[num_matrices];
+
+  cusparseSpMMAlg_t mm_alg = deterministic ? CUSPARSE_COOMM_ALG1 : CUSPARSE_COOMM_ALG2;
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
@@ -926,7 +936,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG1,
+            mm_alg,
             &workspace_buffer_sizes[cur_mat_num]
           ));
           if (workspace_buffer_sizes[cur_mat_num] > 0) {
@@ -944,7 +954,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             (void*)&beta_val,
             result_descr,
             cuda_data_type,
-            CUSPARSE_COOMM_ALG1,
+            mm_alg,
             workspace_buffers[cur_mat_num]
           ));
           TORCH_CUDASPARSE_CHECK(cusparseDestroySpMat(sparse_descr));

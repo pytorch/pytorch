@@ -676,6 +676,13 @@
     SparseCUDA: bmm_sparse_cuda
   supports_named_tensor: True
 
+- func: bmm.deterministic(Tensor self, Tensor mat2, bool deterministic) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    SparseCUDA: bmm_sparse_cuda
+  supports_named_tensor: True
+
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
@@ -684,6 +691,21 @@
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
   supports_named_tensor: True
+
+- func: bmm.deterministic_out(Tensor self, Tensor mat2, bool deterministic, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    SparseCUDA: bmm_out_sparse_cuda
+  supports_named_tensor: True
+
+# - func: bmm.out_deterministic(Tensor self, Tensor mat2, *, bool? deterministic=False, Tensor(a!) out) -> Tensor(a!)
+#   variants: function
+#   dispatch:
+#     CPU: bmm_out_cpu
+#     CUDA: bmm_out_cuda
+#     SparseCPU: bmm_out_sparse_cpu
+#     SparseCUDA: bmm_out_sparse_cuda
+#   supports_named_tensor: True
 
 - func: broadcast_tensors(Tensor[] tensors) -> Tensor[]
   device_guard: False
