@@ -167,13 +167,20 @@ class Min : public BinaryOpNode<Min> {
   }
 };
 
-class CompareSelect : public BinaryOpNode<CompareSelect> {
+class CompareSelect : public ExprNode<CompareSelect> {
  public:
   CompareSelectOperation compare_select_op() const {
     return compare_op_;
   }
+  const Expr& lhs() const {
+    return this->lhs_;
+  }
+  const Expr& rhs() const {
+    return this->rhs_;
+  }
 
   static Expr make(const Expr& lhs, const Expr& rhs) = delete;
+
   static Expr make(
       const Expr& lhs,
       const Expr& rhs,
@@ -182,11 +189,12 @@ class CompareSelect : public BinaryOpNode<CompareSelect> {
   }
 
  private:
+  Expr lhs_;
+  Expr rhs_;
   CompareSelectOperation compare_op_;
   CompareSelect(const Expr& lhs, const Expr& rhs, CompareSelectOperation cmp_op)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kCompareSelect, ReturnType::kint32),
-        compare_op_(cmp_op) {}
-  friend class BinaryOpNode<CompareSelect>;
+      : ExprNodeBase(ToDtype<int>()),
+        lhs_(lhs), rhs_(rhs), compare_op_(cmp_op) {}
 };
 
 // Encode an integer immediate value.
@@ -703,6 +711,7 @@ enum IntrinsicsOp {
   kAsin,
   kAcos,
   kAtan,
+  kAtan2,
   kSinh,
   kCosh,
   kTanh,
@@ -725,7 +734,7 @@ enum IntrinsicsOp {
   kFmod,
   kRemainder,
   kLgamma,
-  kFrac,  
+  kFrac,
   kRand, // We need more discussions on this. Should we consider stateful?
 };
 
@@ -761,6 +770,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "acos";
       case kAtan:
         return "atan";
+      case kAtan2:
+        return "atan2";
       case kSinh:
         return "sinh";
       case kCosh:
@@ -808,7 +819,7 @@ class Intrinsics : public CallNode<Intrinsics> {
       case kErfc:
         return "erfc";
       case kFrac:
-        return "frac";        
+        return "frac";
       default:
         throw std::runtime_error(
             "invalid op_type: " + std::to_string(op_type()));

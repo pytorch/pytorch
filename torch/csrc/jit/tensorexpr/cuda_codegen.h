@@ -42,6 +42,7 @@ class CudaPrinter : public IRPrinter {
   void visit(const Load* v);
   void visit(const Max* v);
   void visit(const Min* v);
+  void visit(const IfThenElse* v);
 
   const std::vector<Expr>& gpu_block_extents() const {
     return gpu_block_extents_;

@@ -44,6 +44,10 @@ void overrideCanFuseOnCPU(bool value) {
   detail::cpu_fuser_enabled = value;
 }
 
+void overrideCanFuseOnGPU(bool value) {
+  detail::gpu_fuser_enabled = value;
+}
+
 // Uses the above interface by stuffing the graph into a node and treating that
 // node as a fusion group.
 std::vector<at::Tensor> debugLaunchGraph(

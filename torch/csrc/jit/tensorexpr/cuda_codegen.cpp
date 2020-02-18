@@ -180,6 +180,15 @@ void CudaPrinter::visit(const Min* v) {
   os() << ")";
 }
 
+void CudaPrinter::visit(const IfThenElse* v) {
+  os() << "(";
+  v->condition().accept(this);
+  os() << ") ? ";
+  v->true_value().accept(this);
+  os() << " : ";
+  v->false_value().accept(this);
+}
+
 void CudaCodeGen::Initialize() {
   printer_.reset(new CudaPrinter(&oss_));
   // TODO: handle multiple kernels.

@@ -264,9 +264,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
   }
 
-  template <typename Op>
   void visit_compare_select_op(
-      const BinaryOpNode<Op>* v,
+      const CompareSelect* v,
       CompareSelectOperation cmp_op) {
     v->lhs().accept(this);
     Value lhs_v = value_;
@@ -610,6 +609,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         return std::fmod(v1, v2);
       case kRemainder:
         return std::remainderf(v1, v2);
+      case kAtan2:
+        return std::atan2(v1, v2);
       default:
         throw std::runtime_error("nvalid op_type: " + std::to_string(op_type));
     }

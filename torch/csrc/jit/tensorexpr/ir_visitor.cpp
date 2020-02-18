@@ -42,7 +42,8 @@ void IRVisitor::visit(const Min* v) {
 }
 
 void IRVisitor::visit(const CompareSelect* v) {
-  visit_binary_op(v, this);
+  v->lhs().accept(this);
+  v->rhs().accept(this);
 }
 
 void IRVisitor::visit(const IntImm* v) {}

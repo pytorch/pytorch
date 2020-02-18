@@ -219,6 +219,7 @@ TORCH_API Expr round(const Expr& v);
 TORCH_API Expr trunc(const Expr& v);
 TORCH_API Expr frac(const Expr& v);
 TORCH_API Expr lgamma(const Expr& v);
+TORCH_API Expr atan2(const Expr& v1, const Expr& v2);
 TORCH_API Expr pow(const Expr& v1, const Expr& v2);
 TORCH_API Expr fmod(const Expr& v1, const Expr& v2);
 TORCH_API Expr remainder(const Expr& v1, const Expr& v2);

@@ -81,24 +81,26 @@ def test_four_arg():
         c = torch.addcmul(torch.add(x, y), z, w)
         return c
 
-    rand_a = torch.rand(1024, dtype=torch.float)
-    rand_b = torch.rand(1024, dtype=torch.float)
-    rand_c = torch.rand(1024, dtype=torch.float)
-    rand_d = torch.rand(1024, dtype=torch.float)
+    device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
+    for dev in device_options:
+        rand_a = torch.rand(1024, dtype=torch.float, device=dev)
+        rand_b = torch.rand(1024, dtype=torch.float, device=dev)
+        rand_c = torch.rand(1024, dtype=torch.float, device=dev)
+        rand_d = torch.rand(1024, dtype=torch.float, device=dev)
 
-    traced = torch.jit.trace(
-        run_addcmul,
-        (
-            torch.zeros(1024, dtype=torch.float),
-            torch.zeros(1024, dtype=torch.float),
-            torch.zeros(1024, dtype=torch.float),
-            torch.zeros(1024, dtype=torch.float),
-        ),
-    )
+        traced = torch.jit.trace(
+            run_addcmul,
+            (
+                torch.zeros(1024, dtype=torch.float, device=dev),
+                torch.zeros(1024, dtype=torch.float, device=dev),
+                torch.zeros(1024, dtype=torch.float, device=dev),
+                torch.zeros(1024, dtype=torch.float, device=dev),
+            ),
+        )
 
-    x = traced(rand_a, rand_b, rand_c, rand_d)
-    y = run_addcmul(rand_a, rand_b, rand_c, rand_d)
-    np.testing.assert_allclose(x.numpy(), y.numpy(), atol=1e-6)
+        x = traced(rand_a, rand_b, rand_c, rand_d)
+        y = run_addcmul(rand_a, rand_b, rand_c, rand_d)
+        np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=1e-6)
 
 
 def test_three_arg_cuda():
@@ -505,7 +507,90 @@ def test_int_output():
     np.testing.assert_allclose(xn * yn * zn, res.numpy())
 
 def test_binary_ops():
-    pass
+    def test_atan2(x, y):
+        c = torch.atan2(torch.add(x, y), y)
+        return c
+
+    def test_gt(x, y):
+        c = torch.gt(torch.add(x, y), y)
+        return c
+
+    def test_ge(x, y):
+        c = torch.ge(torch.add(x, y), y)
+        return c
+
+    def test_lt(x, y):
+        c = torch.lt(torch.add(x, y), y)
+        return c
+
+    def test_le(x, y):
+        c = torch.le(torch.add(x, y), y)
+        return c
+
+    def test_lerp(x, y):
+        c = torch.lerp(torch.add(x, 1), x, 2.0)
+        return c
+
+    def test_mul(x, y):
+        c = torch.mul(torch.add(x, y), y)
+        return c
+
+    def test_ne(x, y):
+        c = torch.ne(torch.add(x, y), y)
+        return c
+
+    def test_div(x, y):
+        c = torch.div(torch.add(x, y), 2)
+        return c
+
+    def test_eq(x, y):
+        c = torch.eq(torch.add(x, y), y)
+        return c
+
+    def test_fmod(x, y):
+        c = torch.fmod(torch.add(x, y), 2)
+        return c
+
+    def test_sub(x, y):
+        c = torch.sub(torch.add(x, y), x)
+        return c
+
+    def test_remainder(x, y):
+        c = torch.remainder(torch.add(x, y), 3.0)
+        return c
+
+    def test_pow(x, y):
+        c = torch.pow(torch.add(x, y), 2.0)
+        return c
+
+    fns = {
+        test_atan2,
+        test_gt,
+        test_ge,
+        test_lt,
+        test_le,
+        test_lerp,
+        test_mul,
+        test_ne,
+        test_div,
+        test_eq,
+        test_fmod,
+        test_sub,
+        # test_remainder,
+        test_pow,
+    }
+
+    device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
+    for torch_fn in fns:
+        for dev in device_options:
+            rand_a = torch.rand(1024, device=dev)
+            rand_b = torch.rand(1024, device=dev)
+            in1 = 20 * torch.rand(1024, device=dev)
+            in2 = 20 * torch.rand(1024, device=dev)
+            traced = torch.jit.trace(torch_fn, (in1, in2))
+            x = traced(rand_a, rand_b)
+            y = torch_fn(rand_a, rand_b)
+            np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=2e-3)
 
 def test_unary_ops():
 
@@ -633,6 +718,10 @@ def test_unary_ops():
         c = torch.relu(torch.add(x, y))
         return c
 
+    def test_threshold(x, y):
+        c = F.threshold(torch.add(x, y), 0.5, 10)
+        return c
+
     fns = {
         test_round,
         test_sin,
@@ -662,6 +751,7 @@ def test_unary_ops():
         test_lgamma,
         test_sigmoid,
         test_reciprocal,
+        test_threshold,
         test_neg,
         test_relu,
     }

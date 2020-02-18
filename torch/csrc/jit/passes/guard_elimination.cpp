@@ -230,7 +230,9 @@ private:
     case aten::asin:
     case aten::acos:
     case aten::atan:
+    case aten::atan2:
     case aten::floor:
+    case aten::fmod:
     case aten::ceil:
     case aten::trunc:
     case aten::sqrt:
@@ -266,10 +268,21 @@ private:
     case aten::log2:
     case aten::log10:
     case aten::frac:
+    case aten::lerp:
     case aten::lgamma:
     case aten::reciprocal:
     case aten::addcmul:
       return checkInputs(n, no_exceptions);
+    case aten::slice:
+      return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+             // check that the dimension argument is constant
+             n->input(1)->node()->kind() == prim::Constant &&
+             // the start offset is constant
+             n->input(2)->node()->kind() == prim::Constant &&
+             // the end offset is constant
+             n->input(3)->node()->kind() == prim::Constant &&
+             // the stride is constant
+             n->input(4)->node()->kind() == prim::Constant;
     case aten::cat:
       // check that the dimension argument is constant
       return n->input(1)->node()->kind() == prim::Constant &&

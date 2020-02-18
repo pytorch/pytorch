@@ -55,18 +55,21 @@ bool isSupported(Node* node) {
     case aten::max:
     case aten::pow:
     case aten::clamp:
+    case aten::lerp:
     case aten::log10:
     case aten::log:
     case aten::log2:
     case aten::exp:
     case aten::erf:
     case aten::erfc:
+    case aten::fmod:
     case aten::cos:
     case aten::sin:
     case aten::tan:
     case aten::acos:
     case aten::asin:
     case aten::atan:
+    case aten::atan2:
     case aten::cosh:
     case aten::sinh:
     case aten::tanh:
@@ -77,6 +80,7 @@ bool isSupported(Node* node) {
     case aten::ceil:
     case aten::round:
     case aten::trunc:
+    case aten::threshold:
     case aten::remainder:
     case prim::ConstantChunk:
     case aten::cat:
@@ -90,9 +94,7 @@ bool isSupported(Node* node) {
     case aten::lgamma:
     case aten::slice:
     case aten::unsqueeze:
-#ifndef ENABLE_LLVM
     case aten::frac:
-#endif
       return true;
     default:
       return false;

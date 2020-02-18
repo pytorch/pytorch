@@ -86,10 +86,11 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kRound:
     case kTrunc:
     case kFrac:
-    case kLgamma:      
+    case kLgamma:
       return 1;
     case kRand:
       return 0;
+    case kAtan2:
     case kFmod:
     case kPow:
     case kRemainder:

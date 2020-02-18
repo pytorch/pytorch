@@ -154,6 +154,10 @@ Expr lgamma(const Expr& v) {
   return Intrinsics::make(kLgamma, v);
 }
 
+Expr atan2(const Expr& v1, const Expr& v2) {
+  return Intrinsics::make(kAtan2, v1, v2);
+}
+
 Expr pow(const Expr& v1, const Expr& v2) {
   return Intrinsics::make(kPow, v1, v2);
 }

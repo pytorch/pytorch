@@ -421,6 +421,12 @@ Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
           });
     } break;
 
+    case aten::lerp: {
+      return ComputeThreeOperand(
+          "aten_lerp", v, [](const Expr& a, const Expr& end, const Expr& weight) {
+            return a + weight * (end - a);
+          });
+    } break;
     case aten::remainder: {
       return ComputeTwoOperand(
           "aten_remainder", v, [](const Expr& lhs, const Expr& rhs) {
@@ -452,6 +458,11 @@ Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
     case aten::atan: {
       return ComputeOneOperand(
           "aten_atan", v, [](const Expr& a) { return atan(a); });
+    } break;
+
+    case aten::atan2: {
+      return ComputeTwoOperand(
+          "aten_atan2", v, [](const Expr& lhs, const Expr& rhs) { return atan2(lhs, rhs); });
     } break;
 
     case aten::tanh: {
@@ -495,6 +506,13 @@ Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
     case aten::trunc: {
       return ComputeOneOperand(
           "aten_trunc", v, [](const Expr& a) { return trunc(a); });
+    } break;
+
+    case aten::threshold: {
+      return ComputeThreeOperand(
+          "aten_threshold", v, [](const Expr& a, const Expr& threshold, const Expr& value) {
+            return ifThenElse(CompareSelect::make(a, threshold, kGT), a, value);
+      });
     } break;
 
     case aten::frac: {
