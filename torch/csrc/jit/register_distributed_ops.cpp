@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
@@ -10,6 +11,7 @@
 using at::Scalar;
 using at::Tensor;
 namespace dist_autograd = torch::distributed::autograd;
+namespace dist_rpc = torch::distributed::rpc;
 
 namespace torch {
 namespace jit {
@@ -40,8 +42,32 @@ c10::OperatorOptions aliasAnalysisSpecialCase() {
   return result;
 }
 
-RegisterOperators reg_rpc_ops(
-    {Operator(
+RegisterOperators reg_rpc_ops({
+    Operator(
+        "aten::to_here(RRef(t) self) -> t",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          IValue res;
+          if (rref->isOwner()) {
+            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                      ->getValue();
+          } else {
+            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                      ->toHere();
+          }
+          push(stack, std::move(res));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::is_owner(RRef(t) self) -> bool",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          push(stack, rref->isOwner());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();

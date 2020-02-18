@@ -372,6 +372,10 @@ struct FunctionValue : public SugaredValue {
     return std::make_shared<SimpleValue>(output);
   }
 
+ const std::vector<Function*>& functions() {
+   return callees_;
+ }
+
  private:
   std::vector<Function*> callees_;
   // TODO holding this thing is creepy

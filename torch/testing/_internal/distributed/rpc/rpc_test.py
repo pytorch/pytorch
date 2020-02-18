@@ -1710,6 +1710,7 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+        self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
 
 
 @unittest.skipIf(
@@ -1717,6 +1718,34 @@ class RpcTest(RpcAgentTestFixture):
     "Pytorch distributed rpc package " "does not support python2",
 )
 class RpcJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_rref_as_arg(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_tensor_to_here(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_var.to_here()
+
+        res = rref_tensor_to_here(rref_var)
+        self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_rref_is_owner(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_tensor_is_owner(rref_var):
+            # type: (RRef[Tensor]) -> bool
+            return rref_var.is_owner()
+
+        res = rref_tensor_is_owner(rref_var)
+        self.assertEqual(res, False)
+
     @dist_init
     def test_rpc_async_op(self):
         @torch.jit.script
@@ -1732,16 +1761,16 @@ class RpcJitTest(RpcAgentTestFixture):
             return
 
         @torch.jit.script
-        def rpc_async_in_torchscript(dst_worker_name, user_func_qual_name, args, kwargs):
-            # type: (str, str, Tuple[Tensor, Tensor], Dict[str, Tensor])
+        def rpc_async_in_torchscript(dst_worker_name, args, kwargs):
+            # type: (str, Tuple[Tensor, Tensor], Dict[str, Tensor])
             fut = rpc.api._invoke_rpc_torchscript(
-                dst_worker_name, user_func_qual_name, two_args_two_kwargs, args, kwargs
+                dst_worker_name, two_args_two_kwargs, args, kwargs
             )
             ret = fut.wait()
             return ret
 
         from torch.testing import FileCheck
-        FileCheck().check("dst_worker_name").check("user_func_qual_nam").run(str(rpc_async_in_torchscript.graph))
+        FileCheck().check("dst_worker_name").run(str(rpc_async_in_torchscript.graph))
 
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
 
@@ -1753,7 +1782,7 @@ class RpcJitTest(RpcAgentTestFixture):
         kwargs = {
             "first_kwarg": torch.tensor([2, 2]),
         }
-        ret = rpc_async_in_torchscript(dst_worker_name, _qualified_name(two_args_two_kwargs), args, kwargs)
+        ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([9, 9]))
 
         # Case 2. All kwargs are specified.
@@ -1765,15 +1794,15 @@ class RpcJitTest(RpcAgentTestFixture):
             "first_kwarg": torch.tensor([2, 2]),
             "second_kwarg": torch.tensor([3, 3]),
         }
-        ret = rpc_async_in_torchscript(dst_worker_name, _qualified_name(two_args_two_kwargs), args, kwargs)
+        ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([8, 8]))
 
         # Case 3. kwargs in the front can be specified by extra args.
         @torch.jit.script
-        def rpc_async_in_torchscript_with_extra_arg(dst_worker_name, user_func_qual_name, args, kwargs):
-            # type: (str, str, Tuple[Tensor, Tensor, Tensor], Dict[str, Tensor])
+        def rpc_async_in_torchscript_with_extra_arg(dst_worker_name, args, kwargs):
+            # type: (str, Tuple[Tensor, Tensor, Tensor], Dict[str, Tensor])
             fut = rpc.api._invoke_rpc_torchscript(
-                dst_worker_name, user_func_qual_name, two_args_two_kwargs, args, kwargs
+                dst_worker_name, two_args_two_kwargs, args, kwargs
             )
             ret = fut.wait()
             return ret
@@ -1787,5 +1816,5 @@ class RpcJitTest(RpcAgentTestFixture):
         kwargs = {
             "second_kwarg": torch.tensor([3, 3]),
         }
-        ret = rpc_async_in_torchscript_with_extra_arg(dst_worker_name, _qualified_name(two_args_two_kwargs), args, kwargs)
+        ret = rpc_async_in_torchscript_with_extra_arg(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([8, 8]))

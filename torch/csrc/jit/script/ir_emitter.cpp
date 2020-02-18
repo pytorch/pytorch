@@ -1511,28 +1511,11 @@ struct to_ir {
           }
           return;
         }
-        if (classinfo.kind() == TK_VAR) {
-          // Special casing for list and tuple since isinstance(x, list) and
-          // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
-          // subscript type annotation in python
-          auto name = Var(classinfo).name().name();
-          if (name == "tuple") {
-            tuple_check = true;
-            return;
-          } else if (name == "list") {
-            list_check = true;
-            return;
-          }
-        }
         TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
         types.emplace_back(type);
       }
       bool staticallyTrue(const TypePtr& actual_type) {
         // is this isinstance check statically true?
-        if ((list_check && actual_type->kind() == ListType::Kind) ||
-            (tuple_check && actual_type->kind() == TupleType::Kind)) {
-          return true;
-        }
         for (const TypePtr& typ : types) {
           if (actual_type->isSubtypeOf(typ)) {
             return true;
@@ -1550,27 +1533,29 @@ struct to_ir {
         return false;
       }
       bool staticallyFalse(const TypePtr& actual_type) {
-        if ((list_check && maybeOfKind(ListType::Kind, actual_type)) ||
-            (tuple_check && maybeOfKind(TupleType::Kind, actual_type))) {
-          return false;
-        }
         for (const TypePtr& typ : types) {
           if (typ->isSubtypeOf(actual_type)) {
+            return false;
+          }
+          if ((typ->isSubtypeOf(AnyListType::get()) &&
+                  maybeOfKind(ListType::Kind, actual_type)) ||
+              (typ->isSubtypeOf(AnyTupleType::get()) &&
+                  maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
         return true;
       }
       ScriptTypeParser typeParser_;
-      bool list_check = false;
-      bool tuple_check = false;
       std::vector<TypePtr> types;
     };
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
     auto val = emitExpr(obj);
     RefinementSet refinement;
-    if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
+    if (gathered.types.size() == 1 &&
+        gathered.types.at(0)->isSubtypeOf(val->type()) &&
+        obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
       Refinement isinstance(std::move(ident), gathered.types.at(0));
       refinement = RefinementSet({isinstance}, {});
@@ -1584,9 +1569,7 @@ struct to_ir {
     }
     // check maybe true/false at runtime, need an actual op
     Value* result =
-        graph
-            ->insertNode(graph->createIsInstance(
-                val, gathered.types, gathered.list_check, gathered.tuple_check))
+        graph->insertNode(graph->createIsInstance(val, gathered.types))
             ->output();
     return CondValue(result, std::move(refinement), c10::nullopt);
   }
@@ -2456,21 +2439,19 @@ struct to_ir {
       }
       case prim::rpc_async: {
         auto& inputs_trees = apply.inputs().tree()->trees();
-        if (inputs_trees.size() < 3) {
+        if (inputs_trees.size() < 2) {
           throw ErrorReport(apply)
               << "Expected at least 3 arguments to "
               << "rpc_async(dst_worker_name, user_func_qual_name, user_func, *args, **kwargs)";
         }
         auto dst_worker_name = emitSugaredExpr(Expr(inputs_trees[0]), 1);
-        auto user_func_qual_name = emitSugaredExpr(Expr(inputs_trees[1]), 1);
-        auto user_func = emitSugaredExpr(Expr(inputs_trees[2]), 1);
-        TreeList args_trees(inputs_trees.begin() + 3, inputs_trees.end());
+        auto user_func = emitSugaredExpr(Expr(inputs_trees[1]), 1);
+        TreeList args_trees(inputs_trees.begin() + 2, inputs_trees.end());
         auto inputs = getNamedValues(args_trees, true);
         auto attributes = emitAttributes(apply.attributes());
         return emitRpcAsyncExpr(
             apply.range(),
             dst_worker_name,
-            user_func_qual_name,
             user_func,
             args_trees,
             inputs,
@@ -2738,19 +2719,29 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitRpcAsyncExpr(
       SourceRange loc,
       const std::shared_ptr<SugaredValue>& dst_worker_name,
-      const std::shared_ptr<SugaredValue>& user_func_qual_name,
       const std::shared_ptr<SugaredValue>& user_func,
       TreeList args_trees,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     auto graphPtr = method.graph();
+
+    // Get user function qualified name as an IR Value.
+    std::shared_ptr<FunctionValue> user_func_function_sugared_value =
+        std::dynamic_pointer_cast<FunctionValue>(user_func);
+    auto& functionPtrs = user_func_function_sugared_value->functions();
+    TORCH_INTERNAL_ASSERT(functionPtrs.size() == 1, "User-provided functions size is 1.")
+    Function* functionPtr = functionPtrs.at(0);
+    auto qual_name = functionPtr->qualname();
+    IValue userFunctionQualNameIValue(qual_name.qualifiedName());
+    Value* userFunctionQualNameValue = graphPtr->insertConstant(userFunctionQualNameIValue, loc);
+
+    // Insert a jit::Operator, prim::rpc_async.
     Node* rpc_async_node = graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
                     ->setSourceRange(loc);
-    TypePtr output_type;
     {
       WithInsertPoint insert(rpc_async_node);
       rpc_async_node->addInput(dst_worker_name->asValue(loc, method));
-      rpc_async_node->addInput(user_func_qual_name->asValue(loc, method));
+      rpc_async_node->addInput(userFunctionQualNameValue);
       // The call is _invoke_rpc_torchscript(dstWorkerName, qualifiedName,
       // args, kwargs), so only 2 inputs are added, no attributes.
       for (auto& input : inputs) {
@@ -2772,6 +2763,7 @@ struct to_ir {
       std::vector<NamedValue> inputValues;
       auto entries = emitSugaredExpr(Expr(args_trees[0]), 1)
                          ->asTuple(args_trees[0]->range(), method);
+      inputValues.reserve(entries.size());
       for (const auto& entry : entries) {
         inputValues.emplace_back(
             args_trees[0]->range(), entry->asValue(args_trees[0]->range(), method));
