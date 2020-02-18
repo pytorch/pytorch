@@ -19,30 +19,27 @@ __cudnn_version = None
 # TODO: dynamic version checks via cudnnGetVersion
 
 def find_cudnn_windows_lib():
-    if cuda is not None:
-        # Override the default search process
-        # Fixes https://github.com/pytorch/pytorch/issues/20202
-        # The library selection will be done in these directories one by one
-        # 1. [Package Root]\Lib 
-        #    That's where our libraries are in, which should be loaded first.
-        # 2. Default directories
-        #    That is stored in the environment variable `PATH`.
-        test_env = os.environ.copy()
-        old_path = test_env['PATH']
-        th_dll_path = os.path.join(os.path.dirname(
-            os.path.dirname(os.path.dirname(__file__))), 'lib')
-        test_env['PATH'] = ';'.join([th_dll_path, old_path])
-        proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE,
-                     stderr=PIPE, stdin=PIPE, env=test_env)
-        out, err = proc.communicate()
-        out = out.decode().strip()
-        if len(out) > 0:
-            if out.find('\r\n') != -1:
-                out = out.split('\r\n')[0]
-            cudnn_lib = str(out)
-            return ctypes.cdll.LoadLibrary(cudnn_lib)
-        else:
-            return None
+    # Override the default search process
+    # Fixes https://github.com/pytorch/pytorch/issues/20202
+    # The library selection will be done in these directories one by one
+    # 1. [Package Root]\Lib 
+    #    That's where our libraries are in, which should be loaded first.
+    # 2. Default directories
+    #    That is stored in the environment variable `PATH`.
+    test_env = os.environ.copy()
+    old_path = test_env['PATH']
+    th_dll_path = os.path.join(os.path.dirname(
+        os.path.dirname(os.path.dirname(__file__))), 'lib')
+    test_env['PATH'] = ';'.join([th_dll_path, old_path])
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE,
+                 stderr=PIPE, stdin=PIPE, env=test_env)
+    out, err = proc.communicate()
+    out = out.decode().strip()
+    if len(out) > 0:
+        if out.find('\r\n') != -1:
+            out = out.split('\r\n')[0]
+        cudnn_lib = str(out)
+        return ctypes.cdll.LoadLibrary(cudnn_lib)
     else:
         return None
 
@@ -116,12 +113,11 @@ def is_acceptable(tensor):
             "PyTorch making sure the library is visible to the build system.")
         return False
     if _libcudnn() is None:
-        if cuda is not None:
-            warnings.warn('cuDNN library not found. Check your {libpath}'.format(
-                libpath={
-                    'darwin': 'DYLD_LIBRARY_PATH',
-                    'win32': 'PATH'
-                }.get(sys.platform, 'LD_LIBRARY_PATH')))
+        warnings.warn('cuDNN/MIOpen library not found. Check your {libpath}'.format(
+            libpath={
+                'darwin': 'DYLD_LIBRARY_PATH',
+                'win32': 'PATH'
+            }.get(sys.platform, 'LD_LIBRARY_PATH')))
         return False
     return True
 
