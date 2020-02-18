@@ -97,6 +97,7 @@ namespace jit {
   _(GPU_FusionCastOp)            \
   _(GPU_FusionEquality)          \
   _(GPU_FusionReplaceAll)        \
+  _(GPU_FusionComputeAt)         \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

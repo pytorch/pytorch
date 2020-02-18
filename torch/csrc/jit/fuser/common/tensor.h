@@ -152,18 +152,8 @@ struct TORCH_API Tensor : public Val {
   const TensorDomain* domain_;
 };
 
-//void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
-  /*
-   * TODO:
-   * Recursive compute_at:
-   * Recurse backward from consumer, to producer, make sure there's a dependency chain there.
-   * After recursing, recurse again, and call ComputeAt for all tensors between producer and consumer.
-   * 
-   * Assert direct consumer/producer relationship.
-   * Compute at modifies the consumer, not the producer.
-   * 
-   */
-//}
+struct TensorView;
+void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis);
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -182,6 +172,14 @@ struct TORCH_API TensorView : public Val {
       , compute_at_axis_(-1) {
       }
 
+  TensorView(const Tensor* _tensor)
+      : Val(ValType::TensorView)
+      , tensor_(_tensor)
+      , domain_(_tensor->domain())
+      , compute_at_view_(nullptr)
+      , compute_at_axis_(-1) {
+      }
+
   const Tensor* tensor() const noexcept { return tensor_; }
   const TensorDomain* domain() const noexcept { return domain_; }
 
@@ -195,9 +193,10 @@ struct TORCH_API TensorView : public Val {
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
   int getComputeAtAxis() const noexcept { return compute_at_axis_; }
   void computeAt(const TensorView* tv, int axis) {
+    ComputeAt_impl(this, tv, axis);
     compute_at_view_ = tv;
     compute_at_axis_ = axis;
-    //ComputeAt_impl(tv, this, axis);
+    
   }
 
 private:
@@ -215,15 +214,15 @@ private:
 struct TORCH_API Split : public Expr {
   ~Split() = default;
   Split(
-      const TensorView* _out,
-      const TensorView* _in,
+      const TensorDomain* _out,
+      const TensorDomain* _in,
       int _axis,
       const Int* _factor);
 
-  const TensorView* out() const noexcept {
+  const TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorView* in() const noexcept {
+  const TensorDomain* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
@@ -249,8 +248,8 @@ struct TORCH_API Split : public Expr {
   Split& operator=(Split&& other) = delete;
 
  private:
-  const TensorView* out_;
-  const TensorView* in_;
+  const TensorDomain* out_;
+  const TensorDomain* in_;
   const int axis_;
   const Int* factor_;
 };
@@ -263,7 +262,7 @@ struct TORCH_API Split : public Expr {
  */
 struct TORCH_API Merge : public Expr {
   ~Merge() = default;
-  Merge(const TensorView* _out, const TensorView* _in, int _axis);
+  Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis);
 
   Merge(const Merge& other) = delete;
   Merge& operator=(const Merge& other) = delete;
@@ -271,10 +270,10 @@ struct TORCH_API Merge : public Expr {
   Merge(Merge&& other) = delete;
   Merge& operator=(Merge&& other) = delete;
 
-  const TensorView* out() const noexcept {
+  const TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorView* in() const noexcept {
+  const TensorDomain* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
@@ -290,8 +289,8 @@ struct TORCH_API Merge : public Expr {
   }
 
  private:
-  const TensorView* out_;
-  const TensorView* in_;
+  const TensorDomain* out_;
+  const TensorDomain* in_;
   const int axis_;
 };
 
@@ -302,8 +301,8 @@ struct TORCH_API Merge : public Expr {
 struct TORCH_API Reorder : public Expr {
   ~Reorder() = default;
   Reorder(
-      const TensorView* _out,
-      const TensorView* _in,
+      const TensorDomain* _out,
+      const TensorDomain* _in,
       std::vector<int> _pos2axis);
 
   Reorder(const Reorder& other) = delete;
@@ -312,10 +311,10 @@ struct TORCH_API Reorder : public Expr {
   Reorder(Reorder&& other) = delete;
   Reorder& operator=(Reorder&& other) = delete;
 
-  const TensorView* out() const noexcept {
+  const TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorView* in() const noexcept {
+  const TensorDomain* in() const noexcept {
     return in_;
   }
   const std::vector<int> pos2axis() const noexcept {
@@ -331,8 +330,8 @@ struct TORCH_API Reorder : public Expr {
   }
 
  private:
-  const TensorView* out_;
-  const TensorView* in_;
+  const TensorDomain* out_;
+  const TensorDomain* in_;
   const std::vector<int> pos2axis_;
 };
 

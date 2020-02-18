@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/transform_replay.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
 #include <iostream>
@@ -367,9 +368,10 @@ void testGPU_FusionTVSplit() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const Tensor *t = Tensor::MakeDummyTensor(3);
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  const TensorView *tv = split(t, 2, 2);
+  tv = split(tv, 2, 2);
+  std::cout<<"Split: "<<tv<<std::endl;
 
   std::cout<<"Split fusion output: "<<fusion<<std::endl;
   
@@ -380,9 +382,9 @@ void testGPU_FusionTVMerge() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const Tensor *t = Tensor::MakeDummyTensor(3);
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  const TensorView *tv = merge(t, 1);
+  tv = merge(tv, 1);
 
   std::cout<<"Merge fusion output: "<<fusion<<std::endl;
   
@@ -393,7 +395,8 @@ void testGPU_FusionTVReorder() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const Tensor *t = Tensor::MakeDummyTensor(3);
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
+  
 
   std::unordered_map<int, int> shift_right{
     {-1, 0}
@@ -413,22 +416,22 @@ void testGPU_FusionTVReorder() {
     {2, 0}
   };
 
-  const TensorView *s_leftl = reorder(t, shift_left);
-  for(int i = 0; i < t->domain()->size(); i++)
-    TORCH_CHECK(t->domain()->axis(i) == s_leftl->domain()->axis(i-1));
+  const TensorView *s_leftl = reorder(tv, shift_left);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i) == s_leftl->domain()->axis(i-1));
   
-  const TensorView *s_left2 = reorder(t, shift_left);
-  for(int i = 0; i < t->domain()->size(); i++)
-    TORCH_CHECK(t->domain()->axis(i) == s_left2->domain()->axis(i-1));
+  const TensorView *s_left2 = reorder(tv, shift_left);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i) == s_left2->domain()->axis(i-1));
 
-  const TensorView *s_right = reorder(t, shift_right);
-  for(int i = 0; i < t->domain()->size(); i++)
-    TORCH_CHECK(t->domain()->axis(i-1) == s_right->domain()->axis(i));
+  const TensorView *s_right = reorder(tv, shift_right);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i-1) == s_right->domain()->axis(i));
 
-  const TensorView *rswap = reorder(t, swap);
-  TORCH_CHECK(t->domain()->axis(0) == rswap->domain()->axis(2));
-  TORCH_CHECK(t->domain()->axis(2) == rswap->domain()->axis(0));
-  TORCH_CHECK(t->domain()->axis(1) == rswap->domain()->axis(1));
+  const TensorView *rswap = reorder(tv, swap);
+  TORCH_CHECK(tv->domain()->axis(0) == rswap->domain()->axis(2));
+  TORCH_CHECK(tv->domain()->axis(2) == rswap->domain()->axis(0));
+  TORCH_CHECK(tv->domain()->axis(1) == rswap->domain()->axis(1));
 
 }
 
@@ -498,6 +501,38 @@ void testGPU_FusionReplaceAll(){
   //make sure the binary op (origin of f3) actually changed to 2.f
   TORCH_CHECK(static_cast<const Float*>(bop->lhs())->same_as(new Float{2.f}));
   
+}
+
+void testGPU_FusionComputeAt(){
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<const IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+
+  const TensorDomain *td = new TensorDomain(dom);
+  const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
+  const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
+
+  tv = split(tv, 3, 4);
+  tv = split(tv, 0, 2);
+  
+  std::stack<const Expr*> target_transforms;
+  TransformReplay::get_root(tv->domain(), &target_transforms);
+  
+  while(!target_transforms.empty()){
+    std::cout<<target_transforms.top()<<std::endl;
+    target_transforms.pop();
+  }
+  /*
+  for(decltype(target_transforms.size()) i = 0; i < target_transforms.size(); i++){
+    std::cout<<"Operation "<<i<<": "<<target_transforms[i]<<std::endl;
+  }
+  */
 }
 
 void testGPU_Fusion() {}

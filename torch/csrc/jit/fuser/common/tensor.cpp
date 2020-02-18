@@ -50,8 +50,8 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
  */
 
 Split::Split(
-    const TensorView* _out,
-    const TensorView* _in,
+    const TensorDomain* _out,
+    const TensorDomain* _in,
     int _axis,
     const Int* _factor)
     : Expr(ExprType::Split),
@@ -64,7 +64,7 @@ Split::Split(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-Merge::Merge(const TensorView* _out, const TensorView* _in, int _axis)
+Merge::Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis)
     : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
   addOutput(_out);
   addInput(_in);
@@ -72,8 +72,8 @@ Merge::Merge(const TensorView* _out, const TensorView* _in, int _axis)
 }
 
 Reorder::Reorder(
-    const TensorView* _out,
-    const TensorView* _in,
+    const TensorDomain* _out,
+    const TensorDomain* _in,
     std::vector<int> _pos2axis)
     : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{_pos2axis} {
   addOutput(_out);
@@ -84,7 +84,8 @@ Reorder::Reorder(
 const TensorView* split(const TensorView* tv, int axis, int factor) {
   
   const TensorDomain* td = tv->domain();
-  assert(axis > 0 && axis < td->size());
+  if(axis<0) axis+=tv->domain()->size();
+  assert(axis >= 0 && axis < td->size());
   const IterDomain* id = td->axis(axis);
 
   if (id->parallel_method() != ParallelType::Serial)
@@ -114,8 +115,9 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
       new_domain.push_back(idi);
     }
   }
-  const TensorView* split_view = new TensorView(tv->tensor(), new TensorDomain(new_domain));
-  const Split* split_node = new Split(split_view, tv, axis, fact); //For record keeping
+  const TensorDomain* split_td = new TensorDomain(new_domain);
+  const TensorView* split_view = new TensorView(tv->tensor(), split_td);
+  const Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
   return split_view;
 }
 
@@ -141,9 +143,10 @@ const TensorView* merge(const TensorView* tv, int axis) {
       new_domain.push_back(merged_id);
     }
   }
-  const TensorView* new_tv = new TensorView(tv->tensor(), new TensorDomain(new_domain));
-  const Merge* merge_node = new Merge(new_tv, tv, axis); //For record keeping
-  return new_tv;
+  const TensorDomain* merged_td = new TensorDomain(new_domain);
+  const TensorView* merged_tv = new TensorView(tv->tensor(), merged_td);
+  const Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
+  return merged_tv;
 }
 
 /*
@@ -152,18 +155,20 @@ const TensorView* merge(const TensorView* tv, int axis) {
  * instances of tensor with the tensorview created here?
  */
 const TensorView* split(const Tensor* tensor, int axis, int factor) {
-  return split(new TensorView(tensor, tensor->domain()), axis, factor);
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling split.");
+  //return split(new TensorView(tensor, tensor->domain()), axis, factor);
 }
 
 const TensorView* merge(const Tensor* tensor, int axis) {
-  
-  return merge(new TensorView(tensor, tensor->domain()), axis);
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling merge.");
+  //return merge(new TensorView(tensor, tensor->domain()), axis);
 }
 
 const TensorView* reorder(
     const Tensor* tensor,
     std::unordered_map<int, int> axis2pos) {
-  return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling reorder.");
+  //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
 }
 
 /*
@@ -176,7 +181,8 @@ const TensorView* reorder(
 const TensorView* reorder(
     const TensorView* tv,
     std::unordered_map<int, int> axis2pos) {
-  auto ndims = tv->domain()->size();
+  const TensorDomain* td = tv->domain();
+  auto ndims = td->size();
   // Map to save from previous order, to new order.
   std::vector<int> pos2axis(ndims, -1);
 
@@ -230,14 +236,54 @@ const TensorView* reorder(
       pos2axis[i] = *it++;
   }
 
-  std::vector<const IterDomain*> domain;
+  std::vector<const IterDomain*> reordered_domain;
 
   for (int i = 0; i < pos2axis.size(); i++) {
-    domain.push_back(tv->domain()->axis(pos2axis[i]));
+    reordered_domain.push_back(td->axis(pos2axis[i]));
   }
-  const TensorView* reordered_view = new TensorView(tv->tensor(), new TensorDomain(domain));
-  const Reorder* merge_node = new Reorder(reordered_view, tv, pos2axis);
+  const TensorDomain* reordered_td = new TensorDomain(reordered_domain);
+  const TensorView* reordered_view = new TensorView(tv->tensor(), reordered_td);
+  const Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
   return reordered_view;
+}
+
+
+void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
+  /*
+   * TODO:
+   * Recursive compute_at:
+   * Recurse backward from consumer, to producer, make sure there's a dependency chain there.
+   * After recursing, recurse again, and call ComputeAt for all tensors between producer and consumer.
+   * 
+   * Assert direct consumer/producer relationship.
+   * Compute at modifies the consumer, not the producer.
+   */
+
+  const Fusion* fusion = FusionGuard::getCurFusion();
+  const Expr* expr = fusion->origin(producer);
+  bool direct_relationship = false;
+  for(const Val* out : expr->outputs())
+    if(out->same_as(consumer))
+      direct_relationship = true;
+  
+  if(!direct_relationship)
+    throw std::runtime_error("Compute at is currently only supported on direct producer/consumer relationships.");
+
+  using size_type = decltype(consumer->domain()->size());
+
+  bool matching_dims = true;
+  if(consumer->domain()->size() != producer->domain()->size()){
+    size_type producer_iter_dims = 0;
+    for(size_type i = 0; i < producer->domain()->size(); i++)
+      if(!producer->domain()->axis(i)->isReduction())
+        producer_iter_dims++;
+    if(producer_iter_dims != consumer->domain()->size())
+      matching_dims = false;      
+  }
+
+  /*
+   * Need replay function producer/consumer.
+   */
 }
 
 } // namespace fuser
