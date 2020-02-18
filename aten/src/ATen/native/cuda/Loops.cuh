@@ -87,8 +87,6 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
   if (fast_loop) {
     modern::launch_kernel(numel, f, data);
   } else {
-    auto inner_strides = iter.get_inner_strides();
-
     at::detail::Array<ScalarType, ntensors> dtypes;
     for (int i = 0; i < ntensors; i++) {
       dtypes[i] = iter.tensor(i).scalar_type();
