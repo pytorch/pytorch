@@ -1874,7 +1874,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
 
 def _verify_batch_size(size):
-    # type: (List[int]) -> None    
+    # type: (List[int]) -> None
     # XXX: JIT script does not support the reduce from functools, and mul op is a
     # builtin, which cannot be used as a value to a func yet, so rewrite this size
     # check to a simple equivalent for loop
@@ -1955,7 +1955,9 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 group_norm, (input,), input, num_groups, weight=weight, bias=bias, eps=eps)
-    _verify_batch_size(input.size())
+    _verify_batch_size([
+        input.size(0) * input.size(1) // num_groups, num_groups]
+        + list(input.size()[2:]))
     return torch.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 

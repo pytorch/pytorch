@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/script/error_report.h>
 
 #include <algorithm>
 #include <iostream>
@@ -853,10 +854,54 @@ Value* Node::namedInput(Symbol name) const {
   return input(findArgument(schema(), name));
 }
 
+bool Node::matches(const FunctionSchema& schema) const {
+  // wrong name
+  if (kind().toQualString() != schema.name()) {
+    return false;
+  }
+  at::ArrayRef<const Value*> actuals = inputs();
+  const auto& formals = schema.arguments();
+
+  // not enough inputs
+  if (actuals.size() < formals.size()) {
+    return false;
+  }
+
+  TypeEnv type_env;
+  for (size_t i = 0; i < formals.size(); ++i) {
+    auto formal = formals[i].type();
+    const MatchTypeReturn matched_type = matchTypeVariables(
+        formal, actuals[i]->type(), type_env);
+    if (!matched_type.success()) {
+      return false;
+    }
+
+    TypePtr resolved = tryEvalTypeVariables(formal, type_env);
+    if (resolved) {
+      formal = resolved;
+    }
+    // note: it is possible at this point that type variable matching has
+    // not resolved all type variables, e.g. if None was matched to Optional[T]
+    // we will not succeed at matching T. However None <: Optional[T] so this
+    // check can still succeed.
+
+    if (!actuals[i]->type()->isSubtypeOf(formal)) {
+      return false;
+    }
+  }
+
+  // too many inputs
+  if (!schema.is_vararg() && actuals.size() != formals.size()) {
+    return false;
+  }
+
+  return true;
+}
+
 bool Node::matches(
     const char* signature_literal,
     at::ArrayRef<Symbol> const_inputs) const {
-  if (!sig(signature_literal).matches(this)) {
+  if (!matches(getOperatorForLiteral(signature_literal)->schema())) {
     return false;
   }
   for (Symbol s : const_inputs) {
@@ -887,7 +932,7 @@ const FunctionSchema& Node::schema() const {
   if (op_) {
     return op_->schema();
   }
-  return getOperatorFor(this).schema();
+  return getOperator().schema();
 }
 
 const FunctionSchema* Node::maybeSchema() const {
@@ -897,20 +942,52 @@ const FunctionSchema* Node::maybeSchema() const {
   return nullptr;
 }
 
-const Operator& Node::getOperator() const {
-  if (!op_) {
-    op_ = &getOperatorFor(this);
-  }
-  return *op_;
-}
-
 const Operator* Node::maybeOperator() const {
   if (!op_) {
-    if (auto op = findOperatorFor(this)) {
-      op_ = op.get();
+    const auto& candidates = getAllOperatorsFor(kind());
+    for (const auto& candidate : candidates) {
+      if (matches(candidate->schema())) {
+        op_ = candidate.get();
+        break;
+      }
     }
   }
   return op_;
+}
+
+const Operator& Node::getOperator() const {
+  const Operator* maybe = maybeOperator();
+  if (maybe)
+    return *maybe;
+
+  auto er = script::ErrorReport(sourceRange());
+  er << "Schema not found for node. File a bug report.\n";
+  er << "Node: " << *this << "\n";
+  er << "Input types:";
+  for (size_t i = 0; i < inputs().size(); ++i) {
+    if (i > 0)
+      er << ", ";
+    er << *inputs()[i]->type();
+  }
+  const auto& candidates = getAllOperatorsFor(kind());
+  if (candidates.size() > 0) {
+    er << "\ncandidates were:\n";
+    for (auto& candidate : candidates) {
+      er << "  " << candidate->schema() << "\n";
+    }
+  } else {
+    er << "\nno candidates found\n";
+  }
+  er << "within the graph:\n";
+  er << *owningGraph() << "\n";
+  throw er;
+}
+
+Operation Node::getOperation() const {
+  // note: some operators require the node to produce a runnable operation, which
+  // is why 'this' is passed here. getOperator() ensures that 'this' matches the schema
+  // of the returned operator.
+  return getOperator().getOperation(this);
 }
 
 bool Node::isNondeterministic() const {
@@ -941,7 +1018,7 @@ bool Node::isNondeterministic() const {
       "aten::randn_like(Tensor self, *, int dtype, int layout, Device device, bool pin_memory, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor"};
 
-  if (nondeterministic_ops.find(this) == nullptr) {
+  if (!isMemberOf(nondeterministic_ops)) {
     return false;
   }
   // Dropout with train = False is deterministic
@@ -1556,12 +1633,6 @@ Node* Graph::createNumToTensor(Value* value) {
   return result;
 }
 
-Node* Graph::createImplicitTensorToNum(const TypePtr& type, Value* value) {
-  auto* result = create(prim::ImplicitTensorToNum, {value});
-  result->output()->setType(type);
-  return result;
-}
-
 Node* Graph::createObject(const ClassTypePtr& type) {
   auto result = create(prim::CreateObject);
   result->output()->setType(type);
@@ -1850,5 +1921,29 @@ TypePtr NamedValue::type() const {
 }
 
 constexpr Symbol ProfileOp::Kind;
+
+
+OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
+  for (const char* sig : sig_literals) {
+    auto op = getOperatorForLiteral(sig);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
+  }
+}
+
+
+bool Node::isMemberOf(const OperatorSet& os) const {
+  auto it = os.ops.find(kind());
+  if (it == os.ops.end()) {
+    return false;
+  }
+  for (auto& op : it->second) {
+    if (matches(op->schema())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 } // namespace jit
 } // namespace torch
