@@ -17,7 +17,7 @@ class Function{
   bool run(Stack& stack) const;
   const std::string& name() const;
   const c10::QualifiedName& qualname() const;
-  void append_instruction(OpCode op, int X, int N, int flags);
+  void append_instruction(OpCode op, int X, int N);
   void append_operator(const std::string& name,
                        const std::string& overload_name);
   void append_constant(const c10::IValue& constant);

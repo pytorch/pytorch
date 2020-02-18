@@ -177,7 +177,7 @@ class ScriptModuleSerializer {
       // instructions
       std::vector<IValue> instructions;
       for (Instruction ins : code.instructions()) {
-        instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N, ins.flags}));
+        instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
       }
 
       // operators

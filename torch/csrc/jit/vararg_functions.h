@@ -28,9 +28,7 @@ void createObject(Stack& stack, at::ClassTypePtr type);
 
 void isinstance(
     Stack& stack,
-    at::ArrayRef<at::TypePtr> types,
-    bool is_list,
-    bool is_tuple);
+    at::ArrayRef<at::TypePtr> types);
 
 void tupleSlice(Stack& stack, size_t begin, size_t end);
 

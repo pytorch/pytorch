@@ -342,8 +342,6 @@ struct BailoutBlock {
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
 
-enum { IS_LIST_FLAG = 0x1, IS_TUPLE_FLAG = 0x2 };
-
 struct CodeImpl {
   friend struct InterpreterState;
   std::vector<Instruction> instructions_;
@@ -443,8 +441,8 @@ struct CodeImpl {
     return instructions_source_;
   }
 
-  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0, uint8_t flags = 0) {
-    instructions_.emplace_back(op, X, N, flags);
+  void insertInstruction(OpCode op, int64_t X = 0, uint64_t N = 0) {
+    instructions_.emplace_back(op, X, N);
     instructions_source_.emplace_back(current_node_);
 
     // check that we didn't accidentally emit nodes out of topological order
@@ -732,21 +730,11 @@ struct CodeImpl {
   void emitIsinstance(Node* node) {
     emitLoadInputs(node->inputs());
     std::vector<TypePtr> types = node->tys(attr::types);
-    uint8_t flags = 0;
-    for (const std::string& kind : node->ss(attr::kinds)) {
-      if (kind == "list") {
-        flags |= IS_LIST_FLAG;
-      } else if (kind == "tuple") {
-        flags |= IS_TUPLE_FLAG;
-      } else {
-        TORCH_INTERNAL_ASSERT(false, "unrecognized type kind ", kind);
-      }
-    }
     size_t types_start = type_table_.size();
     for (const auto& typ : types) {
       emitType(typ);
     }
-    insertInstruction(ISINSTANCE, types_start, types.size(), flags);
+    insertInstruction(ISINSTANCE, types_start, types.size());
   }
 
   void emitTupleSlice(Node* node) {
@@ -1247,15 +1235,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case ISINSTANCE: {
-            bool is_list = inst.flags & IS_LIST_FLAG;
-            bool is_tuple = inst.flags & IS_TUPLE_FLAG;
             at::ArrayRef<TypePtr> types(
-                    af.types + inst.X, af.types + inst.X + inst.N);
-            isinstance(
-                stack,
-                types,
-                is_list,
-                is_tuple);
+                af.types + inst.X, af.types + inst.X + inst.N);
+            isinstance(stack, types);
             ++af.pc;
           } break;
           case FORK: {

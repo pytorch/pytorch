@@ -49,9 +49,6 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   if (nargs > 1) {
     out << " " << inst.N;
   }
-  if (nargs > 2) {
-    out << " " << inst.flags;
-  }
   return out;
 }
 

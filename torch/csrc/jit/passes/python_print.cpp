@@ -1026,11 +1026,8 @@ struct PythonPrintImpl {
       case prim::isinstance: {
         stmt << "isinstance(" << useOf(node->input()) << ", ";
         const auto& types = node->tys(attr::types);
-        const auto& kinds = node->ss(attr::kinds);
-        if (types.size() == 1 && kinds.size() == 0) {
+        if (types.size() == 1) {
           stmt << types.at(0)->python_str();
-        } else if (kinds.size() == 1 && types.size() == 0) {
-          stmt << kinds.at(0);
         } else {
           // check multiple things, e.g. (str, list, int)
           stmt << "(";
@@ -1040,13 +1037,6 @@ struct PythonPrintImpl {
               stmt << ", ";
             }
             stmt << typ->python_str();
-            first = false;
-          }
-          for (const std::string& kind : kinds) {
-            if (!first) {
-              stmt << ", ";
-            }
-            stmt << kind;
             first = false;
           }
           stmt << ")";

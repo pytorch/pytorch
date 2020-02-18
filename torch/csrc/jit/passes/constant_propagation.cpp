@@ -52,18 +52,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
       createObject(stack, n->output()->type()->expect<ClassType>());
     } break;
     case prim::isinstance: {
-      bool is_list = false;
-      bool is_tuple = false;
-      for (const std::string& kind : n->ss(attr::kinds)) {
-        if (kind == "list") {
-          is_list = true;
-        } else if (kind == "tuple") {
-          is_tuple = true;
-        } else {
-          TORCH_INTERNAL_ASSERT(false, "unrecognized type kind ", kind);
-        }
-      }
-      isinstance(stack, n->tys(attr::types), is_list, is_tuple);
+      isinstance(stack, n->tys(attr::types));
     } break;
     default: {
       auto op = n->getOperation();
