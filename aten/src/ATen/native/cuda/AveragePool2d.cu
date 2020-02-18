@@ -417,6 +417,7 @@ Tensor& avg_pool2d_out_cuda(
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
 {
+  bool has_channels_last = input.is_contiguous(MemoryFormat::ChannelsLast);
   avg_pool2d_out_cuda_template(
    output,
    input,
@@ -426,6 +427,9 @@ Tensor& avg_pool2d_out_cuda(
    ceil_mode,
    count_include_pad,
    divisor_override);
+  if (output.dim() == 4 && has_channels_last) {
+    output = output.contiguous(MemoryFormat::ChannelsLast);
+  }
   return output;
 }
 
@@ -437,7 +441,7 @@ Tensor avg_pool2d_cuda(
   bool ceil_mode,
   bool count_include_pad,
   c10::optional<int64_t> divisor_override)
-{
+{bool has_channels_last = input.is_contiguous(MemoryFormat::ChannelsLast);
   Tensor output = at::empty({0}, input.options());
   avg_pool2d_out_cuda_template(
     output,
@@ -448,6 +452,9 @@ Tensor avg_pool2d_cuda(
     ceil_mode,
     count_include_pad,
     divisor_override);
+  if (output.dim() == 4 && has_channels_last) {
+    output = output.contiguous(MemoryFormat::ChannelsLast);
+  }    
   return output;
 }
 
