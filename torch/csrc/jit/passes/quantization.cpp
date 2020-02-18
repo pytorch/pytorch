@@ -371,7 +371,7 @@ class InsertObserversHelper {
 
   void insertObservers(script::Module& module, const std::string& method_name);
 
-  void insertObserversForBoundaryVals(script::Module& module,
+  void insertObserversForBoundaryValues(script::Module& module,
                                       const std::string& method_name);
 
   void clearGraphObserverMap() {
@@ -390,7 +390,9 @@ class InsertObserversHelper {
       script::Module& module,
       const script::Module& observer_module);
 
-  void insertObserverForBoundaryVal(
+  c10::optional<script::Module> getObserverForBoundaryValue(Value* v, std::unordered_set<Value*>& observed);
+
+  void insertObserverForBoundaryValue(
       Value* v, script::Module module);
 
   void skipValuesInFirstModule(
@@ -436,7 +438,8 @@ class InsertObserversHelper {
   std::unordered_set<Value*> values_to_skip_;
   std::unordered_map<Value*, script::Module> observer_for_boundary_value_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, Value*> boundary_value_map_;
+  std::unordered_map<Value*, std::vector<Value*>> boundary_value_map_;
+  std::unordered_set<Value*> observed_values_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -893,12 +896,15 @@ void InsertObserversHelper::preprocess(
         // add mapping from callsite value to value in called graph
         for (auto i = 0; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
-          boundary_value_map_[n->outputs()[i]] = return_val;
+          boundary_value_map_[n->outputs()[i]].push_back(return_val);
         }
         for (auto i = 0; i < g->inputs().size(); ++i) {
           auto* input_val = g->inputs()[i];
-          boundary_value_map_[n->inputs()[i]] = input_val;
+          boundary_value_map_[n->inputs()[i]].push_back(input_val);
         }
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
       }
     }
   }
@@ -1010,24 +1016,52 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
-void InsertObserversHelper::insertObserverForBoundaryVal(
-    Value* v, script::Module module) {
-  Value* it = v;
-  while (true) {
-    if (observer_for_boundary_value_.count(it)) {
-      insertObserverFor(v, module, observer_for_boundary_value_.at(it));
-      observer_for_boundary_value_.erase(it);
-      break;
+c10::optional<script::Module>
+InsertObserversHelper::getObserverForBoundaryValue(
+    Value* v, std::unordered_set<Value*>& observed) {
+  if (observer_for_boundary_value_.count(v)) {
+    auto observer = observer_for_boundary_value_.at(v);
+    observed.insert(v);
+    return observer;
+  }
+  c10::optional<script::Module> result;
+  if (boundary_value_map_.count(v)) {
+    for (Value* next : boundary_value_map_.at(v)) {
+      auto observer_opt = getObserverForBoundaryValue(next, observed);
+      if (observer_opt) {
+        observed.insert(v);
+        // Need to make sure all boundary values are
+        // configured with same observer
+        if (result) {
+          TORCH_CHECK(
+              *observer_opt == *result,
+              "Expecting all values in the graph only configured with one observer");
+        } else {
+          result = observer_opt;
+        }
+      }
     }
-    if (boundary_value_map_.count(it)) {
-      it = boundary_value_map_.at(it);
-    } else {
-      break;
+  }
+  return result;
+}
+
+void InsertObserversHelper::insertObserverForBoundaryValue(
+    Value* v, script::Module module) {
+  if (observed_values_.count(v)) {
+    return;
+  }
+  std::unordered_set<Value*> observed;
+  auto observer_opt = getObserverForBoundaryValue(v, observed);
+  if (observer_opt) {
+    GRAPH_DEBUG("Inserting observer for ", v->debugName());
+    insertObserverFor(v, module, *observer_opt);
+    for (auto* o : observed) {
+      observed_values_.insert(o);
     }
   }
 }
 
-void InsertObserversHelper::insertObserversForBoundaryVals(
+void InsertObserversHelper::insertObserversForBoundaryValues(
     script::Module& module,
     const std::string& method_name) {
 
@@ -1041,9 +1075,10 @@ void InsertObserversHelper::insertObserversForBoundaryVals(
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
     }
   }
+  GRAPH_DUMP("inserting boundary val for:", graph);
 
   for (auto* v : graph->inputs()) {
-    insertObserverForBoundaryVal(v, module);
+    insertObserverForBoundaryValue(v, module);
   }
 
   // parent graph need to be visited before child graphs since we
@@ -1056,7 +1091,7 @@ void InsertObserversHelper::insertObserversForBoundaryVals(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        insertObserverForBoundaryVal(v, module);
+        insertObserverForBoundaryValue(v, module);
       }
       for (Block* subblock : n->blocks()) {
         blocks_to_visit.push(subblock);
@@ -1067,7 +1102,7 @@ void InsertObserversHelper::insertObserversForBoundaryVals(
   for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
-    insertObserversForBoundaryVals(invoked_module, invoked_method_name);
+    insertObserversForBoundaryValues(invoked_module, invoked_method_name);
   }
 }
 
@@ -1942,9 +1977,8 @@ TORCH_API script::Module InsertObservers(
   InsertObserversHelper helper(module_qconfig_map);
   helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name);
-  GRAPH_DEBUG("after inserting observers");
   helper.clearGraphObserverMap();
-  helper.insertObserversForBoundaryVals(module, method_name);
+  helper.insertObserversForBoundaryValues(module, method_name);
   GRAPH_DEBUG("after inserting observers for boundary vals");
   return module;
 }
