@@ -90,6 +90,12 @@
   manual_kernel_registration: True
   variants: method
 
+# Enables .grad attribute for non-leaf Tensors.
+- func: retain_grad(Tensor(a!) self) -> ()
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
+  variants: method
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
@@ -3808,8 +3814,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_tensor_
+    CUDA: set_tensor_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
