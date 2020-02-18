@@ -92,32 +92,16 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
     torch::utils::options_to_string(options).c_str());
 }
 
-static inline void extractTensorsFromSlice(
-  PyObject* obj,
-  Tensor* start_tensor_ptr,
-  Tensor* stop_tensor_ptr,
-  Tensor* step_tensor_ptr) {
+static inline void recordSliceTrace(PyObject* obj) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
-    (*start_tensor_ptr) = THPVariable_Unpack(sliceobj->start);
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, THPVariable_Unpack(sliceobj->start), torch::jit::IntType::get());
   }
   if (THPVariable_Check(sliceobj->stop)) {
-    (*stop_tensor_ptr) = THPVariable_Unpack(sliceobj->stop);
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, THPVariable_Unpack(sliceobj->stop), torch::jit::IntType::get());
   }
   if (THPVariable_Check(sliceobj->step)) {
-    (*step_tensor_ptr) = THPVariable_Unpack(sliceobj->step);
-  }
-}
-
-static inline void recordSliceTrace(const Tensor& start_tensor, const Tensor& stop_tensor, const Tensor& step_tensor) {
-  if (start_tensor.defined()) {
-    torch::jit::tracer::ArgumentStash::stashValue(std::string("start"), 1, start_tensor, torch::jit::IntType::get());
-  }
-  if (stop_tensor.defined()) {
-    torch::jit::tracer::ArgumentStash::stashValue(std::string("end"), 1, stop_tensor, torch::jit::IntType::get());
-  }
-  if (step_tensor.defined()) {
-    torch::jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, step_tensor, torch::jit::IntType::get());
+    torch::jit::tracer::ArgumentStash::stashValue(std::string("step"), 1, THPVariable_Unpack(sliceobj->step), torch::jit::IntType::get());
   }
 }
 
@@ -156,9 +140,7 @@ static inline Variable applySlicing(
           throw python_error();
         }
         if (is_tracing) {
-          Tensor start_tensor, stop_tensor, step_tensor;
-          extractTensorsFromSlice(obj, &start_tensor, &stop_tensor, &step_tensor);
-          recordSliceTrace(start_tensor, stop_tensor, step_tensor);
+          recordSliceTrace(obj);
         }
         return at::indexing::TensorIndex({start, stop, step});
       } else if (obj == Py_Ellipsis) {
@@ -287,9 +269,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       throw python_error();
     }
     if (is_tracing) {
-      Tensor start_tensor, stop_tensor, step_tensor;
-      extractTensorsFromSlice(index, &start_tensor, &stop_tensor, &step_tensor);
-      recordSliceTrace(start_tensor, stop_tensor, step_tensor);
+      recordSliceTrace(index);
     }
     return THPVariable_Wrap(at::indexing::applySlice(
       self_,
@@ -381,9 +361,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
       throw python_error();
     }
     if (is_tracing) {
-      Tensor start_tensor, stop_tensor, step_tensor;
-      extractTensorsFromSlice(index, &start_tensor, &stop_tensor, &step_tensor);
-      recordSliceTrace(start_tensor, stop_tensor, step_tensor);
+      recordSliceTrace(index);
     }
     handle_simple_type(at::indexing::TensorIndex({start, stop, step}));
     return 0;
