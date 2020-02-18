@@ -101,26 +101,6 @@ COMMON_NVCC_FLAGS = [
     '--expt-relaxed-constexpr'
 ]
 
-# See comment in load_inline for more information
-# The goal is to be able to call the safe version of the
-# function exactly as if it was the original one.
-# We need to create a pointer to this new function to give
-# it to pybind later.
-
-SAFE_FUNCTION_DEFINITION = '''
-#include <functional>
-
-template <typename Ret, typename ...Args>
-auto _get_safe_version(Ret (*f)(Args...)) -> std::function<Ret(Args...)> {{
-    return [f](Args&& ...args) -> Ret {{
-        HANDLE_TH_ERRORS
-        return f(std::forward<Args>(args)...);
-        END_HANDLE_TH_ERRORS_PYBIND
-    }};
-}}
-
-'''
-
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 
@@ -945,11 +925,6 @@ def load_inline(name,
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
 
-    # Adds a new `_get_safe_version(foo)` function that returns a new function
-    # that performs the same operation as `foo` but with pytorch error handling
-    # macros.
-    cpp_sources.append(SAFE_FUNCTION_DEFINITION)
-
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
     # function names to function docstrings.
@@ -967,8 +942,9 @@ def load_inline(name,
                     type(functions)))
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append('m.def("{0}", _get_safe_version({0}), "{1}");'.format(
-                    function_name, docstring))
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
             else:
                 module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
