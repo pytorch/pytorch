@@ -1027,6 +1027,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
+        self.run_test(torch.jit.script(RandLike()), x)
 
     def test_random_like_dtype(self):
         class RandNLike(torch.nn.Module):
