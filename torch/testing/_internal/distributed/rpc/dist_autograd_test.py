@@ -1900,7 +1900,7 @@ class DistAutogradTest(RpcAgentTestFixture):
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
                 ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
-                MyFunc.static_grad_ptr = ngrad._values().data_ptr()
+                NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
                 return ngrad, ngrad
 
         a = torch.randn(10, 3, requires_grad=True)
@@ -1933,7 +1933,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
             dist_autograd.backward([loss], retain_graph=True)
             grads = dist_autograd.get_gradients(context_id)
-            p_g = MyFunc.static_grad_ptr
+            p_g = NonContGradFunc.static_grad_ptr
             p_a = grads[a]._values().data_ptr()
             p_b = grads[b]._values().data_ptr()
             # check a,b uses different grad buffer
