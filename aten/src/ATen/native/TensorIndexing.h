@@ -439,7 +439,7 @@ static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::ve
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
-      converted_inds[i] = std::move(ind.to(ind.options().device(self.device())));
+      converted_inds[i] = ind.to(ind.options().device(self.device()));
     } else {
       converted_inds[i] = std::move(indices[i]);
     }
