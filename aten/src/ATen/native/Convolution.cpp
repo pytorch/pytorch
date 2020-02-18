@@ -10,7 +10,7 @@
 #include "nnpack.h"
 #endif
 
-static const int MIOPEN_DIM_MAX = 4;
+constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
