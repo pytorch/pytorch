@@ -206,18 +206,11 @@ Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor 
   at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
-Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor && rhs) {
-  at::indexing::set_item(*this, indices, rhs);
-  return *this;
-}
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
   at::indexing::set_item(*this, indices, v);
   return *this;
 }
 Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs) {
-  return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), rhs);
-}
-Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor && rhs) {
   return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), rhs);
 }
 Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v) {

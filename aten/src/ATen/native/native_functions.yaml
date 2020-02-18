@@ -1443,10 +1443,8 @@
   variants: function, method
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/native/TensorIndexing.cpp:
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor const & rhs)
-  # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Tensor && rhs)
   # - Tensor & Tensor::index_put_(ArrayRef<TensorIndex> indices, Scalar v)
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Tensor const & rhs)
-  # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Tensor && rhs)
   # - Tensor & Tensor::index_put_(std::initializer_list<TensorIndex> indices, Scalar v)
 
 - func: index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
