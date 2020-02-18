@@ -197,8 +197,7 @@ class CrossMapLRN2d(Function):
                 paddded_ratio.narrow(0, 0, ctx.size - 1), 0, keepdim=False, out=accum_ratio)
             for c in range(channels):
                 accum_ratio.add_(paddded_ratio[c + ctx.size - 1])
-                grad_input[n][c].addcmul_(-cache_ratio_value, input[n][c],
-                                          accum_ratio)
+                grad_input[n][c].addcmul_(input[n][c], accum_ratio, value=-cache_ratio_value)
                 accum_ratio.add_(paddded_ratio[c], alpha=-1)
 
         return grad_input, None, None, None, None

@@ -89,12 +89,12 @@ class RMSprop(Optimizer):
                 if group['weight_decay'] != 0:
                     grad = grad.add(p.data, alpha=group['weight_decay'])
 
-                square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
+                square_avg.mul_(alpha).addcmul_(grad, grad, value=1 - alpha)
 
                 if group['centered']:
                     grad_avg = state['grad_avg']
                     grad_avg.mul_(alpha).add_(grad, alpha=1 - alpha)
-                    avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt_().add_(group['eps'])
+                    avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_().add_(group['eps'])
                 else:
                     avg = square_avg.sqrt().add_(group['eps'])
 

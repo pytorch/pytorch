@@ -93,7 +93,7 @@ class Adagrad(Optimizer):
                     std_values = std._values().sqrt_().add_(group['eps'])
                     p.data.add_(make_sparse(grad_values / std_values), alpha=-clr)
                 else:
-                    state['sum'].addcmul_(1, grad, grad)
+                    state['sum'].addcmul_(grad, grad, value=1)
                     std = state['sum'].sqrt().add_(group['eps'])
                     p.data.addcdiv_(-clr, grad, std)
 

@@ -71,7 +71,7 @@ class Rprop(Optimizer):
                 grad[sign.eq(etaminus)] = 0
 
                 # update parameters
-                p.data.addcmul_(-1, grad.sign(), step_size)
+                p.data.addcmul_(grad.sign(), step_size, value=-1)
 
                 state['prev'].copy_(grad)
 
