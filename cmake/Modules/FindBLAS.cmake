@@ -20,7 +20,7 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-SET(WITH_BLAS "" CACHE STRING "Blas type [mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
+SET(WITH_BLAS "" CACHE STRING "Blas type [blis/mkl/open/goto/acml/atlas/accelerate/veclib/generic]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)
@@ -103,6 +103,20 @@ if((NOT BLAS_LIBRARIES)
     SET(BLAS_INCLUDE_DIR ${MKL_INCLUDE_DIR})
     SET(BLAS_VERSION ${MKL_VERSION})
   ENDIF(MKL_FOUND)
+endif()
+
+#BLIS?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "blis")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "blis")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "blis")
+  endif(BLAS_LIBRARIES)
 endif()
 
 # Apple BLAS library?

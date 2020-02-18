@@ -44,6 +44,10 @@ THC_API void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char t
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                                      THHalf alpha, const THHalf *a, int64_t lda, int64_t strideA, const THHalf *b, int64_t ldb, int64_t strideB,
                                                                   THHalf beta, THHalf *c, int64_t ldc, int64_t strideC, int64_t batchCount);
+
+void THCudaBlas_BgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
+                                     at::BFloat16 alpha, const at::BFloat16 *a, int64_t lda, int64_t strideA, const at::BFloat16 *b, int64_t ldb, int64_t strideB,
+                                     at::BFloat16 beta, at::BFloat16 *c, int64_t ldc, int64_t strideC, int64_t batchCount);
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
