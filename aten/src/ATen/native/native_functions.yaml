@@ -276,6 +276,7 @@
   dispatch:
     CPU: add
     CUDA: add
+    FPGA: add
     SparseCPU: add_sparse
     SparseCUDA: add_sparse
     MkldnnCPU: mkldnn_add
@@ -286,6 +287,7 @@
   dispatch:
     CPU: add_
     CUDA: add_
+    FPGA: add_
     SparseCPU: add_sparse_
     SparseCUDA: add_sparse_
     MkldnnCPU: mkldnn_add_
@@ -295,6 +297,7 @@
   dispatch:
     CPU: add_out
     CUDA: add_out
+    FPGA: add_out
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
     MkldnnCPU: mkldnn_add_out
