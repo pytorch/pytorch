@@ -27,6 +27,8 @@ white_list = [
     ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
     ('prim::Load', datetime.date(2020, 3, 1)),
     ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
+    ('aten::is_owner', datetime.date(2020, 3, 1)),
+    ('aten::to_here', datetime.date(2020, 3, 1)),
     ('quantized::linear_unpack_fp16', datetime.date(2020, 3, 2)),
     ('quantized::linear_unpack', datetime.date(2020, 3, 2)),
     ('quantized::linear_prepack_fp16', datetime.date(2020, 3, 2)),
