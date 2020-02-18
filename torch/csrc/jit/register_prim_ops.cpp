@@ -755,42 +755,38 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         prim::Print,
-         [](const Node* node) -> Operation {
-           size_t num_inputs = node->inputs().size();
-           return [num_inputs](Stack& stack) {
-             std::stringstream ss;
-             bool first = true;
-             for (const IValue& i : last(stack, num_inputs)) {
-               if (!first)
-                 ss << " ";
-               first = false;
-               ss << i;
-             }
-             drop(stack, num_inputs);
-             ss << std::endl;
-             auto* handler = getPrintHandler();
-             TORCH_INTERNAL_ASSERT(handler);
-             handler(ss.str());
-             return 0;
-           };
+         "prim::Print(...) -> ()",
+         [](Stack& stack) {
+          auto num_inputs = pop(stack).toInt();
+          std::stringstream ss;
+          bool first = true;
+          for (const IValue& i : last(stack, num_inputs)) {
+            if (!first)
+              ss << " ";
+            first = false;
+            ss << i;
+          }
+          drop(stack, num_inputs);
+          ss << std::endl;
+          auto* handler = getPrintHandler();
+          TORCH_INTERNAL_ASSERT(handler);
+          handler(ss.str());
+          return 0;
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::BroadcastSizes,
-         [](const Node* node) -> Operation {
-           size_t num_inputs = node->inputs().size();
-           return [num_inputs](Stack& stack) {
+         "prim::BroadcastSizes(...) -> int[]",
+          [](Stack& stack) {
+             auto num_inputs = pop(stack).toInt();
              std::vector<int64_t> size;
              size.reserve(8);
-             for (size_t i = 0; i < num_inputs; ++i) {
+             for (auto i = 0; i < num_inputs; ++i) {
                size = at::infer_size(
                    size, peek(stack, i, num_inputs).toIntVector());
              }
              drop(stack, num_inputs);
              push(stack, IValue(std::move(size)));
              return 0;
-           };
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -824,12 +820,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         FunctionSchema(
-             "aten::warn",
-             "",
-             {Argument("message", StringType::get()),
-              Argument("stacklevel", IntType::get(), c10::nullopt, 2, true)},
-             {}),
+         "aten::warn(str message, int stacklevel=2) -> ()",
          [](const Node* node) -> Operation {
            auto range = node->sourceRange().source();
            if (range->filename()) {
@@ -873,7 +864,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
 
      Operator(
-         c10::onnx::Reshape,
+         "onnx::Reshape(Tensor input, Tensor shape) -> Tensor",
          [](Stack& stack) {
            at::Tensor input, shape;
            pop(stack, input, shape);
@@ -885,7 +876,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         c10::onnx::Shape,
+         "onnx::Shape(Tensor t) -> Tensor",
          [](Stack& stack) {
            auto t = pop(stack).toTensor();
            at::IntArrayRef sizes = t.sizes();
@@ -901,9 +892,8 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "prim::AutogradAnyNonZero(...) -> bool",
-         [](const Node* node) -> Operation {
-           size_t num_inputs = node->inputs().size();
-           return [num_inputs](Stack& stack) {
+           [](Stack& stack) {
+             auto num_inputs = pop(stack).toInt();
              bool result = false;
              for (const IValue& v : last(stack, num_inputs)) {
                if (v.isTensor()) {
@@ -927,11 +917,10 @@ RegisterOperators reg(
              drop(stack, num_inputs);
              stack.emplace_back(result);
              return 0;
-           };
          },
          aliasAnalysisFromSchema()),
      Operator(
-         prim::AutogradAdd,
+         "prim::AutogradAdd(Any a, Any b) -> Any",
          [](Stack& stack) {
            at::Tensor a, b;
            pop(stack, a, b);
@@ -1008,7 +997,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::TupleIndex,
+         // note the compiler knows to type TupleIndex more accurately than it is listed here.
+         "prim::TupleIndex(Any tup, int i) -> Any",
          [](Stack& stack) {
            int64_t index = pop(stack).toInt();
            auto tuple = pop(stack).toTuple();
@@ -1225,7 +1215,7 @@ RegisterOperators reg(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
-     Operator(prim::unchecked_cast, noop, aliasAnalysisSpecialCase()),
+     Operator("prim::unchecked_cast(t x) -> t", noop, aliasAnalysisSpecialCase()),
      Operator(
          prim::fork,
          [](const Node* node) -> Operation {
@@ -1258,7 +1248,7 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::Uninitialized,
+         "prim::Uninitialized() -> Any",
          [](Stack& stack) {
            push(stack, IValue::uninitialized());
            return 0;
