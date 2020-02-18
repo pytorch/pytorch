@@ -103,11 +103,26 @@ Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
-  // handle simple types: integers, slices, ellipsis
+  // handle simple types: integers, slices, none, ellipsis
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
-    if (!index.is_boolean() && !index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingGet(self, index, false, self_device, self_sizes);
+    if (index.is_integer()) {
+      return applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
+    } else if (index.is_slice()) {
+      return applySlice(
+        self,
+        0,
+        index.slice().start(),
+        index.slice().stop(),
+        index.slice().step(),
+        /*ensure_view=*/true,
+        /*is_tracing=*/false,
+        self_device,
+        self_sizes);
+    } else if (index.is_none()) {
+      return self.unsqueeze(0);
+    } else if (index.is_ellipsis()) {
+      return at::alias(self);
     }
   }
 

@@ -310,34 +310,6 @@ static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& 
   (*dim_ptr)++;
 };
 
-static inline Tensor handleSimpleTypesInSingleDimIndexingGet(
-    const Tensor& self,
-    const TensorIndex& index,
-    bool is_tracing,
-    const at::Device& self_device,
-    const IntArrayRef& self_sizes) {
-  if (index.is_integer()) {
-    return applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
-  } else if (index.is_slice()) {
-    return applySlice(
-      self,
-      0,
-      index.slice().start(),
-      index.slice().stop(),
-      index.slice().step(),
-      /*ensure_view=*/true,
-      /*is_tracing=*/is_tracing,
-      self_device,
-      self_sizes);
-  } else if (index.is_none()) {
-    return self.unsqueeze(0);
-  } else if (index.is_ellipsis()) {
-    return at::alias(self);
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
-  }
-}
-
 static inline void handleSimpleTypesInSingleDimIndexingSet(
     const Tensor& self,
     const TensorIndex& index,
