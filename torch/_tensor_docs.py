@@ -184,7 +184,7 @@ In-place version of :meth:`~Tensor.acos`
 
 add_docstr_all('add',
                r"""
-add(value) -> Tensor
+add(other) -> Tensor
 add(other, *, alpha=1) -> Tensor
 
 See :func:`torch.add`
@@ -192,7 +192,7 @@ See :func:`torch.add`
 
 add_docstr_all('add_',
                r"""
-add_(value) -> Tensor
+add_(other) -> Tensor
 add_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
