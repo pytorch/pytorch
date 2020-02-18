@@ -125,15 +125,6 @@ static inline void recordSelectTrace(const Tensor& index_tensor) {
   torch::jit::tracer::ArgumentStash::stashValue(std::string("index"), 1, index_tensor, torch::jit::IntType::get());
 }
 
-static inline PyObject* convertToPythonInt(PyObject* obj) {
-  auto idx = THPObjectPtr(PyNumber_Index(obj));
-  if (!idx) {
-    PyErr_Clear();
-    invalid_index(obj);
-  }
-  return idx;
-}
-
 static inline Variable applySlicing(
     const Variable& self,
     PyObject* index,
@@ -190,7 +181,11 @@ static inline Variable applySlicing(
         // (Fixing this means I have to fix the call chain though :/)
         return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
       } else {
-        auto idx = convertToPythonInt(obj);
+        auto idx = THPObjectPtr(PyNumber_Index(obj));
+        if (!idx) {
+          PyErr_Clear();
+          invalid_index(obj);
+        }
         if (is_tracing && THPVariable_Check(idx)) {
           recordSelectTrace(THPVariable_Unpack(idx));
         }
