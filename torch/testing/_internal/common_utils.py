@@ -1187,8 +1187,10 @@ def find_free_port():
     return sockname[1]
 
 
-def retry_on_connect_failures(func=None, connect_errors=["Address already in use"]):
-    """Reruns a test if it sees "Address already in use" error."""
+def retry_on_connect_failures(func=None, connect_errors=("Address already in use")):
+    """Reruns a test if the test returns a RuntimeError and the exception
+    matches exactly with one of the strings in connect_errors."""
+    # This if block is executed when using this function as a decorator with arguments.
     if func is None:
         return partial(retry_on_connect_failures, connect_errors=connect_errors)
 

@@ -507,7 +507,7 @@ class RendezvousTCPTest(TestCase):
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
 
-    @retry_on_connect_failures(connect_errors=["connect() timed out."])
+    @retry_on_connect_failures(connect_errors=("connect() timed out."))
     def test_tcp_store_timeout_set(self):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=10)
