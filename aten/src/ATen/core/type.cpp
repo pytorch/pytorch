@@ -744,19 +744,25 @@ static std::vector<bool> findContiguous(
 std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
     contiguityStrideIndices(at::IntArrayRef sizes, at::IntArrayRef strides) {
   auto contiguity_bool = findContiguous(sizes, strides);
-  std::unordered_map<size_t, size_t> strides2indices;
-  for (size_t i = 0; i < strides.size(); i++) {
-    strides2indices.insert({strides[i], i});
-  }
-  std::vector<int64_t> strides_vec(strides.begin(), strides.end());
-  std::sort(strides_vec.begin(), strides_vec.end());
 
-  std::vector<int64_t> stride_indices;
+  std::vector<int64_t> stride_indices(sizes.size());
+  std::iota(stride_indices.begin(), stride_indices.end(), 0);
+
+  std::sort(
+      stride_indices.begin(),
+      stride_indices.end(),
+      [&strides](const int& a, const int& b) {
+        // break ties in case of unsqueezed dims
+        // i.e. (1, 1, 5)
+        if (strides[a] == strides[b]) {
+          return a > b;
+        }
+        return strides[a] < strides[b];
+      });
+
   std::vector<int64_t> contiguity;
-  for (auto s : strides_vec) {
-    stride_indices.push_back(strides2indices.at(s));
-    contiguity.push_back(
-        static_cast<size_t>(contiguity_bool[strides2indices.at(s)]));
+  for (auto si : stride_indices) {
+    contiguity.push_back(static_cast<size_t>(contiguity_bool[si]));
   }
 
   return std::make_tuple(contiguity, stride_indices);
