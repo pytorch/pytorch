@@ -30,7 +30,7 @@ class KernelArena {
 class KernelScope {
  public:
   TORCH_API KernelScope();
-  TORCH_API KernelScope(KernelArena* arena_);
+  TORCH_API explicit KernelScope(KernelArena* arena_);
   TORCH_API ~KernelScope();
 
  private:
