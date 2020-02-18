@@ -1,11 +1,14 @@
-#include <stdexcept>
 #include "torch/csrc/jit/tensorexpr/mem_arena.h"
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+namespace {
+// Define in an anonymous namespace to hide this symbol from other compilation
+// units
 thread_local KernelArena* current_arena = nullptr;
+}
 
 KernelArena::~KernelArena() {
   for (KernelScopedObject* p : kernel_objects_) {
