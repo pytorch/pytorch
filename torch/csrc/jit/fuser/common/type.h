@@ -77,6 +77,9 @@ TORCH_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_API std::ostream& operator<<(std::ostream&, const ParallelType);
 
+TORCH_API c10::optional<std::string> inline_op_str(const UnaryOpType);
+TORCH_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -154,11 +154,19 @@ std::ostream& operator<<(std::ostream& os, const Int* const i) {
 }
 
 std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
-  return os << uop->out() << " = " << uop->type() << "(" << uop->in() << ")";
+  if(auto inline_uop = inline_op_str(uop->type())) {
+    return os << uop->out() << " = " << inline_uop.value() << uop->in();
+  } else {
+    return os << uop->out() << " = " << uop->type() << "(" << uop->in() << ")";
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
-  return os << bop->out() << " = " << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
+  if(auto inline_bop = inline_op_str(bop->type())) {
+    return os << bop->out() << " = " << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
+  } else {
+    return os << bop->out() << " = " << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
+  }
 }
 
 std::ostream& operator<<(std::ostream& os, const Fusion& f) {

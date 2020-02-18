@@ -50,12 +50,22 @@ static std::unordered_map<UnaryOpType, std::string> unary_op_type_string_map {
     {UnaryOpType::Neg,  "Neg"}
   , {UnaryOpType::Cast, "Cast"}
 };
+static std::unordered_map<UnaryOpType, std::string> unary_op_type_inline_op_string_map {
+    {UnaryOpType::Neg,  "~"}
+};
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
     {BinaryOpType::Add, "Add"}
   , {BinaryOpType::Sub, "Sub"}
   , {BinaryOpType::Mul, "Mul"}
   , {BinaryOpType::Div, "Div"}
   , {BinaryOpType::Mod, "Mod"}
+};
+static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_string_map {
+    {BinaryOpType::Add, "+"}
+  , {BinaryOpType::Sub, "-"}
+  , {BinaryOpType::Mul, "*"}
+  , {BinaryOpType::Div, "/"}
+  , {BinaryOpType::Mod, "%"}
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
@@ -108,6 +118,22 @@ std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   TORCH_CHECK(parallel_type_string_map.count(ptype) != 0);
   return out << parallel_type_string_map[ptype];
+}
+
+c10::optional<std::string> inline_op_str(const UnaryOpType uotype) {
+  if(unary_op_type_inline_op_string_map.find(uotype) == unary_op_type_inline_op_string_map.end()) {
+    return c10::nullopt;
+  } else {
+    return unary_op_type_inline_op_string_map[uotype];
+  }
+}
+
+c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
+  if(binary_op_type_inline_op_string_map.find(botype) == binary_op_type_inline_op_string_map.end()) {
+    return c10::nullopt;
+  } else {
+    return binary_op_type_inline_op_string_map[botype];
+  }
 }
 
 }}} // torch::jit::fuser
