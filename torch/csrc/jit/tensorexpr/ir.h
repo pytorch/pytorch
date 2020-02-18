@@ -167,13 +167,20 @@ class Min : public BinaryOpNode<Min> {
   }
 };
 
-class CompareSelect : public BinaryOpNode<CompareSelect> {
+class CompareSelect : public ExprNode<CompareSelect> {
  public:
   CompareSelectOperation compare_select_op() const {
     return compare_op_;
   }
+  const Expr& lhs() const {
+    return this->lhs_;
+  }
+  const Expr& rhs() const {
+    return this->rhs_;
+  }
 
   static Expr make(const Expr& lhs, const Expr& rhs) = delete;
+
   static Expr make(
       const Expr& lhs,
       const Expr& rhs,
@@ -182,11 +189,14 @@ class CompareSelect : public BinaryOpNode<CompareSelect> {
   }
 
  private:
+  Expr lhs_;
+  Expr rhs_;
   CompareSelectOperation compare_op_;
   CompareSelect(const Expr& lhs, const Expr& rhs, CompareSelectOperation cmp_op)
-      : BinaryOpNode(lhs, rhs, IRNodeType::kCompareSelect, ReturnType::kint32),
+      : ExprNodeBase(ToDtype<int>()),
+        lhs_(lhs),
+        rhs_(rhs),
         compare_op_(cmp_op) {}
-  friend class BinaryOpNode<CompareSelect>;
 };
 
 // Encode an integer immediate value.
