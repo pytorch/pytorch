@@ -239,6 +239,12 @@ class BuildExtension(build_ext, object):
     attempt to build using the Ninja backend. Ninja greatly speeds up
     compilation compared to the standard ``setuptools.build_ext``.
     Fallbacks to the standard distutils backend if Ninja is not available.
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
 
     @classmethod
@@ -922,6 +928,12 @@ def load_inline(name,
         >>> module = load_inline(name='inline_extension',
                                  cpp_sources=[source],
                                  functions=['sin_add'])
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
 
@@ -1285,7 +1297,23 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
+def _get_num_workers(verbose):
+    max_jobs = os.environ.get('MAX_JOBS')
+    if max_jobs is not None and max_jobs.isdigit():
+        if verbose:
+            print('Using envvar MAX_JOBS ({}) as the number of workers...'.format(max_jobs))
+        return int(max_jobs)
+    if verbose:
+        print('Allowing ninja to set a default number of workers... '
+              '(overridable by setting the environment variable MAX_JOBS=N)')
+    return None
+
+
 def _run_ninja_build(build_directory, verbose, error_prefix):
+    command = ['ninja', '-v']
+    num_workers = _get_num_workers(verbose)
+    if num_workers is not None:
+        command.extend(['-j', str(num_workers)])
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1304,14 +1332,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
             # it is valid.
             stdout_fileno = 1
             subprocess.run(
-                ['ninja', '-v'],
+                command,
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 check=True)
         else:
             subprocess.check_output(
-                ['ninja', '-v'],
+                command,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory)
     except subprocess.CalledProcessError:
