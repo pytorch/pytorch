@@ -92,6 +92,12 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
     torch::utils::options_to_string(options).c_str());
 }
 
+static inline void checkUnpackSlice(PyObject* index, Py_ssize_t* start_ptr, Py_ssize_t* stop_ptr, Py_ssize_t* step_ptr) {
+  if (!THPUtils_unpackSlice(index, start_ptr, stop_ptr, step_ptr)) {
+    throw python_error();
+  }
+}
+
 static inline void recordSliceTrace(PyObject* obj) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
@@ -136,9 +142,7 @@ static inline Variable applySlicing(
         return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
       } else if (PySlice_Check(obj)) {
         Py_ssize_t start, stop, step;
-        if (!THPUtils_unpackSlice(obj, &start, &stop, &step)) {
-          throw python_error();
-        }
+        checkUnpackSlice(obj, &start, &stop, &step);
         if (is_tracing) {
           recordSliceTrace(obj);
         }
@@ -265,9 +269,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(at::indexing::applySelect(self_, 0, THPUtils_unpackLong(index), 0, self_device, self_sizes));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
-    if (!THPUtils_unpackSlice(index, &start, &stop, &step)) {
-      throw python_error();
-    }
+    checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
@@ -357,9 +359,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
-    if (!THPUtils_unpackSlice(index, &start, &stop, &step)) {
-      throw python_error();
-    }
+    checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
