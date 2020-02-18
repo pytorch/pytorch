@@ -46,7 +46,8 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 static inline int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
-  for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(index); i++) {
+  auto size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
+  for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     if (THPVariable_Check(obj)) {
       auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -140,6 +141,7 @@ static inline Variable applySlicing(
     bool is_tracing,
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
+  int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(index);
 
@@ -148,7 +150,7 @@ static inline Variable applySlicing(
   }
 
   Variable result = self;
-  for (int64_t i = 0; i < PyTuple_GET_SIZE(index); i++) {
+  for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
 
     auto tensor_index = ([&]() {
