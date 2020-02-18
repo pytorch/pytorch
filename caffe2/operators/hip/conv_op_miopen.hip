@@ -253,14 +253,14 @@ bool MIOPENConvOp::DoRunWithType() {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
       mio_input_dims_ = X.sizes().vec();
-      vector<int> input_dims (begin(mio_input_dims_), end(mio_input_dims_));
+      std::vector<int> input_dims(std::begin(mio_input_dims_), std::end(mio_input_dims_));
       MIOPEN_ENFORCE(miopenSetTensorDescriptor(
             bottom_desc_, miopenTypeWrapper<T_X>::type, input_dims.size(), input_dims.data(), nullptr));
     }
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      vector<int> weight_dims (begin(mio_weight_dims_), end(mio_weight_dims_));
+      std::vector<int> weight_dims(std::begin(mio_weight_dims_), std::end(mio_weight_dims_));
       int spatial_dim = (weight_dims.size() == 5) ? 3 : 2;
       MIOPEN_ENFORCE(miopenInitConvolutionNdDescriptor(
             conv_desc_,
@@ -280,7 +280,7 @@ bool MIOPENConvOp::DoRunWithType() {
     }
     
     mio_output_dims_ = Y->sizes().vec();
-    vector<int> output_dims (begin(mio_output_dims_), end(mio_output_dims_));
+    std::vector<int> output_dims(std::begin(mio_output_dims_), std::end(mio_output_dims_));
     int output_dim_size = output_dims.size();
     MIOPEN_ENFORCE(miopenGetConvolutionNdForwardOutputDim(
           conv_desc_,
@@ -471,15 +471,15 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     VLOG(1) << "Changing MIOpen descriptor configurations.";
     if (input_changed) {
       mio_input_dims_ = X.sizes().vec();
-      vector<int>  input_dims (begin(mio_input_dims_), end(mio_input_dims_));
+      std::vector<int>  input_dims(std::begin(mio_input_dims_), std::end(mio_input_dims_));
       MIOPEN_ENFORCE(miopenSetTensorDescriptor(
             bottom_desc_, miopenTypeWrapper<T_X>::type, input_dims.size(), input_dims.data(), nullptr));
     }
 
     if (weight_changed) {
       mio_weight_dims_ = Weight.sizes().vec();
-      vector<int> weight_dims (begin(mio_weight_dims_), end(mio_weight_dims_));
-      int spatial_dim = (weight_dims.size() == 5) ? 3 : 2;
+      std::vector<int> weight_dims(std::begin(mio_weight_dims_), std::end(mio_weight_dims_));
+      const int spatial_dim = weight_dims.size() - 2;
       MIOPEN_ENFORCE(miopenInitConvolutionNdDescriptor(
             conv_desc_,
             spatial_dim,
@@ -499,7 +499,7 @@ bool MIOPENConvGradientOp::DoRunWithType() {
     }
 
     mio_output_dims_ = dY.sizes().vec();
-    vector<int> output_dims (begin(mio_output_dims_), end(mio_output_dims_));
+    std::vector<int> output_dims(std::begin(mio_output_dims_), std::end(mio_output_dims_));
     int output_dim_size = output_dims.size();
     MIOPEN_ENFORCE(miopenGetConvolutionNdForwardOutputDim(
          conv_desc_,

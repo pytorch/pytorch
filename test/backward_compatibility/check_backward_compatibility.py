@@ -21,9 +21,14 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('split_with_sizes', datetime.date(2020, 2, 1)),
-    ('linear_relu_dynamic_fp16', datetime.date(2020, 2, 5)),
-    ('aten::join', datetime.date(2020, 2, 10)),
+    ('prim::Drop', datetime.date(2020, 3, 1)),
+    ('prim::Store', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_view', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
+    ('prim::Load', datetime.date(2020, 3, 1)),
+    ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
+    ('aten::is_owner', datetime.date(2020, 3, 1)),
+    ('aten::to_here', datetime.date(2020, 3, 1)),
 ]
 
 
@@ -85,8 +90,9 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
+            if "torch.classes" in line or "RRef" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
+                # TODO Delete RRef special case after add the RRef type
                 continue
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
