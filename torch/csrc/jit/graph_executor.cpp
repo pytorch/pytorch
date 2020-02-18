@@ -708,6 +708,11 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 }
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+  // Run custom passes that different backends can register.
+  for (const auto& pass : getCustomPreFusionPasses()) {
+    pass(graph);
+  }
+
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   if (!getProfilingMode()) {
@@ -726,9 +731,8 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   FuseGraph(graph);
 
-  // Run custom passes that different backends can register.
-  // This is done last to give internal optimization passes priority.
-  for (const auto& pass : getCustomPasses()) {
+  // Run custom post-fusion passes
+  for (const auto& pass : getCustomPostFusionPasses()) {
     pass(graph);
   }
 }
