@@ -177,14 +177,14 @@ static inline Variable applySlicing(
       } else if (PyBool_Check(obj)) {
         return at::indexing::TensorIndex(obj == Py_True);
       } else if (THPVariable_Check(obj)) {
+        Tensor tensor = THPVariable_Unpack(obj);
         if (is_tracing) {
-          Tensor tensor = THPVariable_Unpack(obj);
           auto scalar_type = tensor.scalar_type();
           if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/false) && scalar_type != at::kByte) {
             recordSelectTrace(tensor);
           }
         }
-        return at::indexing::TensorIndex(THPVariable_Unpack(obj));
+        return at::indexing::TensorIndex(std::move(tensor));
       } else if (PySequence_Check(obj)) {
         // TODO: Naughty naughty get out of jail free
         // (Fixing this means I have to fix the call chain though :/)
