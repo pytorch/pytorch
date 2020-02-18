@@ -5,7 +5,15 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
 from torch.utils.cpp_extension import CUDA_HOME
 
-CXX_FLAGS = ['/sdl', '/permissive-'] if sys.platform == 'win32' else ['-g']
+if sys.platform == 'win32':
+    vc_version = os.getenv('VCToolsVersion', '')
+    if vc_version.startswith('14.16.'):
+        CXX_FLAGS = ['/sdl']
+    else:
+        CXX_FLAGS = ['/sdl', '/permissive-']
+else:
+    CXX_FLAGS = ['-g']
+
 USE_NINJA = os.getenv('USE_NINJA') == '1'
 
 ext_modules = [
