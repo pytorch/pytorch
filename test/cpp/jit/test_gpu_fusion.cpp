@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/transform_replay.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
 #include <iostream>
@@ -42,7 +43,7 @@ void testGPU_FusionSimpleArith(){
   Float* f1 = new Float(1.f);
   Float* f2 = new Float{2.f};
   Float* f3 = new Float();
-  
+
   BinaryOp* an_add = new BinaryOp(BinaryOpType::Add, f3, f1, f2);
   std::cout<<"Explicit add construction of 1.f + 2.f: "<<fusion<<std::endl;
 
@@ -55,7 +56,7 @@ void testGPU_FusionContainer(){
   
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
-  auto f3 = binary_op(BinaryOpType::Add, f1, f2);
+  auto f3 =add(f1, f2);
   std::cout<<"Implicit add construction of 1.f + 2.f : "<<fusion1<<std::endl;
 
   Fusion fusion2;
@@ -94,6 +95,16 @@ void testGPU_FusionCastOp(){
   TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
 }
 
+class ZeroMutator : public BaseMutator{
+public:
+  const Statement* mutate(const Float* f){
+    if(f->isConst() && *(f->value()) == 1.0)
+      return new Float(0.0);
+    return f;
+  }
+
+};
+
 void testGPU_FusionMutator(){
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -102,8 +113,9 @@ void testGPU_FusionMutator(){
   Int* i1 = new Int{3};
   const Val* f5 = binary_op(BinaryOpType::Add, f4, i1);
   std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
-  BaseMutator mutator;
-  mutator.mutate(&fusion);
+  ZeroMutator mutator;
+  BaseMutator* base_mutator = &mutator;
+  base_mutator->mutate(&fusion);
   std::cout<<"Replaced: "<<fusion<<std::endl;
   
 }
@@ -209,13 +221,12 @@ void testGPU_FusionTensor() {
   auto fuser_tensor  = new Tensor(tensor_type);
   TORCH_CHECK(fuser_tensor->hasContiguityInfo() == 1);
   TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float); 
-
-  // TODO: fix this, I'm getting segfault, but it's getting late...
-  //std::cout << fuser_tensor << std::endl;
+  TORCH_CHECK(fuser_tensor->domain() == nullptr);
   
   auto fuser_null_tensor  = new Tensor(DataType::Int);
   TORCH_CHECK(fuser_null_tensor->hasContiguityInfo() == 0);
   TORCH_CHECK(fuser_null_tensor->getDataType().value() == DataType::Int); 
+  TORCH_CHECK(fuser_null_tensor->domain() == nullptr);
 }
 
 void testGPU_FusionTensorContiguity() {
@@ -261,38 +272,268 @@ void testGPU_FusionTensorContiguity() {
       }
     }
   }
+
+  {
+    // contiguity across size-1 dimension
+    auto tensor = at::randn({4, 1, 4});
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    auto dim = sizes.size();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK(t_c.rank() == sizes.size());
+    auto b_dims = t_c.getBroadcastDims();
+    TORCH_CHECK(b_dims.size() == 0);
+    TORCH_CHECK(t_c.getFCD() == 2);
+    TORCH_CHECK(t_c.hasContiguousFCD());
+    for (int i = 0; i < dim; i++) {
+      TORCH_CHECK(!t_c.isBroadcastDim(i));
+      if (i < dim - 1) {
+        TORCH_CHECK(t_c.canCollapseToHigher(i));
+      }
+    }
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({4, 4, 4}).split(1, 1)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK(!(t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((t_c.canCollapseToHigher(1)));
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({4, 1, 8}).split(4, 2)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK((t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((!t_c.canCollapseToHigher(1)));
+  }
+
+  {
+    // no contiguity across size-1 dimension
+    auto tensor = at::randn({8, 1, 4}).split(4, 0)[0];
+    auto sizes = tensor.sizes().vec();
+    auto strides = tensor.strides().vec();
+    TensorContiguity t_c(sizes, strides);
+    TORCH_CHECK((t_c.canCollapseToHigher(0)));
+    TORCH_CHECK((t_c.canCollapseToHigher(1)));
+  }
+
+  {
+    // test merge
+    TensorContiguity t_c_l({4, 4, 4}, {16, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4}, {16, 4, 1});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK((t_c_l.isIdentical(t_c_r)));
+  }
+
+  {
+    TensorContiguity t_c_l({4, 4, 4, 4}, {16, 0, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 16, 4, 1});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(t_c_l.getFCD() == 3);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+  }
+
+  {
+    // NHWC + NCHW
+    TensorContiguity t_c_l({4, 4, 4, 4}, {64, 16, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 1, 16, 4});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(!t_c_l.hasContiguousFCD());
+    TORCH_CHECK(t_c_l.getFCD() == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+    TORCH_CHECK(t_c_l.getAxisByStride(1) == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(2) == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(3) == -1);
+  }
+
+  {
+    // NCHW + NCHW with broadcasting
+    TensorContiguity t_c_l({4, 4, 4, 4}, {4, 1, 4, 0});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 1, 16, 4});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(t_c_l.getFCD() == 1);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+  }
+
 }
 
-void testGPU_FusionTDSplit() {
+void testGPU_FusionTVSplit() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const Tensor *t = Tensor::MakeDummyTensor(3);
-  std::cout << "A 3d tensor: " << t << std::endl;
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  const TensorView *tv = split(t, 2, 2);
+  tv = split(tv, 2, 2);
+  std::cout<<"Split: "<<tv<<std::endl;
 
-  std::cout<<"Split view: "<<tv<<std::endl;
-  std::cout<<"Fusion code: "<<fusion<<std::endl;
+  std::cout<<"Split fusion output: "<<fusion<<std::endl;
   
 }
 
-void testGPU_FusionTDMerge() {
+void testGPU_FusionTVMerge() {
 
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const Tensor *t = Tensor::MakeDummyTensor(3);
-  std::cout << "A 3d tensor: " << t << std::endl;
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
 
-  const TensorView *tv = merge(t, 1);
+  tv = merge(tv, 1);
 
-  std::cout<<"Merged view: "<<tv<<std::endl;
-  std::cout<<"Fusion code: "<<fusion<<std::endl;
+  std::cout<<"Merge fusion output: "<<fusion<<std::endl;
   
 }
 
+void testGPU_FusionTVReorder() {
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
+  
+
+  std::unordered_map<int, int> shift_right{
+    {-1, 0}
+  };
+  std::unordered_map<int, int> shift_left{
+    {0, -1}
+  };
+
+  std::unordered_map<int, int> shift_left_2{
+    {0, -1},
+    {1, 0},
+    {2, 1}
+  };
+
+  std::unordered_map<int, int> swap{
+    {0, 2},
+    {2, 0}
+  };
+
+  const TensorView *s_leftl = reorder(tv, shift_left);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i) == s_leftl->domain()->axis(i-1));
+  
+  const TensorView *s_left2 = reorder(tv, shift_left);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i) == s_left2->domain()->axis(i-1));
+
+  const TensorView *s_right = reorder(tv, shift_right);
+  for(int i = 0; i < tv->domain()->size(); i++)
+    TORCH_CHECK(tv->domain()->axis(i-1) == s_right->domain()->axis(i));
+
+  const TensorView *rswap = reorder(tv, swap);
+  TORCH_CHECK(tv->domain()->axis(0) == rswap->domain()->axis(2));
+  TORCH_CHECK(tv->domain()->axis(2) == rswap->domain()->axis(0));
+  TORCH_CHECK(tv->domain()->axis(1) == rswap->domain()->axis(1));
+
+}
+
+void testGPU_FusionEquality(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  Float* fval1 = new Float();
+  const Float* fval1_copy = fval1;
+  Float* fval2 = new Float();
+  Float* fone = new Float(1.0);
+
+  TORCH_CHECK(fval1->same_as(fval1_copy));
+  TORCH_CHECK(!fval1->same_as(fval2));
+  TORCH_CHECK(!fone->same_as(fval1));
+  TORCH_CHECK(fone->same_as(new Float(1.0)));
+
+  Int* ival1 = new Int();
+  const Int* ival1_copy = ival1;
+  Int* ival2 = new Int();
+  Int* ione = new Int(1);
+
+  TORCH_CHECK(ival1->same_as(ival1_copy));
+  TORCH_CHECK(!ival1->same_as(ival2));
+  TORCH_CHECK(!ione->same_as(ival1));
+  TORCH_CHECK(ione->same_as(new Int(1)));
+
+  const BinaryOp* add1 = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
+  const BinaryOp* add1_copy = new BinaryOp(BinaryOpType::Add, new Float(), fval1, ival1);
+  const BinaryOp* sub1 = new BinaryOp(BinaryOpType::Sub, new Float(), fval1, ival1);
+
+  const UnaryOp* neg1 = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
+  const UnaryOp* neg2 = new UnaryOp(UnaryOpType::Neg, new Float(), fval2);
+  const UnaryOp* neg1_copy = new UnaryOp(UnaryOpType::Neg, new Float(), fval1);
+
+  TORCH_CHECK(add1->same_as(add1_copy));
+  TORCH_CHECK(!add1->same_as(sub1));
+
+  TORCH_CHECK(neg1->same_as(neg1_copy));
+  TORCH_CHECK(!static_cast<const Expr*>(neg1)->same_as(add1));
+  TORCH_CHECK(!neg1->same_as(neg2));
+
+}
+
+void testGPU_FusionReplaceAll(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  
+  Float* f0 = new Float();
+  Float* f1 = new Float{1.f};
+  Float* f2 = new Float{2.f};
+  Float* f3 = new Float();
+  const Float* f4 = static_cast<const Float*>( add(f1, f0) );
+  
+  //replace the output f4 with f3
+  ReplaceAll::instancesOf(f4, f3);
+  
+  //f3 should now have an origin function
+  TORCH_CHECK(fusion.origin(f3) != nullptr);
+
+  //Should have removed f4 completely so we shouldn't have any other expr than f3 construction
+  TORCH_CHECK(fusion.exprs().size() == 1);
+
+  //Replace constant Float's of value 1.f with 2.f
+  ReplaceAll::instancesOf(f1, f2);
+  const BinaryOp* bop = static_cast<const BinaryOp*> (fusion.origin(f3));
+  //make sure the binary op (origin of f3) actually changed to 2.f
+  TORCH_CHECK(static_cast<const Float*>(bop->lhs())->same_as(new Float{2.f}));
+  
+}
+
+void testGPU_FusionComputeAt(){
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<const IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+
+  const TensorDomain *td = new TensorDomain(dom);
+  const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
+  const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
+
+  tv = split(tv, 3, 4);
+  tv = split(tv, 0, 2);
+  
+  std::stack<const Expr*> target_transforms;
+  TransformReplay::get_root(tv->domain(), &target_transforms);
+  
+  while(!target_transforms.empty()){
+    std::cout<<target_transforms.top()<<std::endl;
+    target_transforms.pop();
+  }
+  /*
+  for(decltype(target_transforms.size()) i = 0; i < target_transforms.size(); i++){
+    std::cout<<"Operation "<<i<<": "<<target_transforms[i]<<std::endl;
+  }
+  */
+}
 
 void testGPU_Fusion() {}
 

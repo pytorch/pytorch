@@ -8,6 +8,48 @@ namespace fuser {
 
 //#define TC_DEBUG
 
+/*
+ * [Note - TensorContiguity implementation]
+ *
+ * contiguity_
+ *   stores contiguity information for each dimension:
+ *   number stored should be between 0 to N+2;
+ *     0   - this axis requires broadcasting;
+ *     X   - where X belongs [-N, -1] U [1, N] means current axis is immediately
+ *           outside of axis `abs(X)-1`. If X < 0, The two axis are contiguous
+ *           and can be collapsed;
+ *     N+1 - the fastest changing dimension, If -N-1, means its contiguous in
+ *           storage (stride == 1);
+ *     N+2 - Unknown;
+ *
+ * TODO sorted_axes_ is something hard to maintain in a meaningful way during
+ *      merge, maybe we'll drop it if it's not of much help for kernel
+ *      generation
+ * sorted_axes_
+ *   This is a helper field, list of axes sorted by their stride;
+ *   Default would be `[0, 1, 2, ..., N-1]`
+ *   Given sorted_axes_[i] == X means: the i-th axis should be X (if X belongs
+ *   [0, N-1]). If X == -1, that means it's unknown. This could happen when we
+ *   merge two TensorContiguity and their order of axes are not consistent.
+ *
+ * The design of TensorContiguity is to handle two things:
+ *   1. Contiguity check - whether or not the contiguity information has
+ *      changed. To do this, we can simply compare TensorContiguity::contiguity_
+ *      between two instances;
+ *   2. Kernel generation
+ *      By looking at contiguity_ flag, we can make correct decision like:
+ *        a. collpasing dimensions;
+ *        b. kernel binding;
+ *
+ * merging two TensorContiguity would check their contiguity_ flag and mark
+ * accordinly.
+ *
+ * Issues with current implementation [definitely not complete]:
+ *   1. stride for size-1 dimension.
+ *     Because of PyTorch implementation, stride for size-1 dimension is ill
+ *     defined and can't properly express intended layout.
+ */
+
 //debug print. remove this guy!
 template<typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
@@ -167,7 +209,20 @@ int TensorContiguity::getFCD() const {
   return -1;
 }
 
-bool TensorContiguity::contiguousFCD() const {
+bool TensorContiguity::isIdentical(const TensorContiguity& tc) const {
+  for (int i = 0; i < rank(); i++) {
+    if (tc.contiguity_[i] != contiguity_[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorContiguity::isCompatible(const TensorContiguity& tc) const {
+  assert(false); // not yet implemented;
+  return false;
+}
+bool TensorContiguity::hasContiguousFCD() const {
   for (int i = 0; i < contiguity_.size(); i++) {
     if (contiguity_[i] == (-contiguity_.size() - 1))
       return true;
@@ -180,21 +235,53 @@ int TensorContiguity::getAxisByStride(int order) const {
   return sorted_axes_[order];
 }
 
-std::vector<int> TensorContiguity::getAxesOrderedByStride() const {
+const std::vector<int>& TensorContiguity::getAxesOrderedByStride() const {
   return sorted_axes_;
 }
 
-std::vector<int> TensorContiguity::getContiguityTag() const {
+const std::vector<int>& TensorContiguity::getContiguityTag() const {
   return contiguity_;
 }
 
-std::vector<int> TensorContiguity::getSortedAxesTag() const {
+const std::vector<int>& TensorContiguity::getSortedAxesTag() const {
   return sorted_axes_;
 }
 
 void TensorContiguity::merge(const TensorContiguity& tc) {
-  assert(false);
-  return;
+  // TODO: different rank not supported yet; This could be done if we follow
+  //       numpy broadcasting rule across multiple operands. We simply insert
+  //       dummy dimensions at the left for tc with lower rank()
+  // see [Note - TensorContiguity implementation]
+  int dim = rank();
+  assert(dim == tc.rank());
+
+  for (int i = 0; i < dim; i++) {
+    int cont_flag = tc.contiguity_[i];
+
+    if (cont_flag != contiguity_[i]) {
+      if (cont_flag == -contiguity_[i]) {
+        // If sorting should remain, we preserve the information but only relax
+        // the contiguity information;
+        contiguity_[i] = std::abs(cont_flag);
+      } else {
+        // mark contiguity as unknown otherwise.
+        contiguity_[i] = dim+2;
+      }
+      cont_flag = contiguity_[i];
+    }
+
+    // TODO: can we update sorted_axes_ information via contiguity flag?
+    if (tc.sorted_axes_[i] != sorted_axes_[i]) {
+      // mark sorted_axes_ as unknown;
+      sorted_axes_[i] = -1;
+    }
+  }
+
+#ifdef TC_DEBUG
+  std::cout << "merging" << std::endl;
+  std::cout << "sorted index: " << sorted_axes_ << std::endl;
+  std::cout << "contiguity flag: " << contiguity_ << std::endl;
+#endif
 }
 
 }}} // namespace torch::jit::fuser

@@ -24,7 +24,6 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Fusion* const fusion) {
-  std::cout<<"Fusion has "<< fusion->exprs().size() << "exprs" << std::endl;
   for (const Expr* expr : fusion->exprs()){
     os << expr << std::endl;
   }
@@ -93,8 +92,9 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const t
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv){
-  assert(tv->tensor->domain != nullptr);
-  return os << tv->tensor << " -> "<<tv->view;
+  return os << "%T" << tv->tensor()->name()<<tv->domain();
+  if(tv->getComputeAtView() != nullptr)
+    os << " compute_at( %T"<<tv->getComputeAtView()->tensor()->name() <<"["<<tv->getComputeAtAxis()<<"] )";
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){
@@ -122,8 +122,8 @@ std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
   os << "%T" << t->name(); 
   if(t->getDataType().has_value())
     os << " scalar_type: " << *(t->getDataType());
-  if(t->domain != nullptr)
-    os << " " << t->domain;
+  if(t->domain() != nullptr)
+    os << " " << t->domain();
   if(t->hasContiguityInfo())
     os << " " << &t->getContiguityInfo().value();
   return os;

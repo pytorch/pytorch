@@ -23,22 +23,39 @@ struct Fusion;
 struct TORCH_API BaseMutator {
 
   void mutate(Fusion* fusion);
-  const Statement* mutate(const Statement* const statement);
+  virtual const Statement* mutate(const Statement* const);
 
-  const Statement* mutate(const UnaryOp* const);
-  const Statement* mutate(const BinaryOp* const);
-  const Statement* mutate(const Split* const);
-  const Statement* mutate(const Merge* const);
-  const Statement* mutate(const Reorder* const);
+  virtual const Statement* mutate(const Val* const);
+  virtual const Statement* mutate(const Expr* const);
 
-  const Statement* mutate(const TensorDomain* const);
-  const Statement* mutate(const TensorView* const);
-  const Statement* mutate(const IterDomain* const);
-  const Statement* mutate(const Tensor* const);
+  virtual const Statement* mutate(const UnaryOp* const);
+  virtual const Statement* mutate(const BinaryOp* const);
 
-  const Statement* mutate(const Float* const);
-  const Statement* mutate(const Int* const);
-  
+  virtual const Statement* mutate(const Split* const);
+  virtual const Statement* mutate(const Merge* const);
+  virtual const Statement* mutate(const Reorder* const);
+
+  virtual const Statement* mutate(const TensorDomain* const);
+  virtual const Statement* mutate(const TensorView* const);
+  virtual const Statement* mutate(const IterDomain* const);
+  virtual const Statement* mutate(const Tensor* const) final; //I believe tensor should never be mutated.
+
+  virtual const Statement* mutate(const Float* const);
+  virtual const Statement* mutate(const Int* const);
+
+};
+
+struct TORCH_API ReplaceAll : public BaseMutator{
+
+  const Statement* mutate(const Val* const);
+
+  TORCH_API static void instancesOf(const Val* const instance, const Val* const with);
+
+private:
+  ReplaceAll(const Val* _instance, const Val* const _with):instance_(_instance), with_(_with){}
+
+  const Val* instance_;
+  const Val* with_;
 
 };
 

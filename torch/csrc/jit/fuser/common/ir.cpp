@@ -1,12 +1,11 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/ir.h>
 
 #include <c10/util/Exception.h>
-
 
 #include <iostream>
 #include <stdexcept>
@@ -34,9 +33,9 @@ Val::Val(const ValType _vtype, const DataType _dtype)
   }
 }
 
-const Expr* Val::getOrigin(){
+const Expr* Val::getOrigin() {
   FusionGuard fg(fusion_);
-  return(fusion_->origin(this));
+  return (fusion_->origin(this));
 }
 
 Expr::Expr(const ExprType _type) : type_{_type} {
@@ -46,17 +45,23 @@ Expr::Expr(const ExprType _type) : type_{_type} {
   this->fusion_ = fusion;
 }
 
-UnaryOp::UnaryOp(const UnaryOpType _type , const Val* _out , const Val* _in)
-  : Expr(ExprType::UnaryOp) , unary_op_type_{_type} , out_{_out} , in_{_in}
-{
-    addOutput(_out);
-    addInput(_in);
-    this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+UnaryOp::UnaryOp(const UnaryOpType _type, const Val* _out, const Val* _in)
+    : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
+  addOutput(_out);
+  addInput(_in);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-BinaryOp::BinaryOp(const BinaryOpType _type , const Val* _out , const Val* _lhs , const Val* _rhs)
-  : Expr(ExprType::BinaryOp) , binary_op_type_{_type} , out_{_out} , lhs_{_lhs} , rhs_{_rhs} 
-{
+BinaryOp::BinaryOp(
+    const BinaryOpType _type,
+    const Val* _out,
+    const Val* _lhs,
+    const Val* _rhs)
+    : Expr(ExprType::BinaryOp),
+      binary_op_type_{_type},
+      out_{_out},
+      lhs_{_lhs},
+      rhs_{_rhs} {
   addOutput(_out);
   addInput(_lhs);
   addInput(_rhs);
@@ -97,52 +102,68 @@ T* ptr(T* obj) {
  */
 
 template <typename T>
+void Val::dispatch(T handler) const {
+  switch (*getValType()) {
+    case ValType::TensorDomain:
+      ptr(handler)->handle(static_cast<const TensorDomain*>(this));
+      return;
+    case ValType::TensorView:
+      ptr(handler)->handle(static_cast<const TensorView*>(this));
+      return;
+    case ValType::IterDomain:
+      ptr(handler)->handle(static_cast<const IterDomain*>(this));
+      return;
+    case ValType::Tensor:
+      ptr(handler)->handle(static_cast<const Tensor*>(this));
+      return;
+    case ValType::Scalar:
+      switch (*getDataType()) {
+        case DataType::Float:
+          ptr(handler)->handle(static_cast<const Float*>(this));
+          return;
+        case DataType::Int:
+          ptr(handler)->handle(static_cast<const Int*>(this));
+          return;
+        default:
+          break;
+      }
+    default:
+      break;
+  }
+  throw std::runtime_error("Unknown valtype in dispatch!");
+}
+
+template <typename T>
+void Expr::dispatch(T handler) const {
+  switch (*getExprType()) {
+    case ExprType::UnaryOp:
+      ptr(handler)->handle(static_cast<const UnaryOp*>(this));
+      return;
+    case ExprType::BinaryOp:
+      ptr(handler)->handle(static_cast<const BinaryOp*>(this));
+      return;
+    case ExprType::Split:
+      ptr(handler)->handle(static_cast<const Split*>(this));
+      return;
+    case ExprType::Merge:
+      ptr(handler)->handle(static_cast<const Merge*>(this));
+      return;
+    case ExprType::Reorder:
+      ptr(handler)->handle(static_cast<const Reorder*>(this));
+      return;
+    default:
+      throw std::runtime_error("Unknown exprtype in dispatch!");
+  }
+}
+
+template <typename T>
 void Statement::dispatch(T handler) const {
   if (isVal()) {
-    switch (*getValType()) {
-      case ValType::TensorDomain:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
-        return;
-      case ValType::TensorView:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
-        return;
-      case ValType::IterDomain:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
-        return;
-      case ValType::Tensor:
-        ptr(handler)->handle(static_cast<const Tensor*>(this));
-        return;        
-      case ValType::Scalar:
-        switch (*getDataType()) {
-          case DataType::Float:
-            ptr(handler)->handle(static_cast<const Float*>(this));
-            return;
-          case DataType::Int:
-            ptr(handler)->handle(static_cast<const Int*>(this));
-            return;
-          default:
-            break;
-        }
-      default:
-        break;
-    }
-    throw std::runtime_error("Unknown valtype in dispatch!");
-  }
-
-  if (isExpr()) {
-    switch (*getExprType()) {
-      case ExprType::UnaryOp:
-        ptr(handler)->handle(static_cast<const UnaryOp*>(this));
-		return;
-      case ExprType::BinaryOp:
-        ptr(handler)->handle(static_cast<const BinaryOp*>(this));
-		return;
-      default:
-        throw std::runtime_error("Unknown exprtype in dispatch!");
-    }
-  }
-
-  throw std::runtime_error("Unknown stmttype in dispatch!");
+    ptr(handler)->handle(static_cast<const Val*>(this));
+  } else if (isExpr()) {
+    ptr(handler)->handle(static_cast<const Expr*>(this));
+  } else
+    throw std::runtime_error("Unknown stmttype in dispatch!");
 }
 
 /*
@@ -157,61 +178,85 @@ void Statement::dispatch(T handler) const {
  * And therefore dispatch_mutator should never call:
  *   ptr(mutator)->mutate(static_cast<const Statement*>(this));
  */
-// NEVER CALL MUTATE ON A CONST STATEMENT* FROM HERE!
-// otherwise you'll end in an infinite loop with mutate.
+template <typename T>
+const Statement* Val::dispatch_mutator(T mutator) const {
+  switch (*getValType()) {
+    case ValType::Tensor:
+      return ptr(mutator)->mutate(static_cast<const Tensor*>(this));
+
+    case ValType::TensorDomain:
+      return ptr(mutator)->mutate(static_cast<const TensorDomain*>(this));
+
+    case ValType::TensorView:
+      return ptr(mutator)->mutate(static_cast<const TensorView*>(this));
+
+    case ValType::IterDomain:
+      return ptr(mutator)->mutate(static_cast<const IterDomain*>(this));
+
+    case ValType::Scalar:
+      switch (*getDataType()) {
+        case DataType::Float:
+          return ptr(mutator)->mutate(static_cast<const Float*>(this));
+
+        case DataType::Int:
+          return ptr(mutator)->mutate(static_cast<const Int*>(this));
+
+        default:
+          break;
+      }
+    default:
+      break;
+  }
+  throw std::runtime_error("Unknown valtype in dispatch_mutator!");
+}
+
+template <typename T>
+const Statement* Expr::dispatch_mutator(T mutator) const {
+  switch (*getExprType()) {
+    case ExprType::UnaryOp:
+      return ptr(mutator)->mutate(static_cast<const UnaryOp*>(this));
+    case ExprType::BinaryOp:
+      return ptr(mutator)->mutate(static_cast<const BinaryOp*>(this));
+    case ExprType::Split:
+      return ptr(mutator)->mutate(static_cast<const Split*>(this));
+    case ExprType::Merge:
+      return ptr(mutator)->mutate(static_cast<const Merge*>(this));
+    case ExprType::Reorder:
+      return ptr(mutator)->mutate(static_cast<const Reorder*>(this));
+    default:
+      throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
+  }
+}
+
 template <typename T>
 const Statement* Statement::dispatch_mutator(T mutator) const {
   if (isVal()) {
-    switch (*getValType()) {
-      case ValType::Tensor:
-        return ptr(mutator)->mutate(static_cast<const Tensor*>(this));
-
-      case ValType::TensorDomain:
-        return ptr(mutator)->mutate(static_cast<const TensorDomain*>(this));
-
-      case ValType::TensorView:
-        return ptr(mutator)->mutate(static_cast<const TensorView*>(this));
-
-      case ValType::IterDomain:
-        return ptr(mutator)->mutate(static_cast<const IterDomain*>(this));
-
-      case ValType::Scalar:
-        switch(*getDataType()){
-          case DataType::Float:
-            return ptr(mutator)->mutate(static_cast<const Float*>(this));
-
-          case DataType::Int:
-            return ptr(mutator)->mutate(static_cast<const Int*>(this));
-
-          default:
-            break;
-        }
-      default:
-      break;
-    }
-    throw std::runtime_error("Unknown valtype in dispatch_mutator!");
+    return ptr(mutator)->mutate(static_cast<const Val*>(this));
   }
-
-
   if (isExpr()) {
-    switch (*getExprType()) {
-      case ExprType::UnaryOp:
-        return ptr(mutator)->mutate(static_cast<const UnaryOp*>(this));
-      case ExprType::BinaryOp:
-        return ptr(mutator)->mutate(static_cast<const BinaryOp*>(this));
-      default:
-        throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
-    }
+    return ptr(mutator)->mutate(static_cast<const Expr*>(this));
   }
   throw std::runtime_error("Unknown stmttype in dispatch_mutator!");
 }
 
-// Handler template instantiations
+/*
+ * Handler template instantiations. These should only have to be done on base classes.
+ * Actual visitors/mutators should inhereit from these classes and call ->dispatch(this)
+ * to avoid needing an explicit instantiation.
+ */
 template void Statement::dispatch(IterVisitor) const;
 template void Statement::dispatch(IterVisitor*) const;
+template void Val::dispatch(IterVisitor) const;
+template void Val::dispatch(IterVisitor*) const;
+template void Expr::dispatch(IterVisitor) const;
+template void Expr::dispatch(IterVisitor*) const;
 
 template const Statement* Statement::dispatch_mutator(BaseMutator) const;
 template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
+template const Statement* Val::dispatch_mutator(BaseMutator) const;
+template const Statement* Val::dispatch_mutator(BaseMutator*) const;
+template const Statement* Expr::dispatch_mutator(BaseMutator) const;
+template const Statement* Expr::dispatch_mutator(BaseMutator*) const;
 
 /*
  * Val member definitions
@@ -220,8 +265,8 @@ template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
 Val::~Val() {}
 
 /*
-* IRInputOutput member definitions
-*/
+ * IRInputOutput member definitions
+ */
 
 IRInputOutput::~IRInputOutput() {}
 

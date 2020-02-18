@@ -119,7 +119,7 @@ struct TORCH_API Fusion : public IRInputOutput {
     }
   };
 
-  /*
+    /*
    * Break dependency chains associated with Expr, remove references to expr
    * delete expr.
    */
@@ -127,6 +127,8 @@ struct TORCH_API Fusion : public IRInputOutput {
     if (!inFusion(expr))
       throw std::runtime_error(
           "Cannot remove expr as it is not registered with this fusion.");
+      // If we hit this error too frequently, we could lighten the restrictions so that removing something
+      // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
 
     for (auto out : expr->outputs())
       if (origin_.find(out) != origin_.end())
@@ -146,6 +148,39 @@ struct TORCH_API Fusion : public IRInputOutput {
 
     delete expr;
   }
+
+  /*
+   * Completely remove val from the fusion, break all dependencies associated with it.
+   */
+  void removeVal(const Val* val) {
+    
+    if (!inFusion(val))
+      throw std::runtime_error(
+          "Cannot remove val as it is not registered with this fusion.");
+      // If we hit this error too frequently, we could lighten the restrictions so that removing something
+      // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
+
+    for(const Val* inp : inputs())
+      if(val->same_as(inp))
+        throw std::runtime_error(
+          "Cannot remove val as it is an input of the fusion.");
+
+    for(const Val* out : outputs())
+      if(val->same_as(out))
+        throw std::runtime_error(
+          "Cannot remove val as it is an output of the fusion.");
+
+    const Expr* orig = origin(val);
+    if(orig != nullptr)
+      removeExpr(origin(val));
+
+    for(const Expr* use : uses(val))
+      removeExpr(use);
+
+    val_set_.erase(val);
+
+  }
+
 
   // Functions for adding inputs and outputs
   void addInput(const Val* input) {
@@ -238,7 +273,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       registerVal(output);
       auto it = origin_.find(output);
       if (it != origin_.end()) {
-        origin_.erase(it);
+        removeExpr(it->second); //will also remove origin entry
       }
 
       origin_[output] = expr;
@@ -275,9 +310,10 @@ struct TORCH_API Fusion : public IRInputOutput {
     return expr_set_;
   }
 
-  const std::unordered_map<const Val*, std::set<const Expr*>>& uses() const
-      noexcept {
-    return uses_;
+  const std::set<const Expr*>& uses(const Val* val) const {
+    if(uses_.find(val) != uses_.end())
+      return uses_.find(val)->second;
+    return std::move(std::set<const Expr*>());
   }
 
   const Expr* origin(const Val* val) const {

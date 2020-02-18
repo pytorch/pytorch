@@ -5,18 +5,19 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-const Statement* BaseMutator::mutate(const Statement* const statement) {
-  // throw std::runtime_error("Could not identify statement. Did you update
-  // dispatch_mutator in ir.cpp?");
+const Statement* BaseMutator::mutate(
+    const Statement* const statement) {
   return statement->dispatch_mutator(this);
+}
+const Statement* BaseMutator::mutate(const Val* const val) {
+  return val->dispatch_mutator(this);
+}
+
+const Statement* BaseMutator::mutate(const Expr* const expr) {
+  return expr->dispatch_mutator(this);
 }
 
 const Statement* BaseMutator::mutate(const Float* const f) {
-  if (!f->isSymbolic())
-    if (*(f->value()) == 1.0) {
-      Float* f2 = new Float(0.0);
-      return f2;
-    }
   return f;
 }
 
@@ -25,68 +26,162 @@ const Statement* BaseMutator::mutate(const Int* const i) {
 }
 
 const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
-  const Val* out = static_cast<const Val*>(uop->out()->dispatch_mutator(this));
-  const Val* in = static_cast<const Val*>(uop->in()->dispatch_mutator(this));
-  // TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-  if (out != uop->out() || in != uop->in())
+  const Val* out = static_cast<const Val*>( mutate(uop->out()) );
+  const Val* in = static_cast<const Val*>( mutate(uop->in()) );
+
+  if 
+  (
+    !(
+         out->same_as(uop->out())
+      && in->same_as(uop->in())
+    )
+  )
     return new UnaryOp(uop->type(), out, in);
   return uop;
 }
 
 const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
-  const Val* out = static_cast<const Val*>(bop->out()->dispatch_mutator(this));
-  const Val* lhs = static_cast<const Val*>(bop->lhs()->dispatch_mutator(this));
-  const Val* rhs = static_cast<const Val*>(bop->rhs()->dispatch_mutator(this));
-  // TODO CHECK IF ADD CHANGED, RETURN NEW ONE.
-  if (out != bop->out() || lhs != bop->lhs() || rhs != bop->rhs())
+  const Val* out = static_cast<const Val*>( mutate(bop->out()) );
+  const Val* lhs = static_cast<const Val*>( mutate(bop->lhs()) );
+  const Val* rhs = static_cast<const Val*>( mutate(bop->rhs()) );
+  if
+  (
+    !(
+         out != bop->out()
+      && lhs != bop->lhs()
+      && rhs != bop->rhs()
+    )
+  )
     return new BinaryOp(bop->type(), out, lhs, rhs);
   return bop;
 }
 
 void BaseMutator::mutate(Fusion* fusion) {
-  std::vector<const Expr*> new_exprs;
   std::vector<const Expr*> orig_exprs = fusion->exprs();
 
-  for (std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++) {
-    const Statement* new_stmt = orig_exprs[i]->dispatch_mutator(this);
-    assert(new_stmt->isExpr());
-    new_exprs.push_back(static_cast<const Expr*>(new_stmt));
-  }
+  /*
+   * We go through all the exprs, in topologically sorted order. We call mutate on them
+   * which could insert nodes, removes nodes, or both. These operations modify the dag
+   * and the Fusion will keep track of what has/hasn't been changed by the origin dependency
+   * tracking that it does. If an operation is added, and its output node is a val which
+   * previously was the output of another expresion, that older expresion will be removed
+   * as we can only assign a Val once due to our SSA restriction. Therefore we don't need
+   * to manually track what expressions stayed constant or were changed.
+   */
 
-  for (std::vector<const Expr*>::size_type i = 0; i < orig_exprs.size(); i++) {
-    if (orig_exprs[i] != new_exprs[i]) {
-      fusion->removeExpr(orig_exprs[i]);
+  for(const Statement* stmt : orig_exprs)
+    mutate(stmt);
+
+}
+
+/*
+ * TODO: Test the below mutator functions
+ */
+
+const Statement* BaseMutator::mutate(const TensorDomain* const td) {
+  
+  std::vector<const IterDomain*> dom;
+  bool mutated = false;
+  for(decltype(td->size()) i = 0; i<td->size(); i++){
+    const IterDomain* id = static_cast<const IterDomain*>(mutate(td->axis(i)));
+    if(!id->same_as(td->axis(i))){
+      mutated = true;
     }
   }
+  
+  if(mutated)
+    return new TensorDomain(dom);
+  return td;
+  
 }
 
-const Statement* BaseMutator::mutate(const TensorDomain* const t) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const TensorView* const tv) {
+  const Tensor* t = static_cast<const Tensor*>(mutate(tv->tensor()));
+  const TensorDomain* td = static_cast<const TensorDomain*>( mutate(tv->domain()));
+
+  if(!(  tv->tensor()->same_as(t)
+      && tv->domain()->same_as(td)))
+      return new TensorView(t, td);
+ return tv;
 }
 
-const Statement* BaseMutator::mutate(const TensorView* const t) {
-  throw std::runtime_error("Not implemented yet.");
-}
-
-const Statement* BaseMutator::mutate(const IterDomain* const t) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const IterDomain* const id) {
+  const Int* s = static_cast<const Int*>(mutate(id->size()));
+  if(!s->same_as(id->size()))
+    return new IterDomain(s, id->parallel_method(), id->isReduction());
+  return id;
 }
 
 const Statement* BaseMutator::mutate(const Tensor* const t) {
-  throw std::runtime_error("Not implemented yet.");
+  return t; //I believe tensor should never be mutated.
 }
 
-const Statement* BaseMutator::mutate(const Split* const split) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Split* const s) {
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(s->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(s->in()));
+  const Int* fact = static_cast<const Int*>(mutate(s->factor()));
+
+  if(!(
+       o->same_as(s->out())
+    && i->same_as(s->in())
+    && fact->same_as(s->factor())
+  ))
+    return new Split(o, i, s->axis(), fact);
+  return s;
 }
 
-const Statement* BaseMutator::mutate(const Merge* const merge) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Merge* const m) {
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(m->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(m->in()));
+
+  if(!(
+       o->same_as(m->out())
+    && i->same_as(m->in())
+  ))
+    return new Merge(o, i, m->axis());
+  return m;
 }
 
-const Statement* BaseMutator::mutate(const Reorder* const reorder) {
-  throw std::runtime_error("Not implemented yet.");
+const Statement* BaseMutator::mutate(const Reorder* const ro) {
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(ro->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(ro->in()));
+
+  if(!(
+       o->same_as(ro->out())
+    && i->same_as(ro->in())
+  ))
+    return new Reorder(o, i, ro->pos2axis());
+  return ro;
 }
+
+const Statement* ReplaceAll::mutate(const Val* const val){
+  if(val->same_as(instance_))
+    return with_;
+  return val;
+}
+
+void ReplaceAll::instancesOf(const Val* const instance, const Val* const with){
+
+  std::set<const Expr*> exprs_containing_val;
+
+  Fusion *fusion = FusionGuard::getCurFusion();
+  const Expr* orig = fusion->origin(instance);
+  if(orig != nullptr)
+    exprs_containing_val.emplace(orig);
+
+  const std::set<const Expr*> exprs = fusion->uses(instance);
+  for(const Expr* expr : exprs)
+    exprs_containing_val.emplace(expr);
+
+  ReplaceAll ra(instance, with);
+
+  for(const Expr* expr : exprs_containing_val)
+    static_cast<BaseMutator*>(&ra)->mutate(expr);
+
+  fusion->removeVal(instance);
+
+}
+
 
 } // namespace fuser
 } // namespace jit
