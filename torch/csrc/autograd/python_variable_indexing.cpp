@@ -133,56 +133,53 @@ static inline Variable applySlicing(
   Variable result = self;
   for (int64_t i = 0; i < size; i++) {
     PyObject* obj = PyTuple_GET_ITEM(index, i); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
-
-    auto tensor_index = ([&]() {
-      if (THPUtils_checkLong(obj)) {
-        if (is_tracing && THPVariable_Check(obj)) {
-          recordSelectTrace(THPVariable_Unpack(obj));
-        }
-        return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
-      } else if (PySlice_Check(obj)) {
-        Py_ssize_t start, stop, step;
-        checkUnpackSlice(obj, &start, &stop, &step);
-        if (is_tracing) {
-          recordSliceTrace(obj);
-        }
-        return at::indexing::TensorIndex({start, stop, step});
-      } else if (obj == Py_Ellipsis) {
-        return at::indexing::TensorIndex(at::indexing::Ellipsis);
-      } else if (obj == Py_None) {
-        return at::indexing::TensorIndex(at::indexing::None);
-      } else if (PyBool_Check(obj)) {
-        return at::indexing::TensorIndex(obj == Py_True);
-      } else if (THPVariable_Check(obj)) {
-        Tensor tensor = THPVariable_Unpack(obj);
-        if (is_tracing) {
-          auto scalar_type = tensor.scalar_type();
-          if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/false) && scalar_type != at::kByte) {
-            recordSelectTrace(tensor);
-          }
-        }
-        return at::indexing::TensorIndex(std::move(tensor));
-      } else if (PySequence_Check(obj)) {
-        // TODO: Naughty naughty get out of jail free
-        // (Fixing this means I have to fix the call chain though :/)
-        return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
-      } else {
-        auto idx = THPObjectPtr(PyNumber_Index(obj));
-        if (!idx) {
-          PyErr_Clear();
-          invalid_index(obj);
-        }
-        if (is_tracing && THPVariable_Check(idx)) {
-          recordSelectTrace(THPVariable_Unpack(idx));
-        }
-        return at::indexing::TensorIndex(THPUtils_unpackLong(idx));
-      }
-    })();
-
     result = at::indexing::handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
       /*original_tensor=*/self,
-      /*index=*/tensor_index,
+      /*index=*/([&]() {
+        if (THPUtils_checkLong(obj)) {
+          if (is_tracing && THPVariable_Check(obj)) {
+            recordSelectTrace(THPVariable_Unpack(obj));
+          }
+          return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
+        } else if (PySlice_Check(obj)) {
+          Py_ssize_t start, stop, step;
+          checkUnpackSlice(obj, &start, &stop, &step);
+          if (is_tracing) {
+            recordSliceTrace(obj);
+          }
+          return at::indexing::TensorIndex({start, stop, step});
+        } else if (obj == Py_Ellipsis) {
+          return at::indexing::TensorIndex(at::indexing::Ellipsis);
+        } else if (obj == Py_None) {
+          return at::indexing::TensorIndex(at::indexing::None);
+        } else if (PyBool_Check(obj)) {
+          return at::indexing::TensorIndex(obj == Py_True);
+        } else if (THPVariable_Check(obj)) {
+          Tensor tensor = THPVariable_Unpack(obj);
+          if (is_tracing) {
+            auto scalar_type = tensor.scalar_type();
+            if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/false) && scalar_type != at::kByte) {
+              recordSelectTrace(tensor);
+            }
+          }
+          return at::indexing::TensorIndex(std::move(tensor));
+        } else if (PySequence_Check(obj)) {
+          // TODO: Naughty naughty get out of jail free
+          // (Fixing this means I have to fix the call chain though :/)
+          return at::indexing::TensorIndex(sequenceToVariable(legacyExtractDispatchKey(self), obj));
+        } else {
+          auto idx = THPObjectPtr(PyNumber_Index(obj));
+          if (!idx) {
+            PyErr_Clear();
+            invalid_index(obj);
+          }
+          if (is_tracing && THPVariable_Check(idx)) {
+            recordSelectTrace(THPVariable_Unpack(idx));
+          }
+          return at::indexing::TensorIndex(THPUtils_unpackLong(idx));
+        }
+      })(),
       /*dim_ptr=*/&dim,
       /*specified_dims_ptr=*/&specified_dims,
       /*real_dim=*/i,
