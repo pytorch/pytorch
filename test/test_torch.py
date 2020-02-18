@@ -6292,6 +6292,49 @@ class TestTorchDeviceType(TestCase):
                                     "input tensors must be on the same device"):
             torch.cat((cpu, cuda0))
 
+    def test_block_diag(self, device):
+        def block_diag_workaround(*arrs):
+            arrs_expanded = []
+            for a in arrs:
+                if a.dim() == 2:
+                    arrs_expanded.append(a)
+                elif a.dim() == 1:
+                    arrs_expanded.append(a.expand(1, a.size(0)))
+                elif a.dim() == 0:
+                    arrs_expanded.append(a.expand(1, 1))
+            shapes = torch.tensor([a.shape for a in arrs_expanded], device=device)
+            out = torch.zeros(
+                torch.sum(shapes, dim=0).tolist(),
+                dtype=arrs_expanded[0].dtype,
+                device=device
+            )
+            r, c = 0, 0
+            for i, (rr, cc) in enumerate(shapes):
+                out[r:r + rr, c:c + cc] = arrs_expanded[i]
+                r += rr
+                c += cc
+            return out
+
+        tensors = [
+            torch.rand((2, 2), device=device),
+            torch.rand((2, 3), device=device),
+            torch.rand(10, device=device),
+            torch.rand((8, 1), device=device),
+            torch.rand(1, device=device)[0]
+        ]
+        result = torch.block_diag(*tensors)
+        result_check = block_diag_workaround(*tensors)
+        self.assertEqual(result, result_check)
+
+        tensor = torch.rand(1, device=device)[0]
+        result = torch.block_diag(tensor)
+        result_check = tensor.expand(1, 1)
+        self.assertEqual(result, result_check)
+
+        tensor = torch.rand(10, device=device)
+        result = torch.block_diag(tensor)
+        result_check = tensor.expand(1, tensor.size(0))
+        self.assertEqual(result, result_check)
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
