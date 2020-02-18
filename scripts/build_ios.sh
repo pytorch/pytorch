@@ -64,6 +64,12 @@ if [ -n "${IOS_PLATFORM:-}" ]; then
   if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
       # iOS Simulator build is not supported by NNPACK
       CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+  elif [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
+      # enable bitcode by default for watchos
+      CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+      CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+      # disable the QNNPACK
+      CMAKE_ARGS+=("-DUSE_PYTORCH_QNNPACK=OFF")
   fi
 else
   # IOS_PLATFORM is not set, default to OS, which builds iOS.
