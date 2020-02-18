@@ -150,8 +150,31 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
-    if (!index.is_tensor()) {
-      return handleSimpleTypesInSingleDimIndexingSet(self, index, value, false, self_device, self_sizes);
+    if (index.is_boolean() && !index.boolean()) {
+      // do nothing for false (technically we should check the size, but we don't have
+      // real 0-sized shapes.
+      return;
+    } else if (index.is_ellipsis()) {
+      copy_to(self, value);
+      return;
+    } else if (index.is_none() || (index.is_boolean() && index.boolean())) {
+      copy_to(self.unsqueeze(0), value);
+      return;
+    } else if (index.is_integer()) {
+      copy_to(applySelect(self, 0, index.integer(), 0, self_device, self_sizes), value);
+      return;
+    } else if (index.is_slice()) {
+      copy_to(applySlice(
+        self,
+        0,
+        index.slice().start(),
+        index.slice().stop(),
+        index.slice().step(),
+        /*ensure_view=*/false,
+        /*is_tracing=*/false,
+        self_device,
+        self_sizes), value);
+      return;
     }
   }
 
