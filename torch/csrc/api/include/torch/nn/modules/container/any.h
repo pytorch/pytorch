@@ -256,7 +256,7 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
 
 inline AnyModule AnyModule::clone(optional<Device> device) const {
   AnyModule clone;
-  clone.content_ = content_ ? content_->clone(device) : nullptr;
+  clone.content_ = content_ ? content_->clone_module(device) : nullptr;
   return clone;
 }
 
