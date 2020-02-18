@@ -69,7 +69,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *py3.6-part2* ]]; then
   # Update the loop for new opsets
   for i in $(seq 10 12); do
-	  pytest "${args[@]}" \
-	    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
-	done
+    pytest "${args[@]}" \
+      "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
+  done
 fi

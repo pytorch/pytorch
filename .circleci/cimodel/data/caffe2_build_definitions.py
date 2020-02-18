@@ -87,8 +87,8 @@ class Conf:
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
             "onnx_py3.6": "onnx-py3.6",
-            "onnx_py3.6_part1": "onnx-py3.6",
-            "onnx_py3.6_part2": "onnx-py3.6",
+            "onnx_py3.6_part1": "onnx-py3.6-part1",
+            "onnx_py3.6_part2": "onnx-py3.6-part2",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
