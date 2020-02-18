@@ -117,8 +117,8 @@ const Statement* BaseMutator::mutate(const Tensor* const t) {
 }
 
 const Statement* BaseMutator::mutate(const Split* const s) {
-  const TensorView* o = static_cast<const TensorView*>(mutate(s->out()));
-  const TensorView* i = static_cast<const TensorView*>(mutate(s->in()));
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(s->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(s->in()));
   const Int* fact = static_cast<const Int*>(mutate(s->factor()));
 
   if(!(
@@ -131,8 +131,8 @@ const Statement* BaseMutator::mutate(const Split* const s) {
 }
 
 const Statement* BaseMutator::mutate(const Merge* const m) {
-  const TensorView* o = static_cast<const TensorView*>(mutate(m->out()));
-  const TensorView* i = static_cast<const TensorView*>(mutate(m->in()));
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(m->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(m->in()));
 
   if(!(
        o->same_as(m->out())
@@ -143,8 +143,8 @@ const Statement* BaseMutator::mutate(const Merge* const m) {
 }
 
 const Statement* BaseMutator::mutate(const Reorder* const ro) {
-  const TensorView* o = static_cast<const TensorView*>(mutate(ro->out()));
-  const TensorView* i = static_cast<const TensorView*>(mutate(ro->in()));
+  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(ro->out()));
+  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(ro->in()));
 
   if(!(
        o->same_as(ro->out())
