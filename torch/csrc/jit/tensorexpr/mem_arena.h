@@ -59,4 +59,3 @@ class TORCH_API KernelScopedObject {
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
-
