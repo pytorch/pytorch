@@ -280,9 +280,15 @@ struct func_wrapper_t {
   func_wrapper_t(const func_t1& op1, const func_t2& op2) : reduce(op1), combine(op2) {}
   func_t1 reduce;
   func_t2 combine;
+
   inline scalar_t project(acc_t a) {
     return (scalar_t)a;
   }
+
+  static acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
 };
 
 template <typename scalar_t, typename acc_t, typename func_t1, typename func_t2>
