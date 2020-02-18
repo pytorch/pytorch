@@ -28,6 +28,8 @@ white_list = [
     ('prim::Load', datetime.date(2020, 3, 1)),
     ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
     ('aten::range', datetime.date(2020, 3, 1)),
+    ('aten::is_owner', datetime.date(2020, 3, 1)),
+    ('aten::to_here', datetime.date(2020, 3, 1)),
 ]
 
 
