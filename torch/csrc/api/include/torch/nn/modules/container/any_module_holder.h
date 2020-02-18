@@ -72,13 +72,35 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   /// Calls `forward()` on the underlying module, casting each `AnyValue` in the
   /// argument vector to a concrete value.
   AnyValue forward(std::vector<AnyValue>&& arguments) override {
-    TORCH_CHECK(
-        arguments.size() == sizeof...(ArgumentTypes),
-        c10::demangle(type_info.name()),
-        "'s forward() method expects ",
-        sizeof...(ArgumentTypes),
-        " arguments, but received ",
-        arguments.size());
+    if (module->_forward_has_default_args()) {
+      TORCH_CHECK(
+          arguments.size() >= module->_forward_num_required_args() && arguments.size() <= sizeof...(ArgumentTypes),
+          c10::demangle(type_info.name()),
+          "'s forward() method expects at least ",
+          module->_forward_num_required_args(),
+          " argument(s) and at most ",
+          sizeof...(ArgumentTypes),
+          " argument(s), but received ",
+          arguments.size(),
+          ".");
+      arguments = std::move(module->_forward_populate_default_args(std::move(arguments)));
+    } else {
+      std::string use_default_args_macro_prompt = \
+        " If " + \
+        c10::demangle(type_info.name()) + \
+        "'s forward() method has default arguments, " + \
+        "please make sure the forward() method is declared with a corresponding `FORWARD_HAS_DEFAULT_ARGS` macro.";
+      TORCH_CHECK(
+          arguments.size() == sizeof...(ArgumentTypes),
+          c10::demangle(type_info.name()),
+          "'s forward() method expects ",
+          sizeof...(ArgumentTypes),
+          " argument(s), but received ",
+          arguments.size(),
+          ".",
+          (arguments.size() < sizeof...(ArgumentTypes)) ? use_default_args_macro_prompt : "");
+    }
+
     // FYI: During invocation of a module's `forward()` method, the values live
     // in the `arguments` vector inside this function.
     return torch::unpack<AnyValue, ArgumentTypes...>(
