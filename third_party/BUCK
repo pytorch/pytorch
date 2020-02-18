@@ -1,0 +1,70 @@
+cxx_library(
+    name = "psimd",
+    header_namespace = "",
+    headers = ['include/psimd.h'],
+    exported_headers = {'psimd.h': 'include/psimd.h'},
+    srcs = [],
+    visibility = [ "PUBLIC" ]
+)
+load('//:utils.bzl', 'cmake', 'extract')
+
+CPUINFO_ARGS = {
+    "CPUINFO_BUILD_TOOLS": False,
+    "CPUINFO_BUILD_UNIT_TESTS": False,
+    "CPUINFO_BUILD_MOCK_TESTS": False,
+    "CPUINFO_BUILD_BENCHMARKS": False,
+}
+
+
+cmake(
+    name = 'cmake',
+    prefix = 'dist',
+    targets = [ 'install' ],
+    args = CPUINFO_ARGS,
+    srcs = glob(["**/*"])
+)
+
+prebuilt_cxx_library(
+  name = 'pthread',
+  header_only = True,
+  exported_linker_flags = [
+   '-lpthread',
+  ],
+)
+
+prebuilt_cxx_library(
+    name = 'clog',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':cmake', 'deps/clog/libclog.a'),
+    header_dirs = [
+        'deps/clog/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'cpuinfo',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':cmake', 'libcpuinfo.a'),
+    header_dirs = [
+        'include'
+    ],
+    exported_deps = [
+        ':clog',
+        ':pthread'
+    ]
+)
+
+prebuilt_cxx_library(
+    name = "FP16",
+    header_only = True,
+    header_dirs = ['include'],
+    visibility = [ "PUBLIC" ]
+)
+prebuilt_cxx_library(
+    name = "FXdiv",
+    header_only = True,
+    header_dirs = ['include'],
+    visibility = [ "PUBLIC" ]
+)
