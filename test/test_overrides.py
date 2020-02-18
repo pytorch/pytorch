@@ -894,14 +894,13 @@ def generate_tensor_like_torch_implementations():
                 continue
             if func not in TENSOR_LIKE_OVERRIDES:
                 untested_funcs.append(qualname)
-            msg = (
-                "The following functions are not tested for __torch_function__ "
-                "support, please either add an entry in "
-                "TENSOR_LIKE_TORCH_IMPLEMENTATIONS for this function or if a "
-                "__torch_function__ override does not make sense, add an entry to "
-                "IGNORED_TORCH_FUNCTIONS.\n\n{}"
-            )
-
+    msg = (
+        "The following functions are not tested for __torch_function__ "
+        "support, please either add an entry in "
+        "TENSOR_LIKE_TORCH_IMPLEMENTATIONS for this function or if a "
+        "__torch_function__ override does not make sense, add an entry to "
+        "IGNORED_TORCH_FUNCTIONS.\n\n{}"
+    )
     assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
         # decorate the overrides with implements_tensor_like
