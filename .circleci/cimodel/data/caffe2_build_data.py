@@ -5,7 +5,8 @@ from cimodel.lib.conf_tree import Ver
 CONFIG_TREE_DATA = [
     (Ver("ubuntu", "16.04"), [
         ([Ver("gcc", "5")], [XImportant("onnx_py2")]),
-        ([Ver("clang", "7")], [XImportant("onnx_py3.6_part1"), XImportant("onnx_py3.6_part2")]),
+        ([Ver("clang", "7")], [XImportant("onnx_py3.6"),
+                               XImportant("onnx_py3.6_part1"), XImportant("onnx_py3.6_part2")]),
     ]),
 ]
 
@@ -30,12 +31,20 @@ class TreeConfigNode(ConfigNode):
         if (str(self.find_prop("language_version")) == "onnx_py3.6_part1") or \
                 (str(self.find_prop("language_version")) == "onnx_py3.6_part2"):
             return False
+        if str(self.find_prop("language_version")) == "onnx_py3.6":
+            return True
         return set(str(c) for c in self.find_prop("compiler_version")).intersection({
             "clang3.8",
             "clang3.9",
             "clang7",
             "android",
         }) or self.find_prop("distro_version").name == "macos"
+
+    def is_test_only(self):
+        if (str(self.find_prop("language_version")) == "onnx_py3.6_part1") or \
+                (str(self.find_prop("language_version")) == "onnx_py3.6_part2"):
+            return True
+        return False
 
 
 class TopLevelNode(TreeConfigNode):
@@ -69,6 +78,7 @@ class LanguageConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["language_version"] = node_name
         self.props["build_only"] = self.is_build_only()
+        self.props["test_only"] = self.is_test_only()
 
     def child_constructor(self):
         return ImportantConfigNode

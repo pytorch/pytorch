@@ -27,8 +27,7 @@ default_set = set([
     'caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
-    'caffe2-onnx-py3.6-part1-clang7-ubuntu16.04',
-    'caffe2-onnx-py3.6-part2-clang7-ubuntu16.04',
+    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake

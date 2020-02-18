@@ -67,8 +67,9 @@ if [[ "$BUILD_ENVIRONMENT" == *py3.6-part1* ]]; then
     "$top_dir/test/onnx/test_models_onnxruntime.py"
 fi
 if [[ "$BUILD_ENVIRONMENT" == *py3.6-part2* ]]; then
-  pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset10" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset11" \
-    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset12"
+  # Update the loop for new opsets
+  for i in $(seq 10 12); do
+	  pytest "${args[@]}" \
+	    "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
+	done
 fi

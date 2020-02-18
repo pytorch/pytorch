@@ -23,6 +23,7 @@ class Conf:
     # for gpu files and host compiler (gcc/clang) for cpu files)
     compilers: [Ver]
     build_only: bool
+    test_only: bool
     is_important: bool
 
     @property
@@ -33,6 +34,7 @@ class Conf:
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
+            or self.language == "onnx_py3.6" \
             or self.language == "onnx_py3.6_part1" \
             or self.language == "onnx_py3.6_part2" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
@@ -51,6 +53,13 @@ class Conf:
 
     def construct_phase_name(self, phase):
         root_parts = self.get_build_name_root_parts()
+
+        build_name_substitutions = {
+            "onnx_py3.6_part1": "onnx_py3.6",
+            "onnx_py3.6_part2": "onnx_py3.6",
+        }
+        if phase == "build":
+            root_parts = [miniutils.override(r, build_name_substitutions) for r in root_parts]
         return "_".join(root_parts + [phase]).replace(".", "_")
 
     def get_platform(self):
@@ -63,6 +72,7 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "py2",
+            "onnx_py3.6": "py3.6",
             "onnx_py3.6_part1": "py3.6",
             "onnx_py3.6_part2": "py3.6",
             "cmake": "py2",
@@ -76,8 +86,9 @@ class Conf:
         parameters = OrderedDict()
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
-            "onnx_py3.6_part1": "onnx-py3.6-part1",
-            "onnx_py3.6_part2": "onnx-py3.6-part2",
+            "onnx_py3.6": "onnx-py3.6",
+            "onnx_py3.6_part1": "onnx-py3.6",
+            "onnx_py3.6_part2": "onnx-py3.6",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -139,6 +150,7 @@ def instantiate_configs():
             distro=fc.find_prop("distro_version"),
             compilers=fc.find_prop("compiler_version"),
             build_only=fc.find_prop("build_only"),
+            test_only=fc.find_prop("test_only"),
             is_important=fc.find_prop("important"),
         )
 
@@ -157,7 +169,8 @@ def get_workflow_jobs():
         phases = ["build"]
         if not conf_options.build_only:
             phases = dimensions.PHASES
-
+        if conf_options.test_only:
+            phases = ["test"]
         for phase in phases:
             x.append(conf_options.gen_workflow_job(phase))
 
