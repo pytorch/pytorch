@@ -53,7 +53,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
       payload_size,
       nullptr, /* class_resover */
       &message.tensors(),
-      rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.

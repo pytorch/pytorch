@@ -34,7 +34,7 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
       payload_size,
       nullptr, /* class_resover */
       &message.tensors(),
-      rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
 
   // convert ivalue to int and construct request
   int64_t context_id = ivalue_context_id.toInt();

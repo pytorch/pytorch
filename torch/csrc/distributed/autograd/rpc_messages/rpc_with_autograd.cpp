@@ -122,7 +122,7 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       autogradPayLoadSize,
       nullptr, /* class_resover */
       &tensorTable,
-      rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Gather all the fields.

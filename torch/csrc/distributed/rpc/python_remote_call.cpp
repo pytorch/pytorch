@@ -39,7 +39,7 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
       payload_size,
       nullptr, /* class_resover */
       &message.tensors(),
-      RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver());
   auto values = value.toTuple()->elements();
 
   // remove the last element from values and convert it back to an RRef

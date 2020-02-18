@@ -711,15 +711,6 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   return metrics;
 }
 
-TypeResolver& ProcessGroupAgent::getTypeResolver() {
-  static TypeResolver typeResolver = [&](const std::string& typeStr) {
-    auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(typeStr);
-    return typePtr;
-  };
-
-  return typeResolver;
-}
-
 void ProcessGroupAgent::addGilWaitTime(
     const std::chrono::microseconds gilWaitTime) {
   std::lock_guard<std::mutex> lock(metricsMutex_);

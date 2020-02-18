@@ -161,15 +161,19 @@ class TORCH_API RpcAgent {
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
-  // Class resolver can be passed to JIT pickler to resolve IValue type based
-  // on type str or qualified name
-  virtual TypeResolver& getTypeResolver() = 0;
+  // Set type resolver that will be passed to JIT pickler to resolver type Ptr
+  // based on type str.
+  void setTypeResolver(std::shared_ptr<TypeResolver> typeResolver);
+
+  // Get the type resolver
+  std::shared_ptr<TypeResolver> getTypeResolver();
 
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
   std::atomic<bool> profilingEnabled_;
+  std::shared_ptr<TypeResolver> typeResolver_;
 
  private:
   static std::shared_ptr<RpcAgent> currentRpcAgent_;

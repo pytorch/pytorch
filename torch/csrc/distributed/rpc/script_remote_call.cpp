@@ -74,7 +74,7 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(
       payload_size,
       nullptr, /* class_resover */
       &message.tensors(),
-      RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver());
   auto values = value.toTuple()->elements();
   return fromIValues(values);
 }
