@@ -366,11 +366,15 @@ class TestScriptPy3(JitTestCase):
 
             def two(self, x):
                 # type: (Tensor) -> Tensor
-                return 2 * x
+                return x * 2
+
+            def three(self, x):
+                # type: (Tensor) -> Tensor
+                return 10 * x
 
             def forward(self, x):
                 # type: (Tensor) -> Tensor
-                return self.one(self.two(x), x)
+                return self.one(self.two(x), self.three(x))
 
         class BarMod(nn.Module):
             def one(self, x, y):
@@ -405,7 +409,7 @@ class TestScriptPy3(JitTestCase):
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
         self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant'])
+                         ['aten::add.Tensor', 'aten::mul.Scalar', 'aten::mul.Scalar2', 'prim::Constant'])
 
 
 if __name__ == '__main__':
