@@ -246,17 +246,17 @@ TEST_F(AnyModuleTest, ConvertsVariableToTensorCorrectly) {
 
 namespace torch {
 namespace nn {
-struct TestValue {
+struct TestAnyValue {
   template <typename T>
-  explicit TestValue(T&& value) : value_(std::forward<T>(value)) {}
-  AnyModule::Value operator()() {
+  explicit TestAnyValue(T&& value) : value_(std::forward<T>(value)) {}
+  AnyValue operator()() {
     return std::move(value_);
   }
-  AnyModule::Value value_;
+  AnyValue value_;
 };
 template <typename T>
-AnyModule::Value make_value(T&& value) {
-  return TestValue(std::forward<T>(value))();
+AnyValue make_value(T&& value) {
+  return TestAnyValue(std::forward<T>(value))();
 }
 } // namespace nn
 } // namespace torch
@@ -318,11 +318,11 @@ TEST_F(AnyValueTest, GetThrowsForTheWrongType) {
   ASSERT_NE(value.try_get<int>(), nullptr);
   ASSERT_THROWS_WITH(
       value.get<float>(),
-      "Attempted to cast Value to float, "
+      "Attempted to cast AnyValue to float, "
       "but its actual type is int");
   ASSERT_THROWS_WITH(
       value.get<long>(),
-      "Attempted to cast Value to long, "
+      "Attempted to cast AnyValue to long, "
       "but its actual type is int");
 }
 
