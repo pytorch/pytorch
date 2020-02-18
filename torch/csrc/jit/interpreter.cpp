@@ -522,8 +522,13 @@ struct CodeImpl {
 
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(OP, operator_table_.size());
-    operator_table_.emplace_back(node->getOperation());
+    const Operator& op = node->getOperator();
+    if (op.hasOperation() && op.schema().is_vararg()) {
+      insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+    } else {
+      insertInstruction(OP, operator_table_.size());
+    }
+    operator_table_.emplace_back(op.getOperation(node));
   }
 
   void emitWait(Node* node) {
@@ -757,7 +762,7 @@ struct CodeImpl {
 
   void dump(std::ostream& out, size_t i) const {
     out << i << " " << instructions_[i];
-    if (instructions_[i].op == OP || instructions_[i].op == CALL) {
+    if (instructions_[i].op == OP || instructions_[i].op == CALL || instructions_[i].op == OPN) {
       out << " # " << *instructions_source_[i];
     } else {
       out << "\n";
@@ -881,8 +886,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-//         std::cout << "RUNNING ";
-//         frames.back().function->dump(std::cout, af.pc);
+        // std::cout << "RUNNING ";
+        // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -890,7 +895,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
             break;
           case OPN:
-            AT_ERROR("OPN is currently supported in mobile mode only.");
+            stack.push_back(inst.N);
+            af.operators[inst.X](stack);
+            ++af.pc;
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
