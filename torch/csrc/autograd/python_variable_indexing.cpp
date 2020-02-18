@@ -271,8 +271,8 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(at::alias(self_));
   }
 
-  const at::Device& self_device = self_.device();
-  const at::IntArrayRef& self_sizes = self_.sizes();
+  at::Device self_device = self_.device();
+  at::IntArrayRef self_sizes = self_.sizes();
   bool is_tracing = torch::jit::tracer::isTracing();
 
   // handle simple types: integers, slices
@@ -333,8 +333,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-  const at::Device& self_device = self_.device();
-  const at::IntArrayRef& self_sizes = self_.sizes();
+  at::Device self_device = self_.device();
+  at::IntArrayRef self_sizes = self_.sizes();
   Variable value;
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {

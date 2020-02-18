@@ -100,8 +100,8 @@ Tensor applySlicing(
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
 Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
   OptionalDeviceGuard device_guard(device_of(self));
-  const at::Device self_device = self.device();
-  const IntArrayRef& self_sizes = self.sizes();
+  at::Device self_device = self.device();
+  IntArrayRef self_sizes = self.sizes();
 
   // handle simple types: integers, slices, ellipsis
   if (indices.size() == 1) {
@@ -129,8 +129,8 @@ Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
 // for "the assigned value is a Tensor" case
 void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
   OptionalDeviceGuard device_guard(device_of(self));
-  const at::Device self_device = self.device();
-  const IntArrayRef& self_sizes = self.sizes();
+  at::Device self_device = self.device();
+  IntArrayRef self_sizes = self.sizes();
 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
