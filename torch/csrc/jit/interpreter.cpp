@@ -10,12 +10,14 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/vararg_functions.h>
 
 #include <exception>
 #include <iostream>
@@ -310,6 +312,7 @@ struct PreprocessGraph {
     insertLastUses(*graph);
     can_emit_inline = std::move(CanEmitInline(graph).can_emit_inline_);
   }
+
   // Outputs of the preprocessing:
   std::shared_ptr<Graph> graph;
   std::unordered_map<Node*, bool> can_emit_inline;
@@ -352,6 +355,8 @@ struct CodeImpl {
   std::vector<Operation> operator_table_;
   std::vector<Function*> function_table_;
   std::vector<TypePtr> type_table_;
+  std::vector<Code> code_table_;
+
   int register_size_ = 0;
   size_t n_outputs;
   size_t n_inputs;
@@ -381,9 +386,12 @@ struct CodeImpl {
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
   std::vector<std::unique_ptr<Function>> bailout_functions_;
+  size_t remaining_bailout_depth_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph)
-      : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -401,8 +409,28 @@ struct CodeImpl {
     insertBailoutBlocks();
   }
 
+
   const std::vector<c10::IValue>& constant_table() const {
     return constant_table_;
+  }
+
+  void request_bailout(size_t index) {
+    auto count = index;
+    for (size_t instr_index = 0; instr_index < instructions_.size();
+         instr_index++) {
+      if (instructions_[instr_index].op == GUARD || instructions_[instr_index].op == FAIL_GUARD) {
+        if (count-- == 0) {
+          // patching GUARD to FAIL_GUARD
+          instructions_[instr_index].op = FAIL_GUARD;
+          GRAPH_DEBUG(
+              "Added a bailout request for ",
+              index,
+              " at instruction ",
+              instr_index);
+          break;
+        }
+      }
+    }
   }
 
   const std::vector<Instruction>& instructions() const {
@@ -498,8 +526,13 @@ struct CodeImpl {
 
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
-    insertInstruction(OP, operator_table_.size());
-    operator_table_.emplace_back(getOperation(node));
+    const Operator& op = node->getOperator();
+    if (op.hasOperation() && op.schema().is_vararg()) {
+      insertInstruction(OPN, operator_table_.size(), node->inputs().size());
+    } else {
+      insertInstruction(OP, operator_table_.size());
+    }
+    operator_table_.emplace_back(op.getOperation(node));
   }
 
   void emitWait(Node* node) {
@@ -588,15 +621,19 @@ struct CodeImpl {
     }
   }
 
+  size_t emitType(TypePtr t) {
+    size_t r = type_table_.size();
+    type_table_.emplace_back(std::move(t));
+    return r;
+  }
+
   size_t emitGuard(Node* node) {
     // unoptimized graph is at index 0
     // guarded input is at index 1
     // the rest of args follow
     emitLoadInputs(node->inputs().slice(1, 1));
-    insertInstruction(GUARD, type_table_.size());
-    type_table_.emplace_back(node->outputs().at(0)->type());
+    insertInstruction(GUARD, emitType(node->outputs().at(0)->type()));
     insertInstruction(JF, 0 /* to be patched */);
-
     return instructions_.size() - 1;
   }
 
@@ -663,6 +700,61 @@ struct CodeImpl {
     auto method_name = insertConstant(std::move(method_name_str));
     insertInstruction(INTERFACE_CALL, method_name, inputs.size());
   }
+
+  void emitListUnpack(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(LIST_UNPACK, node->outputs().size());
+  }
+
+  void emitTupleConstruct(Node* node) {
+    bool named = node->output()->type()->expect<TupleType>()->name().has_value();
+    if (named) {
+      emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
+    } else {
+      emitLoadInputs(node->inputs());
+      insertInstruction(TUPLE_CONSTRUCT, node->inputs().size());
+    }
+  }
+
+  void emitContainerConstruct(OpCode op, Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(
+        op,
+        emitType(node->output()->type()),
+        node->inputs().size());
+  }
+
+  void emitCreateObject(Node* node) {
+    insertInstruction(CREATE_OBJECT, emitType(node->output()->type()));
+  }
+  void emitIsinstance(Node* node) {
+    emitLoadInputs(node->inputs());
+    std::vector<TypePtr> types = node->tys(attr::types);
+    size_t types_start = type_table_.size();
+    for (const auto& typ : types) {
+      emitType(typ);
+    }
+    insertInstruction(ISINSTANCE, types_start, types.size());
+  }
+
+  void emitTupleSlice(Node* node) {
+    emitLoadInputs(node->inputs());
+    int64_t beg_ind = node->i(attr::beg);
+    int64_t end_ind = node->i(attr::end);
+    insertInstruction(TUPLE_SLICE, beg_ind, end_ind - beg_ind);
+  }
+
+  void emitFork(Node* node) {
+    emitLoadInputs(node->inputs());
+    code_table_.emplace_back(node->g(attr::Subgraph));
+    insertInstruction(FORK, code_table_.size() - 1, node->inputs().size());
+  }
+
+  void emitWarn(Node* node) {
+    emitLoadInputs(node->inputs());
+    insertInstruction(WARN);
+  }
+
   void emitNode(Node* node) {
     WithCurrentNode guard(&current_node_, node);
     switch (node->kind()) {
@@ -707,6 +799,33 @@ struct CodeImpl {
       case prim::SetAttr:
         emitSetAttr(node);
         break;
+      case prim::ListUnpack:
+        emitListUnpack(node);
+        break;
+      case prim::TupleConstruct:
+        emitTupleConstruct(node);
+        break;
+      case prim::ListConstruct:
+        emitContainerConstruct(LIST_CONSTRUCT, node);
+        break;
+      case prim::DictConstruct:
+        emitContainerConstruct(DICT_CONSTRUCT, node);
+        break;
+      case prim::CreateObject:
+        emitCreateObject(node);
+        break;
+      case prim::isinstance:
+        emitIsinstance(node);
+        break;
+      case prim::TupleSlice:
+        emitTupleSlice(node);
+        break;
+      case prim::fork:
+        emitFork(node);
+        break;
+      case aten::warn:
+        emitWarn(node);
+        break;
     }
   }
 
@@ -732,7 +851,7 @@ struct CodeImpl {
 
   void dump(std::ostream& out, size_t i) const {
     out << i << " " << instructions_[i];
-    if (instructions_[i].op == OP || instructions_[i].op == CALL) {
+    if (instructions_[i].op == OP || instructions_[i].op == CALL || instructions_[i].op == OPN) {
       out << " # " << *instructions_source_[i];
     } else {
       out << "\n";
@@ -856,8 +975,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ActiveFrame af(frames.back());
     try {
       while (true) {
-//         std::cout << "RUNNING ";
-//         frames.back().function->dump(std::cout, af.pc);
+        // std::cout << "RUNNING ";
+        // frames.back().function->dump(std::cout, af.pc);
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case OP:
@@ -865,7 +984,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
             break;
           case OPN:
-            AT_ERROR("OPN is currently supported in mobile mode only.");
+            stack.push_back(inst.N);
+            af.operators[inst.X](stack);
+            ++af.pc;
             break;
           case LOAD:
             stack.emplace_back(reg(inst.X));
@@ -936,7 +1057,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+                // consider passing
+                // `frames.back().function->remaining_bailout_depth_` into
+                // `get_executor().getPlanFor()` to propagate caller's depth
+                // restrictions onto children while this strategy has a
+                // potential to reduce the number of compilations for too
+                // dynamic callers we might miss opportunities where a caller is
+                // dynamic but a callee gets stable arguments
+                af.functions[inst.X]
+                    ->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
@@ -946,11 +1077,22 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // this can be more optimized if necessary, caching parts
             // of the hashing computation or storing the offset when
             // the object is turned into an interface
+
+            // consider passing
+            // `frames.back().function->remaining_bailout_depth_` into
+            // `get_executor().getPlanFor()` to propagate caller's depth
+            // restrictions onto children while this strategy has a potential to
+            // reduce the number of compilations for too dynamic callers we
+            // might miss opportunities where a caller is dynamic but a callee
+            // gets stable arguments
             auto function = peek(stack, 0, inst.N)
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code = function->get_executor().getPlanFor(stack).code;
+            const Code& code =
+                function->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - inst.N);
             af = ActiveFrame(frames.back());
@@ -1019,17 +1161,34 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(future->value());
             ++af.pc;
           } break;
+          case FAIL_GUARD: {
+            // patch FAIL_GUARD back to GUARD
+            GRAPH_DEBUG(
+                "Bailout ", inst.X, " triggered via bailout_requests_!");
+            af.instructions[af.pc].op = GUARD;
+            push(stack, false);
+            ++af.pc;
+            break;
+          }
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            size_t remaining_bailout_depth =
+                frames.back().function->remaining_bailout_depth_ > 0
+                ? frames.back().function->remaining_bailout_depth_ - 1
+                : 0;
+            const Code& code = af.functions[inst.X]
+                                   ->get_executor()
+                                   .getPlanFor(stack, remaining_bailout_depth)
+                                   .code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
@@ -1042,6 +1201,72 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             leaveFrame();
             enterFrame(code, base_pointer);
             af = ActiveFrame(frames.back());
+          } break;
+         case LIST_UNPACK: {
+            listUnpack(stack, inst.X);
+            ++af.pc;
+          } break;
+          case TUPLE_CONSTRUCT: {
+            tupleConstruct(stack, inst.X);
+            ++af.pc;
+          } break;
+          case TUPLE_SLICE: {
+            tupleSlice(stack, inst.X, inst.X + inst.N);
+            ++af.pc;
+          } break;
+          case NAMED_TUPLE_CONSTRUCT: {
+            auto type = af.types[inst.X]->expect<TupleType>();
+            namedTupleConstruct(stack, type, inst.N);
+            ++af.pc;
+          } break;
+          case LIST_CONSTRUCT: {
+            auto type = af.types[inst.X]->expect<ListType>();
+            listConstruct(stack, type, inst.N);
+            ++af.pc;
+          } break;
+          case DICT_CONSTRUCT: {
+            auto type = af.types[inst.X]->expect<DictType>();
+            dictConstruct(stack, type, inst.N);
+            ++af.pc;
+          } break;
+          case CREATE_OBJECT: {
+            auto type = af.types[inst.X]->expect<ClassType>();
+            createObject(stack, type);
+            ++af.pc;
+          } break;
+          case ISINSTANCE: {
+            at::ArrayRef<TypePtr> types(
+                af.types + inst.X, af.types + inst.X + inst.N);
+            isinstance(stack, types);
+            ++af.pc;
+          } break;
+          case FORK: {
+            // Move inputs to a separate stack
+            InterpreterState forked_interpreter(
+                frames.back().function->code_table_.at(inst.X));
+            InterpreterContinuation continuation(
+                forked_interpreter,
+                Stack(stack.end() - inst.N, stack.end()),
+                autograd::GradMode::is_enabled());
+            drop(stack, inst.N);
+            push(stack, forked_interpreter.getFuture());
+            at::launch(std::move(continuation));
+            ++af.pc;
+          } break;
+          case WARN: {
+            Node* node = frames.back().function->instructions_source_.at(af.pc);
+            auto range = node->sourceRange().source();
+            if (range->filename()) {
+              auto line = range->starting_line_no() +
+                  range->lineno_for_offset(node->sourceRange().start());
+              drop(stack, 1);
+              c10::SourceLocation location{
+                  "", range->filename()->c_str(), uint32_t(line)};
+              c10::Warning::warn(location, pop(stack).toStringRef());
+            } else {
+              AT_WARN(pop(stack).toStringRef());
+            }
+            ++af.pc;
           } break;
         }
       }
@@ -1134,11 +1359,20 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_bailouts() const {
+  return pImpl->type_table_.size();
+}
+
+void Code::request_bailout(size_t index) {
+  pImpl->request_bailout(index);
 }
 
 size_t Code::num_inputs() const {
@@ -1159,6 +1393,10 @@ const std::vector<Instruction>& Code::instructions() const {
 
 const std::vector<Node*>& Code::instructions_source() const {
   return pImpl->instructions_source();
+}
+
+const std::vector<TypePtr>& Code::type_table() const {
+  return pImpl->type_table_;
 }
 
 size_t Code::register_size() const {

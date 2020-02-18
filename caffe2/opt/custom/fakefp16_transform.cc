@@ -17,15 +17,19 @@ C10_DEFINE_bool(
 namespace caffe2 {
 namespace opt {
 
-namespace {
 std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
-    bool use_fp16_acc_for_fc = false,
-    bool use_nnpi = false) {
+    bool use_fp16_acc,
+    bool use_nnpi) {
   std::unordered_map<std::string, std::string> fake_fp16_op_conversion_map = {
       {"FC", "Fp16FCAcc32NNPI"},
+      {"FbFCPacked", "Fp16FCAcc32NNPI"},
       {"SparseLengthsSum", "SparseLengthsSumFakeFP16AccFP16"},
       {"SparseLengthsWeightedSum", "SparseLengthsWeightedSumFakeFP16AccFP16"},
       {"SparseLengthsMean", "SparseLengthsMeanFakeFP16AccFP16"},
+      {"SparseLengthsSumFused4BitRowwise",
+       "SparseLengthsSumFused4BitRowwiseFakeFP16NNPI"},
+      {"SparseLengthsWeightedSumFused4BitRowwise",
+       "SparseLengthsWeightedSumFused4BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsSumFused8BitRowwise",
        "SparseLengthsSumFused8BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsWeightedSumFused8BitRowwise",
@@ -34,6 +38,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
+      {"SpatialBN", "SpatialBNFakeLoweredFp16NNPI"},
       {"Tanh", "TanhFakeFp16"},
       {"Relu", "ReluFakeFp16"},
       {"Add", "AddFakeFp16"},
@@ -43,8 +48,9 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
       {"Sum", "SumFakeFp16"},
       {"Sqr", "SqrFakeFp16"},
       {"LengthsSum", "LengthsSumFakeFp16"}};
-  if (use_fp16_acc_for_fc) {
+  if (use_fp16_acc) {
     fake_fp16_op_conversion_map["FC"] = "Fp16FCAcc16NNPI";
+    fake_fp16_op_conversion_map["FbFCPacked"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["BatchMatMul"] = "BatchMatMulFP16Acc16Fake";
   }
   if (use_nnpi) {
@@ -53,7 +59,6 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
   }
   return fake_fp16_op_conversion_map;
 }
-} // namespace
 
 void fakeFp16Transform(NetDef* net) {
   static const std::unordered_map<std::string, std::string>

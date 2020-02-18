@@ -270,8 +270,16 @@ if (MSVC)
     endif()
 
     # /bigobj increases number of sections in .obj file, which is needed to link
-    # against libaries in Python 2.7 under Windows
-    set(${flag_var} "${${flag_var}} /MP /bigobj")
+    # against libraries in Python 2.7 under Windows
+    # For Visual Studio generators, if /MP is not added, then we may need 
+    # to add /MP to the flags.
+    # For other generators like ninja, we don't need to add /MP because it is
+    # already handled by the generator itself.
+    if(CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT ${flag_var} MATCHES "/MP")
+      set(${flag_var} "${${flag_var}} /MP /bigobj")
+    else()
+      set(${flag_var} "${${flag_var}} /bigobj")
+    endif()
   endforeach(flag_var)
 
   foreach(flag_var
@@ -302,6 +310,8 @@ ENDIF(NOT MSVC)
 # applicable to mobile are disabled by this variable.
 if (ANDROID OR IOS)
   set(INTERN_BUILD_MOBILE ON)
+  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
@@ -333,7 +343,6 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_PYTORCH_QNNPACK ON)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)

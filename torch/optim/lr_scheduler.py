@@ -134,7 +134,6 @@ class _LRScheduler(object):
 
             def __exit__(self, type, value, traceback):
                 self.o._get_lr_called_within_step = False
-                return self
 
         with _enable_get_lr_call(self):
             if epoch is None:
@@ -436,12 +435,14 @@ class CosineAnnealingLR(_LRScheduler):
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
-        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
-        T_{cur} \neq (2k+1)T_{max};\\
-        \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
-        \cos(\frac{1}{T_{max}}\pi)}{2},
-        T_{cur} = (2k+1)T_{max}.\\
+        \begin{aligned}
+            \eta_t & = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1
+            + \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right),
+            & T_{cur} \neq (2k+1)T_{max}; \\
+            \eta_{t+1} & = \eta_{t} + \frac{1}{2}(\eta_{max} - \eta_{min})
+            \left(1 - \cos\left(\frac{1}{T_{max}}\pi\right)\right),
+            & T_{cur} = (2k+1)T_{max}.
+        \end{aligned}
 
     When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
     is defined recursively, the learning rate can be simultaneously modified

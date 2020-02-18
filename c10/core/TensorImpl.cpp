@@ -58,7 +58,7 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       numel_(0),
       data_type_(data_type),
       device_opt_(device_opt),
-      key_set_(key_set.add(DispatchKey::VariableTensorId)) {
+      key_set_(key_set) {
   if (!key_set.empty()) {
     AT_ASSERT(data_type.id() ==  caffe2::TypeIdentifier::uninitialized() ||
               device_opt_.has_value());
@@ -114,20 +114,7 @@ bool TensorImpl::compute_channels_last_contiguous() const {
 }
 
 bool TensorImpl::compute_strides_like_channels_last() const {
-  if (sizes_.size() == 4) {
-    int64_t min = 0;
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes_[d] != 1) {
-        if (strides_[d] > min) {
-          min = strides_[d];
-        } else {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-  return false;
+  return is_channels_last_strides(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {

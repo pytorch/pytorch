@@ -200,7 +200,7 @@ __global__ void cunn_SpatialSoftMaxForward(
     for (uint32_t inner_index = blockIdx.y * blockDim.y + threadIdx.y; inner_index < inner_size; inner_index += blockDim.y * gridDim.y) {
       const uint32_t data_offset = outer_offset + inner_index;
       ////////////////////////////////////////////////////////////
-      // These two blocks are really eqivalent, but specializing on
+      // These two blocks are really equivalent, but specializing on
       // blockDim.x == 1 makes the kernel faster when it's unused.
       // I didn't want to thread an extra template parameter, and nvcc
       // seems to be smart enough to hoist the if outside of the loops.
@@ -345,7 +345,7 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < C10_WARP_SIZE; ++i) {
         warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
-#if CUDA_VERSION >= 9000
+#ifndef __HIP_PLATFORM_HCC__
       __syncwarp(mask);
 #endif
       smem[lane] = warpVal;

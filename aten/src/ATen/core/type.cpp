@@ -1,9 +1,10 @@
-#include <ATen/core/jit_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/Dict.h>
-#include <iostream>
-#include <c10/macros/Macros.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/jit_type.h>
+#include <c10/macros/Macros.h>
+#include <ATen/core/grad_mode.h>
+#include <iostream>
 
 namespace c10 {
 
@@ -43,6 +44,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
+  } else if(t.kind() == TypeKind::RRefType) {
+    auto elem = t.cast<RRefType>()->getElementType();
+    out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
       out << "NamedTuple";
@@ -68,6 +72,48 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 AnyTypePtr AnyType::get() {
   static auto value = AnyType::create();
   return value;
+}
+
+template <typename T>
+static bool compatible_optional(c10::optional<T> e, T a) {
+  return !e.has_value() || e.value() == a;
+}
+
+static bool compatible_varying_shape(const VaryingShape& e, at::IntArrayRef a) {
+  if (!e.size().has_value()) {
+    return true;
+  }
+
+  if (e.size().value() != a.size()) {
+    return false;
+  }
+
+  auto ndim = a.size();
+  for (size_t i = 0; i < ndim; i++) {
+    if (!compatible_optional(e[i], a[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool TensorType::isCompatibleWithInCurrentExecutionContext(
+    at::Tensor& t) const {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the following
+  // `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
+  if (!t.defined()) {
+    return compatible_optional(undefined(), !t.defined());
+  }
+
+  return compatible_varying_shape(sizes(), t.sizes()) &&
+      (t.is_sparse() || t.is_mkldnn() ||
+       compatible_varying_shape(strides(), t.strides())) &&
+      compatible_optional(
+             requiresGrad(), t.requires_grad() && at::GradMode::is_enabled()) &&
+      compatible_optional(scalarType(), t.scalar_type()) &&
+      compatible_optional(device(), t.device());
 }
 
 TensorTypePtr TensorType::get() {
@@ -128,6 +174,10 @@ OptionalTypePtr OptionalType::ofTensor() {
   static auto value = OptionalType::create(TensorType::get());
   return value;
 }
+PyObjectTypePtr PyObjectType::get() {
+  static auto value = PyObjectType::create();
+  return value;
+}
 CapsuleTypePtr CapsuleType::get() {
   static auto value = CapsuleType::create();
   return value;
@@ -146,6 +196,20 @@ ListTypePtr ListType::ofFloats() {
 }
 ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
+  return value;
+}
+ListTypePtr ListType::ofStrings() {
+  static auto value = ListType::create(StringType::get());
+  return value;
+}
+
+AnyListTypePtr AnyListType::get() {
+  static auto value = AnyListType::create();
+  return value;
+}
+
+AnyTupleTypePtr AnyTupleType::get() {
+  static auto value = AnyTupleType::create();
   return value;
 }
 
@@ -324,6 +388,19 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->python_str();
+      return ss.str();
+    }
+  } else if (auto lt_formal = formal->cast<RRefType>()) {
+    if (auto lt_actual = actual->cast<RRefType>()) {
+      const auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match a rref to " << actual->python_str();
       return ss.str();
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
@@ -509,8 +586,12 @@ TupleType::TupleType(
 }
 
 bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
-  if (Type::isSubtypeOfExt(rhs_, why_not))
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
+  }
+  if (rhs_->kind() == AnyTupleType::Kind) {
+    return true;
+  }
   auto rhs = rhs_->cast<TupleType>();
   if (!rhs)
     return false;
@@ -537,6 +618,16 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
     return a->isSubtypeOfExt(b, why_not);
   });
+}
+
+bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyListType::Kind) {
+    return true;
+  }
+  return false;
 }
 
 bool TupleType::operator==(const Type& rhs) const {

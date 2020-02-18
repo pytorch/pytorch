@@ -8,6 +8,7 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/type_hashing.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/argument_spec.h"
@@ -39,18 +40,16 @@
 #include "torch/csrc/jit/scope.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/utils/memory.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
+#include <torch/script.h>
 #include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/script/ir_emitter.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/jit.h"
-#include <torch/script.h>
 
 #include "onnx/onnx_pb.h"
 
@@ -76,7 +75,6 @@ inline c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
-using namespace torch::autograd;
 
 template <typename T>
 std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
@@ -954,25 +952,21 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              push(stack, IValue());
-              return 0;
-            };
+          [](Stack& stack) {
+            push(stack, IValue());
+            return 0;
           },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              IValue a = pop(stack);
-              if (a.isNone()) {
-                push(stack, true);
-              } else {
-                push(stack, false);
-              }
-              return 0;
-            };
+          [](Stack& stack) {
+            IValue a = pop(stack);
+            if (a.isNone()) {
+              push(stack, true);
+            } else {
+              push(stack, false);
+            }
+            return 0;
           },
           aliasAnalysisFromSchema()),
   });

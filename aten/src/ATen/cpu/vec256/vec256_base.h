@@ -84,7 +84,7 @@ public:
   // a constexpr variable if we never odr-use it.  But it seems that some
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
-  // a variable is odr-used or not.  So best to just cut the probem at the root.
+  // a variable is odr-used or not.  So best to just cut the problem at the root.
   static constexpr int size() {
     return 32 / sizeof(T);
   }
@@ -164,6 +164,16 @@ public:
   }
   T& operator[](int idx) {
     return values[idx];
+  }
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    int mask = 0;
+    for (int i = 0; i < size(); ++ i) {
+      if (values[i] == static_cast<T>(0)) {
+        mask |= (1 << i);
+      }
+    }
+    return mask;
   }
   Vec256<T> map(T (*f)(T)) const {
     Vec256<T> ret;

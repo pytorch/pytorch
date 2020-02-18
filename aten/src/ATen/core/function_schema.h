@@ -184,7 +184,7 @@ struct FunctionSchema {
   std::vector<Argument> returns_;
   // if true then this schema takes an arbitrary number of additional arguments
   // after the argument specified in arguments
-  // currently this is used primarily to represent 'primtive' operators whose
+  // currently this is used primarily to represent 'primitive' operators whose
   // arguments are not checked by schema
   bool is_vararg_;
   bool is_varret_;

@@ -49,7 +49,7 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
-// Applies implict conversion from value trying to turn it into type
+// Applies implicit conversion from value trying to turn it into type
 // concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
@@ -88,20 +88,24 @@ Value* tryConvertToType(
 
   // implicit conversions
   if (allow_conversions) {
-    // Convert tensor to number
-    if (concrete_type->isSubtypeOf(NumberType::get()) &&
-        value->type()->isSubtypeOf(TensorType::get())) {
-      auto n = graph.createImplicitTensorToNum(concrete_type, value);
-      value = graph.insertNode(n)->setSourceRange(loc)->output();
-    }
-
-    if (*value->type() == *NumberType::get()) {
-      // convert Number to float
-      if (*concrete_type == *FloatType::get()) {
-        value = graph.insert(aten::Float, {value});
+    // Convert tensor or number to concrete int/float types
+    bool value_isa_tensor = value->type()->isSubtypeOf(TensorType::get());
+    bool value_equals_number = *value->type() == *NumberType::get();
+    bool concrete_float = *concrete_type == *FloatType::get();
+    bool concrete_int = *concrete_type == *IntType::get();
+    bool concrete_number = *concrete_type == *NumberType::get();
+    if (value_isa_tensor) {
+      if (concrete_float) {
+        value = graph.insert(aten::FloatImplicit, {value});
+      } else if (concrete_int) {
+        value = graph.insert(aten::IntImplicit, {value});
+      } else if (concrete_number) {
+        value = graph.insert(aten::ScalarImplicit, {value});
       }
-      // convert Number to int
-      else if (*concrete_type == *IntType::get()) {
+    } else if (value_equals_number) {
+      if (concrete_float) {
+        value = graph.insert(aten::Float, {value});
+      } else if (concrete_int) {
         value = graph.insert(aten::Int, {value});
       }
     }
@@ -256,7 +260,7 @@ static bool varargsCanBeUsedAsList(
   // otherwise a single int is a valid input
   bool arg_is_broadcasting_list = bool(arg.N());
 
-  return is_last_argument && argument_is_list & !arg_is_broadcasting_list &&
+  return is_last_argument && argument_is_list && !arg_is_broadcasting_list &&
       !typevar_list;
 }
 
@@ -549,7 +553,7 @@ static Value* emitBuiltinNode(
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
-  getOperation(n);
+  n->getOperation();
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }

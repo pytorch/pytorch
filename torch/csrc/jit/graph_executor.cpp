@@ -477,7 +477,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  ExecutionPlan plan = getPlanFor(stack);
+  ExecutionPlan plan =
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -494,8 +495,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  ExecutionPlan getPlanFor(Stack& stack) override {
-   return getGraphExecutorOptimize() ? getOrCompile(stack)
+  ExecutionPlan getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+      override {
+    return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
 
@@ -579,7 +581,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 4. If this graph will be differentiated, we need to slice out the
     //          symbolically differentiable subgraphs for further optimizations.
     // Phase 5. Apply non-differentiable optimizations to the graphs we've found
-    //          (or the whole grpah if we know we won't need its derivative).
+    //          (or the whole graph if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,
@@ -632,8 +634,14 @@ void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
 }
 
-ExecutionPlan GraphExecutor::getPlanFor(Stack& inputs) {
-  return pImpl->getPlanFor(inputs);
+size_t GraphExecutor::getDefaultNumBailOuts() {
+  return getProfilingMode() ? getBailoutDepth().load() : 0;
+}
+
+ExecutionPlan GraphExecutor::getPlanFor(
+    Stack& inputs,
+    size_t remaining_bailout_depth) {
+  return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {
@@ -700,9 +708,16 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 }
 
 void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+  // Run custom passes that different backends can register.
+  for (const auto& pass : getCustomPreFusionPasses()) {
+    pass(graph);
+  }
+
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
-  DecomposeOps(graph);
+  if (!getProfilingMode()) {
+    DecomposeOps(graph);
+  }
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
@@ -716,9 +731,8 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   FuseGraph(graph);
 
-  // Run custom passes that different backends can register.
-  // This is done last to give internal optimization passes priority.
-  for (const auto& pass : getCustomPasses()) {
+  // Run custom post-fusion passes
+  for (const auto& pass : getCustomPostFusionPasses()) {
     pass(graph);
   }
 }

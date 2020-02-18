@@ -28,7 +28,7 @@
  * are computed from the input and the output size;
  *
  *
- * When the scales are infered from the input and output sizes,
+ * When the scales are inferred from the input and output sizes,
  * we view each pixel as an area, idx + 0.5 as its center index.
  * Here is an example formula in 1D case.
  * if align_corners: center of two corner pixel areas are preserved,
@@ -60,10 +60,11 @@ static inline void upsample_1d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 3,
-        "Non-empty 3D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.size(1) != 0 && input.size(2) != 0) && input.dim() == 3,
+                "Non-empty 3D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 3, 0, nbatch);
     check_dim_size(grad_output, 3, 1, nchannels);
@@ -95,10 +96,14 @@ static inline void upsample_2d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 4,
-        "Non-empty 4D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 ||
+                 (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)
+                 ) &&
+                input.dim() == 4,
+                "Non-empty 4D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 4, 0, nbatch);
     check_dim_size(grad_output, 4, 1, nchannels);
@@ -136,10 +141,13 @@ static inline void upsample_3d_shape_check(
       ")");
 
   if (input.defined()) {
+    // Allow for empty batch size but not other dimensions
+    bool valid_empty = input.size(0) == 0 && input.size(1) != 0 &&
+      input.size(2) != 0 && input.size(3) != 0 && input.size(4) != 0;
     TORCH_CHECK(
-        input.numel() != 0 && input.dim() == 5,
-        "Non-empty 5D data tensor expected but got a tensor with sizes ",
-        input.sizes());
+                (input.numel() != 0 || valid_empty) && input.dim() == 5,
+                "Non-empty 5D data tensor expected but got a tensor with sizes ",
+                input.sizes());
   } else if (grad_output.defined()) {
     check_dim_size(grad_output, 5, 0, nbatch);
     check_dim_size(grad_output, 5, 1, nchannels);

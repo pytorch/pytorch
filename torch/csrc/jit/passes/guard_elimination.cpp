@@ -158,7 +158,7 @@ struct GuardElimination {
   }
 
   // `checkInputs` check the invariants specified in `removableGuard`
-  // on inputs to `n`. The invarints must hold, or an input must
+  // on inputs to `n`. The invariants must hold, or an input must
   // be a `prim::Constant` or be of `NumberType` or be included
   // as an exception in `except`
   bool checkInputs(Node *n, const std::unordered_set<size_t> &except) {
@@ -247,6 +247,20 @@ private:
     case aten::erf:
     case aten::erfc:
       return checkInputs(n, no_exceptions);
+    case aten::slice:
+      return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+             // check that the dimension argument is constant
+             n->input(1)->node()->kind() == prim::Constant &&
+             // the start offset is constant
+             n->input(2)->node()->kind() == prim::Constant &&
+             // the end offset is constant
+             n->input(3)->node()->kind() == prim::Constant &&
+             // the stride is constant
+             n->input(4)->node()->kind() == prim::Constant;
+    case aten::unsqueeze:
+     // check that the dimension argument is constant
+     return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+            n->input(1)->node()->kind() == prim::Constant;
     case aten::cat:
       // check that the dimension argument is constant
       return n->input(1)->node()->kind() == prim::Constant &&

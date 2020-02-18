@@ -31,11 +31,11 @@ void _convolution_kernel(const c10::OperatorHandle& op, Stack* stack) {
       (std::move(peek(*stack, 0, 12))).toTensor(),
       (std::move(peek(*stack, 1, 12))).toTensor(),
       toOptionalTensor((std::move(peek(*stack, 2, 12)))),
-      (std::move(peek(*stack, 3, 12))).toIntListRef(),
-      (std::move(peek(*stack, 4, 12))).toIntListRef(),
-      (std::move(peek(*stack, 5, 12))).toIntListRef(),
+      (std::move(peek(*stack, 3, 12))).toIntVector(),
+      (std::move(peek(*stack, 4, 12))).toIntVector(),
+      (std::move(peek(*stack, 5, 12))).toIntVector(),
       (std::move(peek(*stack, 6, 12))).toBool(),
-      (std::move(peek(*stack, 7, 12))).toIntListRef(),
+      (std::move(peek(*stack, 7, 12))).toIntVector(),
       (std::move(peek(*stack, 8, 12))).toInt(),
       (std::move(peek(*stack, 9, 12))).toBool(),
       (std::move(peek(*stack, 10, 12))).toBool(),
@@ -53,9 +53,9 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
         (std::move(peek(*stack, 0, 7))).toTensor(),
         (std::move(peek(*stack, 1, 7))).toTensor(),
         toOptionalTensor((std::move(peek(*stack, 2, 7)))),
-        (std::move(peek(*stack, 3, 7))).toIntListRef(),
-        (std::move(peek(*stack, 4, 7))).toIntListRef(),
-        (std::move(peek(*stack, 5, 7))).toIntListRef(),
+        (std::move(peek(*stack, 3, 7))).toIntVector(),
+        (std::move(peek(*stack, 4, 7))).toIntVector(),
+        (std::move(peek(*stack, 5, 7))).toIntVector(),
         (std::move(peek(*stack, 6, 7))).toInt()
         );
     drop(*stack, 7);
@@ -67,7 +67,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
   at::AutoNonVariableTypeMode non_var_type_mode(true);
 #endif
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
       );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -75,7 +75,7 @@ void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
-      (std::move(peek(*stack, 1, 2))).toIntListRef()
+      (std::move(peek(*stack, 1, 2))).toIntVector()
   );
   drop(*stack, 2);
   pack(*stack, std::move(result_));
@@ -83,7 +83,7 @@ void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
 void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::cat(
-      (std::move(peek(*stack, 0, 2))).toTensorListRef(),
+      (std::move(peek(*stack, 0, 2))).toTensorVector(),
       (std::move(peek(*stack, 1, 2))).toInt()
   );
   drop(*stack, 2);
@@ -116,6 +116,17 @@ void softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pack(*stack, std::move(result_));
 }
 
+void upsample_nearest2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto result_ = at::upsample_nearest2d(
+    (std::move(peek(*stack, 0, 4))).toTensor(),
+    (std::move(peek(*stack, 1, 4))).toIntVector(),
+    (std::move(peek(*stack, 2, 4))).toOptional<double>(),
+    (std::move(peek(*stack, 3, 4))).toOptional<double>()
+  );
+  drop(*stack, 4);
+  pack(*stack, std::move(result_));
+}
+
 void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   drop(*stack, 1);
   pop(*stack);
@@ -135,6 +146,12 @@ static auto registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
     return at::add(a, b, c);
+  })
+).op(
+  "_aten::sub.Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](at::Tensor a, at::Tensor b, at::Scalar c) -> at::Tensor {
+    return at::sub(a, b, c);
   })
 ).op(
   "_aten::add.Scalar",
@@ -348,6 +365,9 @@ static auto registry = torch::RegisterOperators().op(
      return at::mul(self, other);
   })
 ).op(
+  "_aten::upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor",
+  torch::RegisterOperators::options().kernel<&upsample_nearest2d_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
   "_aten::tanh(Tensor self) -> Tensor",
   torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
   [](const Tensor & self) {
@@ -371,6 +391,12 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&softmax_kernel>(c10::DispatchKey::CPUTensorId)
+).op(
+  "_aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor& self, Scalar beta, Scalar threshold) {
+    return at::softplus(self, beta, threshold);
+  })
 ).op(
   "_aten::warn() -> void",
   torch::RegisterOperators::options().catchAllKernel<&warn_kernel>()

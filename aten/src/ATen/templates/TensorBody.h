@@ -204,9 +204,14 @@ class CAFFE2_API Tensor {
     return impl_->is_non_overlapping_and_dense();
   }
 
-  at::MemoryFormat suggest_memory_format() const {
-    if (!is_mkldnn() && !is_sparse() && !impl_->is_contiguous() && impl_->is_strides_like_channels_last()) {
-      return at::MemoryFormat::ChannelsLast;
+  at::MemoryFormat suggest_memory_format(
+      bool channels_last_strides_exact_match = false) const {
+    // Setting channels_last_strides_exact_match to true forces function to
+    // check 0,1 - sized dimention strides.
+    if (!is_mkldnn() && !is_sparse() && impl_->is_strides_like_channels_last()) {
+      if (!channels_last_strides_exact_match || get_channels_last_strides(sizes()) == strides()) {
+        return at::MemoryFormat::ChannelsLast;
+      }
     }
     return at::MemoryFormat::Contiguous;
   }
@@ -498,7 +503,7 @@ public:
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
-  const Tensor& base() const;
+  const Tensor& _base() const;
 
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

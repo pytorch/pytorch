@@ -29,7 +29,7 @@
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
-#include <torch/csrc/autograd/generated/python_nn_functions.h>
+#include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -741,6 +741,16 @@ PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  // Automatically translate errors thrown from pybind11 functions
+  py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+    try {
+      if (e) {
+        std::rethrow_exception(e);
+      }
+    }
+    CATCH_TH_ERRORS()
+  });
 
   auto py_module = py::reinterpret_borrow<py::module>(module);
   py_module.def("_demangle", &c10::demangle);

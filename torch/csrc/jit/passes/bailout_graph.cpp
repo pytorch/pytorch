@@ -290,7 +290,7 @@ struct BailOutInserter {
         const auto& live_inputs = liveness_sets_[*it];
 
         // guarded inputs come first
-        // currently, there's always one guaded input
+        // currently, there's always one guarded input
         bailout_node->addInput(it->input());
         for (auto li : live_inputs) {
           // Guarded inputs have already been added

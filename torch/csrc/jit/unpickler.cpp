@@ -58,22 +58,26 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
+      case PyObjectType::Kind:
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
+      case RRefType::Kind:
         // no op, there is nothing to tag
         break;
       case AnyType::Kind:
+      case AnyListType::Kind:
+      case AnyTupleType::Kind:
         // if Any type does show up, we no longer have a way to precisely
         // recover the type information since the w.value may be an untagged
         // List/Dict. We should prevent objects being serialized from having the
         // Any type and if we do allow it in functions limit it to non-heap
         // locations.
         TORCH_INTERNAL_ASSERT(
-            false, "AnyType should not show up in the static type of objects");
+            false, "AnyType, AnyTupleType, and AnyListType should not show up in the static type of objects");
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -100,11 +104,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case ListType::Kind: {
         // specialized lists do not need their type refined, so we can exit
         // early here
-        if (!w.value.isGenericList()) {
+        if (!w.value.isList()) {
           break;
         }
         auto elem_type = w.static_type->cast<ListType>()->getElementType();
-        auto lst = w.value.toGenericList();
+        auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue& item : lst) {
           Work elem = {elem_type, item};
@@ -217,7 +221,7 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
 template <typename T>
 static std::vector<T> convertList(const IValue& v) {
   return fmap(
-      v.toGenericListRef(), [](const IValue& elem) { return elem.to<T>(); });
+      v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -438,7 +442,7 @@ void Unpickler::readGlobal(
       });
     } else if (class_name == "IntList") {
       globals_.emplace_back([this] {
-        stack_.back().toGenericList().unsafeSetElementType(IntType::get());
+        stack_.back().toList().unsafeSetElementType(IntType::get());
       });
     } else {
       AT_ERROR("Unknown pickler class id", class_name);
@@ -471,7 +475,7 @@ void Unpickler::readGlobal(
       // Unpickle a list specialization (e.g. List[Tensor], List[int], ...)
       globals_.emplace_back([this, elem_type] {
         // Pop reduce arg off the stack
-        auto data = stack_.back().toTuple()->elements().at(0).toGenericList();
+        auto data = stack_.back().toTuple()->elements().at(0).toList();
         stack_.pop_back();
         data.unsafeSetElementType(elem_type);
         stack_.emplace_back(std::move(data));
@@ -685,8 +689,8 @@ void Unpickler::readList(IValue list_ivalue) {
     for (const auto& elem : elements) {
       list.push_back(elem.toBool());
     }
-  } else if (list_ivalue.isGenericList()) {
-    auto list = std::move(list_ivalue).toGenericList();
+  } else if (list_ivalue.isList()) {
+    auto list = std::move(list_ivalue).toList();
     list.reserve(num_elements);
     for (const auto& elem : elements) {
       list.emplace_back(elem);

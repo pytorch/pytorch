@@ -865,6 +865,25 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_t
   EXPECT_FALSE(called_autograd);
 }
 
+TEST(OperatorRegistrationTest, xlaPreAutogradOverridesAutogradKernel) {
+  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
+    .impl_unboxedOnlyKernel<decltype(nonautograd_kernel), &nonautograd_kernel>(DispatchKey::XLAPreAutograd)
+    .impl_unboxedOnlyKernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::VariableTensorId));
+
+  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(c10::DispatchKeySet{DispatchKey::XLATensorId, DispatchKey::XLAPreAutograd}));
+  EXPECT_TRUE(called_nonautograd);
+  EXPECT_FALSE(called_autograd);
+
+  called_nonautograd = called_autograd = false;
+  c10::Dispatcher::singleton().callUnboxed<void, Tensor>(*op, dummyTensor(DispatchKey::CPUTensorId));
+  EXPECT_TRUE(called_autograd);
+  EXPECT_FALSE(called_nonautograd);
+}
+
 /**
  * This is used to check that a given type works correctly when passed as input
  * to or as output from a kernel.
@@ -1066,7 +1085,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool[] a) -> bool[]");
   testArgTypes<c10::List<std::string>>::test(
     c10::List<std::string>(), [] (const c10::List<std::string>& v) {EXPECT_EQ(0, v.size());},
-    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    c10::List<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
     "(str[] a) -> str[]");
 
 
@@ -1086,9 +1105,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<c10::List<std::string>>::test(
     c10::List<std::string>({"first", "second"}), [] (const c10::List<std::string>& v) {expectListEquals({"first", "second"}, v);},
     c10::List<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<c10::List<Tensor>>::test(
@@ -1116,7 +1135,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   //Note: vector<bool> is not supported, use List<bool> instead.
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>(), [] (const std::vector<std::string>& v) {EXPECT_EQ(0, v.size());},
-    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toGenericListRef().size());},
+    std::vector<std::string>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
     "(str[] a) -> str[]");
 
 
@@ -1133,9 +1152,9 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
   testArgTypes<std::vector<std::string>>::test<TestLegacyAPI>(
     std::vector<std::string>({"first", "second"}), [] (const std::vector<std::string>& v) {expectListEquals({"first", "second"}, v);},
     std::vector<std::string>({"first", "second"}), [] (const IValue& v) {
-      EXPECT_EQ(2, v.toGenericListRef().size());
-      EXPECT_EQ("first", v.toGenericListRef()[0].toStringRef());
-      EXPECT_EQ("second", v.toGenericListRef()[1].toStringRef());
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
     },
     "(str[] a) -> str[]");
   testArgTypes<std::vector<Tensor>>::test<TestLegacyAPI>(
