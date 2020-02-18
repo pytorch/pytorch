@@ -19,9 +19,14 @@ CMAKE_ARGS=()
 
 if [ -n "${BUILD_PYTORCH_MOBILE:-}" ]; then
   CMAKE_ARGS+=("-DBUILD_CAFFE2_MOBILE=OFF")
+  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
   CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
   CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
+  # custom build with selected ops
+  if [ -n "${SELECTED_OP_LIST}" ]; then
+    CMAKE_ARGS+=("-DSELECTED_OP_LIST=${SELECTED_OP_LIST}")
+  fi
   # bitcode
   if [ "${ENABLE_BITCODE:-}" == '1' ]; then
     CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
@@ -59,6 +64,12 @@ if [ -n "${IOS_PLATFORM:-}" ]; then
   if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
       # iOS Simulator build is not supported by NNPACK
       CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
+  elif [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
+      # enable bitcode by default for watchos
+      CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
+      CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
+      # disable the QNNPACK
+      CMAKE_ARGS+=("-DUSE_PYTORCH_QNNPACK=OFF")
   fi
 else
   # IOS_PLATFORM is not set, default to OS, which builds iOS.

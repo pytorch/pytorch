@@ -136,7 +136,7 @@ TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(AdaptiveAvgPool3d, AdaptiveAvgPool3dFuncO
 
 // ============================================================================
 
-/// Options for a `D`-dimensional maxunpool functional and module.
+/// Options for a `D`-dimensional maxunpool module.
 template <size_t D>
 struct MaxUnpoolOptions {
   MaxUnpoolOptions(ExpandingArray<D> kernel_size)
@@ -161,19 +161,80 @@ using MaxUnpool2dOptions = MaxUnpoolOptions<2>;
 /// `MaxUnpoolOptions` specialized for 3-D maxunpool.
 using MaxUnpool3dOptions = MaxUnpoolOptions<3>;
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool1d, MaxUnpool1dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool2d, MaxUnpool2dFuncOptions)
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(MaxUnpool3d, MaxUnpool3dFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+/// Options for a `D`-dimensional maxunpool functional.
+template <size_t D>
+struct MaxUnpoolFuncOptions {
+  MaxUnpoolFuncOptions(ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size), stride_(kernel_size) {}
+
+  /// the size of the window to take a max over
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+
+  /// the stride of the window. Default value is `kernel_size
+  TORCH_ARG(ExpandingArray<D>, stride);
+
+  /// implicit zero padding to be added on both sides
+  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+
+  /// the targeted output size
+  TORCH_ARG(c10::optional<std::vector<int64_t>>, output_size) = c10::nullopt;
+};
+
+/// `MaxUnpoolFuncOptions` specialized for 1-D maxunpool.
+using MaxUnpool1dFuncOptions = MaxUnpoolFuncOptions<1>;
+
+/// `MaxUnpoolFuncOptions` specialized for 2-D maxunpool.
+using MaxUnpool2dFuncOptions = MaxUnpoolFuncOptions<2>;
+
+/// `MaxUnpoolFuncOptions` specialized for 3-D maxunpool.
+using MaxUnpool3dFuncOptions = MaxUnpoolFuncOptions<3>;
+
+} // namespace functional
+
+// ============================================================================
+
+/// Options for a `D`-dimensional fractional maxpool functional and module.
+template <size_t D>
+struct FractionalMaxPoolOptions {
+  FractionalMaxPoolOptions(ExpandingArray<D> kernel_size)
+      : kernel_size_(kernel_size) {}
+
+  /// the size of the window to take a max over
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+
+  /// the target output size of the image
+  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_size) = c10::nullopt;
+
+  /// If one wants to have an output size as a ratio of the input size, this option can be given.
+  /// This has to be a number or tuple in the range (0, 1)
+  using ExpandingArrayDouble=torch::ExpandingArray<D,double>;
+  TORCH_ARG(c10::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
+
+  TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
+};
+
+/// `FractionalMaxPoolOptions` specialized for 2-D maxpool.
+using FractionalMaxPool2dOptions = FractionalMaxPoolOptions<2>;
+
+/// `FractionalMaxPoolOptions` specialized for 3-D maxpool.
+using FractionalMaxPool3dOptions = FractionalMaxPoolOptions<3>;
+
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool2d, FractionalMaxPool2dFuncOptions)
+TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(FractionalMaxPool3d, FractionalMaxPool3dFuncOptions)
 
 // ============================================================================
 
 /// Options for a `D`-dimensional lppool functional and module.
 template <size_t D>
 struct LPPoolOptions {
-  LPPoolOptions(float norm_type, ExpandingArray<D> kernel_size)
+  LPPoolOptions(double norm_type, ExpandingArray<D> kernel_size)
       : norm_type_(norm_type), kernel_size_(kernel_size), stride_(kernel_size) {}
 
-  TORCH_ARG(float, norm_type);
+  TORCH_ARG(double, norm_type);
 
   // the size of the window to take an average over
   TORCH_ARG(ExpandingArray<D>, kernel_size);

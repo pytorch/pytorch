@@ -16,13 +16,15 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Ensure consistent CircleCI YAML config
         run: |
           pip install -r requirements.txt
           cd .circleci && ./ensure-consistency.py
       - name: Ensure Docker version is correctly deployed
-        run: .circleci/validate-docker-version.py
+        run: |
+          pip install pyyaml
+          .circleci/validate-docker-version.py
       - name: Shellcheck Jenkins scripts
         run: |
           sudo apt-get install -y shellcheck
@@ -51,7 +53,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Checkout PR tip
         run: |
           set -eux
@@ -65,7 +67,8 @@ jobs:
       - name: Run flake8
         run: |
           set -eux
-          pip install flake8
+          pip install flake8 flake8-mypy flake8-bugbear flake8-comprehensions flake8-executable flake8-pyi mccabe pycodestyle pyflakes
+          flake8 --version
           flake8 --exit-zero > ${GITHUB_WORKSPACE}/flake8-output.txt
           cat ${GITHUB_WORKSPACE}/flake8-output.txt
       - name: Add annotations
@@ -87,7 +90,7 @@ jobs:
           python-version: 2.x
           architecture: x64
       - name: Fetch PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Checkout PR tip
         run: |
           set -eux
@@ -126,7 +129,7 @@ jobs:
           python-version: 3.x
           architecture: x64
       - name: Checkout PyTorch
-        uses: actions/checkout@master
+        uses: actions/checkout@v1
       - name: Checkout PR tip
         run: |
           set -eux
@@ -150,7 +153,7 @@ jobs:
           # Install dependencies
           pip install pyyaml
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-          sudo apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-8 main"
+          sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-8 main"
           sudo apt-get update
           sudo apt-get install -y clang-tidy-8
           sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-8 1000

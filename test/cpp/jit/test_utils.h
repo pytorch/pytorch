@@ -35,7 +35,7 @@ at::Tensor t_def(at::Tensor x);
 
 // given the difference of output vs expected tensor, check whether the
 // difference is within a relative tolerance range. This is a standard way of
-// matching tensor values upto certain precision
+// matching tensor values up to certain precision
 bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs);
 bool almostEqual(const at::Tensor& a, const at::Tensor& b);
 

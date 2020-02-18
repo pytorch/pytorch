@@ -23,7 +23,6 @@ TupleTypePtr Tuple::type() const {
 
 } // namespace ivalue
 
-
 TypePtr IValue::type() const {
   switch(tag) {
     case Tag::None:
@@ -36,14 +35,6 @@ TypePtr IValue::type() const {
       return IntType::get();
     case Tag::Bool:
       return BoolType::get();
-    case Tag::IntList:
-      return ListType::ofInts();
-    case Tag::DoubleList:
-      return ListType::ofFloats();
-    case Tag::BoolList:
-      return ListType::ofBools();
-    case Tag::TensorList:
-      return ListType::ofTensors();
     case Tag::String:
       return StringType::get();
     case Tag::Blob:
@@ -53,13 +44,17 @@ TypePtr IValue::type() const {
       return DictType::create(d.keyType(), d.valueType());
     }
     case Tag::GenericList:
-      return ListType::create(toGenericList().elementType());
+      return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    case Tag::RRef:
+      return toRRef()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
+    case Tag::PyObject:
+      return PyObjectType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
@@ -72,36 +67,44 @@ TypePtr IValue::type() const {
 }
 namespace {
 
-template<class T>
-std::ostream& printList(std::ostream & out, const c10::List<T> &v,
-  const std::string start, const std::string finish) {
+using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
+
+template <class T>
+std::ostream& printList(
+    std::ostream& out,
+    const T& list,
+    const std::string start,
+    const std::string finish,
+    IValueFormatter formatter) {
   out << start;
-  for(size_t i = 0; i < v.size(); ++i) {
-    if(i > 0)
+  for (size_t i = 0; i < list.size(); ++i) {
+    if (i > 0){
       out << ", ";
-    // make sure we use ivalue printing, and not default printing for the element type
-    out << IValue(v.get(i));
+    }
+    formatter(out, IValue(list[i]));
   }
   out << finish;
   return out;
 }
 
-template<class T>
-std::ostream& printList(std::ostream & out, const std::vector<T> &v,
-  const std::string start, const std::string finish) {
-  out << start;
-  for(size_t i = 0; i < v.size(); ++i) {
-    if(i > 0)
-      out << ", ";
-    // make sure we use ivalue printing, and not default printing for the element type
-    out << IValue(v[i]);
+// Properly disambiguate the type of an empty list
+std::ostream& printMaybeAnnotatedList(
+    std::ostream& out,
+    const IValue& the_list,
+    IValueFormatter formatter) {
+  if (the_list.toListRef().size() == 0) {
+    out << "annotate(" << the_list.type()->python_str() << ", [])";
+  } else {
+    return printList(out, the_list.toListRef(), "[", "]", formatter);
   }
-  out << finish;
   return out;
 }
 
-template<typename Dict>
-std::ostream& printDict(std::ostream& out, const Dict& v) {
+template <typename Dict>
+std::ostream& printDict(
+    std::ostream& out,
+    const Dict& v,
+    IValueFormatter formatter) {
   out << "{";
 
   bool first = true;
@@ -109,17 +112,81 @@ std::ostream& printDict(std::ostream& out, const Dict& v) {
     if (!first) {
       out << ", ";
     }
-    out << pair.key() << ": " << pair.value();
+
+    formatter(out, pair.key());
+    out << ": ";
+    formatter(out, pair.value());
     first = false;
   }
 
   out << "}";
   return out;
 }
+}
 
-} // anonymous namespace
+std::ostream& IValue::repr(
+    std::ostream& out,
+    std::function<bool(std::ostream&, const IValue& v)>
+        customFormatter) const {
+  // First check if the caller has provided a custom formatter. Use that if possible.
+  if (customFormatter(out, *this)) {
+    return out;
+  }
+
+  const IValue& v = *this;
+  // continue to use custom formatter in recursion
+  auto formatter = [&](std::ostream& out, const IValue& input) {
+    input.repr(out, customFormatter);
+  };
+  switch (v.tag) {
+    case IValue::Tag::None:
+      return out << v.toNone();
+    case IValue::Tag::Double: {
+      double d = v.toDouble();
+      int c = std::fpclassify(d);
+      if (c == FP_NORMAL || c == FP_ZERO) {
+        int64_t i = int64_t(d);
+        if (double(i) == d) {
+          return out << i << ".";
+        }
+      }
+      auto orig_prec = out.precision();
+      return out << std::setprecision(std::numeric_limits<double>::max_digits10)
+                 << v.toDouble() << std::setprecision(orig_prec);
+    }
+    case IValue::Tag::Int:
+      return out << v.toInt();
+    case IValue::Tag::Bool:
+      return out << (v.toBool() ? "True" : "False");
+    case IValue::Tag::Tuple: {
+      const auto& elements = v.toTuple()->elements();
+      const auto& finish = elements.size() == 1 ? ",)" : ")";
+      return printList(out, elements, "(", finish, formatter);
+    }
+    case IValue::Tag::String:
+      c10::printQuotedString(out, v.toStringRef());
+      return out;
+    case IValue::Tag::GenericList: {
+      return printMaybeAnnotatedList(out, *this, formatter);
+    }
+    case IValue::Tag::Device: {
+      std::stringstream device_stream;
+      device_stream << v.toDevice();
+      out << "torch.device(";
+      c10::printQuotedString(out, device_stream.str());
+      return out << ")";
+    }
+    case IValue::Tag::GenericDict:
+      return printDict(out, v.toGenericDict(), formatter);
+    default:
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
+  }
+}
 
 std::ostream& operator<<(std::ostream & out, const IValue & v) {
+  auto formatter = [&](std::ostream& out, const IValue& v) {
+    out << v;
+  };
   switch(v.tag) {
     case IValue::Tag::None:
       return out << v.toNone();
@@ -143,24 +210,21 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toInt();
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
-    case IValue::Tag::Tuple:
-      return printList(out, v.toTuple()->elements(), "(", ")");
-    case IValue::Tag::IntList:
-      return printList(out, v.toIntList(), "[", "]");
-    case IValue::Tag::DoubleList:
-      return printList(out, v.toDoubleList(), "[", "]");
-    case IValue::Tag::BoolList:
-      return printList(out, v.toBoolList(), "[", "]");
+    case IValue::Tag::Tuple: {
+      const auto& elements = v.toTuple()->elements();
+      const auto& finish = elements.size() == 1 ? ",)" : ")";
+      return printList(out, elements, "(", finish, formatter);
+    }
     case IValue::Tag::String:
       return out << v.toStringRef();
-    case IValue::Tag::TensorList:
-      return printList(out, v.toTensorList(), "[", "]");
     case IValue::Tag::Blob:
       return out << *v.toBlob();
     case IValue::Tag::Capsule:
       return out << "Capsule";
     case IValue::Tag::GenericList:
-      return printList(out, v.toGenericList(), "[", "]");
+      return printList(out, v.toList(), "[", "]", formatter);
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -168,12 +232,17 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Device:
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
-      return printDict(out, v.toGenericDict());
-    case IValue::Tag::Object:
+      return printDict(out, v.toGenericDict(), formatter);
+    case IValue::Tag::PyObject: {
+      auto py_obj = v.toPyObject();
+      return out << "<PyObject at" << py_obj << ">";
+    }
+    case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
+    }
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }

@@ -176,8 +176,8 @@ namespace {
                                     GridSamplerInterpolation interpolation_mode,
                                     GridSamplerPadding padding_mode,
                                     bool align_corners) {
-    auto grad_input = at::zeros_like(input, at::MemoryFormat::Contiguous);
-    auto grad_grid = at::empty_like(grid, at::MemoryFormat::Contiguous);
+    auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     // If interpolation mode is Nearest, then grad_grid is not filled in the
     // loop below.
     if (interpolation_mode == GridSamplerInterpolation::Nearest) {

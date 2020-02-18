@@ -7,11 +7,13 @@
 #include <mutex>
 
 #include <c10/util/Exception.h>
+#include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/script/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
+#include <ATen/detail/FunctionTraits.h>
 
 /// NOTE [ Conversion Cpp Python Warning ]
 /// The warning handler cannot set python warnings immediately
@@ -40,10 +42,12 @@
 #define HANDLE_TH_ERRORS                                             \
   try {                                                              \
     torch::PyWarningHandler __enforce_warning_buffer;                \
-    try{
+    try {
 
+// Only catch torch-specific exceptions
 #define CATCH_TH_ERRORS(retstmnt)                                    \
     catch (python_error & e) {                                       \
+      e.restore();                                                   \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
@@ -60,7 +64,10 @@
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg.c_str());                 \
       retstmnt;                                                      \
-    }                                                                \
+    }
+
+#define CATCH_ALL_ERRORS(retstmnt)                                   \
+    CATCH_TH_ERRORS(retstmnt)                                        \
     catch (const std::exception& e) {                                \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
@@ -69,46 +76,30 @@
 
 #define END_HANDLE_TH_ERRORS_PYBIND                                      \
     }                                                                    \
-    catch (py::error_already_set & e) {                                  \
-      /* Unpack already stored error to be detectable by warning code */ \
-      e.restore();                                                       \
+    catch(...) {                                                         \
+      __enforce_warning_buffer.set_in_exception();                       \
       throw;                                                             \
     }                                                                    \
-    catch (py::builtin_exception & e) {                                  \
-      /* Unpack already stored error to be detectable by warning code */ \
-      e.set_error();                                                     \
-      throw;                                                             \
-    }                                                                    \
-    catch (torch::jit::JITException & e) {                               \
-      /* Special case for JITException that are explicitly unpacked by */\
-      /* pybind. Set a temporary python error to be detectable by */     \
-      /* warning code */                                                 \
-      PyErr_SetString(PyExc_RuntimeError, "JITException");               \
-      throw;                                                             \
-    }                                                                    \
-    CATCH_TH_ERRORS(throw)                                               \
   }                                                                      \
   catch (py::error_already_set & e) {                                    \
-    /* Repack already stored error */                                    \
-    throw py::error_already_set();                                       \
-  }                                                                      \
-  catch (py::builtin_exception & e) {                                    \
-    /* Repack already stored error */                                    \
-    throw py::error_already_set();                                       \
-  }                                                                      \
-  catch (torch::jit::JITException & e) {                                 \
-    /* Special case for JITException that are explicitly unpacked by */  \
-    /* pybind. Clear the temporary error message we used */              \
-    PyErr_Clear();                                                       \
     throw;                                                               \
   }                                                                      \
-  CATCH_TH_ERRORS(throw py::error_already_set())
+  catch (py::builtin_exception & e) {                                    \
+    throw;                                                               \
+  }                                                                      \
+  catch (torch::jit::JITException & e) {                                 \
+    throw;                                                               \
+  }                                                                      \
+  CATCH_ALL_ERRORS(throw py::error_already_set())
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
     }                                                                \
-    CATCH_TH_ERRORS(return retval)                                   \
+    catch(...) {                                                     \
+      __enforce_warning_buffer.set_in_exception();                   \
+      throw;                                                         \
+    }                                                                \
   }                                                                  \
-  CATCH_TH_ERRORS(return retval)
+  CATCH_ALL_ERRORS(return retval)
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
@@ -124,7 +115,7 @@ struct python_error : public std::exception {
         value(other.value),
         traceback(other.traceback),
         message(other.message) {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
     Py_XINCREF(traceback);
@@ -142,7 +133,7 @@ struct python_error : public std::exception {
 
   ~python_error() override {
     if (type || value || traceback) {
-      AutoGIL gil;
+      pybind11::gil_scoped_acquire gil;
       Py_XDECREF(type);
       Py_XDECREF(value);
       Py_XDECREF(traceback);
@@ -155,7 +146,7 @@ struct python_error : public std::exception {
 
   void build_message() {
     // Ensure we have the GIL.
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
 
     // No errors should be set when we enter the function since PyErr_Fetch
     // clears the error indicator.
@@ -167,7 +158,7 @@ struct python_error : public std::exception {
     // Try to retrieve the error message from the value.
     if (value != nullptr) {
       // Reference count should not be zero.
-      TORCH_INTERNAL_ASSERT(value->ob_refcnt > 0);
+      TORCH_INTERNAL_ASSERT(Py_REFCNT(value) > 0);
 
       PyObject* pyStr = PyObject_Str(value);
       if (pyStr != nullptr) {
@@ -194,7 +185,7 @@ struct python_error : public std::exception {
   inline void persist() {
     if (type) return; // Don't overwrite exceptions
     // PyErr_Fetch overwrites the pointers
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XDECREF(type);
     Py_XDECREF(value);
     Py_XDECREF(traceback);
@@ -206,7 +197,7 @@ struct python_error : public std::exception {
   inline void restore() {
     if (!type) return;
     // PyErr_Restore steals references
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     Py_XINCREF(type);
     Py_XINCREF(value);
     Py_XINCREF(traceback);
@@ -270,6 +261,16 @@ public:
   void process(const at::SourceLocation &source_location,
                const std::string &msg) override;
 
+  /** Call if an exception has been thrown
+
+   *  Necessary to determine if it is safe to throw from the desctructor since
+   *  std::uncaught_exception is buggy on some platforms and generally
+   *  unreliable across dynamic library calls.
+   */
+  void set_in_exception() {
+    in_exception_ = true;
+  }
+
 private:
   using warning_buffer_t =
     std::vector<std::pair<c10::SourceLocation, std::string>>;
@@ -277,6 +278,34 @@ private:
   warning_buffer_t warning_buffer_;
 
   at::WarningHandler* prev_handler_;
+  bool in_exception_;
 };
+
+namespace detail {
+template <typename Func, size_t i>
+using Arg = typename function_traits<Func>::template arg<i>::type;
+
+template <typename Func, size_t ...Is>
+auto wrap_pybind_function_impl_(Func&& f, std::index_sequence<Is...>) {
+  using traits = function_traits<Func>;
+  namespace py = pybind11;
+
+  // f=f is needed to handle function references on older compilers
+  return [f=f](Arg<Func, Is> ...args) -> typename traits::result_type {
+    HANDLE_TH_ERRORS
+    return f(std::forward<Arg<Func, Is>>(args)...);
+    END_HANDLE_TH_ERRORS_PYBIND
+  };
+}
+}  // namespace detail
+
+// Wrap a function with TH error and warning handling.
+// Returns a function object suitable for registering with pybind11.
+template <typename Func>
+auto wrap_pybind_function(Func&& f) {
+  using traits = function_traits<Func>;
+  return torch::detail::wrap_pybind_function_impl_(
+    std::forward<Func>(f), std::make_index_sequence<traits::arity>{});
+}
 
 } // namespace torch

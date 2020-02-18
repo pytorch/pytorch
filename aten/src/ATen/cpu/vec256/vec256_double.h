@@ -61,7 +61,13 @@ public:
     if (count == size())
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
+
     __at_align32__ double tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value
+    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
     std::memcpy(
         tmp_values,
         reinterpret_cast<const double*>(ptr),
@@ -79,6 +85,11 @@ public:
   }
   const double& operator[](int idx) const  = delete;
   double& operator[](int idx) = delete;
+  int zero_mask() const {
+    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    __m256d cmp = _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_EQ_OQ);
+    return _mm256_movemask_pd(cmp);
+  }
   Vec256<double> map(double (*f)(double)) const {
     __at_align32__ double tmp[4];
     store(tmp);

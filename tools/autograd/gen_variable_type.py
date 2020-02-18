@@ -27,12 +27,6 @@ from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS
 from .gen_autograd_functions import uses_single_grad
 
-# These functions are written manually in templates/VariableType.cpp
-MANUAL_IMPLEMENTATIONS = {
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', 'backward',
-    'set_data', 'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
-}
-
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
 # of proper scopes, where subsequent compilation passes can ask for the unfolding
@@ -76,11 +70,11 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
-    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
-    c10::optional<MemoryFormat> memory_format = c10::nullopt;
+    c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
 }
@@ -189,14 +183,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(TensorTypeId::VariableTensorId)
+  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(DispatchKey::VariableTensorId)
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(TensorTypeId::VariableTensorId, &VariableType::${api_name})
+  .kernel<${return_type} (${formal_types})>(DispatchKey::VariableTensorId, &VariableType::${api_name})
   .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 """)
 
@@ -310,6 +304,11 @@ RUN_ONLY_IN_DEBUG_MODE = CodeTemplate("""\
 #ifndef NDEBUG
 ${statements}
 #endif
+""")
+
+# Generate a file that lists all functions and their schema string. Used for XLA
+REGISTRATION_DECLARATION = CodeTemplate("""\
+${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
 """)
 
 
@@ -502,6 +501,18 @@ def gen_variable_type(out, aten_declarations, template_path):
         gen_variable_type_shard(out, shard, template_path, '_%d' % i, False)
     gen_variable_type_shard(out, aten_declarations, template_path, 'Everything', False)
 
+    REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
+    registration_declarations = []
+
+    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
+    for declaration in aten_declarations:
+        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+
+    env = {
+        'registration_declarations': registration_declarations,
+    }
+    write(out, 'RegistrationDeclarations.h', REGISTRATION_DECLARATIONS_H, env)
 
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -514,17 +525,17 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
-        if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
+        if not declaration['manual_kernel_registration']:
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
-        if declaration['use_c10_dispatcher'] == 'full':
-            wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
-        else:
-            assert declaration['use_c10_dispatcher'] == 'unboxed_only'
-            wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, formal_types=formal_types))
+            if declaration['use_c10_dispatcher'] == 'full':
+                wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
+            else:
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
+                wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
+                    declaration, formal_types=formal_types))
 
     env = {
         'type_derived_method_declarations': type_declarations,
@@ -551,6 +562,9 @@ def emit_body(declaration):
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     view_info = VIEW_FUNCTIONS.get(base_name, None)
+    # TODO: Add back when https://github.com/pytorch/pytorch/pull/32044 lands again
+    # if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
+    #     view_info = "self"
 
     def is_differentiable(arg):
         if 'TensorOptions' in arg['type']:
@@ -748,61 +762,38 @@ def emit_body(declaration):
         return '\n'.join(names)
 
     def wrap_output(call):
-        # Returns a 2-tuple `(wrapped_call, extra_wrapping_stmts)`, where
-        # `wrapped_call` is to drop-in replace `call`, and
-        # `extra_wrapping_stmts` is a list of extra statements to run after
-        # `call`.
+        # Returns `wrapped_call` which is a drop-in replacement for `call`
         if 'Tensor' not in declaration['return_type']:
-            return call, []
+            return call
         elif view_info is not None:
             # See NOTE [ Autograd View Variables ] in variable.h for details.
             differentiable_output_vars = {r['name'] for r in differentiable_outputs}
-            tensor_output_vars = {r['name'] for r in returns if 'Tensor' in r['type']}
-            if not isinstance(view_info, dict):
-                if len(differentiable_output_vars) == len(tensor_output_vars):
-                    # all outputs are differentiable
-                    return 'as_view({}, {}, true)'.format(view_info, call), []
-                elif len(differentiable_output_vars) == 0:
-                    # no output is differentiable
-                    return 'as_view({}, {}, false)'.format(view_info, call), []
-                else:
-                    # some of the outputs are differentiable
-                    # need to expand to dict mode, i.e., one entry per output
-                    base_name = view_info
-                    view_info_dict = {}
-                    for i, return_info in enumerate(returns):
-                        if 'Tensor' in return_info['type']:
-                            view_info_dict[i] = base_name
+
+            if not isinstance(view_info, str):
+                raise TypeError("The view info should be a string for {}, but it is: {}".format(base_name, view_info))
+
+            if len(differentiable_output_vars) == 0:
+                # no output is differentiable (.indices() for SparseTensors for example)
+                return 'as_view({}, {}, /* is_differentiable */ false)'.format(view_info, call)
+            elif len(differentiable_output_vars) == 1:
+                # Single differentiable output (Tensor or Tensor[])
+                return_info = differentiable_outputs[0]
+                # We only support simple Tensor or a TensorList for functions that return views
+                if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
+                    raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
+                # Only allow rebasing of the history if we return a single Tensor
+                allow_rebase_history = 'true'
+                if return_info['dynamic_type'] == 'TensorList':
+                    allow_rebase_history = 'false'
+                wrapped_call = ("as_view(/* base */{}, /* output */ {}, /* is_differentiable */ true, "
+                                "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
+                return wrapped_call
             else:
-                view_info_dict = view_info
-
-            def wrap_view_single(output_var, base_var):
-                fmt = '{output_var} = as_view({base_var}, {output_var}, {is_differentiable});'
-                if output_var in differentiable_output_vars:
-                    # If `GradMode::is_enabled()` is False, this is a
-                    # non-differentiable view. Gradients should not flow through.
-                    is_differentiable = 'true'
-                else:
-                    # This output is non-differentiable, so it is a
-                    # non-differentiable view. Gradients should not flow through.
-                    is_differentiable = 'false'
-                return fmt.format(output_var=output_var, base_var=base_var,
-                                  is_differentiable=is_differentiable)
-
-            extra_wrapping_stmts = []
-            for output_idx, return_info in enumerate(returns):
-                if 'Tensor' not in return_info['type']:
-                    assert output_idx not in view_info_dict, 'Can not wrap non-Tensor output as a view'
-                    continue
-                output_var = return_info['name']
-                if output_idx in view_info_dict:
-                    stmt = wrap_view_single(output_var, view_info_dict[output_idx])
-                elif 'Tensor' in return_info['type']:
-                    stmt = '{output_var} = as_variable({output_var});'.format(output_var=output_var)
-                extra_wrapping_stmts.append(stmt)
-            return call, extra_wrapping_stmts
+                # This could be supported but we don't need it at the moment, so keeping things simple.
+                raise RuntimeError("Function that return multiple differentiable output "
+                                   "when at least one of them is view is not supported.")
         else:
-            return 'as_variable(std::move({}))'.format(call), []
+            return 'std::move({})'.format(call)
 
     def enforce_same_tensorimpl_and_storage(env, call):
         save_ptrs_stmts = []
@@ -829,7 +820,6 @@ def emit_body(declaration):
 
     def emit_call(env):
         combined = nested_dict(env, declaration)
-        extra_wrapping_stmts = []
         if strategy == 'use_derived':
             # We only care about adding `at::AutoNonVariableTypeMode` guard for non-variable dispatch
             # (which corresponds to 'use_derived' strategy). The purpose of this guard is to make sure
@@ -843,7 +833,7 @@ def emit_body(declaration):
                 base_type_call = CALL_DISPATCH_VIA_METHOD.substitute(
                     combined, unpacked_method_args=unpacked_method_args)
             if not modifies_arguments and not returns_void:
-                rhs_value, extra_wrapping_stmts = wrap_output('tmp')
+                rhs_value = wrap_output('tmp')
                 call = DISPATCH_TO_NON_VAR_TYPE_WITH_RETURN_VALUES.substitute(
                     base_type_call=base_type_call,
                     return_values=tie_return_values(),
@@ -856,8 +846,6 @@ def emit_body(declaration):
             if not modifies_arguments and not returns_void:
                 call = '{} = {}'.format(tie_return_values(), call)
             call = call + ';'
-        for stmt in extra_wrapping_stmts:
-            call += '\n' + stmt
         call = enforce_same_tensorimpl_and_storage(env, call)
         return call
 
@@ -981,7 +969,7 @@ def unpack_args(env, declaration):
             ))
         else:
             # Okay, we are abusing the definition of 'unpack' here a bit,
-            # although it's stll getting the non-variable from the variable
+            # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
             body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 

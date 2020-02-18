@@ -42,8 +42,8 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
     // skip
   } else if (steps == 1) {
     r.fill_(std::pow(base, start.to<double>()));
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+  } else if (isComplexType(r.scalar_type())) {
+    AT_DISPATCH_COMPLEX_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
@@ -53,6 +53,19 @@ Tensor& logspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
         scalar_t is = static_cast<scalar_t>(p_begin);
         for (int64_t i = p_begin; i < p_end; ++i, is+=1) { //std::complex does not support ++operator
           data_ptr[i]= std::pow(scalar_base, scalar_start + step*is);
+        }
+      });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES(r.scalar_type(), "logspace_cpu", [&]() {
+      double scalar_base = static_cast<double>(base); // will be autopromoted anyway
+      scalar_t scalar_start = start.to<scalar_t>();
+      scalar_t scalar_end = end.to<scalar_t>();
+      scalar_t *data_ptr = r.data_ptr<scalar_t>();
+      double step = static_cast<double>(scalar_end - scalar_start) / (steps-1);
+      at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
+        for (int64_t i=p_begin; i < p_end; i++) {
+          data_ptr[i] = std::pow(scalar_base, scalar_start + step*i);
         }
       });
     });
@@ -130,11 +143,20 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
 
     TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
              "invalid size, possible overflow?");
-    int64_t size = static_cast<int64_t>(size_d);
 
-    if (result.numel() != size) {
+    int64_t size = static_cast<int64_t>(size_d);
+    int64_t numel = result.numel();
+
+    if (numel != size) {
+      if(numel > 0){
+        TORCH_WARN("The number of elements in the out tensor of shape ", result.sizes(),
+                    " is ", numel, " which does not match the computed number of elements ", size,
+                    ". Note that this may occur as a result of rounding error. "
+                    "The out tensor will be resized to a tensor of shape (", size, ",).");
+      }
       result.resize_({size});
     }
+
     Tensor r = result.is_contiguous() ? result : result.contiguous();
     scalar_t *data_ptr = r.data_ptr<scalar_t>();
 

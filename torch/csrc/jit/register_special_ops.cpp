@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/vararg_functions.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
@@ -26,26 +27,22 @@ c10::OperatorOptions aliasAnalysisFromSchema() {
   return result;
 }
 
-void checkListInputType(const c10::TypePtr& elem_type, const Node* node) {
-  std::string op_name = node->kind().toUnqualString();
+void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(NumberType::get()) &&
       elem_type != BoolType::get()) {
-    auto error = script::ErrorReport(node->sourceRange());
-    error << "Input list to torch." << op_name
-          << " must be of ints, floats, or bools, "
+    std::stringstream error;
+    error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->python_str();
     // special case empty list torch.tensor([])
     if (elem_type->isSubtypeOf(TensorType::get())) {
-      auto input = node->inputs().at(0);
-      if (input->node()->kind() == prim::ListConstruct &&
-          input->node()->inputs().size() == 0) {
+      if (empty_list) {
         error << "\nEmpty lists default to List[Tensor]. Add a variable "
                  "annotation to the assignment to create an empty list "
                  "of another type (torch.jit.annotate(List[T, []]) where T "
                  "is the type of elements in the list for Python 2)";
       }
     }
-    throw error;
+    throw std::runtime_error(error.str());
   }
 }
 
@@ -63,32 +60,16 @@ at::Tensor castTensorTo(
   return self;
 }
 
-int64_t list_size(const IValue& list) {
-  if (list.isGenericList()) {
-    return list.toGenericListRef().size();
-  } else if (list.isIntList()) {
-    return list.toIntListRef().size();
-  } else if (list.isDoubleList()) {
-    return list.toDoubleListRef().size();
-  } else if (list.isBoolList()) {
-    return list.toBoolList().size();
-  }
-  AT_ASSERTM(0, "Unexpected list type", list);
-}
-
 std::vector<int64_t> compute_sizes(const IValue& seq) {
   std::vector<int64_t> sizes;
-  // because bool, int, and float lists are specialized, inner array will
-  // will not be generic list
-  auto seq_recur = seq;
-  while (seq_recur.isGenericList()) {
-    auto seq_list = seq_recur.toGenericListRef();
-    auto length = seq_list.size();
-    AT_ASSERT(length != 0);
-    sizes.push_back(length);
-    seq_recur = seq_list[0];
+  auto seq_recur = seq.toList();
+  while (true) {
+    sizes.push_back(seq_recur.size());
+    if (seq_recur.size() == 0 || !seq_recur.get(0).isList()) {
+      break;
+    }
+    seq_recur = seq_recur.get(0).toList();
   }
-  sizes.push_back(list_size(seq_recur));
   return sizes;
 }
 
@@ -105,42 +86,24 @@ void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   }
 }
 
-template <typename DTYPE, typename List>
+template <typename DTYPE>
 void storeLastDimension(
     char* data,
     const std::vector<int64_t>& sizes,
     const c10::ArrayRef<int64_t>& strides,
     int64_t dim,
     int elementSize,
-    List obj) {
+    at::ArrayRef<IValue> obj) {
   auto n = sizes[dim];
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (int64_t i = 0; i < n; i++) {
-    *(DTYPE*)data = obj[i];
+    *(DTYPE*)data = obj[i].to<DTYPE>();
     data += strides[dim] * elementSize;
   }
 }
 
-template <>
-void storeLastDimension<bool>(
-    char* data,
-    const std::vector<int64_t>& sizes,
-    const c10::ArrayRef<int64_t>& strides,
-    int64_t dim,
-    int elementSize,
-    const c10::List<bool>& obj) {
-  auto n = sizes[dim];
-  auto seq_size = obj.size();
-  checkSequenceSize(n, dim, seq_size);
-  for (int64_t i = 0; i < n; i++) {
-    *(bool*)data = static_cast<bool>(obj[i]);
-    data += strides[dim] * elementSize;
-  }
-}
-
-// refernce python implementation recursive_store in tensor_new.cpp
-
+// reference python implementation recursive_store in tensor_new.cpp
 void recursiveStore(
     char* data,
     const std::vector<int64_t>& sizes,
@@ -150,41 +113,29 @@ void recursiveStore(
     const IValue& obj) {
   auto ndim = sizes.size();
   auto n = sizes[dim];
-  auto seq_size = list_size(obj);
-  checkSequenceSize(n, dim, seq_size);
+  auto seq = obj.toListRef();
+  checkSequenceSize(n, dim, seq.size());
   if (dim + 1 < static_cast<long>(ndim)) {
-    auto items = obj.toGenericListRef();
     for (int64_t i = 0; i < n; i++) {
-      recursiveStore(data, sizes, strides, dim + 1, elementSize, items[i]);
+      recursiveStore(data, sizes, strides, dim + 1, elementSize, seq[i]);
       data += strides[dim] * elementSize;
     }
   } else {
     AT_ASSERT(obj.isIntList() || obj.isDoubleList() || obj.isBoolList());
     if (obj.isIntList()) {
-      storeLastDimension<int64_t>(
-          data, sizes, strides, dim, elementSize, obj.toIntListRef());
+      storeLastDimension<int64_t>(data, sizes, strides, dim, elementSize, seq);
     } else if (obj.isDoubleList()) {
-      storeLastDimension<double>(
-          data, sizes, strides, dim, elementSize, obj.toDoubleListRef());
+      storeLastDimension<double>(data, sizes, strides, dim, elementSize, seq);
     } else {
-      storeLastDimension<bool>(
-          data, sizes, strides, dim, elementSize, obj.toBoolList());
+      storeLastDimension<bool>(data, sizes, strides, dim, elementSize, seq);
     }
   }
 }
 
 template<bool if_set_requires_grad>
-Operation createTensorFromList(const Node* node) {
-  // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
-  // we use the template arg to distinguish between these two cases
-  auto input = node->inputs().at(0);
-  auto elem_type = input->type();
-  while (auto list_type = elem_type->cast<ListType>()) {
-    elem_type = list_type->getElementType();
-  }
-  checkListInputType(elem_type, node);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
-  return [initial_scalar_type, elem_type](Stack& stack) {
+int createTensorFromList(Stack& stack) {
+    // torch.tensor has a fourth requires_grad arg but torch.as_tensor not, so
+    // we use the template arg to distinguish between these two cases
     bool requires_grad;
     IValue data;
     IValue dtype;
@@ -194,9 +145,16 @@ Operation createTensorFromList(const Node* node) {
     } else {
       pop(stack, data, dtype, device);
     }
+    auto elem_type = data.type();
+    while (auto list_type = elem_type->cast<ListType>()) {
+      elem_type = list_type->getElementType();
+    }
     auto sizes = compute_sizes(data);
-    auto tensor = autograd::make_variable(at::empty(
-        sizes, at::initialTensorOptions().dtype(initial_scalar_type)));
+    checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
+    at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+
+    auto tensor = at::empty(
+        sizes, at::initialTensorOptions().dtype(initial_scalar_type));
 
     recursiveStore(
         (char*)tensor.data_ptr(),
@@ -226,7 +184,7 @@ Operation createTensorFromList(const Node* node) {
     }
     push(stack, std::move(tensor));
     return 0;
-  };
+
 }
 
 RegisterOperators reg({
@@ -237,10 +195,10 @@ RegisterOperators reg({
 
           auto result = at::split_with_sizes(
               (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toIntListRef(),
+              (std::move(peek(stack, 1, 3))).toIntVector(),
               (std::move(peek(stack, 2, 3))).toInt());
           drop(stack, 3);
-          pack(stack, c10::impl::toList(std::move(result)));
+          pack(stack, std::move(result));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -264,7 +222,7 @@ RegisterOperators reg({
           RECORD_FUNCTION("sizes", last(stack, 2));
 
           auto list = peek(stack, 0, 2).toIntList().copy();
-          auto defaults = peek(stack, 1, 2).toIntListRef();
+          auto defaults = peek(stack, 1, 2).toIntVector();
           drop(stack, 2);
 
           AT_ASSERT(defaults.size() > list.size());
@@ -281,7 +239,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),
@@ -308,32 +266,8 @@ RegisterOperators reg({
         "aten::format(str self, ...) -> str",
         [](const Node* node) -> Operation {
           size_t num_inputs = node->inputs().size();
-          std::regex unsupported_options("\\{(.*?)\\}");
-          return [num_inputs, unsupported_options](Stack& stack) {
-            auto format = peek(stack, 0, num_inputs).toStringRef();
-
-            if (std::regex_search(format, unsupported_options)) {
-              AT_WARN("Format options are not supported.");
-            }
-
-            auto args = last(stack, num_inputs - 1);
-            std::stringstream ss;
-            for (size_t begin = 0, used_args = 0; true; ++used_args) {
-              size_t loc = format.find("{}", begin);
-              if (loc == std::string::npos) {
-                ss << format.substr(begin);
-                break;
-              }
-              ss << format.substr(begin, loc - begin);
-              if (used_args >= args.size()) {
-                AT_ERROR("Too few arguments for format string: ", format);
-              }
-              ss << args[used_args];
-              begin = loc + 2;
-            }
-
-            drop(stack, num_inputs);
-            push(stack, ss.str());
+          return [num_inputs](Stack& stack) {
+            formatFunc(num_inputs, stack);
             return 0;
           };
         },
@@ -350,7 +284,7 @@ RegisterOperators reg({
         IValue device;                                                     \
         bool requires_grad;                                                \
         pop(stack, scalar_val, dtype, device, requires_grad);              \
-        auto tensor = autograd::make_variable(tensor_creation_op);         \
+        auto tensor = tensor_creation_op;                                  \
         tensor = castTensorTo(tensor, dtype, device);                      \
         tensor.set_requires_grad(requires_grad);                           \
         push(stack, std::move(tensor));                                    \
@@ -365,7 +299,7 @@ RegisterOperators reg({
             IValue dtype;                                                  \
             IValue device;                                                 \
             pop(stack, scalar_val, dtype, device);                         \
-            auto tensor = autograd::make_variable(tensor_creation_op);     \
+            auto tensor = tensor_creation_op;                              \
             tensor = castTensorTo(tensor, dtype, device);                  \
             push(stack, std::move(tensor));                                \
             return 0;                                                      \
@@ -386,7 +320,7 @@ RegisterOperators reg({
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
-          push(stack, at::infer_size(a.toIntListRef(), b.toIntListRef()));
+          push(stack, at::infer_size(a.toIntVector(), b.toIntVector()));
           return 0;
         },
         aliasAnalysisFromSchema()),

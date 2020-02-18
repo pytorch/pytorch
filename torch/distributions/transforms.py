@@ -32,7 +32,7 @@ class Transform(object):
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Caching is useful for tranforms whose inverses are either expensive or
+    Caching is useful for transforms whose inverses are either expensive or
     numerically unstable. Note that care must be taken with memoized values
     since the autograd graph may be reversed. For example while the following
     works with or without caching::

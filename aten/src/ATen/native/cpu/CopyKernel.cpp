@@ -10,62 +10,6 @@ namespace at {
 namespace native {
 namespace {
 
-template <typename self_T>
-void copy_kernel_cast(TensorIterator& iter) {
-    if (isComplexType(iter.dtype(1))) {
-      AT_DISPATCH_COMPLEX_TYPES(iter.dtype(1), "copy_kernel_cast", [&] {
-        cpu_kernel(iter, [=](scalar_t a) -> self_T {
-            return c10::static_cast_with_inter_type<self_T>(std::real(a));
-          });
-        });
-    }
-    else {
-      AT_DISPATCH_ALL_TYPES_AND3(
-        ScalarType::Half,
-        ScalarType::Bool,
-        ScalarType::BFloat16,
-        iter.dtype(1),
-        "copy_kernel_cast",
-        [&] {
-          cpu_kernel(iter, [=](scalar_t a) -> self_T {
-            return c10::static_cast_with_inter_type<self_T>(a);
-          });
-        });
-    }
-}
-
-template <>
-void copy_kernel_cast<std::complex<float>>(TensorIterator& iter) {
-  // Specialization for inter-complex dtypes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    ScalarType::Half,
-    ScalarType::Bool,
-    ScalarType::BFloat16,
-    iter.dtype(1),
-    "copy_kernel_cast",
-    [&] {
-      cpu_kernel(iter, [=](scalar_t a) -> std::complex<float> {
-        return c10::static_cast_with_inter_type<std::complex<float>>(a);
-      });
-    });
-}
-
-template <>
-void copy_kernel_cast<std::complex<double>>(TensorIterator& iter) {
-  // Specialization for inter-complex dtypes
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-    ScalarType::Half,
-    ScalarType::Bool,
-    ScalarType::BFloat16,
-    iter.dtype(1),
-    "copy_kernel_cast",
-    [&] {
-      cpu_kernel(iter, [=](scalar_t a) -> std::complex<double> {
-        return c10::static_cast_with_inter_type<std::complex<double>>(a);
-      });
-    });
-}
-
 static void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   if (dtype == iter.dtype(1)) {
@@ -96,7 +40,25 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
     }
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
-      copy_kernel_cast<scalar_t>(iter);
+      using dest_t = scalar_t;
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
+        // Note (@zasdfgbnm):
+        //
+        // The code below can not be simplified as
+        //    cpu_kernel(iter, c10::static_cast_with_inter_type<dest_t, scalar_t>::apply);
+        //
+        // because this would force the compiler to instantiate the inline function and generate a function call in the loop
+        // instead of inlining it, making all the optimizations like vectorization impossible.
+        // You can verify this by looking the the symbols of `libtorch_cpu.so`:
+        //
+        //    readelf -Ws libtorch_cpu.so | grep static_cast_with_inter_type
+        //
+        // If done correctly, the above command should have no output.
+        //
+        // See: https://github.com/pytorch/pytorch/issues/31271
+        cpu_kernel(iter, [](scalar_t src) -> dest_t {
+          return c10::static_cast_with_inter_type<dest_t, scalar_t>::apply(src); });
+      });
     });
   }
 }

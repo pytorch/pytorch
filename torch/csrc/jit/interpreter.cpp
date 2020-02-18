@@ -10,8 +10,9 @@
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
 #include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/script/compilation_unit.h>
@@ -50,6 +51,17 @@ namespace jit {
 // * move_flags[n] - a list of booleans, one for each input,
 //   indicating whether this is the last use of the value. The interpreter
 //   should generate a move rather than a copy in this case.
+
+TensorTypePtr tensorTypeInCurrentExecutionContext(const at::Tensor& t) {
+  if (!t.defined()) {
+    return TensorType::get()->withUndefined();
+  }
+  auto r = TensorType::create(t);
+  if (!at::GradMode::is_enabled()) {
+    return r->withRequiresGrad(false);
+  }
+  return r;
+}
 
 namespace {
 
@@ -370,9 +382,12 @@ struct CodeImpl {
   // out-of-line jumps for bailouts that are patched in at the end
   std::vector<BailoutBlock> bailout_blocks_;
   std::vector<std::unique_ptr<Function>> bailout_functions_;
+  size_t remaining_bailout_depth_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph)
-      : preprocess_(*graph), current_node_(preprocess_.graph->return_node()) {
+  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+      : preprocess_(*graph),
+        current_node_(preprocess_.graph->return_node()),
+        remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
     n_outputs = graph_->outputs().size();
     if (n_outputs == 1) {
@@ -392,6 +407,26 @@ struct CodeImpl {
 
   const std::vector<c10::IValue>& constant_table() const {
     return constant_table_;
+  }
+
+  void request_bailout(size_t index) {
+    auto count = index;
+    for (size_t instr_index = 0; instr_index < instructions_.size();
+         instr_index++) {
+      if (instructions_[instr_index].op == GUARD || instructions_[instr_index].op == FAIL_GUARD) {
+        if (count-- == 0) {
+          // patching GUARD to FAIL_GUARD
+          instructions_[instr_index] =
+              Instruction(FAIL_GUARD, instructions_[instr_index].X, 0);
+          GRAPH_DEBUG(
+              "Added a bailout request for ",
+              index,
+              " at instruction ",
+              instr_index);
+          break;
+        }
+      }
+    }
   }
 
   const std::vector<Instruction>& instructions() const {
@@ -488,7 +523,7 @@ struct CodeImpl {
   void emitOperator(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(OP, operator_table_.size());
-    operator_table_.emplace_back(getOperation(node));
+    operator_table_.emplace_back(node->getOperation());
   }
 
   void emitWait(Node* node) {
@@ -583,6 +618,7 @@ struct CodeImpl {
     // the rest of args follow
     emitLoadInputs(node->inputs().slice(1, 1));
     insertInstruction(GUARD, type_table_.size());
+
     type_table_.emplace_back(node->outputs().at(0)->type());
     insertInstruction(JF, 0 /* to be patched */);
 
@@ -925,7 +961,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case CALL: {
             const Code& code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+                // consider passing
+                // `frames.back().function->remaining_bailout_depth_` into
+                // `get_executor().getPlanFor()` to propagate caller's depth
+                // restrictions onto children while this strategy has a
+                // potential to reduce the number of compilations for too
+                // dynamic callers we might miss opportunities where a caller is
+                // dynamic but a callee gets stable arguments
+                af.functions[inst.X]
+                    ->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - code.num_inputs());
             af = ActiveFrame(frames.back());
@@ -935,11 +981,22 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // this can be more optimized if necessary, caching parts
             // of the hashing computation or storing the offset when
             // the object is turned into an interface
+
+            // consider passing
+            // `frames.back().function->remaining_bailout_depth_` into
+            // `get_executor().getPlanFor()` to propagate caller's depth
+            // restrictions onto children while this strategy has a potential to
+            // reduce the number of compilations for too dynamic callers we
+            // might miss opportunities where a caller is dynamic but a callee
+            // gets stable arguments
             auto function = peek(stack, 0, inst.N)
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code = function->get_executor().getPlanFor(stack).code;
+            const Code& code =
+                function->get_executor()
+                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+                    .code;
             frames.back().pc = af.pc + 1;
             enterFrame(code, stack.size() - inst.N);
             af = ActiveFrame(frames.back());
@@ -1008,18 +1065,34 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             stack.emplace_back(future->value());
             ++af.pc;
           } break;
+          case FAIL_GUARD: {
+            // patch FAIL_GUARD back to GUARD
+            GRAPH_DEBUG(
+                "Bailout ", inst.X, " triggered via bailout_requests_!");
+            af.instructions[af.pc] = Instruction(GUARD, inst.X, 0);
+            push(stack, false);
+            ++af.pc;
+            break;
+          }
           case GUARD: {
             auto t = stack.back().toTensor();
-            auto actual = t.defined() ? TensorType::create(t)
-                                      : TensorType::get()->withUndefined();
-            const TypePtr &expected = af.types[inst.X];
-            push(stack, *expected == *actual);
+            const TypePtr& expected = af.types[inst.X];
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
             ++af.pc;
           } break;
           case TAIL_CALL: {
+            GRAPH_DEBUG("running TAIL_CALL for ", inst.X);
             af.functions[inst.X]->ensure_defined();
-            const Code &code =
-                af.functions[inst.X]->get_executor().getPlanFor(stack).code;
+            size_t remaining_bailout_depth =
+                frames.back().function->remaining_bailout_depth_ > 0
+                ? frames.back().function->remaining_bailout_depth_ - 1
+                : 0;
+            const Code& code = af.functions[inst.X]
+                                   ->get_executor()
+                                   .getPlanFor(stack, remaining_bailout_depth)
+                                   .code;
             size_t num_inputs = code.num_inputs();
             size_t base_pointer = frames.back().base_pointer;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
@@ -1044,23 +1117,38 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    for (size_t i = 0; i < frames.size(); ++i) {
+    std::string previous_fn_name = "";
+    for (int64_t i = frames.size() - 1; i >= 0; i--) {
       const Frame& frame = frames[frames.size() - 1 - i];
       size_t pc = (i == 0) ? frame.pc
                            : frame.pc -
               1; // make sure we report the call node, not the node after it
       Node* node = frame.function->instructions_source_[pc];
-      if (i > 0) {
-        out << "during call ";
+      if (node->callstack()) {
+        for (const auto& p : (*node->callstack())->vec()) {
+          p.second.print_with_context(
+              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          previous_fn_name = p.first->name();
+        }
       }
-      node->sourceRange().highlight(out);
+      node->sourceRange().print_with_context(
+          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+      if (node->kind() == prim::CallFunction) {
+        previous_fn_name = node->inputs()
+                               .at(0)
+                               ->type()
+                               ->expect<FunctionType>()
+                               ->function()
+                               ->name();
+      }
     }
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
     ss << msg << "\n";
-    ss << "The above operation failed in interpreter, with the following stack trace:\n";
+    ss << "The above operation failed in interpreter.\n";
+    ss << "Traceback (most recent call last):\n";
     formatStackTrace(ss);
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));
@@ -1109,11 +1197,20 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph) : pImpl(new CodeImpl(graph)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
   return pImpl->grad_executors();
+}
+
+size_t Code::num_bailouts() const {
+  return pImpl->type_table_.size();
+}
+
+void Code::request_bailout(size_t index) {
+  pImpl->request_bailout(index);
 }
 
 size_t Code::num_inputs() const {

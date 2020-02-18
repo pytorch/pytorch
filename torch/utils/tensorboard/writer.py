@@ -299,7 +299,11 @@ class SummaryWriter(object):
             raise TypeError('hparam_dict and metric_dict should be dictionary.')
         exp, ssi, sei = hparams(hparam_dict, metric_dict)
 
-        with SummaryWriter(log_dir=os.path.join(self.file_writer.get_logdir(), str(time.time()))) as w_hp:
+        logdir = os.path.join(
+            self._get_file_writer().get_logdir(),
+            str(time.time())
+        )
+        with SummaryWriter(log_dir=logdir) as w_hp:
             w_hp.file_writer.add_summary(exp)
             w_hp.file_writer.add_summary(ssi)
             w_hp.file_writer.add_summary(sei)
@@ -501,8 +505,8 @@ class SummaryWriter(object):
         Shape:
             img_tensor: Default is :math:`(3, H, W)`. You can use ``torchvision.utils.make_grid()`` to
             convert a batch of tensor into 3xHxW format or call ``add_images`` and let us do the job.
-            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitible as long as
-            corresponding ``dataformats`` argument is passed. e.g. CHW, HWC, HW.
+            Tensor with :math:`(1, H, W)`, :math:`(H, W)`, :math:`(H, W, 3)` is also suitable as long as
+            corresponding ``dataformats`` argument is passed, e.g. ``CHW``, ``HWC``, ``HW``.
 
         Examples::
 

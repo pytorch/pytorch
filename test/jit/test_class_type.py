@@ -12,9 +12,9 @@ from torch.testing import FileCheck
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from jit_utils import JitTestCase
-import jit_utils
-from common_utils import IS_SANDCASTLE
+from torch.testing._internal.jit_utils import JitTestCase
+import torch.testing._internal.jit_utils
+from torch.testing._internal.common_utils import IS_SANDCASTLE
 from typing import List
 
 if __name__ == '__main__':
@@ -42,7 +42,7 @@ class TestClassType(JitTestCase):
 
     def test_get_attr(self):
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.foo = x
 
@@ -56,7 +56,7 @@ class TestClassType(JitTestCase):
 
     def test_in(self):
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self):
                 pass
 
@@ -149,7 +149,7 @@ class TestClassType(JitTestCase):
     def test_type_annotations(self):
         with self.assertRaisesRegex(RuntimeError, "Expected a value of type \'bool"):
             @torch.jit.script  # noqa: B903
-            class FooTest(object):
+            class FooTest(object):  # noqa: B903
                 def __init__(self, x):
                     # type: (bool) -> None
                     self.foo = x
@@ -171,7 +171,7 @@ class TestClassType(JitTestCase):
     def test_class_type_as_param(self):
         global FooTest  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class FooTest(object):
+        class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.attr = x
 
@@ -261,7 +261,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -272,7 +272,7 @@ class TestClassType(JitTestCase):
 
     def test_save_load_with_classes_nested(self):
         @torch.jit.script  # noqa: B903
-        class FooNestedTest(object):
+        class FooNestedTest(object):  # noqa: B903
             def __init__(self, y):
                 self.y = y
 
@@ -302,7 +302,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -314,7 +314,7 @@ class TestClassType(JitTestCase):
     def test_python_interop(self):
         global Foo   # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -341,7 +341,7 @@ class TestClassType(JitTestCase):
     def test_class_specialization(self):
         global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -366,7 +366,7 @@ class TestClassType(JitTestCase):
     def test_class_sorting(self):
         global Foo  # see [local resolution in python]
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __init__(self, x):
                 # type: (int) -> None
                 self.x = x
@@ -430,6 +430,7 @@ class TestClassType(JitTestCase):
                 li = [NoMethod(), NoMethod()]
                 li.sort()
                 return li
+            test()
 
         @torch.jit.script
         class WrongLt(object):
@@ -446,6 +447,7 @@ class TestClassType(JitTestCase):
                 li = [WrongLt(), WrongLt()]
                 li.sort()
                 return li
+            test()
 
     def test_class_inheritance(self):
         @torch.jit.script
@@ -483,7 +485,7 @@ class TestClassType(JitTestCase):
 
         # classes are globally registered for now, so we need to clear the JIT
         # registry to simulate loading a new model
-        jit_utils.clear_class_registry()
+        torch.testing._internal.jit_utils.clear_class_registry()
 
         buffer.seek(0)
         m_loaded = torch.jit.load(buffer)
@@ -860,7 +862,7 @@ class TestClassType(JitTestCase):
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903
-        class Foo(object):
+        class Foo(object):  # noqa: B903
             def __before_init__(self):
                 # accessing this field should not throw, since __init__ should be compiled
                 return self.x
@@ -871,7 +873,7 @@ class TestClassType(JitTestCase):
 
     def test_class_constructs_itself(self):
         @torch.jit.script  # noqa: B903
-        class LSTMStateStack(object):
+        class LSTMStateStack(object):  # noqa: B903
             def __init__(self, num_layers, hidden_size):
                 # type: (int, int) -> None
                 self.num_layers = num_layers
@@ -896,7 +898,7 @@ class TestClassType(JitTestCase):
 
         # should not throw
         @torch.jit.script  # noqa: B903
-        class Tree(object):
+        class Tree(object):  # noqa: B903
             def __init__(self):
                 self.child = torch.jit.annotate(Optional[Leaf], None)
 
@@ -910,6 +912,32 @@ class TestClassType(JitTestCase):
         """
         with self.assertRaises(RuntimeError):
             @torch.jit.script  # noqa: B903
-            class Tree(object):
+            class Tree(object):  # noqa: B903
                 def __init__(self):
                     self.parent = torch.jit.annotate(Optional[Tree], None)
+
+    def test_class_constant(self):
+        class M(torch.nn.Module):
+            __constants__ = ["w"]
+
+            def __init__(self, w):
+                super(M, self).__init__()
+                self.w = w
+
+            def forward(self, x):
+                # Make sure class constant is accessible in method
+                print(self.w)
+                return x
+
+        # Test serialization/deserialization of class constant
+        for c in (2, 1.0, None, True, 'str', (2, 3), [5.9, 7.3]):
+            m = torch.jit.script(M(c))
+            buffer = io.BytesIO()
+            torch.jit.save(m, buffer)
+
+            buffer.seek(0)
+            m_loaded = torch.jit.load(buffer)
+            input = torch.rand(2, 3)
+            self.assertEqual(m(input), m_loaded(input))
+            # Make sure class constant is accessible from module
+            self.assertEqual(m.w, m_loaded.w)

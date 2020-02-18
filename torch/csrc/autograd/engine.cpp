@@ -81,7 +81,7 @@ struct ReadyQueue {
   // To notify threads waiting on the ReadyQueue of available tasks on the heap_
   std::condition_variable not_empty_;
   // To protect read and writes to heap_
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
 
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
@@ -90,6 +90,7 @@ struct ReadyQueue {
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
+  size_t size() const;
 };
 
 // Note [Reentrant backwards]
@@ -153,8 +154,19 @@ struct ReadyQueue {
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
-  TORCH_INTERNAL_ASSERT(graph_task, "GraphTask is no longer valid!")
-  return graph_task->reentrant_depth_;
+  if (graph_task) {
+    return graph_task->reentrant_depth_;
+  } else {
+    // The graph task is no longer valid indicating an error. As a result, we
+    // try to move this to the front of the queue to ensure the autograd
+    // engine threads pick up this error soon.
+    return std::numeric_limits<int>::max();
+  }
+}
+
+bool graph_task_completed(const std::shared_ptr<GraphTask>& graph_task) {
+  return graph_task->outstanding_tasks_.load() == 0 ||
+      (graph_task->exit_on_error_ && graph_task->has_error_.load());
 }
 
 auto ReadyQueue::push(NodeTask item, bool incrementOutstandingTasks) -> void {
@@ -177,6 +189,12 @@ auto ReadyQueue::pushShutdownTask() -> void {
     heap_.push(NodeTask({}, nullptr, InputBuffer(0), true));
   }
   not_empty_.notify_one();
+}
+
+size_t ReadyQueue::size() const {
+  // Lock mutex for accesses to heap_
+  std::unique_lock<std::mutex> lock(mutex_);
+  return heap_.size();
 }
 
 auto ReadyQueue::pop() -> NodeTask {
@@ -299,52 +317,40 @@ auto Engine::thread_main(
     }
 
     if (task.fn_ && !local_graph_task->has_error_.load()) {
-      GradMode::set_enabled(local_graph_task->grad_mode_);
+      AutoGradMode grad_mode(local_graph_task->grad_mode_);
       try {
         evaluate_function(local_graph_task, task.fn_.get(), task.inputs_);
       } catch (std::exception& e) {
         thread_on_exception(local_graph_task, task.fn_, e);
       }
     }
-    // Notify downstream about the completion of tasks depending
-    // on both where the task was executed, and who owned the overall
-    // graph (in case of reentrant execution.)  See Note [Reentrant backwards].
-    auto base_owner = local_graph_task->owner_;
-    // Task from a non-worker thread. Easy case.
-    if (base_owner == NO_DEVICE) {
-      if (--local_graph_task->outstanding_tasks_ == 0) {
-        // Lock mutex to notify the GraphTask waiting on not_done_
-        std::lock_guard<std::mutex> lock(local_graph_task->mutex_);
-        local_graph_task->not_done_.notify_all();
-      }
-    } else {
-      // If it's a task initiated from this thread, decrease the counter, but
-      // don't do anything - loop condition will do all checks for us next.
-      if (base_owner == worker_device) {
-        --local_graph_task->outstanding_tasks_;
-        // Otherwise send a dummy function task to the owning thread just to
-        // ensure that it's not sleeping. If it has work, it might see that
-        // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
-        // it's a no-op anyway.
-      } else if (base_owner != worker_device) {
-        if (--local_graph_task->outstanding_tasks_ == 0) {
-          // Synchronize outstanding_tasks_ with queue mutex
-          std::atomic_thread_fence(std::memory_order_release);
-          ready_queue_by_index(base_owner)
-              .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
-        }
-      }
-    }
-  }
 
-  // When current_depth is 0 this worker thread is done and we need to notify
-  // the parent thread waiting on the graph_task
-  // NOTE: An edge case for this is when reentrant calls are repeatedly made in
-  // a thread which is at its maximum stack depth and they keep exiting right
-  // after. We will always switch to a new thread for each call, so, we'll keep
-  // oscillating between the two threads.
-  if (reentrant_thread && current_depth == 0) {
-    graph_task->not_done_.notify_all();
+    // Decrement the outstanding tasks.
+    --local_graph_task->outstanding_tasks_;
+
+    // Check if we've completed execution.
+    bool gt_completed = graph_task_completed(local_graph_task);
+    if (gt_completed) {
+      // We don't need to explicitly notify the owner thread, since
+      // 'mark_graph_task_completed' would mark the Future as completed and this
+      // would notify the owner thread that the task has been completed.
+      mark_graph_task_completed(local_graph_task);
+    }
+
+    auto base_owner = local_graph_task->owner_;
+    // Send a dummy function task to the owning thread just to
+    // ensure that it's not sleeping. If it has work, it might see that
+    // graph_task->outstanding_tasks_ == 0 before it gets to the task, but
+    // it's a no-op anyway.
+    // This is not necessary if the owning thread is not a device thread or the
+    // current thread is the owning thread.
+    if (base_owner != NO_DEVICE && base_owner != worker_device &&
+        gt_completed) {
+      // Synchronize outstanding_tasks_ with queue mutex
+      std::atomic_thread_fence(std::memory_order_release);
+      ready_queue_by_index(base_owner)
+          .push(NodeTask(local_graph_task, nullptr, InputBuffer(0)));
+    }
   }
 }
 
@@ -374,25 +380,28 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
-  // Use std::current_exception() instead of passed in exception to get the
-  // appropriate exception_ptr.
-  graph_task->set_exception(std::current_exception(), fn);
+  graph_task->set_exception(e, fn);
 }
 
 void GraphTask::set_exception(
-    std::exception_ptr eptr,
+    std::exception& e,
     const std::shared_ptr<Node>& fn) {
-  // Lock mutex for writing to exception_
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
-    exception_ = std::move(eptr);
     has_error_ = true;
-    if (exit_on_error_) {
-      // Notify other threads if we are supposed to exit on errors.
-      not_done_.notify_all();
+    // Careful: setting the future_result_ can trigger DistAutogradContext to
+    // resetGraphTask(), sometimes deleting this underlying GraphTask.
+    // Don't touch *this after setError() below, and release the lock early, to
+    // avoid unlocking this->mutex_ after setting the future.
+    std::shared_ptr<FutureVariableList> future_result = future_result_;
+    lock.unlock();
+    if (!future_result->completed()) {
+      future_result->setError(e.what());
+    } else {
+      TORCH_INTERNAL_ASSERT(future_result->hasError());
     }
   }
 }
@@ -411,11 +420,10 @@ static variable_list call_post_hooks(Node& fn, variable_list outputs, const vari
   return outputs;
 }
 
-static bool is_compatible_type(const at::DeprecatedTypeProperties& expected, const at::DeprecatedTypeProperties& actual) {
+static bool is_compatible_type(const at::TensorOptions& expected, const at::TensorOptions& actual) {
   // Types are compatible if they exactly match or if the gradient is a sparse
   // version of the expected type.
-  return expected == actual || (actual.is_sparse() &&
-      expected == actual.toBackend(toDense(actual.backend())));
+  return expected.type_equal(actual) || (actual.is_sparse() && expected.device().type() == actual.device().type());
 }
 
 void validate_outputs(
@@ -451,14 +459,14 @@ void validate_outputs(
       }
       grads[i] = at::sum_to(std::move(grads[i]), metadata.shape());
     }
-    TORCH_CHECK(isFloatingType(grads[i].type().scalarType()));
-    if (metadata.type().scalarType() != grads[i].type().scalarType()) {
-      grads[i] = grads[i].to(metadata.type().scalarType());
+    TORCH_CHECK(isFloatingType(grads[i].scalar_type()));
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) != grads[i].scalar_type()) {
+      grads[i] = grads[i].to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }
-    if (!is_compatible_type(metadata.type(), grads[i].type())) {
+    if (!is_compatible_type(metadata.options(), grads[i].options())) {
        std::stringstream ss;
        ss << "invalid gradient at index " << i << " - expected type ";
-       ss << metadata.type() << " but got " << grads[i].type();
+       ss << metadata.options() << " but got " << grads[i].options();
        AT_ERROR(format_error(ss.str()));
     }
     auto output_device = output.device();
@@ -566,6 +574,7 @@ void Engine::evaluate_function(
     // Records leaf stream (if applicable)
     // See note "Streaming backwards"
     if (opt_parent_stream) {
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
       graph_task->leaf_streams.emplace(*opt_parent_stream);
     }
     return;
@@ -576,7 +585,7 @@ void Engine::evaluate_function(
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && output.ne(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output).any().item<uint8_t>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
         throw std::runtime_error(ss.str());
@@ -715,7 +724,8 @@ auto Engine::execute(const edge_list& roots,
   if (!outputs.empty()) {
     graph_task->init_to_execute(*graph_root, outputs);
   }
-  return execute_with_graph_task(graph_task, graph_root);
+
+  return execute_with_graph_task(graph_task, graph_root)->wait();
 }
 
 void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
@@ -724,13 +734,8 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
       std::move(task), /* incrementOutstandingTasks */ false);
 }
 
-bool graph_task_completed(const GraphTask& graph_task) {
-  return graph_task.outstanding_tasks_.load() == 0 ||
-      (graph_task.exit_on_error_ && graph_task.has_error_.load());
-}
-
-variable_list Engine::execute_with_graph_task(
-    std::shared_ptr<GraphTask> graph_task,
+std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
+    const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
   // Lock mutex for GraphTask.
@@ -741,34 +746,62 @@ variable_list Engine::execute_with_graph_task(
 
   // Not a worker
   if (worker_device == NO_DEVICE) {
-    // Wait for all tasks to complete
-    graph_task->not_done_.wait(
-        lock, [&graph_task] { return graph_task_completed(*graph_task); });
+    // graph_task_exec_post_processing is done when the Future is marked as
+    // completed in mark_graph_task_completed.
+    return graph_task->future_result_;
   } else {
     graph_task->owner_ = worker_device;
-    ++total_depth;
-    if(current_depth >= max_recursion_depth_){
+    if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
       add_thread_pool_task(graph_task);
-      graph_task->not_done_.wait(
-          lock, [&graph_task] { return graph_task_completed(*graph_task); });
+      // graph_task_exec_post_processing is done when the Future is marked as
+      // completed in mark_graph_task_completed.
+      return graph_task->future_result_;
     } else {
+      // Total depth needs to be updated only in this codepath, since it is
+      // not used in the block above (when we call add_thread_pool_task).
+      // In the codepath above, GraphTask.reentrant_depth_ is used to
+      // bootstrap total_depth in the other thread.
+      ++total_depth;
+
       // Get back to work while we wait for our new graph_task to
       // complete!
       ++current_depth;
       lock.unlock();
       thread_main(graph_task, /* reentrant_thread */ true);
       --current_depth;
+      --total_depth;
+
+      // The graph task should have completed and the associated future should
+      // be marked completed as well.
+      TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
+
+      // We return a completed future here since 'thread_main' above is a call
+      // blocking an autograd engine thread and not the thread the user called
+      // 'execute_with_graph_task' from.
+      return graph_task->future_result_;
     }
-    --total_depth;
+  }
+}
+
+void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
+  std::unique_lock<std::mutex> lock(graph_task->mutex_);
+  if (graph_task->future_result_->completed()) {
+    // Future is already marked as completed.
+    return;
   }
 
-  // Check for an exception while running backwards
-  if (graph_task->has_error_.load()) {
-    std::rethrow_exception(graph_task->exception_);
+  try {
+    auto val = graph_task_exec_post_processing(graph_task);
+    graph_task->future_result_->markCompleted(val);
+  } catch (std::exception& e) {
+    graph_task->future_result_->setError(e.what());
   }
+}
 
+variable_list Engine::graph_task_exec_post_processing(
+    const std::shared_ptr<GraphTask>& graph_task) {
   if (!graph_task->not_ready_.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
@@ -802,6 +835,7 @@ variable_list Engine::execute_with_graph_task(
   return graph_task->captured_vars_;
 }
 
+
 // note that when python is present, this base engine will be overriden
 // with a PythonEngine. Because this typically happens before get_default_engine
 // is called, this base engine will never be created.
@@ -828,6 +862,16 @@ void Engine::queue_callback(std::function<void()> callback) {
 
 bool Engine::is_checkpoint_valid() {
   return checkpoint_valid;
+}
+
+size_t Engine::ready_queue_size(at::Device device) {
+  if (ready_queues_.empty()) {
+    // The vector ready_queues_ is initialized in start_threads, but this method
+    // can be called before start_threads. Adding this check to avoid index
+    // out of bound error.
+    return 0;
+  }
+  return ready_queue(device).size();
 }
 
 auto Engine::ready_queue(at::Device device) -> ReadyQueue& {

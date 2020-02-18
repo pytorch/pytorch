@@ -144,6 +144,8 @@ using NodeKind = Symbol;
 using topo_position_t = int64_t;
 using ValueSet = std::unordered_set<const Value*>;
 
+struct OperatorSet;
+
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
@@ -227,6 +229,18 @@ struct Value {
   //          %5 = h(%6, %6)
   TORCH_API void replaceAllUsesWith(Value* newValue);
 
+  // Replaces all uses of this value with 'newValue' after 'node'.
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = inplace_(%3)
+  //          %6 = h(%3, %3)
+  // Execute: %3.replaceAllUsesAfterNodeWith(%5.node(), %5)
+  // Result:  %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = inplace_(%3)
+  //          %6 = h(%5, %5)
+  TORCH_API void replaceAllUsesAfterNodeWith(const Node* node, Value* newValue);
+
   TORCH_API Value* copyMetadata(Value* from);
 };
 
@@ -250,6 +264,7 @@ struct TORCH_API Node {
   Block* owning_block_;
   c10::optional<SourceRange> source_range_;
   ScopePtr scope_;
+  c10::optional<InlinedCallStackPtr> callstack_;
   // Assumes FunctionSchemas are persistent, so we don't manage their lifetime.
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially
@@ -316,6 +331,13 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+  c10::optional<InlinedCallStackPtr> callstack() const {
+    return callstack_;
+  }
+  void setCallStack(InlinedCallStackPtr cs) {
+    callstack_ = cs;
+  }
+
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
   // We can't return a std::vector<Node*>& because there's no
@@ -616,14 +638,20 @@ struct TORCH_API Node {
     return static_cast<T*>(this);
   }
 
+  bool matches(const FunctionSchema& schema) const;
+
   // XXX: this function is meant to be used with string literals only!
   bool matches(
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
+  bool isMemberOf(const OperatorSet& os) const;
+
   const FunctionSchema& schema() const;
   const FunctionSchema* maybeSchema() const;
   const Operator& getOperator() const;
+  Operation getOperation() const;
+
   const Operator* maybeOperator() const;
 
   void dump() const;
@@ -707,6 +735,7 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Graphs, gs)
   CREATE_ACCESSOR(Type, ty)
   CREATE_ACCESSOR(Types, tys)
+  CREATE_ACCESSOR(IValue, ival)
 
 #undef CREATE_ACCESSOR
 
@@ -718,7 +747,6 @@ struct TORCH_API Node {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Node* t_(Symbol name, TensorAttr::ConstructorType v) {
-    AT_ASSERT(!v.defined() || v.is_variable());
     return setAttr<TensorAttr>(
         name, std::forward<TensorAttr::ConstructorType>(v));
   }
@@ -727,9 +755,6 @@ struct TORCH_API Node {
   }
 
   Node* ts_(Symbol name, TensorsAttr::ConstructorType v) {
-    for (const at::Tensor& t : v) {
-      AT_ASSERT(!t.defined() || t.is_variable());
-    }
     return setAttr<TensorsAttr>(
         name, std::forward<TensorsAttr::ConstructorType>(v));
   }
@@ -1086,14 +1111,13 @@ struct Graph {
       at::ArrayRef<Value*> keys,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createNumToTensor(Value* value);
-  TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createObject(const ClassTypePtr& type);
   TORCH_API Node* createSetAttr(
       Value* obj,
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
-  TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
+  Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
@@ -1129,7 +1153,7 @@ struct Graph {
 
   // Insert constant IValue into the graph.
   TORCH_API Value* insertConstant(
-      IValue val,
+      const IValue& val,
       c10::optional<SourceRange> loc = c10::nullopt,
       c10::optional<ScopePtr> scope = c10::nullopt);
 
@@ -1323,25 +1347,40 @@ TORCH_API void LintGraph(const std::shared_ptr<Graph>& graph);
 TORCH_API at::ArrayRef<Value*> createTupleUnpack(Value* v);
 
 /** Insert graph \p CALLEE into graph \p G using \p INPUTS as input values.
- *
  * The insertion happens at the current insertion point.
+ * Optionally, one can also pass \p VALUE_MAP to get a map between \p CALLEE
+ * values and their cloned copies in \p G.
  */
 TORCH_API std::vector<Value*> insertGraph(
     Graph& g,
     Graph& callee,
     ArrayRef<Value*> inputs);
+TORCH_API std::vector<Value*> insertGraph(
+    Graph& g,
+    Graph& callee,
+    ArrayRef<Value*> inputs,
+    std::unordered_map<Value*, Value*>& value_map);
 
-/** Insert graph \p CALLEE after node \p TO_REPLACE, remove the node and
- * replace all its uses with corresponding outputs of the inserted graph. The
- * function asserts that the number of outputs of the original node and the
+/** Insert function \p CALLEE after node \p TO_REPLACE, remove the node and
+ * replace all its uses with corresponding outputs of the inserted function.
+ * This asserts that the number of outputs of the original node and the
  * graph are the same.
  */
-TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Graph& callee);
+TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
+
+struct OperatorSet {
+  OperatorSet(std::initializer_list<const char*> sig_literals);
+ private:
+  friend struct Node;
+  std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
+};
+
 
 } // namespace jit
 } // namespace torch

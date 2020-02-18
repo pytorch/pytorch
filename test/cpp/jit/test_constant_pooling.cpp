@@ -80,24 +80,6 @@ graph():
         ->check_count("Long(2) = prim::Constant", 1, /*exactly*/ true)
         ->run(*graph);
   }
-  // don't create aliasing of graph outputs in constant pooling
-  {
-    auto graph = std::make_shared<Graph>();
-    script::parseIR(
-        R"IR(
-graph(%cond : Tensor):
-  %a : Tensor = prim::Constant()
-  %b : Tensor = prim::Constant()
-  %c : Tensor = prim::Constant()
-  %1 = prim::Print(%c)
-  return (%a, %b)
-  )IR",
-        &*graph);
-    ConstantPooling(graph);
-    testing::FileCheck()
-        .check_count("prim::Constant", 2, /*exactly*/ true)
-        ->run(*graph);
-  }
 }
 } // namespace jit
 } // namespace torch
