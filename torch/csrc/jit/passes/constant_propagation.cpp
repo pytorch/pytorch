@@ -24,8 +24,8 @@ c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
       return c10::nullopt;
     }
   }
+  auto op = node->getOperation();
   try {
-    auto op = node->getOperation();
     op(stack);
     TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
   } catch (...) {
@@ -75,39 +75,35 @@ struct ConstantPropagator {
     }
   }
 
-  std::vector<IValue> runNode(Node* n) {
+  c10::optional<std::vector<IValue>> runNode(Node* n) {
     auto op = n->getOperation();
     Stack stack;
     for (auto input : n->inputs()) {
       stack.push_back(*toIValue(input));
     }
-    op(stack);
-    auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
+    try {
+      op(stack);
+    } catch (...) {
+      return c10::nullopt;
+    }
+    for (const IValue& v : stack) {
       if (v.isTensor()) {
-        auto t = std::move(v).toTensor();
-        if (t.defined()) {
-          if (t.requires_grad()) {
-            // error gets caught within propagateNode()
-            throw c10::Error("Can't insert requires grad as constant", "");
-          }
-          return IValue(t);
-        } else {
-          return t;
+        at::Tensor t  = v.toTensor();
+        if (t.defined() && t.requires_grad()) {
+          // requires grad tensors cannot be constants
+          return c10::nullopt;
         }
-      } else {
-        return v;
       }
-    });
-    return var_outputs;
+    }
+    return stack;
   }
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
-    try {
-      outputs = runNode(n);
-    } catch (...) {
-      // Catch exceptions. This op may not be run,
-      // so catch the error here & leave the op in the graph
+    if (auto outputs_opt = runNode(n)) {
+      outputs = std::move(outputs_opt.value());
+    } else {
+      // The op failed to run, so we cannot continue constant-prop for it.
       return;
     }
     auto graph = n->owningGraph();
