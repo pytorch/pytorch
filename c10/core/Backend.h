@@ -148,6 +148,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::HIP;
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
+      return DeviceType::CPU;
     case Backend::Undefined:
       AT_ERROR("Undefined backend is not a valid device type");
     default:
