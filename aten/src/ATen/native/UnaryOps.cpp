@@ -31,97 +31,100 @@
 namespace at {
 namespace native {
 
-enum class TypePromotionStrategy {
-  None,  // No implicit dtype promotion
-  Type1, // int8 - fp16, int16 - fp32, int32 - fp64, int64 - fp64, bool - fp16
-  Type2, // (int8, int16, int32, int64, bool) - fp64
-  Type3, // bool - int8
-  Type4  // bool - fp16
-};
+// Using anonymous namespace as these functions' scope is limited to this file and we do not want to pollute at::native namespace
+namespace {
+  enum class TypePromotionStrategy {
+    None,  // No implicit dtype promotion
+    Type1, // int8 - fp16, int16 - fp32, int32 - fp64, int64 - fp64, bool - fp16
+    Type2, // (int8, int16, int32, int64, bool) - fp64
+    Type3, // bool - int8
+    Type4  // bool - fp16
+  };
 
-// promoteToFloatType[1/2/3/4] functions are helper functions to support input dtype to Float implicit promotions based on NumPy's conversion rules
-// For discussion, check https://github.com/pytorch/pytorch/pull/33322 and https://github.com/pytorch/pytorch/issues/28703
-// There are 4 type of dtype promotions in NumPy: (float16 is replaced by float32 for CPU devices)
-// Type - 1: int8 - float16, int16 - float32, int32 - float64, int64 - float64, bool - float16
-// Type - 2: (int8, int16, int32, int64, bool) - float64
-// Type - 3: bool - int8
-// Type - 4: bool - float16
+  // promoteToFloatType[1/2/3/4] functions are helper functions to support input dtype to Float implicit promotions based on NumPy's conversion rules
+  // For discussion, check https://github.com/pytorch/pytorch/pull/33322 and https://github.com/pytorch/pytorch/issues/28703
+  // There are 4 type of dtype promotions in NumPy: (float16 is replaced by float32 for CPU devices)
+  // Type - 1: int8 - float16, int16 - float32, int32 - float64, int64 - float64, bool - float16
+  // Type - 2: (int8, int16, int32, int64, bool) - float64
+  // Type - 3: bool - int8
+  // Type - 4: bool - float16
+  static inline ScalarType promoteToFloatType1(const Tensor& self) {
+    // This promotes dtype based on Type 1 strategy
+    ScalarType dtype;
 
-static inline ScalarType promoteToFloatType1(const Tensor& self) {
-  // This promotes dtype based on Type 1 strategy
-  ScalarType dtype;
+    switch(self.scalar_type()) {
+      case kChar:
+        dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+        break;
+      case kShort:
+        dtype = kFloat;
+        break;
+      case kInt:
+        dtype = kDouble;
+        break;
+      case kLong:
+        dtype = kDouble;
+        break;
+      case kBool:
+        dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+        break;
+      default:
+        dtype = ScalarType::Undefined;
+    }
 
-  switch(self.scalar_type()) {
-    case kChar:
-      dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      break;
-    case kShort:
-      dtype = kFloat;
-      break;
-    case kInt:
-      dtype = kDouble;
-      break;
-    case kLong:
-      dtype = kDouble;
-      break;
-    case kBool:
-      dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      break;
-    default:
-      dtype = ScalarType::Undefined;
+    return dtype;
   }
 
-  return dtype;
-}
+  static inline ScalarType promoteToFloatType2(const Tensor& self) {
+    // This promotes dtype based on Type 2 strategy
+    ScalarType dtype;
 
-static inline ScalarType promoteToFloatType2(const Tensor& self) {
-  // This promotes dtype based on Type 2 strategy
-  ScalarType dtype;
+    switch(self.scalar_type()) {
+      case kChar:
+      case kShort:
+      case kInt:
+      case kLong:
+      case kBool:
+        dtype = kDouble;
+        break;
+      default:
+        dtype = ScalarType::Undefined;
+    }
 
-  switch(self.scalar_type()) {
-    case kChar:
-    case kShort:
-    case kInt:
-    case kLong:
-    case kBool:
-      dtype = kDouble;
-      break;
-    default:
-      dtype = ScalarType::Undefined;
+    return dtype;
   }
 
-  return dtype;
-}
+  static inline ScalarType promoteToFloatType3(const Tensor& self) {
+    // This promotes dtype based on Type 3 strategy
+    ScalarType dtype;
 
-static inline ScalarType promoteToFloatType3(const Tensor& self) {
-  // This promotes dtype based on Type 3 strategy
-  ScalarType dtype;
+    switch(self.scalar_type()) {
+      case kBool:
+        dtype = kChar;
+        break;
+      default:
+        dtype = ScalarType::Undefined;
+    }
 
-  switch(self.scalar_type()) {
-    case kBool:
-      dtype = kChar;
-      break;
-    default:
-      dtype = ScalarType::Undefined;
+    return dtype;
   }
 
-  return dtype;
-}
+  static inline ScalarType promoteToFloatType4(const Tensor& self) {
+    // This promotes dtype based on Type 4 strategy
+    ScalarType dtype;
 
-static inline ScalarType promoteToFloatType4(const Tensor& self) {
-  // This promotes dtype based on Type 4 strategy
-  ScalarType dtype;
+    switch(self.scalar_type()) {
+      case kBool:
+        dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
+        break;
+      default:
+        dtype = ScalarType::Undefined;
+    }
 
-  switch(self.scalar_type()) {
-    case kBool:
-      dtype = (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      break;
-    default:
-      dtype = ScalarType::Undefined;
+    return dtype;
   }
+} // end anonymous namespace
 
-  return dtype;
-}
 
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
