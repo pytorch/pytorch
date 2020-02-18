@@ -11,22 +11,23 @@ def _remote_method(method, rref, *args, **kwargs):
     return rpc.rpc_sync(rref.owner(), _call_method, args=args, kwargs=kwargs)
 
 
-class FakeEmbeddingTable(nn.Module):
-    def __init__(self):
-        super(FakeEmbeddingTable, self).__init__()
-        # 1 token only
-        self.em = nn.Embedding(1, 8)
+class SimpleNet(nn.Module):
+    def __init__(self, d_in, d_out):
+        super(SimpleNet, self).__init__()
+        self.net = nn.Linear(d_in, d_out)
 
     def forward(self, input):
-        return self.em(input)
+        return nn.ReLU(self.net(input))
 
 
 class DdpModelWithRpc(nn.Module):
-    def __init__(self, ps):
-        super(MultiMachineModel, self).__init__()
-        self.em_rref = rpc.remote(ps, FakeEmbeddingTable)
-        self.net = DDP(torch.nn.Linear(ninp, 10))
+    def __init__(self, remote_server):
+        super(DdpModelWithRpc, self).__init__()
+        self.net1 = DDP(SimpleNet(5, 8))
+        self.rref = rpc.remote(remote_server, 8, 5)
+        self.net2 = DDP(SimpleNet(5, 3))
 
     def forward(self, x):
-        emb = _remote_method(EmbeddingTable.forward, self.em_rref, x)
-        return self.net(emb)
+        x = self.net1(x)
+        x = _remote_method(SimpleNet.forward, self.rref, x)
+        return self.net2(x)
