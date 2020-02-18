@@ -229,8 +229,6 @@ Tensor& _clamp_out_cpu(
     optional<Scalar> min,
     optional<Scalar> max) {
   if (min && max) {
-    TORCH_CHECK(self.device().type() == DeviceType::CPU,
-                "clamp only supports CPU device type, got: ", self.device().type());
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
     auto iter = TensorIterator::unary_op(result, self,
@@ -251,8 +249,6 @@ Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
 }
 
 Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU,
-              "clamp_max only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,
@@ -266,8 +262,6 @@ Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU,
-              "clamp_min only supports CPU device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self,

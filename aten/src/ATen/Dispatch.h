@@ -8,7 +8,6 @@
 
 #define AT_PRIVATE_CASE_TYPE(enum_type, type, ...) \
   case enum_type: {                                \
-    constexpr at::ScalarType __st = enum_type;     \
     using scalar_t = type;                         \
     return __VA_ARGS__();                          \
   }
