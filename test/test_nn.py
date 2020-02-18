@@ -49,7 +49,7 @@ from torch.testing._internal.common_nn import NNTestCase, ModuleTest, CriterionT
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
-    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm
+    skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest
 
 from torch.nn import MultiheadAttention
 
@@ -61,13 +61,6 @@ from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
-
-TEST_LARGE_TENSOR = TEST_CUDA
-TEST_32GB_TENSOR = TEST_CUDA
-if TEST_CUDA:
-    total_memory_in_gb = torch.cuda.get_device_properties(0).total_memory / (1024 * 1024 * 1024)
-    TEST_LARGE_TENSOR = (total_memory_in_gb >= 12)
-    TEST_32GB_TENSOR = (total_memory_in_gb > 31)
 
 if TEST_SCIPY:
     from scipy import stats
@@ -3592,8 +3585,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @largeCUDATensorTest('12GB')
     def test_adaptive_pooling_avg_nhwc_launch_config_backward(self):
         input = torch.randint(1, 10, (1, 32, 2 ** 17 + 1, 32), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -3615,8 +3607,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out, ref_out)
         self.assertEqual(input.grad, ref_input.grad)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    @largeCUDATensorTest('12GB')
     def test_adaptive_pooling_avg_nhwc_launch_config_forward(self):
         input = torch.randint(1, 10, (1, 32, 16, 16), dtype=torch.float32, device="cuda")
         input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
@@ -9419,7 +9410,7 @@ class TestNNDeviceType(NNTestCase):
                     grad_input.sum().backward()
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory to run test")
+    @largeCUDATensorTest('12GB')
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
         # that is, it does not crash. The correctness of fallback implementation should be
@@ -9471,7 +9462,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
+    @largeCUDATensorTest('32GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -9488,7 +9479,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff3, 0)
 
     @skipIfRocm
-    @unittest.skipIf(not TEST_32GB_TENSOR, "not enough memory to run test")
+    @largeCUDATensorTest('32GB')
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
