@@ -97,12 +97,22 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
         "output memory locations. Found overlap in input tensor %d.", i);
   }
 
+
+  // Hack `cat` operator to support channels last
+  bool has_channels_last = false;
+  
   for (i = 0; i < numInputs; i++)
   {
     if (should_skip(inputs[i])) {
       hasSkippedInput = true;
       continue;
     }
+
+  
+    // Hack `cat` operator to support channels last
+    at::Tensor tensor_wrap = THTensor_wrap(inputs[i]);
+    has_channels_last = has_channels_last || tensor_wrap.is_contiguous(at::MemoryFormat::ChannelsLast);
+
     nDims = inputs[i]->dim();
     notSkippedTensor = inputs[i];
   }
@@ -250,6 +260,18 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       offset += dimSize;
     }
   }
+
+// Hack `cat` operator to support channels last
+at::Tensor tensor_wrap = THTensor_wrap(result);
+if (has_channels_last && !tensor_wrap.is_contiguous(at::MemoryFormat::ChannelsLast)) {
+at::Tensor tensor_wrap = THTensor_wrap(result);
+auto resized_res = tensor_wrap.contiguous(at::MemoryFormat::ChannelsLast);
+//tensor_wrap.contiguous(at::MemoryFormat::ChannelsLast);
+ tensor_wrap.resize_(tensor_wrap.sizes(), at::MemoryFormat::ChannelsLast);
+ tensor_wrap.copy_(resized_res);
+}
+    
+
 }
 
 void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
