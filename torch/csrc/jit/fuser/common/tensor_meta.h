@@ -38,6 +38,12 @@ struct TORCH_API TensorContiguity {
   // return the rank of the tensor;
   int rank() const;
 
+  // check contiguity
+  bool isIdentical(const TensorContiguity& tc) const;
+
+  // TODO: check for compatiblity
+  // I need feedback on this one. What do we check? order + broadcast rule?
+  bool isCompatible(const TensorContiguity& tc) const;
 
 /*******************************************************************************
  * Future proof support
@@ -57,6 +63,7 @@ struct TORCH_API TensorContiguity {
   bool hasContiguousFCD() const;
 
   // This is used to support rational binding;
+  // similarly return -1 means it's unknown;
   int getAxisByStride(int order) const;
   const std::vector<int>& getAxesOrderedByStride() const;
 
@@ -64,7 +71,6 @@ struct TORCH_API TensorContiguity {
   const std::vector<int>& getContiguityTag() const;
   const std::vector<int>& getSortedAxesTag() const;
 
-  // TODO: merge two contiguity info;
   void merge(const TensorContiguity& tc);
 
 protected:

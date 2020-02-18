@@ -321,6 +321,45 @@ void testGPU_FusionTensorContiguity() {
     TORCH_CHECK((t_c.canCollapseToHigher(0)));
     TORCH_CHECK((t_c.canCollapseToHigher(1)));
   }
+
+  {
+    // test merge
+    TensorContiguity t_c_l({4, 4, 4}, {16, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4}, {16, 4, 1});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK((t_c_l.isIdentical(t_c_r)));
+  }
+
+  {
+    TensorContiguity t_c_l({4, 4, 4, 4}, {16, 0, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 16, 4, 1});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(t_c_l.getFCD() == 3);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+  }
+
+  {
+    // NHWC + NCHW
+    TensorContiguity t_c_l({4, 4, 4, 4}, {64, 16, 4, 1});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 1, 16, 4});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(!t_c_l.hasContiguousFCD());
+    TORCH_CHECK(t_c_l.getFCD() == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+    TORCH_CHECK(t_c_l.getAxisByStride(1) == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(2) == -1);
+    TORCH_CHECK(t_c_l.getAxisByStride(3) == -1);
+  }
+
+  {
+    // NCHW + NCHW with broadcasting
+    TensorContiguity t_c_l({4, 4, 4, 4}, {4, 1, 4, 0});
+    TensorContiguity t_c_r({4, 4, 4, 4}, {64, 1, 16, 4});
+    t_c_l.merge(t_c_r);
+    TORCH_CHECK(t_c_l.getFCD() == 1);
+    TORCH_CHECK(t_c_l.getAxisByStride(0) == 0);
+  }
+
 }
 
 void testGPU_FusionTVSplit() {
