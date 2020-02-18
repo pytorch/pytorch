@@ -82,49 +82,29 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
-  at::detail::Array<ScalarType, ntensors> dtypes;
-  for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
-  }
-
   int64_t numel = iter.numel();
-  if (iter.is_trivial_1d()) {
+  bool fast_loop = iter.is_contiguous() && !needs_dynamic_casting<func_t>::check(iter) && modern::detail::has_same_arg_types<func_t>::value;
+  if (fast_loop) {
+    modern::launch_kernel(numel, f, data);
+  } else {
     auto inner_strides = iter.get_inner_strides();
     at::detail::Array<int, ntensors> strides;
     for (int i = 0; i < ntensors; i++) {
       strides[i] = inner_strides[i];
     }
 
-    if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        void* out = data[0] + strides[0] * idx;
-        arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
-      modern::launch_kernel(numel, f, data);
-    } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
-      });
+    at::detail::Array<ScalarType, ntensors> dtypes;
+    for (int i = 0; i < ntensors; i++) {
+      dtypes[i] = iter.tensor(i).scalar_type();
     }
-  } else {
+
     auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
-    if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        void* out = data[0] + offsets[0];
-        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
-      });
-    }
+    legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
+      auto offsets = offset_calc.get(idx);
+      void* out = data[0] + offsets[0];
+      arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+      c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+    });
   }
 }
 
