@@ -189,7 +189,11 @@ class ShapePropagator {
       bool complete = false) {
     std::vector<TensorTypePtr> tensor_types;
 
-    auto& schema = node->schema();
+    auto schema_opt = node->maybeSchema();
+    if (!schema_opt) {
+      return c10::nullopt;
+    }
+    auto& schema = *schema_opt;
     auto& args = schema.arguments();
     // can't handle varargs primitives because we don't know what should be a
     // Tensor

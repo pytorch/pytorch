@@ -49,6 +49,9 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   if (nargs > 1) {
     out << " " << inst.N;
   }
+  if (nargs > 2) {
+    out << " " << inst.flags;
+  }
   return out;
 }
 
@@ -70,7 +73,7 @@ OpCode parseOpCode(const char *str) {
 
 bool isOpSupportedInMobile(OpCode op) {
   static constexpr OpCode supported_ops_in_mobile[] {
-      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR
+      OP, OPN, LOAD, MOVE, STOREN, STORE, DROP, DROPR, LOADC, JF, JMP, LOOP, RET, GET_ATTR, SET_ATTR, LIST_CONSTRUCT, TUPLE_CONSTRUCT,
   };
 
   for (auto sop : supported_ops_in_mobile) {

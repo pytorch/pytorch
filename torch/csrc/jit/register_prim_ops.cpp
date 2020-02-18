@@ -103,14 +103,6 @@ void checkImplicitTensorToNum(at::Tensor t, bool toInt) {
   }
 }
 
-template <typename dtype> // int64_t, bool, double
-Operation listConstruct(int64_t num_inputs) {
-  return [=](Stack& stack) {
-    listConstructFunc<dtype>(num_inputs, stack);
-    return 0;
-  };
-}
-
 static int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
@@ -821,25 +813,10 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          "aten::warn(str message, int stacklevel=2) -> ()",
-         [](const Node* node) -> Operation {
-           auto range = node->sourceRange().source();
-           if (range->filename()) {
-             auto line = range->starting_line_no() +
-                 range->lineno_for_offset(node->sourceRange().start());
-             return [=](Stack& stack) {
-               drop(stack, 1);
-               c10::SourceLocation location{
-                   "", range->filename()->c_str(), uint32_t(line)};
-               c10::Warning::warn(location, pop(stack).toStringRef());
-               return 0;
-             };
-           }
-
-           return [=](Stack& stack) {
-             drop(stack, 1);
-             AT_WARN(pop(stack).toStringRef());
-             return 0;
-           };
+         [](Stack& stack) {
+            TORCH_CHECK(
+               false, "warn is implemented directly in the interpreter");
+            return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -970,33 +947,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         prim::TupleUnpack,
-         [](const Node* node) -> Operation {
-           size_t num_elems = node->outputs().size();
-           return [=](Stack& stack) {
-             tupleUnpackFunc(num_elems, stack);
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::TupleSlice,
-         [](const Node* node) -> Operation {
-           int64_t beg_ind = node->i(attr::beg);
-           int64_t end_ind = node->i(attr::end);
-           return [=](Stack& stack) {
-             auto tuple = pop(stack).toTuple();
-             std::vector<IValue> output_elems;
-             output_elems.reserve(end_ind - beg_ind);
-             for (int64_t i = beg_ind; i < end_ind; ++i) {
-               output_elems.emplace_back(tuple->elements()[i]);
-             }
-             push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          // note the compiler knows to type TupleIndex more accurately than it is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
          [](Stack& stack) {
@@ -1011,23 +961,10 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisSpecialCase()),
-     Operator(
-         prim::TupleConstruct,
-         [](const Node* node) -> Operation {
-           size_t num_inputs = node->inputs().size();
-           auto type = node->output()->type()->expect<TupleType>();
-           bool named = type->name().has_value();
-           return [=](Stack& stack) {
-             std::vector<IValue> elems{
-                 std::make_move_iterator(stack.end() - num_inputs),
-                 std::make_move_iterator(stack.end())};
-             drop(stack, num_inputs);
-             push(
-                 stack,
-                 named ? c10::ivalue::Tuple::createNamed(std::move(elems), type)
-                       : c10::ivalue::Tuple::create(std::move(elems)));
+      Operator("prim::TupleUnpack(Any tup) -> ...",
+         [](Stack& stack) {
+             tupleUnpack(stack);
              return 0;
-           };
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -1076,122 +1013,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::ListUnpack,
-         [](const Node* node) -> Operation {
-           const auto num_outputs = node->outputs().size();
-           ListTypePtr lt = node->input()->type()->expect<ListType>();
-           if (lt->getElementType() == IntType::get()) {
-             return [=](Stack& stack) {
-               auto list = pop(stack).toIntList();
-               TORCH_CHECK(
-                   list.size() == num_outputs,
-                   "Expected ",
-                   num_outputs,
-                   " elements in a list but found ",
-                   list.size());
-               push_list_elements(stack, list);
-               return 0;
-             };
-           } else if (lt->getElementType() == FloatType::get()) {
-             return [=](Stack& stack) {
-               auto list = pop(stack).toDoubleList();
-               TORCH_CHECK(
-                   list.size() == num_outputs,
-                   "Expected ",
-                   num_outputs,
-                   " elements in a list but found ",
-                   list.size());
-               push_list_elements(stack, list);
-               return 0;
-             };
-           } else if (lt->getElementType() == TensorType::get()) {
-             return [=](Stack& stack) {
-               auto list = pop(stack).toTensorList();
-               TORCH_CHECK(
-                   list.size() == num_outputs,
-                   "Expected ",
-                   num_outputs,
-                   " elements in a list but found ",
-                   list.size());
-               push_list_elements(stack, list);
-               return 0;
-             };
-           } else {
-             return [=](Stack& stack) {
-               auto list = pop(stack).toList();
-               TORCH_CHECK(
-                   list.size() == num_outputs,
-                   "Expected ",
-                   num_outputs,
-                   " elements in a list but found ",
-                   list.size());
-               push_list_elements(stack, list);
-               return 0;
-             };
-           }
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::ListConstruct,
-         [](const Node* node) -> Operation {
-           const auto num_inputs = node->inputs().size();
-           ListTypePtr lt = node->output()->type()->expect<ListType>();
-           if (IntType::get() == lt->getElementType()) {
-             return listConstruct<int64_t>(num_inputs);
-           } else if (FloatType::get() == lt->getElementType()) {
-             return listConstruct<double>(num_inputs);
-           } else if (lt->getElementType() == BoolType::get()) {
-             return listConstruct<bool>(num_inputs);
-           } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
-             return [=](Stack& stack) {
-               tensorListConstructFunc(num_inputs, stack);
-               return 0;
-             };
-           } else {
-             TypePtr elementType = lt->getElementType();
-             return [=](Stack& stack) {
-               const size_t stack_size = stack.size();
-               auto vals = c10::impl::GenericList(elementType);
-               vals.reserve(num_inputs);
-               for (size_t i = stack_size - num_inputs; i < stack_size; ++i) {
-                 vals.emplace_back(std::move(stack[i]));
-               }
-               drop(stack, num_inputs);
-               push(stack, std::move(vals));
-               return 0;
-             };
-           }
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::DictConstruct,
-         [](const Node* node) -> Operation {
-           const auto num_inputs = node->inputs().size();
-           if (num_inputs % 2 != 0) {
-             throw std::runtime_error(
-                 "DictConstruct must have an even number of inputs");
-           }
-           TORCH_INTERNAL_ASSERT(
-               node->outputs().size() == 1,
-               "DictConstruct must have exactly one output");
-           TypePtr output_type = node->outputs()[0]->type();
-           auto dt = output_type->expect<DictType>();
-           TypePtr key_type = dt->getKeyType();
-           TypePtr value_type = dt->getValueType();
-           return [=](Stack& stack) {
-             auto vals = c10::impl::GenericDict(key_type, value_type);
-             vals.reserve(num_inputs / 2);
-             for (size_t i = 0; i < num_inputs; i += 2) {
-               auto val = pop(stack);
-               auto key = pop(stack);
-               vals.insert_or_assign(std::move(key), std::move(val));
-             }
-             push(stack, std::move(vals));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          "aten::dict() -> Dict(str, Tensor)",
          [](Stack& stack) {
            auto dict =
@@ -1217,29 +1038,6 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      Operator("prim::unchecked_cast(t x) -> t", noop, aliasAnalysisSpecialCase()),
      Operator(
-         prim::fork,
-         [](const Node* node) -> Operation {
-           Code code(node->g(attr::Subgraph));
-           int n_inputs = node->inputs().size();
-           AT_ASSERT(node->blocks().size() == 0);
-           AT_ASSERT(node->hasAttribute(attr::Subgraph));
-           return [=](Stack& stack) {
-             // Move inputs to a separate stack
-             InterpreterState forked_interprester(code);
-             InterpreterContinuation continuation(
-                 forked_interprester,
-                 Stack(stack.end() - n_inputs, stack.end()),
-                 autograd::GradMode::is_enabled());
-             drop(stack, n_inputs);
-
-             push(stack, forked_interprester.getFuture());
-
-             at::launch(std::move(continuation));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
          "aten::wait(Future(t) self) -> t",
          [](Stack& stack) {
            TORCH_CHECK(
@@ -1252,53 +1050,6 @@ RegisterOperators reg(
          [](Stack& stack) {
            push(stack, IValue::uninitialized());
            return 0;
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::CreateObject,
-         [](const Node* node) -> Operation {
-           const auto type = node->output()->type()->expect<ClassType>();
-           const size_t numAttrs = type->numAttributes();
-           auto cu = type->compilation_unit();
-           return [cu, type, numAttrs](Stack& stack) {
-             auto userObj = c10::ivalue::Object::create(
-                 c10::StrongTypePtr(cu, type), numAttrs);
-             push(stack, std::move(userObj));
-             return 0;
-           };
-         },
-         aliasAnalysisSpecialCase()),
-     Operator(
-         prim::isinstance,
-         [](const Node* node) -> Operation {
-           std::vector<TypePtr> types = node->tys(attr::types);
-           bool is_list = false;
-           bool is_tuple = false;
-           for (const std::string& kind : node->ss(attr::kinds)) {
-             if (kind == "list") {
-               is_list = true;
-             } else if (kind == "tuple") {
-               is_tuple = true;
-             } else {
-               TORCH_INTERNAL_ASSERT(false, "unrecognized type kind ", kind);
-             }
-           }
-           return [types, is_list, is_tuple](Stack& stack) {
-             TypePtr ty = pop(stack).type();
-             if ((is_list && ty->kind() == ListType::Kind) ||
-                 (is_tuple && ty->kind() == TupleType::Kind)) {
-               push(stack, true);
-               return 0;
-             }
-             for (const TypePtr& to_check : types) {
-               if (ty->isSubtypeOf(to_check)) {
-                 push(stack, true);
-                 return 0;
-               }
-             }
-             push(stack, false);
-             return 0;
-           };
          },
          aliasAnalysisSpecialCase())});
 

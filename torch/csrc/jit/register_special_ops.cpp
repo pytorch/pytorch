@@ -266,7 +266,7 @@ RegisterOperators reg({
         "aten::format(str self, ...) -> str",
         [](Stack& stack) {
           size_t num_inputs = pop(stack).toInt();
-          formatFunc(num_inputs, stack);
+          format(stack, num_inputs);
           return 0;
         },
         aliasAnalysisFromSchema()),
