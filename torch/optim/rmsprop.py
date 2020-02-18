@@ -103,6 +103,6 @@ class RMSprop(Optimizer):
                     buf.mul_(group['momentum']).addcdiv_(grad, avg)
                     p.data.add_(buf, alpha=-group['lr'])
                 else:
-                    p.data.addcdiv_(-group['lr'], grad, avg)
+                    p.data.addcdiv_(grad, avg, value=-group['lr'])
 
         return loss

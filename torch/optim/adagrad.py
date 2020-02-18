@@ -95,6 +95,6 @@ class Adagrad(Optimizer):
                 else:
                     state['sum'].addcmul_(grad, grad, value=1)
                     std = state['sum'].sqrt().add_(group['eps'])
-                    p.data.addcdiv_(-clr, grad, std)
+                    p.data.addcdiv_(grad, std, value=-clr)
 
         return loss
