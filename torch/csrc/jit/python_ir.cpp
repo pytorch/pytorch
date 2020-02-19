@@ -236,7 +236,9 @@ void initPythonIRBindings(PyObject* module_) {
              bool strip_doc_string,
              bool keep_initializers_as_inputs,
              const std::map<std::string, int>& custom_opsets,
-             bool add_node_names) {
+             bool add_node_names,
+             bool use_external_data_format,
+             const std::string& onnx_file_path) {
             std::string graph;
             RawDataExportMap export_map;
             std::tie(graph, export_map) = export_onnx(
@@ -249,7 +251,9 @@ void initPythonIRBindings(PyObject* module_) {
                 strip_doc_string,
                 keep_initializers_as_inputs,
                 custom_opsets,
-                add_node_names);
+                add_node_names,
+                use_external_data_format,
+                onnx_file_path);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -273,7 +277,9 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("strip_doc_string") = true,
           py::arg("keep_initializers_as_inputs") = true,
           py::arg("custom_opsets"),
-          py::arg("add_node_names") = true)
+          py::arg("add_node_names") = true,
+          py::arg("use_external_data_format") = false,
+          py::arg("onnx_file_path") = std::string())
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph> g,
