@@ -315,25 +315,29 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
   bool is_tracing = torch::jit::tracer::isTracing();
 
+  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, Variable&& value) {
+    at::indexing::set_item(self_, {std::move(tensor_index)}, std::move(value), is_tracing);
+  };
+
   // handle simple types: integers, slices, ellipsis, none, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     // do nothing for false (technically we should check the size, but we don't have
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
-    self_.index_put_({at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
+    handle_simple_type(at::indexing::TensorIndex(at::indexing::Ellipsis), std::move(value));
     return 0;
   } else if (index == Py_None) {
-    self_.index_put_({at::indexing::TensorIndex(at::indexing::None)}, value);
+    handle_simple_type(at::indexing::TensorIndex(at::indexing::None), std::move(value));
     return 0;
   } else if (index == Py_True) {
-    self_.index_put_({at::indexing::TensorIndex(true)}, value);
+    handle_simple_type(at::indexing::TensorIndex(true), std::move(value));
     return 0;
   } else if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    self_.index_put_({at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
+    handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), std::move(value));
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
@@ -341,7 +345,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    self_.index_put_({at::indexing::TensorIndex({start, stop, step})}, value);
+    handle_simple_type(at::indexing::TensorIndex({start, stop, step}), std::move(value));
     return 0;
   }
 

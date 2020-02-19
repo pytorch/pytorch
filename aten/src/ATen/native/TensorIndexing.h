@@ -496,5 +496,62 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   return dispatch_index(sliced, std::move(tensorIndices));
 }
 
+// This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
+// for "the assigned value is a Tensor" case
+static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value, bool is_tracing) {
+  OptionalDeviceGuard device_guard(device_of(self));
+  at::Device self_device = self.device();
+  IntArrayRef self_sizes = self.sizes();
+
+  // handle simple types: integers, slices, ellipsis, bool
+  if (indices.size() == 1) {
+    const TensorIndex& index = indices[0];
+    if (index.is_boolean() && !index.boolean()) {
+      // do nothing for false (technically we should check the size, but we don't have
+      // real 0-sized shapes.
+      return;
+    } else if (index.is_ellipsis()) {
+      copy_to(self, value);
+      return;
+    } else if (index.is_none() || (index.is_boolean() && index.boolean())) {
+      copy_to(self.unsqueeze(0), value);
+      return;
+    } else if (index.is_integer()) {
+      copy_to(applySelect(self, 0, index.integer(), 0, self_device, self_sizes), value);
+      return;
+    } else if (index.is_slice()) {
+      copy_to(applySlice(
+        self,
+        0,
+        index.slice().start(),
+        index.slice().stop(),
+        index.slice().step(),
+        /*ensure_view=*/false,
+        /*is_tracing=*/is_tracing,
+        self_device,
+        self_sizes), value);
+      return;
+    }
+  }
+
+  std::vector<Tensor> tensorIndices;
+  Tensor sliced = applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
+  if (tensorIndices.empty()) {
+    copy_to(sliced, value);
+    return;
+  }
+
+  IntArrayRef valueSizes = value.sizes();
+  IntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
+  Tensor valuesSliced;
+  if (!valueSizes.equals(slicedValueSizes)) {
+    valuesSliced = value.view(slicedValueSizes);
+  } else {
+    valuesSliced = value;
+  }
+  dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
+  return;
+}
+
 } // namespace indexing
 } // namespace at
