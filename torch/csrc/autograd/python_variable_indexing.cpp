@@ -260,8 +260,15 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 
   bool is_tracing = torch::jit::tracer::isTracing();
 
-  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index) {
-    return wrap_var(std::move(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing)));
+  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, bool release_gil) {
+    Tensor result;
+    if (release_gil) {
+      pybind11::gil_scoped_release no_gil;
+      result = at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing);
+    } else {
+      result = at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing);
+    }
+    return wrap_var(std::move(result));
   };
 
   // handle simple types: integers, slices, bool
@@ -269,23 +276,16 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)));
+    return handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), /*release_gil=*/false);
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    return handle_simple_type(at::indexing::TensorIndex({start, stop, step}));
+    return handle_simple_type(at::indexing::TensorIndex({start, stop, step}), /*release_gil=*/false);
   } else if (index == Py_False || index == Py_True) {
-    Tensor result = self_.unsqueeze(0);
-    return wrap_var(std::move(([&]() {
-      pybind11::gil_scoped_release no_gil;
-      variable_list variableIndices{
-        at::indexing::boolToIndexingTensor(result, index == Py_True, self_.device())
-      };
-      return at::indexing::dispatch_index(result, std::move(variableIndices));
-    })()));
+    return handle_simple_type(at::indexing::TensorIndex(index == Py_True), /*release_gil=*/true);
   }
 
   // wrap index in a tuple if it's not already one

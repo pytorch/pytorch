@@ -459,7 +459,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
-  // handle simple types: integers, slices, none, ellipsis
+  // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (index.is_integer()) {
@@ -479,6 +479,14 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
       return self.unsqueeze(0);
     } else if (index.is_ellipsis()) {
       return at::alias(self);
+    } else if (index.is_boolean()) {
+      Tensor result = self.unsqueeze(0);
+      return dispatch_index(
+        result,
+        std::move(std::vector<Tensor>{
+          boolToIndexingTensor(result, index.boolean(), self_device)
+        })
+      );
     }
   }
 
