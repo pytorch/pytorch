@@ -31,7 +31,7 @@ from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
     dtypes, dtypesIfCUDA, deviceCountAtLeast, skipCUDAIf, precisionOverride, \
-    PYTORCH_CUDA_MEMCHECK
+    PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
 import torch.backends.quantized
 import torch.testing._internal.data
 
@@ -5355,6 +5355,57 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 # inputs are not expandable but reshapeable, output size is not the same as mean
                 torch.normal(tensor2345, tensor120, out=output345)
 
+    def test_tensoriterator_output_setup(self):
+        # Test whether the output's memory layout is correct
+        def test_memory_layout(x, y, scale, zero_point, out):
+            self.assertEqual(x.dim(), 4)
+            self.assertEqual(x.size(), y.size())
+            self.assertEqual(y.size(), out.size())
+
+            shape = x.size()
+            for n in range(shape[0]):
+                for c in range(shape[1]):
+                    for h in range(shape[2]):
+                        for w in range(shape[3]):
+                            if scale is not None and zero_point is not None:
+                                self.assertEqual(
+                                    out[n][c][h][w],
+                                    torch.ops.quantized.add(x[n][c][h][w], y[n][c][h][w], scale, zero_point))
+                            else:
+                                self.assertEqual(out[n][c][h][w], x[n][c][h][w] + y[n][c][h][w])
+
+        xraw = torch.rand(2, 3, 4, 4)
+        yraw = torch.rand(2, 3, 4, 4)
+        qxraw = torch.quantize_per_tensor(xraw, 0.1, 5, torch.quint8)
+        qyraw = torch.quantize_per_tensor(yraw, 0.1, 5, torch.quint8)
+
+        # contiguous case fast setup
+        test_memory_layout(xraw, yraw, None, None, xraw + yraw)
+        test_memory_layout(qxraw, qyraw, 0.1, 5, torch.ops.quantized.add(qxraw, qyraw, 0.1, 5))
+
+        # channels last case fast setup
+        x = xraw.contiguous(memory_format=torch.channels_last)
+        y = yraw.contiguous(memory_format=torch.channels_last)
+        test_memory_layout(x, y, None, None, x + y)
+        qx = qxraw.contiguous(memory_format=torch.channels_last)
+        qy = qyraw.contiguous(memory_format=torch.channels_last)
+        test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+        # non contiguous case fast setup (dense, non-overlapping, same shape and sizes)
+        x = xraw.permute(0, 2, 3, 1)
+        y = yraw.permute(0, 2, 3, 1)
+        test_memory_layout(x, y, None, None, x + y)
+        qx = qxraw.permute(0, 2, 3, 1)
+        qy = qyraw.permute(0, 2, 3, 1)
+        test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+        # non contiguous case non fast setup
+        x = xraw.permute(0, 2, 3, 1)
+        y = yraw.permute(0, 3, 2, 1)
+        test_memory_layout(x, y, None, None, x + y)
+        qx = qxraw.permute(0, 2, 3, 1)
+        qy = qyraw.permute(0, 3, 2, 1)
+        test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
 # Functions to test negative dimension wrapping
 METHOD = 1
@@ -8448,6 +8499,21 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
+    @slowTest
+    def test_argminmax_large_axis(self, device):
+        # Regression test for gh-32863
+        # Requires > 8 GB of memory. So, if allocation fails just skip it.
+        try:
+            x = torch.zeros((2, 2**32), device=device, dtype=torch.int8)
+            x[:, -1] = 1
+            self.assertEqual(x.argmax(1), [x.shape[1] - 1] * 2)
+            x[:, -1] = -1
+            self.assertEqual(x.argmin(1), [x.shape[1] - 1] * 2)
+        except RuntimeError as e:
+            if 'memory' in str(e):
+                raise unittest.SkipTest('Insufficient memory')
+            raise
+
     def test_remainder_overflow(self, device):
         # Check Integer Overflows
         x = torch.tensor(23500, dtype=torch.int64, device=device)
@@ -10510,6 +10576,19 @@ class TestTorchDeviceType(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), 0)
+
+    @largeCUDATensorTest('16GB')
+    def test_range_factories_64bit_indexing(self, device):
+        bigint = 2 ** 31 + 1
+        t = torch.arange(bigint, dtype=torch.long, device=device)
+        self.assertEqual(t[-1].item(), bigint - 1)
+        del t
+        t = torch.linspace(0, 1, bigint, dtype=torch.float, device=device)
+        self.assertEqual(t[-1].item(), 1)
+        del t
+        t = torch.logspace(0, 1, bigint, 2, dtype=torch.float, device=device)
+        self.assertEqual(t[-1].item(), 2)
+        del t
 
     def test_logical(self, device):
         for dt in torch.testing.get_all_dtypes():
