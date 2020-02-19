@@ -360,7 +360,12 @@ class ConvolutionOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8(bool runtime_quant = false) const {
+  enum class Mode {
+    Static,
+    Runtime,
+  };
+
+  void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -480,8 +485,68 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      if (runtime_quant) {
-        qnnpack::conv_param_t conv_p(
+
+      switch(mode) {
+        case Mode::Static:
+        {
+          pytorch_qnnp_operator_t convolution = nullptr;
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_convolution2d_nhwc_q8(
+                  paddingTop(),
+                  paddingRight(),
+                  paddingBottom(),
+                  paddingLeft(),
+                  kernelHeight(),
+                  kernelWidth(),
+                  subsamplingHeight(),
+                  subsamplingWidth(),
+                  dilationHeight(),
+                  dilationWidth(),
+                  groups(),
+                  groupInputChannels(),
+                  groupOutputChannels(),
+                  inputZeroPoint,
+                  1.0f /* input scale */,
+                  kernelZeroPoint,
+                  1.0f /* kernel scale */,
+                  kernel.data(),
+                  bias.data(),
+                  outputZeroPoint,
+                  outputScale,
+                  qmin(),
+                  qmax(),
+                  0,
+                  &convolution));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_convolution2d_nhwc_q8(
+                  convolution,
+                  batchSize(),
+                  inputHeight(),
+                  inputWidth(),
+                  inputPtr,
+                  inputPixelStride(),
+                  output.data(),
+                  outputPixelStride(),
+                  nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(convolution));
+          convolution = nullptr;
+        }
+        break;
+
+        case Mode::Runtime:
+        {
+          qnnpack::conv_param_t conv_p(
             {kernelWidth(), kernelHeight()},
             {subsamplingWidth(), subsamplingHeight()},
             {dilationWidth(), dilationHeight()},
@@ -493,80 +558,33 @@ class ConvolutionOperatorTester {
             1.0,
             qmin(),
             qmax());
-        auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
-            new qnnpack::PrePackConvWeights(
-                conv_p,
-                kernel.data(),
-                bias.data()));
-        const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
-            conv_p,
-            packW->getPackedWeights(),
-            batchSize(),
-            inputHeight(),
-            inputWidth(),
-            1.0,
-            inputZeroPoint,
-            inputPtr,
-            outputScale,
-            outputZeroPoint,
-            output.data(),
-            nullptr);
-        ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+          auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
+              new qnnpack::PrePackConvWeights(
+                  conv_p,
+                  kernel.data(),
+                  bias.data()));
+          const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
+              conv_p,
+              packW->getPackedWeights(),
+              batchSize(),
+              inputHeight(),
+              inputWidth(),
+              1.0,
+              inputZeroPoint,
+              inputPtr,
+              outputScale,
+              outputZeroPoint,
+              output.data(),
+              nullptr);
+          ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+        }
+        break;
+
+        default:
+          // Undefined!
+          ASSERT_TRUE(false);
       }
-      else {
-        pytorch_qnnp_operator_t convolution = nullptr;
 
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_create_convolution2d_nhwc_q8(
-                paddingTop(),
-                paddingRight(),
-                paddingBottom(),
-                paddingLeft(),
-                kernelHeight(),
-                kernelWidth(),
-                subsamplingHeight(),
-                subsamplingWidth(),
-                dilationHeight(),
-                dilationWidth(),
-                groups(),
-                groupInputChannels(),
-                groupOutputChannels(),
-                inputZeroPoint,
-                1.0f /* input scale */,
-                kernelZeroPoint,
-                1.0f /* kernel scale */,
-                kernel.data(),
-                bias.data(),
-                outputZeroPoint,
-                outputScale,
-                qmin(),
-                qmax(),
-                0,
-                &convolution));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_setup_convolution2d_nhwc_q8(
-                convolution,
-                batchSize(),
-                inputHeight(),
-                inputWidth(),
-                inputPtr,
-                inputPixelStride(),
-                output.data(),
-                outputPixelStride(),
-                nullptr /* thread pool */));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_delete_operator(convolution));
-        convolution = nullptr;
-      }
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t y = 0; y < outputHeight(); y++) {
           for (size_t x = 0; x < outputWidth(); x++) {
