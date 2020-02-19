@@ -611,7 +611,6 @@ private:
 //    .def("mul(Tensor self, Tensor other) -> Tensor")
 //
 //    // Define a operator with exactly one implementation for all backends.
-//    // It's also OK to omit the schema in which case we'll infer it.
 //    .def("add(Tensor self, Tensor other) -> Tensor", &add_impl)
 //
 //    // Provide an implementation for a defined operator (you can
