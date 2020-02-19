@@ -249,7 +249,7 @@ typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
 }
 #else
 template<typename T>
-typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+bool isnan_(T x) {
   return std::isnan(x);
 }
 #endif
