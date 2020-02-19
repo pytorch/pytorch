@@ -65,7 +65,9 @@ public:
   virtual void handle(const Reorder* const);
 
   void traverse(const Fusion* const _fusion,  bool from_outputs_only, bool breadth_first);
-
+  //Traverse fusion from specific vals.
+  void traverse(const Fusion* const fusion, std::vector<const Val*> from);
+  
 };
 
 }}} //torch::jit::fuser
