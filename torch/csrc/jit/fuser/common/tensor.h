@@ -357,7 +357,8 @@ struct TORCH_API Reorder : public Expr {
   const TensorDomain* in() const noexcept {
     return in_;
   }
-  const std::vector<int> pos2axis() const noexcept {
+  //Returns map pos2axis[new_position] = old_position
+  const std::vector<int>& pos2axis() const noexcept {
     return pos2axis_;
   }
 

@@ -510,29 +510,80 @@ void testGPU_FusionComputeAt(){
 
   std::vector<const IterDomain*> dom;
   dom.push_back(new IterDomain(new Int()));
-  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
   dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
   dom.push_back(new IterDomain(new Int()));
 
   const TensorDomain *td = new TensorDomain(dom);
   const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
   const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
 
-  tv = split(tv, 3, 4);
-  tv = split(tv, 0, 2);
+  //[I0, I1, R0, I2]
+  tv = split(tv, 0, 4);
+  //[I0o, I0i{4}, I1, R0, I2]
+  tv = merge(tv, 1);
+  //[I0o, I0i{4}*I1, R0, I2]
+  tv = split(tv, -1, 2);
+  //[I0o, I0i{4}*I1, R0, I2o, I2i{2}]
+  tv = reorder(tv, {
+    {0, 2},
+    {2, 0},
+    {3, 4}
+  });
+  //[R0, I0i*I1, I0o, I2i, I2o]
   
-  std::stack<const Expr*> target_transforms;
-  TransformReplay::get_root(tv->domain(), &target_transforms);
-  
-  while(!target_transforms.empty()){
-    std::cout<<target_transforms.top()<<std::endl;
-    target_transforms.pop();
-  }
-  /*
-  for(decltype(target_transforms.size()) i = 0; i < target_transforms.size(); i++){
-    std::cout<<"Operation "<<i<<": "<<target_transforms[i]<<std::endl;
-  }
-  */
+  TransformReplay TR;
+  const TensorView* replayed = TR.replay(tv, tv2, 2);
+
+  //When replayed tv2 should be: [I1, I0i*I0o, R0, I2]
+  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
+  std::cout<<"Produced domain should be something along the lines of:";
+  std::cout<<"[I1, I0i{4}*I0o, R0, I2]"<<std::endl;
+}
+
+void testGPU_FusionComputeAt2(){
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<const IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
+  dom.push_back(new IterDomain(new Int()));
+
+  const TensorDomain *td = new TensorDomain(dom);
+  const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
+  const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
+
+  //[I0, I1, R0, I2]
+  tv = split(tv, -1, 4);
+  //[I0, I1, R0, I2o, I2i{4}]
+    tv = reorder(tv, {
+    {3, 0},
+    {0, 3},
+    {1, 4},
+    {4, 1}
+  });
+  //[I2o, I2i{4}, R0, I0, I1]
+  tv = split(tv, 3, 2);
+  //[I2o, I2i{4}, R0, I0o, I0i{2}, I1]
+  tv = reorder(tv, {
+    {3, 0},
+    {4, 1},
+    {5, 2},
+    {2, 3}
+
+  });
+  //[I0o, I0i{2}, I1, R0, I2o, I2i{4}]
+
+  TransformReplay TR;
+  const TensorView* replayed = TR.replay(tv, tv2, 2);
+  //Replay should produce [I0o, I0i{2}, I1, R0, I2]
+
+  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
+  std::cout<<"Produced domain should be something along the lines of:";
+  std::cout<<"[I0o, I0i{2}, I1, R0, I2]"<<std::endl;
 }
 
 void testGPU_Fusion() {}
