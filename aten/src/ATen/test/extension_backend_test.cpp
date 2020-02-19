@@ -28,7 +28,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   EXPECT_ANY_THROW(empty({5, 5}, at::kMSNPU));
   auto registry1 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
-      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
+      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
       .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
   Tensor a = empty({5, 5}, at::kMSNPU);

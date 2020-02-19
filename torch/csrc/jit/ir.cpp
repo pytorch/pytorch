@@ -1006,19 +1006,19 @@ bool Node::isNondeterministic() const {
       "aten::poisson(Tensor self, Generator? generator) -> Tensor",
       "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
       "aten::rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
-      "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool pin_memory=False) -> Tensor",
+      "aten::rand(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False) -> Tensor",
       "aten::rand_like(Tensor self, *, MemoryFormat memory_format) -> Tensor",
       "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool pin_memory=False) -> Tensor",
-      "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool pin_memory=False) -> Tensor",
+      "aten::randint(int high, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False) -> Tensor",
+      "aten::randint(int low, int high, int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, MemoryFormat memory_format) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, MemoryFormat memory_format) -> Tensor",
       "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor",
       "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool pin_memory=False) -> Tensor",
+      "aten::randn(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False) -> Tensor",
       "aten::randn_like(Tensor self, *, MemoryFormat memory_format) -> Tensor",
       "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor",
-      "aten::randperm(int n, *, int? dtype, int? layout, Device? device, bool pin_memory=False) -> Tensor"};
+      "aten::randperm(int n, *, int? dtype=None, int? layout=None, Device? device=None, bool pin_memory=False) -> Tensor"};
 
   if (!isMemberOf(nondeterministic_ops)) {
     return false;
@@ -1676,18 +1676,8 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 
 Node* Graph::createIsInstance(
     Value* v,
-    at::ArrayRef<TypePtr> types,
-    bool is_list,
-    bool is_tuple) {
+    at::ArrayRef<TypePtr> types) {
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
-  std::vector<std::string> kinds;
-  if (is_list) {
-    kinds.emplace_back("list");
-  }
-  if (is_tuple) {
-    kinds.emplace_back("tuple");
-  }
-  n->ss_(attr::kinds, std::move(kinds));
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
   return n;
