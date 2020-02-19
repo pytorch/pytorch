@@ -20,10 +20,9 @@ class Function{
   void append_instruction(OpCode op, int X, int N);
   void append_operator(const std::string& name,
                        const std::string& overload_name);
-  void append_vararg_operator(const std::string& name,
-                              const std::string& overload_name);
-  void build_vararg_operator_table();
   void append_constant(const c10::IValue& constant);
+  void append_type(const c10::TypePtr& type);
+
   void set_register_size(size_t size);
 
  private:
