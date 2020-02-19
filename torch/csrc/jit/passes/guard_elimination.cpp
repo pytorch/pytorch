@@ -405,6 +405,10 @@ private:
            n->input(3)->node()->kind() == prim::Constant &&
            // the stride is constant
            n->input(4)->node()->kind() == prim::Constant;
+     case aten::unsqueeze:
+       // check that the dimension argument is constant
+       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+           n->input(1)->node()->kind() == prim::Constant;
      case aten::cat:
        // check that the dimension argument is constant
        return n->input(1)->node()->kind() == prim::Constant &&
