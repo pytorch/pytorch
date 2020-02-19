@@ -299,8 +299,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     equivalent graph, where each output is treated as if it were produced by a
 ///     distinct view operation. This discards the original (e.g., user provided)
 ///     grad_fn. If the provided grad_fn does more than the backward of the view,
-///     then the DifferentiableViewMeta must be created with allow_rebase_history=
-///     OnRebase::ERROR_REBASE to prevent the engine from ignoring the provided grad_fn.
+///     then the DifferentiableViewMeta must be created with creation_meta=
+///     CreationMeta::MULTI_OUTPUT_NODE to prevent the engine from ignoring the
+///     provided grad_fn.
 ///
 /// Interaction with GradMode:
 /// The particular case that we consider here is:
@@ -316,7 +317,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// Given that this particular code example is ambiguous and can easily be replace by
 /// either moving both inside the no_grad block or both outside, we explicitly forbid
 /// it. For now, it is deprecated by a warning. This is achieved by setting
-/// allow_rebase_history=OnRebase::WARN_REBASE for all differentiable views created
+/// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
 /// in no_grad mode.
 ///
 /// Non-Differentiable Views
@@ -347,30 +348,18 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// when both happen, we tag the DifferentiableViewMeta when the view is created
 /// via the `make_variable_*_view()` functions. This tag is then checked by the
 /// `check_inplace()` function from `VariableTypeUtils.h` that should be called before
-/// every inplace operation. To detect cases where other views are modified and this
+/// every inplace operation and to detect cases where other views are modified and this
 /// one is rebased by side effect, we also check in the `VariableHooks::grad_fn()`.
 
-
-/// Here are all the possible case for a DifferentiableViewMeta and how they are created.
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-/// |                      | grad_fn_ == nullptr                            | grad_fn_ != nullptr                            |
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-/// | WARN_REBASE          | view created by single-output in no_grad mode  | should not happen                              |
-/// |                      | (outside of custom Functions)                  |                                                |
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-/// | WARN_REBASE_FUNCTION | view created during forward of custom Function | view created during forward of custom Function |
-/// |                      | in no_grad mode (including multi-output ones)  | (including multi-output ones)                  |
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-/// | ERROR_REBASE         | view created by multi-output codegen or custom | view created by multi-output codegen or custom |
-/// |                      | function in no_grad mode                       | function                                       |
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-/// | ALLOW_REBASE         | view created in no_grad mode from a base that  | All other differentiable views                 |
-/// |                      | do not require gradients                       |                                                |
-/// +----------------------+------------------------------------------------+------------------------------------------------+
-
-/// Flag that control what happens when a Tensor's history is rebased
-enum class OnRebase: uint8_t { ALLOW_REBASE, WARN_REBASE, WARN_REBASE_FUNCTION,
-                               ERROR_REBASE };
+/// Flag that gives more information about when this view was created:
+/// - IN_CUSTOM_FUNCTION should be set when the view is created inside a custom
+///   autograd Function is returned.
+/// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
+/// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
+///   multiple differentiable views
+/// - DEFAULT is for all other cases
+enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
+                                   NO_GRAD_MODE };
 
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened
@@ -386,14 +375,14 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
-  OnRebase allow_rebase_history;
+  CreationMeta creation_meta;
 
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
   DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-                         OnRebase allow_rebase_history=OnRebase::ALLOW_REBASE);
+                         CreationMeta creation_meta=CreationMeta::DEFAULT);
   ~DifferentiableViewMeta();
 };
 
@@ -422,14 +411,14 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    OnRebase allow_rebase_history) {
+    CreationMeta on_rebase) {
   if (data.defined()) {
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/0,
       /*allow_tensor_metadata_change=*/true);
     data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
       data_impl_copy.get(), std::move(base),
-      allow_rebase_history));
+      on_rebase));
     return Variable(data_impl_copy);
     }
   return Variable();

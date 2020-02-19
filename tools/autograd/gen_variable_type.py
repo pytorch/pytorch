@@ -784,11 +784,11 @@ def emit_body(declaration):
                 # Only allow rebasing of the history if we return a single Tensor
                 # If we are in a no grad block, raise a warning
                 # See NOTE [ View + Inplace detection ] for more details about this logic
-                allow_rebase_history = "GradMode::is_enabled() ? {}: {}".format("OnRebase::ALLOW_REBASE", "OnRebase::WARN_REBASE")
+                creation_meta = "GradMode::is_enabled() ? {}: {}".format("CreationMeta::DEFAULT", "CreationMeta::NO_GRAD_MODE")
                 if return_info['dynamic_type'] == 'TensorList':
-                    allow_rebase_history = "OnRebase::ERROR_REBASE"
+                    creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
                 wrapped_call = ("as_view(/* base */{}, /* output */ {}, /* is_differentiable */ true, "
-                                "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
+                                "/* creation_meta */ {})").format(view_info, call, creation_meta)
                 return wrapped_call
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.
