@@ -133,6 +133,30 @@ bool isFunctionNode(Node* n,
   return is_quantizable;
 }
 
+// If the op doesn't require observation, return
+// the number of Tensor inputs, otherwise
+// return null
+c10::optional<int> getGeneralOpNumTensorInputs(Node* n) {
+  std::vector<std::string> single_input_aten_funcs = {
+    "adaptive_avg_pool2d",
+    "max_pool2d",
+    "flatten",
+  };
+  std::vector<std::string> single_input_call_funcs = {
+    "adaptive_avg_pool2d",
+    "_max_pool2d",
+  };
+  if (isFunctionNode(
+          n,
+      // We don't have call functions
+      // after inline
+      /* call_funcs = */ single_input_call_funcs,
+      /* aten_funcs = */ single_input_aten_funcs)) {
+    return 1;
+  }
+  return c10::nullopt;
+}
+
 bool nodeQuantizable(Node* n) {
   return isFunctionNode(
       n,
@@ -1848,27 +1872,6 @@ script::Module InsertQuantDeQuant(
 
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
-}
-
-// If the op doesn't require observation, return
-// the number of Tensor inputs, otherwise
-// return null
-c10::optional<int> getGeneralOpNumTensorInputs(Node* n) {
-  std::vector<std::string> single_input_ops = {
-    "relu_",
-    "relu",
-    "adaptive_avg_pool2d",
-    "max_pool2d"
-  };
-  if (isFunctionNode(
-          n,
-      // We don't have call functions
-      // after inline
-      /* call_funcs = */ {},
-      /* aten_funcs = */ single_input_ops)) {
-    return 1;
-  }
-  return c10::nullopt;
 }
 
 // This is the pass to handle ops that does not require observation
