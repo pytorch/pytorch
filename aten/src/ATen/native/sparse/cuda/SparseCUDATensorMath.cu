@@ -723,12 +723,12 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 }
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
-  Tensor result = at::empty({}, mat2.options());
+  Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
   return bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
 Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
-  Tensor result = at::empty({}, mat2.options());
+  Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
   return bmm_out_sparse_cuda(result, self, mat2, false);
 }
 
@@ -820,17 +820,29 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   TORCH_CHECK(self.size(0) == mat2.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
   TORCH_CHECK(self.size(2) == mat2.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
-  result.resize_({self.size(0), mat2.size(2), self.size(1)});
+  int64_t num_matrices = self.size(0);
+  int64_t dim_i = self.size(1);
+  int64_t dim_j = self.size(2);
+  int64_t dim_k = mat2.size(2);
 
-  if ((self._nnz() == 0) || (mat2.size(1) == 0) || (mat2.size(2) == 0)) {
-    result.zero_().transpose_(1,2);
+  result.resize_({num_matrices, dim_k, dim_i});
+
+  if ((self._nnz() == 0) || (dim_j == 0) || (dim_k == 0)) {
+    result.zero_().transpose_(1, 2);
     return result;
   }
 
-  // TODO: I'm not sure if this is necessary or not. Does at::resize_()
-  //    ensure contiguity?
-  if (!result.is_contiguous()) {
-    result.copy_(result.clone(at::MemoryFormat::Contiguous));
+  Tensor tmp_result;
+  bool need_copy_result;
+
+  // If the result tensor is contiguous, we can just write results directly to it.
+  // Otherwise, we'll need to write results to a temp buffer and then copy.
+  if (result.is_contiguous()) {
+    tmp_result = result;
+    need_copy_result = false;
+  } else {
+    tmp_result = at::empty({num_matrices, dim_k, dim_i}, result.options(), at::MemoryFormat::Contiguous);
+    need_copy_result = true;
   }
 
   // Dense matrices have to be contiguous for cusparseSpMM to work
@@ -844,7 +856,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   int64_t nnz =        self_coalesced._nnz();
   LongTensor indices = self_coalesced._indices();
   Tensor values =      self_coalesced._values();
-  int64_t num_matrices = self_coalesced.size(0);
 
   LongTensor indices_dim0 = indices[0];
 
@@ -856,10 +867,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
   int64_t* mat_el_end_indices;
   cudaMallocManaged(&mat_el_end_indices, num_matrices*sizeof(int64_t));
   search_end_matrix_indices(mat_el_end_indices, num_matrices, indices_dim0);
-
-  int64_t dim_i = self_coalesced.size(1);
-  int64_t dim_j = self_coalesced.size(2);
-  int64_t dim_k = mat2_contig.size(2);
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -891,7 +898,6 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
           uint32_t* row_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim1.data_ptr())[mat_el_begin_idx];
           uint32_t* col_indices_ptr = &reinterpret_cast<uint32_t*>(indices_dim2.data_ptr())[mat_el_begin_idx];
           scalar_t* values_ptr = &reinterpret_cast<scalar_t*>(values.data_ptr())[mat_el_begin_idx];
-          // void* values_ptr = values.data_ptr()+(mat_el_begin_idx*sizeof(scalar_t));
 
           cusparseSpMatDescr_t sparse_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
@@ -917,7 +923,7 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
             cuda_data_type,
             CUSPARSE_ORDER_COL
           ));
-          scalar_t* result_ptr = &reinterpret_cast<scalar_t*>(result.data_ptr())[dim_i*dim_k*cur_mat_num];
+          scalar_t* result_ptr = &reinterpret_cast<scalar_t*>(tmp_result.data_ptr())[dim_i*dim_k*cur_mat_num];
           cusparseDnMatDescr_t result_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
             &result_descr,
@@ -969,12 +975,16 @@ Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tens
       mat_el_begin_idx = mat_el_end_idx;
     } else {
       workspace_buffers[cur_mat_num] = nullptr;
-      result[cur_mat_num].zero_();
+      tmp_result[cur_mat_num].zero_();
     }
+  }
+  if (need_copy_result) {
+    result.copy_(tmp_result);
   }
   // Need to transpose the result matrices since cusparse stores
   // them in column-major order in memory
   result.transpose_(1,2);
+
   cudaFree(mat_el_end_indices);
 
   // The overall operation is significantly faster if all the
