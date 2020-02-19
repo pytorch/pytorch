@@ -236,12 +236,12 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
-// Implement std::nan<IntegralType> for MSVC according to https://zh.cppreference.com/w/cpp/numeric/math/isnan.
+// Implement std::is_nan<IntegralType> for MSVC.
 namespace {
 #ifdef _MSC_VER
 template<typename T>
 typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
-  return std::isnan(static_cast<double>(x));
+  return false;
 }
 template<typename T>
 typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
