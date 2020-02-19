@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/mutator.h>
 
 namespace torch {
 namespace jit {
@@ -122,6 +123,7 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
   const TensorDomain* split_td = new TensorDomain(new_domain);
   const TensorView* split_view = new TensorView(tv->tensor(), split_td);
   const Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
+
   return split_view;
 }
 
@@ -155,28 +157,6 @@ const TensorView* merge(const TensorView* tv, int axis) {
   const TensorView* merged_tv = new TensorView(tv->tensor(), merged_td);
   const Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
   return merged_tv;
-}
-
-/*
- * TODO: How do we coordinate the uses of tensor and the tensorview used here,
- * Do we only support these operations on tensorview? Do we replace all
- * instances of tensor with the tensorview created here?
- */
-const TensorView* split(const Tensor* tensor, int axis, int factor) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling split.");
-  //return split(new TensorView(tensor, tensor->domain()), axis, factor);
-}
-
-const TensorView* merge(const Tensor* tensor, int axis) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling merge.");
-  //return merge(new TensorView(tensor, tensor->domain()), axis);
-}
-
-const TensorView* reorder(
-    const Tensor* tensor,
-    std::unordered_map<int, int> axis2pos) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling reorder.");
-  //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
 }
 
 /*
@@ -245,7 +225,7 @@ const TensorView* reorder(
   }
 
   //pos2axis is now filled
-  if(tv->getComputeAtView != nullptr){
+  if(tv->getComputeAtView() != nullptr){
     for(int i = 0; i < tv->getComputeAtAxis(); i++){
       if(pos2axis[i] != i)
         throw std::runtime_error("Cannot reorder axis within compute at range.");
@@ -261,6 +241,28 @@ const TensorView* reorder(
   const TensorView* reordered_view = new TensorView(tv->tensor(), reordered_td);
   const Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
   return reordered_view;
+}
+
+/*
+ * TODO: How do we coordinate the uses of tensor and the tensorview used here,
+ * Do we only support these operations on tensorview? Do we replace all
+ * instances of tensor with the tensorview created here?
+ */
+const TensorView* split(const Tensor* tensor, int axis, int factor) {
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling split.");
+  //return split(new TensorView(tensor, tensor->domain()), axis, factor);
+}
+
+const TensorView* merge(const Tensor* tensor, int axis) {
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling merge.");
+  //return merge(new TensorView(tensor, tensor->domain()), axis);
+}
+
+const TensorView* reorder(
+    const Tensor* tensor,
+    std::unordered_map<int, int> axis2pos) {
+  throw std::runtime_error("For now tensors must be converted to tensor views before calling reorder.");
+  //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
 }
 
 
