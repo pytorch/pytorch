@@ -756,14 +756,14 @@ class HistogramObserver(_ObserverBase):
         # histogram, which is initialized with zeros.
         # The offset at which the histogram is introduced is determined
         # by the start index as the output histogram can cover a wider range
-        histogram_with_output_range = torch.zeros((Nbins * downsample_rate))
+        histogram_with_output_range = orig_hist.new_zeros((Nbins * downsample_rate))
         histogram_with_output_range[start_idx:Nbins * upsample_rate + start_idx] = upsampled_histogram
         # Compute integral histogram, double precision is needed to ensure
         # that there are no overflows
         integral_histogram = torch.cumsum(histogram_with_output_range, 0,
                                           dtype=torch.double)[downsample_rate - 1 :: downsample_rate]
         # Finally perform interpolation
-        shifted_integral_histogram = torch.zeros((Nbins))
+        shifted_integral_histogram = orig_hist.new_zeros((Nbins))
         shifted_integral_histogram[1:Nbins] = integral_histogram[0:-1]
         interpolated_histogram = (integral_histogram - shifted_integral_histogram) / upsample_rate
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
