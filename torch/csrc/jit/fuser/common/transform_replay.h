@@ -60,7 +60,6 @@ std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
  * unnecessary parts of the domain.
  *
  * EXAMPLES:
- *
  *   T2[I, J, K] = T1[I, J, K] * 2.0
  * T2.split(axis = 0, factor = ...)
  *   T2[Io, Ii, J, K] = T1[I, J, K] * 2.0
@@ -69,6 +68,9 @@ std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
  * T1.compute_at(T2, axis=1)
  *   T2[Io, Ii, Jo, Ji, K] = T1[Io, Ii, J, K] * 2.0
  *
+ * Note: compute_at axis:
+ * T2[ 0 Io, 1 Ii, 2 Jo, 3 Ji, 4 K 5 ] //5 is inline, 0 is at "root" which means completely separate loop nests.
+ *  
  * for(io : Io)
  *  for(ii : Ii)
  *   for(j : J)
