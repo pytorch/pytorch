@@ -246,60 +246,45 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
-
-  // handle simple types: none, ellipsis
-  if (index == Py_None) {
-    return THPVariable_Wrap(self_.unsqueeze(0));
-  } else if (index == Py_Ellipsis) {
-    return THPVariable_Wrap(at::alias(self_));
-  }
-
-  at::Device self_device = self_.device();
-  at::IntArrayRef self_sizes = self_.sizes();
   bool is_tracing = torch::jit::tracer::isTracing();
 
-  // handle simple types: integers, slices
+  // handle simple types: integers, slices, none, ellipsis
   if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_Wrap(at::indexing::applySelect(self_, 0, THPUtils_unpackLong(index), 0, self_device, self_sizes));
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, is_tracing)));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    return THPVariable_Wrap(at::indexing::applySlice(
-      self_,
-      0,
-      start,
-      stop,
-      step,
-      /*ensure_view=*/true,
-      /*is_tracing=*/is_tracing,
-      self_device,
-      self_sizes));
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex({start, stop, step})}, is_tracing)));
+  } else if (index == Py_None) {
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, is_tracing)));
+  } else if (index == Py_Ellipsis) {
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, is_tracing)));
   }
 
   // wrap index in a tuple if it's not already one
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_device, self_sizes);
+  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_.device(), self_.sizes());
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return THPVariable_Wrap(sliced);
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(sliced));
   }
 
   // indexing by tensors ("advanced" indexing)
-  return THPVariable_Wrap(([&]() {
+  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(([&]() {
     pybind11::gil_scoped_release no_gil;
     return at::indexing::dispatch_index(sliced, std::move(variableIndices));
-  })());
+  })()));
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

@@ -39,110 +39,9 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
   return stream;
 }
 
-// NOTE: Why do we mirror instead of replace the `count_specified_dimensions` function
-// in torch/csrc/autograd/python_variable_indexing.cpp? It's because
-// `count_specified_dimensions` is on the hot path of Python tensor multi-dim indexing
-// (i.e. it's called by `applySlicing` which is called by `THPVariable_getitem` /
-// `THPVariable_setitem` when handling indexing of more than one dimension). If we were
-// to merge the Python/C++ `count_specified_dimensions` function, on the Python side
-// we would have to construct a `std::vector` container to be consumed by the C++
-// `count_specified_dimensions` function, which adds 100s of nanoseconds overhead and
-// is undesirable.
-int64_t count_specified_dimensions(ArrayRef<TensorIndex> indices) {
-  // Count the number of indexed dimensions (everything but ellipsis and None)
-  int64_t count = 0;
-  size_t size = indices.size();
-  for (auto& obj : indices) {
-    if (obj.is_tensor()) {
-      auto& tensor = obj.tensor();
-      if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
-        count += tensor.dim();
-      } else {
-        count++;
-      }
-    } else if (!obj.is_none() && !obj.is_ellipsis() && !obj.is_boolean()) {
-      count++;
-    }
-  }
-  return count;
-}
-
-// This mirrors `applySlicing` in torch/csrc/autograd/python_variable_indexing.cpp
-Tensor applySlicing(
-    const Tensor& self,
-    ArrayRef<TensorIndex> indices,
-    std::vector<Tensor>& outIndices,
-    const at::Device& self_device,
-    const IntArrayRef& self_sizes) {
-  int64_t dim = 0;
-  int64_t specified_dims = count_specified_dimensions(indices);
-
-  TORCH_CHECK_INDEX(specified_dims <= self_sizes.size(), "too many indices for tensor of dimension ", (int)self_sizes.size());
-
-  Tensor result = self;
-  for (int64_t i = 0; i < indices.size(); i++) {
-    auto& obj = indices[i];
-    result = handleDimInMultiDimIndexing(
-      /*prev_dim_result=*/result,
-      /*original_tensor=*/self,
-      /*index=*/obj,
-      /*dim=*/&dim,
-      /*specified_dims=*/&specified_dims,
-      /*real_dim=*/i,
-      /*outIndices=*/outIndices,
-      /*is_tracing=*/false,
-      /*original_tensor_device=*/self_device,
-      /*prev_dim_result_sizes=*/result.sizes());
-  }
-  return result;
-}
-
-// This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
-Tensor get_item(const Tensor& self, ArrayRef<TensorIndex> indices) {
-  OptionalDeviceGuard device_guard(device_of(self));
-  at::Device self_device = self.device();
-  IntArrayRef self_sizes = self.sizes();
-
-  // handle simple types: integers, slices, none, ellipsis
-  if (indices.size() == 1) {
-    const TensorIndex& index = indices[0];
-    if (index.is_integer()) {
-      return applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
-    } else if (index.is_slice()) {
-      return applySlice(
-        self,
-        0,
-        index.slice().start(),
-        index.slice().stop(),
-        index.slice().step(),
-        /*ensure_view=*/true,
-        /*is_tracing=*/false,
-        self_device,
-        self_sizes);
-    } else if (index.is_none()) {
-      return self.unsqueeze(0);
-    } else if (index.is_ellipsis()) {
-      return at::alias(self);
-    }
-  }
-
-  std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device, self_sizes);
-  if (tensorIndices.empty()) {
-    if (sliced.is_same(self)) {
-      // ensure we return a shallow copy for things like x[...]
-      sliced = at::alias(sliced);
-    }
-    return sliced;
-  }
-
-  // indexing by tensors ("advanced" indexing)
-  return dispatch_index(sliced, std::move(tensorIndices));
-}
-
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
-void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) {
+static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value, bool is_tracing) {
   OptionalDeviceGuard device_guard(device_of(self));
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
@@ -171,7 +70,7 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) 
         index.slice().stop(),
         index.slice().step(),
         /*ensure_view=*/false,
-        /*is_tracing=*/false,
+        /*is_tracing=*/is_tracing,
         self_device,
         self_sizes), value);
       return;
@@ -179,7 +78,7 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) 
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, self_device, self_sizes);
+  Tensor sliced = applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
@@ -199,7 +98,7 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, const Tensor& value) 
 
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Scalar" case
-void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
+static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v, bool is_tracing) {
   OptionalDeviceGuard device_guard(device_of(self));
   Tensor value;
 
@@ -213,24 +112,24 @@ void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
     }
   }
 
-  return set_item(self, indices, value);
+  return set_item(self, indices, value, is_tracing);
 }
 
 } // namespace indexing
 
 Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
-  return at::indexing::get_item(*this, indices);
+  return at::indexing::get_item(*this, indices, /*is_tracing=*/false);
 }
 Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) const {
   return index(ArrayRef<at::indexing::TensorIndex>(indices));
 }
 
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs) {
-  at::indexing::set_item(*this, indices, rhs);
+  at::indexing::set_item(*this, indices, rhs, /*is_tracing=*/false);
   return *this;
 }
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
-  at::indexing::set_item(*this, indices, v);
+  at::indexing::set_item(*this, indices, v, /*is_tracing=*/false);
   return *this;
 }
 Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs) {
