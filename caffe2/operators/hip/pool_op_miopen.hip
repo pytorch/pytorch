@@ -35,11 +35,15 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
     if ((operator_def.type().substr(0, 9) == "MaxPool") ||
-        (operator_def.type().substr(0, 17) == "MaxPoolGradient")) {
+        (operator_def.type().substr(0, 17) == "MaxPoolGradient") ||
+        (operator_def.type().substr(0, 9) == "MaxPool3D") ||
+        (operator_def.type().substr(0, 17) == "MaxPool3DGradient")) {
       mode_ = miopenPoolingMax;
     } else if (
         (operator_def.type().substr(0, 13) == "AveragePool") ||
-        (operator_def.type().substr(0, 21) == "AveragePoolGradient")) {
+        (operator_def.type().substr(0, 21) == "AveragePoolGradient") ||
+        (operator_def.type().substr(0, 13) == "AveragePool3D") || 
+        (operator_def.type().substr(0, 21) == "AveragePool3DGradient")) {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
@@ -76,22 +80,34 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     H_out = Y->dim32(2);
     W_out = Y->ndim() > 3 ? Y->dim32(3) : 1;
 
-    CAFFE_ENFORCE(kernel_.size() == 2, "MIOpen supports only 2D pooling");
-    MIOPEN_ENFORCE(miopenSet2dPoolingDescriptor(
+    CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
+    vector<int> pads (pads_.data(), pads_.data() + (kernel_.size()));    
+
+    MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
         mode_,
-        kernel_h(),
-        kernel_w(),
-        pad_t(),
-        pad_l(),
-        stride_h(),
-        stride_w()));
+        kernel_.size(),
+        kernel_.data(),
+        pads.data(),
+        stride_.data()
+    ));
 
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
+    mio_input_dims = X.sizes().vec();
+    vector<int> input_dims(begin(mio_input_dims), end(mio_input_dims));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        bottom_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
 
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
+    mio_output_dims = Y->sizes().vec();
+    vector<int> output_dims(begin(mio_output_dims), end(mio_output_dims));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        top_desc_, miopenTypeWrapper<T>::type, output_dims.size(), output_dims.data(), nullptr));
+
+    miopenIndexType_t index_type = miopenIndexUint64;
+    MIOPEN_ENFORCE(miopenSetPoolingIndexType(pooling_desc_, index_type));
+    MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSizeV2(pooling_desc_, top_desc_, &poolWsSize_));
+    if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
+      HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
+    }
 
     const T* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
@@ -105,8 +121,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
         top_desc_,
         Ydata,
         false,
-        nullptr,
-        0));
+        poolWs_,
+        poolWsSize_));
 
     return true;
   }
@@ -127,7 +143,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
 
  protected:
   size_t poolWsSize_;
-  char* poolWs_;
+  int64_t* poolWs_;
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t bottom_desc_;
   miopenTensorDescriptor_t top_desc_;
@@ -135,6 +151,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   miopenPoolingMode_t mode_;
   const float alpha_;
   const float beta_;
+  vector<int64_t> mio_input_dims;
+  vector<int64_t> mio_output_dims;
 };
 
 class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
@@ -151,9 +169,11 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
-    if (operator_def.type().substr(0, 7) == "MaxPool") {
+    if (operator_def.type().substr(0, 7) == "MaxPool" || 
+       (operator_def.type().substr(0, 7) == "MaxPool3D")) {
       mode_ = miopenPoolingMax;
-    } else if (operator_def.type().substr(0, 11) == "AveragePool") {
+    } else if (operator_def.type().substr(0, 11) == "AveragePool" ||
+              (operator_def.type().substr(0, 11) == "AveragePool3D")) {
       mode_ = miopenPoolingAverage;
     } else {
       LOG(FATAL) << "Unsupported pooling method: " << operator_def.type();
@@ -216,22 +236,25 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
         CAFFE_THROW("Unsupported kernel size :", kernel_.size());
     }
 
-    CAFFE_ENFORCE(kernel_.size() == 2, "MIOpen supports only 2D pooling");
-    MIOPEN_ENFORCE(miopenSet2dPoolingDescriptor(
+    CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
+    vector<int> pads (pads_.data(), pads_.data() + (kernel_.size()));
+    MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
         mode_,
-        kernel_h(),
-        kernel_w(),
-        pad_t(),
-        pad_l(),
-        stride_h(),
-        stride_w()));
+        kernel_.size(),
+        kernel_.data(),
+        pads.data(),
+        stride_.data()));
 
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        bottom_desc_, miopenTypeWrapper<T>::type, N, C, H, W));
-
-    MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
-        top_desc_, miopenTypeWrapper<T>::type, N_out, C_out, H_out, W_out));
+    mio_input_dims = X.sizes().vec();
+    vector<int> input_dims(begin(mio_input_dims), end(mio_input_dims));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        bottom_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
+    
+    mio_output_dims = Y.sizes().vec();
+    vector<int> output_dims(begin(mio_output_dims), end(mio_output_dims));
+    MIOPEN_ENFORCE(miopenSetTensorDescriptor(
+        top_desc_, miopenTypeWrapper<T>::type, output_dims.size(), output_dims.data(), nullptr));
 
     // Carry out the pooling computation.
     const T* Xdata = X.template data<T>();
@@ -240,7 +263,9 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     T* dXdata = dX->template mutable_data<T>();
 
     if (mode_ == miopenPoolingMax) {
-      MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSize(top_desc_, &poolWsSize_));
+      miopenIndexType_t index_type = miopenIndexUint64;
+      MIOPEN_ENFORCE(miopenSetPoolingIndexType(pooling_desc_, index_type));
+      MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSizeV2(pooling_desc_, top_desc_, &poolWsSize_));
 
       if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
         HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
@@ -301,7 +326,7 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
 
  protected:
   size_t poolWsSize_;
-  char* poolWs_;
+  int64_t* poolWs_;
   MIOPENWrapper miopen_wrapper_;
   miopenTensorDescriptor_t bottom_desc_;
   miopenTensorDescriptor_t top_desc_;
@@ -310,6 +335,8 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
   const float alpha_;
   const float beta_;
   float* bwdPoolScratch_;
+  vector<int64_t> mio_input_dims;
+  vector<int64_t> mio_output_dims;
 };
 
 namespace {
@@ -318,5 +345,11 @@ REGISTER_MIOPEN_OPERATOR(AveragePoolGradient, MIOPENPoolGradientOp);
 
 REGISTER_MIOPEN_OPERATOR(MaxPool, MIOPENPoolOp);
 REGISTER_MIOPEN_OPERATOR(MaxPoolGradient, MIOPENPoolGradientOp);
+
+REGISTER_MIOPEN_OPERATOR(MaxPool3D, MIOPENPoolOp);
+REGISTER_MIOPEN_OPERATOR(MaxPool3DGradient, MIOPENPoolGradientOp);
+
+REGISTER_MIOPEN_OPERATOR(AveragePool3D, MIOPENPoolOp);
+REGISTER_MIOPEN_OPERATOR(AveragePool3DGradient, MIOPENPoolOp);
 } // namespace
 } // namespace caffe2
