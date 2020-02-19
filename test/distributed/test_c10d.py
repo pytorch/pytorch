@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     simple_sparse_reduce_tests
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_connect_failures, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -507,7 +507,7 @@ class RendezvousTCPTest(TestCase):
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
 
-    @retry_on_connect_failures(connect_errors=("connect() timed out."))
+    @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
     def test_tcp_store_timeout_set(self):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=10)

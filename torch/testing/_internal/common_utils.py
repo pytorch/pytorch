@@ -1186,8 +1186,11 @@ def find_free_port():
     sock.close()
     return sockname[1]
 
+# Errors that we can get in c10d initialization for which we should retry tests for.
+ADDRESS_IN_USE = "Address already in use"
+CONNECT_TIMEOUT = "connect() timed out."
 
-def retry_on_connect_failures(func=None, connect_errors=("Address already in use")):
+def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     """Reruns a test if the test returns a RuntimeError and the exception
     matches exactly with one of the strings in connect_errors."""
     # This if block is executed when using this function as a decorator with arguments.
