@@ -25,8 +25,8 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, r
 from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, pdist_single, brute_cdist, slowTest, \
-    skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext, skipIfRocm
+    IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
+    BytesIOContext, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
@@ -9691,6 +9691,13 @@ class TestTorchDeviceType(TestCase):
         y = torch.randn((0, 0), device=device)
         self.assertEqual(torch.empty(2, 0, device=device), torch.cdist(x, y))
 
+    def _brute_cdist(self, x, y, p=2):
+        r1 = x.shape[-2]
+        r2 = y.shape[-2]
+        if r1 == 0 or r2 == 0:
+            return torch.empty(r1, r2, device=x.device)
+        return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
+
     def test_cdist_norm(self, device):
         for r1 in [3, 4, 5, 6]:
             for m in [2, 3, 4, 10]:
@@ -9701,11 +9708,11 @@ class TestTorchDeviceType(TestCase):
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
                                 actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                                expected = brute_cdist(x, y, p=2)
+                                expected = self._brute_cdist(x, y, p=2)
                                 self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
-                            expected = brute_cdist(x, y, p=p)
+                            expected = self._brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_norm_batch(self, device):
@@ -9718,11 +9725,11 @@ class TestTorchDeviceType(TestCase):
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
                                 actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                                expected = brute_cdist(x, y, p=2)
+                                expected = self._brute_cdist(x, y, p=2)
                                 self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
-                            expected = brute_cdist(x, y, p=p)
+                            expected = self._brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self, device):
@@ -9730,7 +9737,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(1000, 10, device=device)
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large_batch(self, device):
@@ -9738,7 +9745,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 3, 1000, 10, device=device)
             y = torch.randn(4, 3, 1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous(self, device):
@@ -9746,7 +9753,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(5, 7, device=device).transpose(-1, -2)
             y = torch.randn(5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9754,7 +9761,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(7, 5, device=device)
             y = torch.randn(5, 3, device=device).t()
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9762,7 +9769,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9772,7 +9779,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9780,7 +9787,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(7, 2, 7, 5, device=device)
             y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9788,7 +9795,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -11101,24 +11108,56 @@ class TestTorchDeviceType(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def _brute_pdist(self, inp, p=2):
+        """Computes the same as torch.pdist using primitives"""
+        n = inp.shape[-2]
+        k = n * (n - 1) // 2
+        if k == 0:
+            # torch complains about empty indices
+            return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
+        square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+        unroll = square.view(square.shape[:-2] + (n * n,))
+        inds = torch.ones(k, dtype=torch.int)
+        inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
+        return unroll[..., inds.cumsum(0)]
+
+    def _pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
+        x = torch.randn(shape, dtype=dtype, device=device)
+        if trans:
+            x.transpose_(-2, -1)
+        if grad_check:
+            x.requires_grad_()
+            y = x.detach().clone().requires_grad_()
+        else:
+            y = x
+        actual = torch.pdist(x, p=p)
+        expected = self._brute_pdist(y, p=p)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(torch.allclose(expected, actual))
+        if grad_check and expected.size() != torch.Size([0]):
+            g0 = torch.rand_like(actual)
+            actual.backward(g0)
+            expected.backward(g0)
+            self.assertTrue(torch.allclose(x.grad, y.grad))
+
     def test_pdist_norm_forward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        pdist_single(self, shape, device, p, dtype, trans, grad_check=False)
+                        self._pdist_single(shape, device, p, dtype, trans, grad_check=False)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
         for dtype in [torch.float32, torch.float64]:
-            pdist_single(self, (1000, 2), device, 2, dtype, trans=False, grad_check=False)
+            self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
     @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
-                    pdist_single(self, shape, device, p, torch.float64, trans, grad_check=True)
+                    self._pdist_single(shape, device, p, torch.float64, trans, grad_check=True)
 
     @skipIfRocm
     def test_pdist_norm_large(self, device):
