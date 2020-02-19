@@ -893,7 +893,7 @@ def lu(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if not torch.jit.is_scripting() and type(A) is not Tensor and has_torch_function((A,)):
+    if type(A) is not Tensor and has_torch_function((A,)):
         return handle_torch_function(
             lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     # If get_infos is True, then we don't need to check for errors and vice versa
