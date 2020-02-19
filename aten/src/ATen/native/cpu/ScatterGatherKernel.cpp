@@ -1,6 +1,7 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
+#include <atomic>
 
 namespace at { namespace native {
 
@@ -155,6 +156,44 @@ void cpu_scatter_gather_base_kernel(
   );
 }
 
+  void atomic_add(auto * self_data, int64_t self_data_offset,
+                  auto * src_data, int64_t src_data_offset) {
+
+    
+  }
+
+void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  if (index.numel() == 0) {
+    return;
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+  
+  scatter_shape_check(self, dim, index, src);
+
+  int64_t index_dim_size = ensure_nonempty_size(index, dim);
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  cpu_scatter_gather_base_kernel(
+    self, dim, index, src,
+    "scatter_add_", [&] (
+      auto* self_data, auto self_dim_stride,
+      const auto* index_data, auto index_dim_stride,
+      const auto* src_data, auto src_dim_stride
+    ) {
+      for (int64_t i = 0; i < index_dim_size; ++i) {
+        int64_t idx_dim = index_data[i * index_dim_stride];
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
+          "index ", idx_dim,
+          " is out of bounds for dimension ", dim,
+          " with size ", self_dim_size);
+        atomic_add(self_data, idx_dim * self_dim_stride, src_data, i * src_dim_stride);
+        self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+      }
+    }, /*serial_exec=*/true
+  );
+}
+
 void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   if (index.numel() == 0) {
     return;
@@ -186,36 +225,6 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
   );
 }
 
-void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (index.numel() == 0) {
-    return;
-  }
-
-  dim = maybe_wrap_dim(dim, self.dim());
-  
-  scatter_shape_check(self, dim, index, src);
-
-  int64_t index_dim_size = ensure_nonempty_size(index, dim);
-  int64_t self_dim_size = ensure_nonempty_size(self, dim);
-
-  cpu_scatter_gather_base_kernel(
-    self, dim, index, src,
-    "scatter_add_", [&] (
-      auto* self_data, auto self_dim_stride,
-      const auto* index_data, auto index_dim_stride,
-      const auto* src_data, auto src_dim_stride
-    ) {
-      for (int64_t i = 0; i < index_dim_size; ++i) {
-        int64_t idx_dim = index_data[i * index_dim_stride];
-        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
-          "index ", idx_dim,
-          " is out of bounds for dimension ", dim,
-          " with size ", self_dim_size);
-        self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
-      }
-    }, /*serial_exec=*/false
-  );
-}
 
 } // anonymous napespace
 
