@@ -736,7 +736,8 @@ void Int8FCDNNLowpPackedWeightBlobShapeFunctions::SetupExternalTensorDescriptor(
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);
@@ -784,7 +785,8 @@ void Int8ConvDNNLowpPackedWeightBlobShapeFunctions::
   std::vector<int32_t> offsets;
   for (const auto v : dnntensor.qparams) {
     scales.push_back(v.scale);
-    offsets.push_back(reinterpret_cast<int32_t>(v.zero_point));
+    int32_t cur_offset = v.zero_point;
+    offsets.push_back(cur_offset);
   }
   all_scales->push_back(scales);
   all_offsets->push_back(offsets);

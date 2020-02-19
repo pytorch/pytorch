@@ -133,10 +133,9 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
 
 template <typename T>
 inline float dequantize_val(double scale, int64_t zero_point, T value) {
-  fbgemm::TensorQuantizationParams qparams = {
-    .scale = static_cast<float>(scale),
-    .zero_point = static_cast<int32_t>(zero_point)
-  };
+  fbgemm::TensorQuantizationParams qparams;
+  qparams.scale = static_cast<float>(scale);
+  qparams.zero_point = static_cast<int32_t>(zero_point);
   return fbgemm::Dequantize<typename T::underlying>(value.val_, qparams);
 }
 
