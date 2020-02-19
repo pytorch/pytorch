@@ -35,7 +35,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
   for (auto const &tensor : tensors) {
     inputs.emplace_back(tensor, dim, inner);
   }
-  
+ 
   using Vec = vec256::Vec256<scalar_t>;
   int64_t offset = 0;
   for (int64_t i = 0; i < outer; i++) {
@@ -45,11 +45,11 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       if (local_inner < Vec::size()) {
         #ifndef _MSC_VER
-        #  pragma unroll
+        # pragma unroll
         #endif
         for (int64_t k = 0; k < local_inner; k++) {
-	  result_ptr[k] = input_ptr[k];
-	}
+          result_ptr[k] = input_ptr[k];
+        }
       } else {
         vec256::map(
             [](Vec x) { return x; },
