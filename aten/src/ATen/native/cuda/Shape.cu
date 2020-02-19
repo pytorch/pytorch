@@ -19,8 +19,8 @@
 namespace at {
 namespace native {
 
-#define CAT_ARRAY_BATCH_SIZE 1024
-#define CAT_ARRAY_MAX_INPUT_DIMS 4
+constexpr int CAT_ARRAY_BATCH_SIZE = 1024;
+constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 
 namespace {
 
