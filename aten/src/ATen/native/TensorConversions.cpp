@@ -19,9 +19,8 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
-static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Preserve);
+static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
   if (self.dtype() == options.dtype() && self.layout() == options.layout() &&
       self.device() == options.device() && !copy &&
@@ -45,7 +44,16 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
+
   TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
            "options.requires_grad set as ", options.requires_grad());
@@ -68,27 +76,26 @@ Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, b
   if (dtype_opt) {
     specified_options = specified_options.dtype(dtype_opt.value());
   }
-  return to_impl(self, specified_options, non_blocking, copy, optional_memory_format);
+  return to_impl(self, specified_options, non_blocking, copy);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   device = ensure_has_index(device);
   return to_impl(
       self,
-      self.options().device(device).dtype(dtype),
+      self.options().device(device).dtype(dtype).memory_format(optional_memory_format),
       non_blocking,
-      copy,
-      optional_memory_format);
+      copy);
 }
 
 Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
-      self, self.options().dtype(dtype), non_blocking, copy, optional_memory_format);
+      self, self.options().dtype(dtype).memory_format(optional_memory_format), non_blocking, copy);
 }
 
 Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = other.options();
-  return to_impl(self, options, non_blocking, copy, optional_memory_format);
+  return to_impl(self, options.memory_format(optional_memory_format), non_blocking, copy);
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
