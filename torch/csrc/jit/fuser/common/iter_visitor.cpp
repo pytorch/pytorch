@@ -127,6 +127,17 @@ void IterVisitor::traverse(
   traverse(fusion, outputs_to_visit);
 }
 
+void DependencyCheck::handle(const Val* val){
+  if(val->same_as(dependency_))
+    is_dependency = true;
+}
+
+bool DependencyCheck::check(){
+  is_dependency = false;
+  IterVisitor::traverse(FusionGuard::getCurFusion(), {of_});
+  return is_dependency;
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

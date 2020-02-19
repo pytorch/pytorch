@@ -53,7 +53,6 @@ void testGPU_FusionContainer(){
   Fusion fusion1;
   FusionGuard fg(&fusion1);
   
-  
   Float* f1 = new Float(1.f);
   Float* f2 = new Float(2.f);
   auto f3 =add(f1, f2);
@@ -517,7 +516,7 @@ void testGPU_FusionComputeAt(){
   const TensorDomain *td = new TensorDomain(dom);
   const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
   const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
-
+  const BinaryOp* add_node = new BinaryOp(BinaryOpType::Add, tv2, tv, new Float(1.0));
   //[I0, I1, R0, I2]
   tv = split(tv, 0, 4);
   //[I0o, I0i{4}, I1, R0, I2]
@@ -555,6 +554,8 @@ void testGPU_FusionComputeAt2(){
   const TensorDomain *td = new TensorDomain(dom);
   const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
   const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
+  
+  const BinaryOp* add_node = new BinaryOp(BinaryOpType::Add, tv, tv2, new Float(1.0));
 
   //[I0, I1, R0, I2]
   tv = split(tv, -1, 4);
@@ -585,6 +586,33 @@ void testGPU_FusionComputeAt2(){
   std::cout<<"Produced domain should be something along the lines of:";
   std::cout<<"[I0o, I0i{2}, I1, R0, I2]"<<std::endl;
 }
+
+void testGPU_FusionDependency(){
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+    
+  Float* f1 = new Float(1.f);
+  Float* f2 = new Float(2.f);
+  auto   f3 = add(f1, f2);
+  Float* f4 = new Float(4.f);
+  Float* f5 = new Float(5.f);
+  auto   f6 = add(f4, f5);
+  auto   f7 = add(f6, f3);
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f7));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f7));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f7));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f4, f7));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f5, f7));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f6, f7));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f1));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f2));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f3));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f4));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f5));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f6));
+  
+}
+
 
 void testGPU_Fusion() {}
 
