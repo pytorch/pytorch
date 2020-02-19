@@ -235,6 +235,25 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
   return result;
 }
 
+// Implement std::nan<IntegralType> for MSVC according to https://zh.cppreference.com/w/cpp/numeric/math/isnan.
+namespace {
+#ifdef _MSC_VER
+template<typename T>
+typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
+  return std::isnan(static_cast<double>(x));
+}
+template<typename T>
+typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+  return std::isnan(x);
+}
+#else
+template<typename T>
+typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+  return std::isnan(x);
+}
+#endif
+}
+
 template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
@@ -243,7 +262,7 @@ void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data
       int idx = 0;
       for(int i = 0; i < self_dim_size; i++) {
         T1 curr_elem = self_data[i*self_stride];
-        if(std::isnan(curr_elem) || (!std::isnan(out) && op(curr_elem, out))) {
+        if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
             out = self_data[i*self_stride];
             idx = i;
         }
