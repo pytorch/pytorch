@@ -126,7 +126,7 @@ const TensorView* merge(const TensorView* tv, int axis) {
   assert(axis >= 0 && axis + 1 < td->size());
 
   const IterDomain* first = tv->domain()->axis(axis);
-  const IterDomain* second = tv->domain()->axis(axis);
+  const IterDomain* second = tv->domain()->axis(axis+1);
 
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
