@@ -17,6 +17,7 @@ cat_configs_short = op_bench.config_list(
     attrs=[
         [(1,    1,      1), 2, 0], # noqa
         [(512,  512,    2), 2, 1], # noqa
+        [(128, 1024,    2), 2, 1], # noqa
     ],
     cross_product_configs={
         'device': ['cpu', 'cuda'],

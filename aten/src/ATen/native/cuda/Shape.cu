@@ -284,7 +284,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   TORCH_CHECK(inputs.size() > 0, "invalid number of inputs ", inputs.size());
   TORCH_CHECK(dimension >= 0, "invalid dimension ", dimension);
 
-  std::vector<int64_t> size(nDims);
+  std::vector<int64_t> size(notSkippedTensor->sizes().vec());
 
   // Compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
@@ -298,13 +298,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   }
 
   // Compute the size of the result
-  for (int dim = 0; dim < nDims; dim++) {
-    int64_t out_dim_size = at::native::size(*notSkippedTensor, dim);
-    if (dim == dimension) {
-      out_dim_size = cat_dim_size;
-    }
-    size[dim] = out_dim_size;
-  }
+  size[dimension] = cat_dim_size;
   out.resize_(size);
   if (out.numel() == 0) {
     return out;
