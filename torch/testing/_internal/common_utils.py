@@ -985,13 +985,7 @@ class TestCase(expecttest.TestCase):
             callable()
             self.assertTrue(len(ws) > 0, msg)
             found = any(re.search(regex, str(w.message)) is not None for w in ws)
-            if not found:
-                m = 'Caught unexpected warnings: ' + msg + '\n'
-                for w in ws:
-                    m += warnings.formatwarning(
-                        w.message, w.category, w.filename, w.lineno, w.line)
-                    m += '\n'
-                self.fail(m)
+            self.assertTrue(found, msg)
 
     @contextmanager
     def maybeWarnsRegex(self, category, regex=''):
@@ -1325,6 +1319,26 @@ def brute_pdist(inp, p=2):
     return unroll[..., inds.cumsum(0)]
 
 
+def pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
+    x = torch.randn(shape, dtype=dtype, device=device)
+    if trans:
+        x.transpose_(-2, -1)
+    if grad_check:
+        x.requires_grad_()
+        y = x.detach().clone().requires_grad_()
+    else:
+        y = x
+    actual = torch.pdist(x, p=p)
+    expected = brute_pdist(y, p=p)
+    self.assertEqual(expected.shape, actual.shape)
+    self.assertTrue(torch.allclose(expected, actual))
+    if grad_check and expected.size() != torch.Size([0]):
+        g0 = torch.rand_like(actual)
+        actual.backward(g0)
+        expected.backward(g0)
+        self.assertTrue(torch.allclose(x.grad, y.grad))
+
+
 def brute_cdist(x, y, p=2):
     r1 = x.shape[-2]
     r2 = y.shape[-2]
@@ -1468,7 +1482,9 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
-dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2,
-              torch.bfloat16: 1e-1}
+# Using @precisionOverride specific to your test is the recommended way
+# of doing this. These are just some values that worked for test_nn.
+dtype2prec_DONTUSE = {torch.float: 1e-5,
+                      torch.double: 1e-5,
+                      torch.half: 1e-2,
+                      torch.bfloat16: 1e-1}

@@ -162,7 +162,7 @@ if (IOS_PLATFORM STREQUAL "OS")
 elseif (IOS_PLATFORM STREQUAL "SIMULATOR")
     set (DEFAULT_IOS_ARCH "x86_64")
 elseif (IOS_PLATFORM STREQUAL "WATCHOS")
-    set (DEFAULT_IOS_ARCH "armv7k")
+    set (DEFAULT_IOS_ARCH "armv7k;arm64_32")
 endif ()
 
 set (IOS_ARCH ${DEFAULT_IOS_ARCH} CACHE string  "Build architecture for iOS")
