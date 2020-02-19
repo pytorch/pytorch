@@ -76,11 +76,10 @@ class GradScaler(object):
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_factor`` consecutive iterations.
-            The default value is recommended.
         backoff_factor (float, optional, default=0.5):  Factor by which the scale is multiplied during
-            :meth:`update` if inf/NaN gradients occur in an iteration.  The default value is recommended.
+            :meth:`update` if inf/NaN gradients occur in an iteration.
         growth_interval (int, optional, default=2000):  Number of consecutive iterations without inf/NaN gradients
-            that must occur for the scale to be multiplied by ``growth_factor``.  The default value is recommended.
+            that must occur for the scale to be multiplied by ``growth_factor``.
         enabled (bool, optional, default=True):  If ``False``, disables gradient scaling. :meth:`step` simply
             invokes the underlying ``optimizer.step()``, and other methods become no-ops.
     """
@@ -97,8 +96,8 @@ class GradScaler(object):
                  enabled=True):
         self._enabled = enabled
         if enabled:
-            assert growth_factor > 1.0, "The growth factor must be > 1.0.  Using the default value is recommended."
-            assert backoff_factor < 1.0, "The backoff factor must be < 1.0.  Using the default value is recommended."
+            assert growth_factor > 1.0, "The growth factor must be > 1.0."
+            assert backoff_factor < 1.0, "The backoff factor must be < 1.0."
 
             self._init_scale = init_scale
             # self._scale will be lazily initialized during the first call to scale()
@@ -111,10 +110,10 @@ class GradScaler(object):
             self._growth_tracker = None
             self._per_optimizer_states = defaultdict(lambda: {"stage": self.READY, "found_inf_per_device": {}})
 
-    @staticmethod
-    def _not_initialized_error(funcname, value):
-        return "Attempted to call {} but the {} tensor is None.  ".format(funcname, value) + \
-               "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
+    def _check_scale_growth_tracker(self, funcname):
+        fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
+        assert self._scale is not None, "Attempted {} but _scale is None.  ".format(funcname) + fix
+        assert self._growth_tracker is not None, "Attempted {} but _growth_tracker is None.  ".format(funcname) + fix
 
     def _lazy_init_scale_growth_tracker(self, dev):
         assert self._growth_tracker is None, "_growth_tracker initialized before _scale"
@@ -207,8 +206,7 @@ class GradScaler(object):
         if not self._enabled:
             return
 
-        assert self._scale is not None, self._not_initialized_error("unscale_", "_scale")
-        assert self._growth_tracker is not None, self._not_initialized_error("unscale_", "_growth_tracker")
+        self._check_scale_growth_tracker("unscale_")
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
@@ -252,8 +250,7 @@ class GradScaler(object):
         if "closure" in kwargs:
             raise RuntimeError("Closure use is not currently supported if GradScaler is enabled.")
 
-        assert self._scale is not None, self._not_initialized_error("step", "_scale")
-        assert self._growth_tracker is not None, self._not_initialized_error("step", "_growth_tracker")
+        self._check_scale_growth_tracker("step")
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
@@ -303,8 +300,7 @@ class GradScaler(object):
         if not self._enabled:
             return
 
-        assert self._scale is not None, self._not_initialized_error("update", "_scale")
-        assert self._growth_tracker is not None, self._not_initialized_error("update", "_growth_tracker")
+        self._check_scale_growth_tracker("update")
 
         if new_scale is not None:
             # Accept a new user-defined scale.
@@ -458,9 +454,7 @@ class GradScaler(object):
             self._growth_tracker.fill_(state_dict["_growth_tracker"])
 
     def _check_inf_per_device(self, optimizer):
-        assert self._scale is not None, self._not_initialized_error("_check_inf_per_device", "_scale")
-        assert self._growth_tracker is not None, \
-            self._not_initialized_error("_check_inf_per_device", "_growth_tracker")
+        self._check_scale_growth_tracker("_check_inf_per_device")
 
         dummy_inv_scale = torch.full((1,), 1.0, dtype=torch.float32, device=self._scale.device)
         found_inf = torch.full((1,), 0.0, dtype=torch.float32, device=self._scale.device)

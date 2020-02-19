@@ -111,11 +111,14 @@ __global__ void amp_update_scale_cuda_kernel(int* growth_tracker,
 // _amp_update_scale_cuda asynchronously updates the scale factor.
 //
 // Args:
+// growth_tracker:  A one-element torch.cuda.IntTensor containing the number of recent consecutive unskipped steps.
 // current_scale:  A one-element torch.cuda.FloatTensor containing the current scale value.
 // found_inf:  A one-element torch.cuda.FloatTensor. If > 0, indicates that infs/nans were found by the relevant
 //             prior _amp_non_finite_check_and_unscale_cuda call, and 0 if no infs/nans were found.
 // growth_factor:  Multiplier if no infs/NaNs were found (typically slightly > 1).
 // backoff_factor:  Multiplier if infs/NaNs were found (typically 0.5).
+// growth_interval:  Number of consecutive unskipped steps that must occur for current_scale to be multiplied by
+//                   growth_factor.
 //
 // Returns:
 // new_scale:  A new one-element torch.cuda.FloatTensor containing the new recommended scale value.

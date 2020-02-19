@@ -1981,18 +1981,18 @@ t2.start()
         found_inf = torch.tensor([0.0], dtype=dtype, device=device)
         g = torch.tensor([4.0], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertEqual(found_inf.item(), 0.0)
+        self.assertEqual(found_inf, 0.0)
         self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
 
         found_inf.zero_()
         g = torch.tensor([float('inf')], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertEqual(found_inf.item(), 1.0)
+        self.assertEqual(found_inf, 1.0)
 
         found_inf.zero_()
         g = torch.tensor([float('nan')], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertEqual(found_inf.item(), 1.0)
+        self.assertEqual(found_inf, 1.0)
 
         growth = 2.0
         backoff = 0.25
@@ -2004,16 +2004,16 @@ t2.start()
         # Simulates 2 consecutive unskipped iterations
         scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 1)
-        self.assertEqual(scale.item(), 4.0)
+        self.assertEqual(scale, 4.0)
         scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale.item(), 8.0)
+        self.assertEqual(scale, 8.0)
 
         # Simulates a skipped iteration
         found_inf.fill_(1.0)
         scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
         self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale.item(), 2.0)
+        self.assertEqual(scale, 2.0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
@@ -2066,11 +2066,11 @@ t2.start()
 
             s1.load_state_dict(s0.state_dict())
 
-            self.assertTrue(s1.get_scale() == 3.)
-            self.assertTrue(s1.get_growth_factor() == 4.)
-            self.assertTrue(s1.get_backoff_factor() == .5)
-            self.assertTrue(s1.get_growth_interval() == 2)
-            self.assertTrue(s1._init_growth_tracker == 0)
+            self.assertEqual(s1.get_scale(), 3.)
+            self.assertEqual(s1.get_growth_factor(), 4.)
+            self.assertEqual(s1.get_backoff_factor(), .5)
+            self.assertEqual(s1.get_growth_interval(), 2)
+            self.assertEqual(s1._init_growth_tracker, 0)
 
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
