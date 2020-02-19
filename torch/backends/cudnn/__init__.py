@@ -162,7 +162,7 @@ def set_flags(_enabled, _benchmark, _deterministic, _verbose):
     return orig_flags
 
 @contextmanager
-def flags(enabled=False, benchmark=(False if cuda is not None else True), deterministic=False, verbose=False):
+def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
     try:
