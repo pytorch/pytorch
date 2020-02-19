@@ -46,11 +46,11 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
-                                 Multinomial, MultivariateNormal,
+                                 MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 VonMises, Weibull, constraints, kl_divergence)
+                                 Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -59,7 +59,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             CatTransform, ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
-                                            SoftmaxTransform,
+                                            TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
@@ -425,22 +425,25 @@ EXAMPLES = [
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
     ]),
-    Example(VonMises, [
-        {
-            'loc': torch.tensor(1.0, requires_grad=True),
-            'concentration': torch.tensor(10.0, requires_grad=True)
-        },
-        {
-            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
-            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
-        }
-    ]),
     Example(Weibull, [
         {
             'scale': torch.randn(5, 5).abs().requires_grad_(),
             'concentration': torch.randn(1).abs().requires_grad_()
         }
-    ])
+    ]),
+    Example(MixtureSameFamily, [
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+                                             torch.rand(5, requires_grad=True)),
+        },
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': MultivariateNormal(
+                loc=torch.randn(5, 2, requires_grad=True),
+                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
+        },     
+    ]) 
 ]
 
 BAD_EXAMPLES = [
@@ -693,7 +696,7 @@ class TestDistributions(TestCase):
             asset_fn(i, val.squeeze(), log_prob)
 
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
-                               circular=False, num_samples=10000, failure_rate=1e-3):
+                               num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
         torch_samples = torch_dist.sample((num_samples,)).squeeze()
         torch_samples = torch_samples.cpu().numpy()
@@ -705,8 +708,6 @@ class TestDistributions(TestCase):
             torch_samples = np.dot(torch_samples, axis)
             ref_samples = np.dot(ref_samples, axis)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
-        if circular:
-            samples = [(np.cos(x), v) for (x, v) in samples]
         shuffle(samples)  # necessary to prevent stable sort from making uneven bins for discrete
         samples.sort(key=lambda x: x[0])
         samples = np.array(samples)[:, 1]
@@ -1360,23 +1361,6 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_vonmises_sample(self):
-        for loc in [0.0, math.pi / 2.0]:
-            for concentration in [0.03, 0.3, 1.0, 10.0, 100.0]:
-                self._check_sampler_sampler(VonMises(loc, concentration),
-                                            scipy.stats.vonmises(loc=loc, kappa=concentration),
-                                            "VonMises(loc={}, concentration={})".format(loc, concentration),
-                                            num_samples=int(1e5), circular=True)
-
-    def test_vonmises_logprob(self):
-        concentrations = [0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
-        for concentration in concentrations:
-            grid = torch.arange(0., 2 * math.pi, 1e-4)
-            prob = VonMises(0.0, concentration).log_prob(grid).exp()
-            norm = prob.mean().item() * 2 * math.pi
-            self.assertLess(abs(norm - 1), 1e-3)
-
     def test_cauchy(self):
         loc = torch.zeros(5, 5, requires_grad=True)
         scale = torch.ones(5, 5, requires_grad=True)
@@ -1587,6 +1571,92 @@ class TestDistributions(TestCase):
                 LogisticNormal(mean_th, std_th), ref_dist,
                 'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
                 multivariate=True)
+
+    def test_mixture_same_family_shape(self):
+        normal_case_1d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Normal(torch.randn(5), torch.rand(5)))
+        normal_case_1d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Normal(torch.randn(3, 5), torch.rand(3, 5)))
+        normal_case_1d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Normal(torch.randn(4, 3, 5), torch.rand(4, 3, 5)))
+        normal_case_2d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Independent(Normal(torch.randn(5, 2), torch.rand(5, 2)), 1))
+        normal_case_2d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Independent(Normal(torch.randn(3, 5, 2), torch.rand(3, 5, 2)), 1))
+        normal_case_2d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Independent(Normal(torch.randn(4, 3, 5, 2), torch.rand(4, 3, 5, 2)), 1))
+
+        self.assertEqual(normal_case_1d.sample().size(), ())
+        self.assertEqual(normal_case_1d.sample((2,)).size(), (2,))
+        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))            
+        self.assertEqual(normal_case_1d_batch.sample().size(), (3,))
+        self.assertEqual(normal_case_1d_batch.sample((2,)).size(), (2, 3))
+        self.assertEqual(normal_case_1d_batch.sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample().size(), (4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2,)).size(), (2, 4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3))
+
+        self.assertEqual(normal_case_2d.sample().size(), (2,))
+        self.assertEqual(normal_case_2d.sample((2,)).size(), (2, 2))
+        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))            
+        self.assertEqual(normal_case_2d_batch.sample().size(), (3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2,)).size(), (2, 3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2, 7)).size(), (2, 7, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample().size(), (4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2,)).size(), (2, 4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3, 2))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_log_prob(self):
+        probs = torch.rand(5, 5).softmax(dim=-1)
+        loc = torch.randn(5, 5)
+        scale = torch.rand(5, 5)
+
+        def ref_log_prob(idx, x, log_prob):
+            p = probs[idx].numpy()
+            m = loc[idx].numpy()
+            s = scale[idx].numpy()
+            mix = scipy.stats.multinomial(1, p)
+            comp = scipy.stats.norm(m, s)
+            expected = scipy.special.logsumexp(comp.logpdf(x) + np.log(mix.p))
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(
+            MixtureSameFamily(Categorical(probs=probs), 
+                              Normal(loc, scale)), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_sample(self):
+        probs = torch.rand(5).softmax(dim=-1)
+        loc = torch.randn(5)
+        scale = torch.rand(5)
+
+        class ScipyMixtureNormal(object):
+            def __init__(self, probs, mu, std):
+                self.probs = probs
+                self.mu = mu
+                self.std = std
+
+            def rvs(self, n_sample):
+                comp_samples = [scipy.stats.norm(m, s).rvs(n_sample) for m, s
+                                in zip(self.mu, self.std)]
+                mix_samples = scipy.stats.multinomial(1, self.probs).rvs(n_sample)
+                samples = []
+                for i in range(n_sample):
+                    samples.append(comp_samples[mix_samples[i].argmax()][i])
+                return np.asarray(samples)
+
+        self._check_sampler_sampler(
+            MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
+            ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
+            '''MixtureSameFamily(Categorical(probs={}), 
+            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -2974,6 +3044,16 @@ class TestDistributionShapes(TestCase):
         simplex_sample = simplex_sample / simplex_sample.sum(-1).unsqueeze(-1)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
+    def test_mixture_same_family_shape(self):
+        dist = MixtureSameFamily(Categorical(torch.rand(5)),
+                                 Normal(torch.randn(5), torch.rand(5)))
+        self.assertEqual(dist._batch_shape, torch.Size())
+        self.assertEqual(dist._event_shape, torch.Size())
+        self.assertEqual(dist.sample().size(), torch.Size())
+        self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1)
         self.assertEqual(gamma._batch_shape, torch.Size())
@@ -3051,27 +3131,6 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
-
-    def test_vonmises_shape_tensor_params(self):
-        von_mises = VonMises(torch.tensor([0., 0.]), torch.tensor([1., 1.]))
-        self.assertEqual(von_mises._batch_shape, torch.Size((2,)))
-        self.assertEqual(von_mises._event_shape, torch.Size(()))
-        self.assertEqual(von_mises.sample().size(), torch.Size((2,)))
-        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
-        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
-        self.assertEqual(von_mises.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
-
-    def test_vonmises_shape_scalar_params(self):
-        von_mises = VonMises(0., 1.)
-        self.assertEqual(von_mises._batch_shape, torch.Size())
-        self.assertEqual(von_mises._event_shape, torch.Size())
-        self.assertEqual(von_mises.sample().size(), torch.Size())
-        self.assertEqual(von_mises.sample(torch.Size((3, 2))).size(),
-                         torch.Size((3, 2)))
-        self.assertEqual(von_mises.log_prob(self.tensor_sample_1).size(),
-                         torch.Size((3, 2)))
-        self.assertEqual(von_mises.log_prob(self.tensor_sample_2).size(),
-                         torch.Size((3, 2, 3)))
 
     def test_weibull_scale_scalar_params(self):
         weibull = Weibull(1, 1)
@@ -3824,10 +3883,6 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.uniform(random_var, positive_var)
             ),
             (
-                VonMises(random_var, positive_var),
-                scipy.stats.vonmises(positive_var, loc=random_var)
-            ),
-            (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             )
@@ -3845,9 +3900,8 @@ class TestAgainstScipy(TestCase):
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, (Cauchy, HalfCauchy, VonMises)):
+            if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
                 # Cauchy, HalfCauchy distributions' standard deviation is nan, skipping check
-                # VonMises variance is circular and scipy doesn't produce a correct result
                 continue
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
@@ -3892,6 +3946,7 @@ class TestTransforms(TestCase):
                 PowerTransform(exponent=torch.tensor(5.).normal_(),
                                cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
+                TanhTransform(cache_size=cache_size),
                 AffineTransform(0, 1, cache_size=cache_size),
                 AffineTransform(1, -2, cache_size=cache_size),
                 AffineTransform(torch.randn(5),
@@ -3946,6 +4001,10 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif domain is constraints.unit_interval:
             return x.uniform_()
+        elif isinstance(domain, constraints.interval):
+            x = x.uniform_()
+            x = x.mul_(domain.upper_bound - domain.lower_bound).add_(domain.lower_bound)
+            return x
         elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)
@@ -4174,9 +4233,9 @@ class TestTransforms(TestCase):
 
 class TestFunctors(TestCase):
     def test_cat_transform(self):
-        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
-        x2 = (torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100
-        x3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        x1 = -1 * torch.range(1, 100).view(-1, 100)
+        x2 = (torch.range(1, 100).view(-1, 100) - 1) / 100
+        x3 = torch.range(1, 100).view(-1, 100)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.cat([x1, x2, x3], dim=dim)
@@ -4189,9 +4248,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
-        y2 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
-        y3 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
+        y1 = torch.range(1, 100).view(-1, 100)
+        y2 = torch.range(1, 100).view(-1, 100)
+        y3 = torch.range(1, 100).view(-1, 100)
         y = torch.cat([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4208,9 +4267,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_cat_transform_non_uniform(self):
-        x1 = -1 * torch.arange(1, 101, dtype=torch.float).view(-1, 100)
-        x2 = torch.cat([(torch.arange(1, 101, dtype=torch.float).view(-1, 100) - 1) / 100,
-                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
+        x1 = -1 * torch.range(1, 100).view(-1, 100)
+        x2 = torch.cat([(torch.range(1, 100).view(-1, 100) - 1) / 100,
+                        torch.range(1, 100).view(-1, 100)])
         t1 = ExpTransform()
         t2 = CatTransform([AffineTransform(1, 100), identity_transform], dim=0)
         dim = 0
@@ -4223,9 +4282,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.cat([t1(x1), t2(x2)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.arange(1, 101, dtype=torch.float).view(-1, 100)
-        y2 = torch.cat([torch.arange(1, 101, dtype=torch.float).view(-1, 100),
-                        torch.arange(1, 101, dtype=torch.float).view(-1, 100)])
+        y1 = torch.range(1, 100).view(-1, 100)
+        y2 = torch.cat([torch.range(1, 100).view(-1, 100),
+                        torch.range(1, 100).view(-1, 100)])
         y = torch.cat([y1, y2], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.cat([t1.codomain.check(y1),
@@ -4240,9 +4299,9 @@ class TestFunctors(TestCase):
         self.assertEqual(actual_jac, expected_jac)
 
     def test_stack_transform(self):
-        x1 = -1 * torch.arange(1, 101, dtype=torch.float)
-        x2 = (torch.arange(1, 101, dtype=torch.float) - 1) / 100
-        x3 = torch.arange(1, 101, dtype=torch.float)
+        x1 = -1 * torch.range(1, 100)
+        x2 = (torch.range(1, 100) - 1) / 100
+        x3 = torch.range(1, 100)
         t1, t2, t3 = ExpTransform(), AffineTransform(1, 100), identity_transform
         dim = 0
         x = torch.stack([x1, x2, x3], dim=dim)
@@ -4255,9 +4314,9 @@ class TestFunctors(TestCase):
         actual = t(x)
         expected = torch.stack([t1(x1), t2(x2), t3(x3)], dim=dim)
         self.assertEqual(expected, actual)
-        y1 = torch.arange(1, 101, dtype=torch.float)
-        y2 = torch.arange(1, 101, dtype=torch.float)
-        y3 = torch.arange(1, 101, dtype=torch.float)
+        y1 = torch.range(1, 100)
+        y2 = torch.range(1, 100)
+        y3 = torch.range(1, 100)
         y = torch.stack([y1, y2, y3], dim=dim)
         actual_cod_check = t.codomain.check(y)
         expected_cod_check = torch.stack([t1.codomain.check(y1),
@@ -4450,7 +4509,6 @@ class TestJit(TestCase):
             xfail = [
                 Cauchy,  # aten::cauchy(Double(2,1), float, float, Generator)
                 HalfCauchy,  # aten::cauchy(Double(2, 1), float, float, Generator)
-                VonMises  # Variance is not Euclidean
             ]
             if Dist in xfail:
                 continue
