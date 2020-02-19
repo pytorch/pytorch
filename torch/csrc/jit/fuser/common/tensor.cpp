@@ -92,6 +92,10 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
     throw std::runtime_error(
         "Splitting an axis of non-Serial iteration approach is not supported at this time. Parallelization strategy must be set after calling split.");
 
+  if (tv->getComputeAtView() != nullptr)
+    if (axis < tv->getComputeAtAxis())
+        throw std::runtime_error("Cannot split axis within compute at range.");
+
   std::vector<const IterDomain*> new_domain;
 
   const Int* fact = new Int(factor);
@@ -124,6 +128,10 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
 const TensorView* merge(const TensorView* tv, int axis) {
   const TensorDomain* td = tv->domain();
   assert(axis >= 0 && axis + 1 < td->size());
+
+  if (tv->getComputeAtView() != nullptr)
+    if (axis < tv->getComputeAtAxis())
+        throw std::runtime_error("Cannot split axis within compute at range.");
 
   const IterDomain* first = tv->domain()->axis(axis);
   const IterDomain* second = tv->domain()->axis(axis+1);
@@ -231,9 +239,17 @@ const TensorView* reorder(
   // in empty spots in the set of new positions.
   // pos2axis[new_position] = old_position
   auto it = positions_left.begin(); // old positions left
-  for (int i = 0; i < pos2axis.size(); i++) {
+  for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
     if (pos2axis[i] == -1)
       pos2axis[i] = *it++;
+  }
+
+  //pos2axis is now filled
+  if(tv->getComputeAtView != nullptr){
+    for(int i = 0; i < tv->getComputeAtAxis(); i++){
+      if(pos2axis[i] != i)
+        throw std::runtime_error("Cannot reorder axis within compute at range.");
+    }
   }
 
   std::vector<const IterDomain*> reordered_domain;
