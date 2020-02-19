@@ -10600,7 +10600,7 @@ class TestTorchDeviceType(TestCase):
                          0)
 
         # Check for race condition (correctness when applied on a large tensor).
-        y = torch.linspace(0, 1000000-1, 1000000, device=device, dtype=dtype)
+        y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
         correct = True
         for i in range(y.shape[0] - 1):
             correct = correct and y[i] < y[i+1]

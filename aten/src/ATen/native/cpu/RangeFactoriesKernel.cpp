@@ -14,21 +14,18 @@ using namespace vec256;
 
 static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar scalar_end, int64_t steps) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "linspace_cpu", [&]() {
-    int64_t idx = 0;
+    int64_t idx(0);
     scalar_t start = scalar_start.to<scalar_t>();
     scalar_t end = scalar_end.to<scalar_t>();
     scalar_t step = (end - start) / static_cast<scalar_t>(steps - 1);
     cpu_kernel_vec(
         iter,
         [start, step, &idx]() -> scalar_t {
-          scalar_t res = start + static_cast<scalar_t>(idx) * step;
-          ++ idx;
-          return res;
+          return start + static_cast<scalar_t>(idx ++) * step;
         },
         [start, step, &idx]() -> Vec256<scalar_t> {
-          auto res = Vec256<scalar_t>::arange(start + static_cast<scalar_t>(idx) * step, step);
+          return Vec256<scalar_t>::arange(start + static_cast<scalar_t>(idx) * step, step);
           idx += Vec256<scalar_t>::size();
-          return res;
         });
   });
 }
