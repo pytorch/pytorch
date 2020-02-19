@@ -152,6 +152,37 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   return self.set_requires_grad(_requires_grad);
 }
 
+void retain_grad(const Tensor & self) {
+  TORCH_CHECK(self.requires_grad(), "can't retain_grad on Tensor that has requires_grad=False");
+  if (self.is_leaf()) {  // no-op for leaves
+    return;
+  }
+  if (impl::get_autograd_meta(self)->retains_grad_) {
+    return;
+  }
+  c10::weak_intrusive_ptr<TensorImpl> weak_self(self.getIntrusivePtr());
+
+  std::function<void(Tensor)> retain_grad_hook([weak_self](const Tensor& grad) {
+    if (weak_self.expired()) {
+      return;
+    } else {
+      auto var = weak_self.lock();
+      if (!var->grad().defined()) {
+        if (grad.is_sparse()) {
+          var->grad() = grad.clone();
+        } else {
+          var->grad() = grad.clone(at::MemoryFormat::Contiguous);
+        }
+      } else {
+        var->grad() = var->grad() + grad;
+      }
+    }
+  });
+
+  self.register_hook(retain_grad_hook);
+  impl::get_autograd_meta(self)->retains_grad_ = true;
+}
+
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
@@ -255,7 +286,7 @@ Tensor detach(const Tensor & self) {
 
   }
   // <NON_GENERATED_CODE>
-  auto result = make_variable_view(self, self, /*is_differentiable=*/false, /*allow_tensor_metadata_change=*/false);
+  auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
   // </NON_GENERATED_CODE>
   if (jit::tracer::isTracing()) {
@@ -368,6 +399,10 @@ static auto registry = torch::RegisterOperators()
     //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
     .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::VariableTensorId)
     .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>()
+    .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
+  .op(torch::RegisterOperators::options()
+    .schema("aten::retain_grad(Tensor(a!) self) -> ()")
+    .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>()
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA))
   ;
 

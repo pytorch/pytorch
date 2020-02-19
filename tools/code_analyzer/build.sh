@@ -72,21 +72,10 @@ build_test_project() {
 }
 
 call_analyzer() {
-  echo "Analyze: ${INPUT}"
-
-  "${LLVM_DIR}/bin/opt" \
-    -load="${BUILD_ROOT}/libOpDependencyPass.so" \
-    -op_dependency \
-    -disable-output \
-    -op_schema_pattern="^(_aten|_prim|aten|quantized|profiler|_test)::[^ ]+" \
-    -op_register_pattern="c10::RegisterOperators::(op|checkSchemaAndRegisterOp_)" \
-    -op_invoke_pattern="c10::Dispatcher::findSchema|callOp" \
-    -format="${FORMAT}" \
-    ${EXTRA_ANALYZER_FLAGS} \
-    "${INPUT}" \
-    > "${OUTPUT}"
-
-  echo "Result: ${OUTPUT}"
+  ANALYZER_BIN="${BUILD_ROOT}/analyzer" \
+    INPUT="${INPUT}" OUTPUT="${OUTPUT}" FORMAT="${FORMAT}" \
+    EXTRA_ANALYZER_FLAGS="${EXTRA_ANALYZER_FLAGS}" \
+    "${ANALYZER_SRC_HOME}/run_analyzer.sh"
 }
 
 analyze_torch_mobile() {

@@ -10,10 +10,6 @@
   device_guard: False
   return: argument 0
   options:
-    - cname: set
-      arguments:
-        - THTensor* self
-        - THTensor* source
     - cname: setStorage
       arguments:
         - THTensor* self
@@ -263,7 +259,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: index
     - THTensor* self
     - long dim
     - THIndexTensor* index
@@ -564,24 +559,6 @@
     - real p
     - long dim
     - real maxnorm
-]]
-[[
-  name: _th_dist
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: dist
-      return: accreal
-      arguments:
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-        - real p
 ]]
 [[
   name: _th_histc
@@ -1202,54 +1179,7 @@
     - double to
     - THGenerator* generator
 ]]
-[[
-  name: _th_normal
-  cname: normal
-  types:
-    - floating_point
-  backends:
-    - CPU
-  return: argument 0
-  variants:
-    - function
-  options:
-    - cname: normal_means
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - double std
-        - THGenerator* generator
-    - cname: normal_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: double mean
-        - THTensor* std
-        - THGenerator* generator
-    - cname: normal_means_stddevs
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - THTensor* mean
-        - THTensor* std
-        - THGenerator* generator
-]]
-[[
-  name: _th_normal_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: normal
-  variants: function
-  return: self
-  arguments:
-    - THTensor* self
-    - double mean
-    - double std
-    - THGenerator* generator
-]]
+
 [[
   name: _th_copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
@@ -1266,10 +1196,9 @@
   name: _th_cat
   cname: catArray
   variants: [function]
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   return: self
   arguments:

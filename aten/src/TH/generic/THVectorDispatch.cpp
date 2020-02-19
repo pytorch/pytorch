@@ -179,23 +179,6 @@ void THVector_(divs)(scalar_t *y, const scalar_t *x, const scalar_t c, const ptr
   THVector_(divs_DISPATCHPTR)(y, x, c, n);
 }
 
-
-static void (*THVector_(normal_fill_DISPATCHPTR))(scalar_t *, const int64_t, at::Generator *, const scalar_t, const scalar_t) = &THVector_(normal_fill_DEFAULT);
-static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
-  #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
-      FUNCTION_IMPL(THVector_(normal_fill_AVX2), SIMDExtension_AVX2),
-  #endif
-
-  FUNCTION_IMPL(THVector_(normal_fill_DEFAULT), SIMDExtension_DEFAULT)
-};
-void THVector_(normal_fill)(scalar_t *data,
-                            const int64_t size,
-                            at::Generator *generator,
-                            const scalar_t mean,
-                            const scalar_t stddev) {
-  THVector_(normal_fill_DISPATCHPTR)(data, size, generator, mean, stddev);
-}
-
 /*
  * This struct's constructor initializes the dispatch tables. It simply checks
  * what SIMD extensions are available, and then walks the dispatch table
@@ -214,7 +197,6 @@ struct THVector_(startup) {
     INIT_DISPATCH_PTR(muls);
     INIT_DISPATCH_PTR(cdiv);
     INIT_DISPATCH_PTR(divs);
-    INIT_DISPATCH_PTR(normal_fill);
   }
 };
 
