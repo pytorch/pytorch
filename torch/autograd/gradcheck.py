@@ -49,6 +49,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     Note that `target` may not even be part of `input` to `fn`, so please be
     **very careful** in this to not clone `target`.
     """
+
+    is_complex = input[0].dtype.is_complex
+    if is_complex:
+        eps = eps * 1j
+
     if target is None:
         target = input
     output_size = fn(input).numel()
@@ -93,6 +98,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     outb = fn(input).clone()
                     x_value[x_idx] = orig
                     r = (outb - outa) / (2 * eps)
+                    if is_complex:
+                        r=r.abs()
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
@@ -115,6 +122,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn([x_tensor_mkl])
 
                 r = (outb - outa) / (2 * eps)
+                if is_complex:
+                    r=r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
             # Use .data here to get around the version check
@@ -127,6 +136,8 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 outb = fn(input).clone()
                 x_tensor[x_idx] = orig
                 r = (outb - outa) / (2 * eps)
+                if is_complex:
+                    r=r.abs()
                 d_tensor[d_idx] = r.detach().reshape(-1)
 
     return jacobian
