@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/custom_operator.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -8,9 +9,8 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-using namespace torch::jit;
-
-namespace {
+namespace torch {
+namespace jit {
 
 const Symbol& getTensorExprSymbol() {
   static Symbol s = Symbol::fromQualString("tensorexpr::Group");
@@ -47,10 +47,7 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
     return false;                           \
   }
 
-bool canMerge(
-    Node* consumer,
-    Node* producer,
-    AliasDb& aliasDb) {
+bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
   // Only handle complete tensor types
   for (torch::jit::Value* output : consumer->outputs()) {
     REQ(output->isCompleteTensor());
@@ -72,7 +69,7 @@ bool canMerge(
 }
 #undef REQ
 
-Node *getOrCreateTensorExprSubgraph(Node *n) {
+Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
@@ -122,6 +119,27 @@ std::pair<graph_node_list::iterator, bool> scanNode(
   // We know consumer didn't move, so skip over it.
   return {++(++iter), false};
 }
+
+Operation createTensorExprOp(const Node* node) {
+  // TODO: actually compile the fusion group.
+  return [](Stack& stack) {
+    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
+    return 0;
+  };
+}
+
+c10::OperatorOptions getAliasAnalysisOption(AliasAnalysisKind k) {
+  auto options = c10::OperatorOptions();
+  options.setAliasAnalysis(k);
+  return options;
+}
+
+RegisterOperators TensorExprOps({
+    torch::jit::Operator(
+        getTensorExprSymbol(),
+        createTensorExprOp,
+        getAliasAnalysisOption(AliasAnalysisKind::PURE_FUNCTION)),
+});
 
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
@@ -176,27 +194,12 @@ void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("After TExprFuser: ", graph);
 }
 
-Operation createTensorExprOp(const Node* node) {
-  // TODO: actually compile the fusion group.
-  return [](Stack& stack) {
-    RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    return 0;
-  };
+void registerTensorExprFuser() {
+  static bool already_registered = false;
+  if (!already_registered) {
+    RegisterPass pass(fuseTensorExprs);
+    already_registered = true;
+  }
 }
-
-c10::OperatorOptions getAliasAnalysisOption(AliasAnalysisKind k) {
-  auto options = c10::OperatorOptions();
-  options.setAliasAnalysis(k);
-  return options;
-}
-
-RegisterOperators TensorExprOps({
-    torch::jit::Operator(
-        getTensorExprSymbol(),
-        createTensorExprOp,
-        getAliasAnalysisOption(AliasAnalysisKind::PURE_FUNCTION)),
-});
-
-RegisterPass pass(fuseTensorExprs);
-
-} // namespace
+} // namespace jit
+} // namespace torch
