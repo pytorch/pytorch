@@ -51,11 +51,11 @@ def set_training(model, mode):
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
         if mode is True:
-            from torch.onnx.symbolic_helper import onnx_opset_version
-            if onnx_opset_version < 12:
+            from torch.onnx.symbolic_helper import _export_onnx_opset_version
+            if _export_onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
                               "Note that onnx opset version 12 was updated for better support of training "
-                              "amenable mode.".format(onnx_opset_version))
+                              "amenable mode.".format(_export_onnx_opset_version))
 
         if old_mode != mode:
             model.train(mode)

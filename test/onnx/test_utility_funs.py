@@ -388,7 +388,7 @@ class TestUtilityFuns(TestCase):
 
         ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
         ort_outs = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(out, ort_out, atol=10e-3, rtol=10e-3) for out, ort_out in zip(pytorch_out, ort_outs)]
+        [np.testing.assert_allclose(p_out, ort_out, atol=10e-3, rtol=10e-3) for p_out, ort_out in zip(pytorch_out, ort_outs)]
 
     # TODO: Enable test when Dropout is implemented in ORT for opset 12.
     @skipIfUnsupportedOpsetVersion([12])
