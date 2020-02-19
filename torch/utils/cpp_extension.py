@@ -1654,4 +1654,7 @@ def _join_cuda_home(*paths):
 
 
 def _is_cuda_file(path):
-    return os.path.splitext(path)[1] in ['.cu', '.cuh', '.hip']
+    valid_ext = ['.cu', '.cuh']
+    if is_hip_extension:
+        valid_ext.append('.hip')
+    return os.path.splitext(path)[1] in valid_ext
