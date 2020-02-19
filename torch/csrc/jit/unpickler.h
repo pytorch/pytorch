@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pickler.h"
+#include <ATen/core/ivalue.h>
 
 namespace torch {
 namespace jit {
@@ -101,6 +102,12 @@ class Unpickler {
   std::vector<IValue> memo_table_;
   std::vector<size_t> marks_;
   const std::vector<at::Tensor>* tensor_table_;
+
+  // When deserializing types on lists and dicts, cache the type here
+  // so we don't have to parse the same type multiple times. Strings
+  // are already de-duplicated and replaced with BINGETs in the 
+  // pickler, so we can just use the actual data pointer of each string.
+  std::unordered_map<const void*, c10::TypePtr> type_cache_;
 
   // optionally nullptr, needs to be present for creating classes
   ClassResolver class_resolver_;

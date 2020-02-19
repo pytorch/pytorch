@@ -65,6 +65,13 @@ void testTypeTags() {
   auto dict = c10::Dict<std::string, at::Tensor>();
   dict.insert("Hello", torch::ones({2, 2}));
 
+  auto dict_list = c10::List<c10::Dict<std::string, at::Tensor>>();
+  for (size_t i = 0; i < 5; i++) {
+    auto another_dict = c10::Dict<std::string, at::Tensor>();
+    another_dict.insert("Hello" + std::to_string(i), torch::ones({2, 2}));
+    dict_list.push_back(another_dict);
+  }
+
   auto tuple = std::tuple<int, std::string>(2, "hi");
 
   struct TestItem {
@@ -75,6 +82,7 @@ void testTypeTags() {
     {list, ListType::create(ListType::create(IntType::get()))},
     {2, IntType::get()},
     {dict, DictType::create(StringType::get(), TensorType::get())},
+    {dict_list, ListType::create(DictType::create(StringType::get(), TensorType::get()))},
     {tuple, TupleType::create({IntType::get(), StringType::get()})}
   };
 
