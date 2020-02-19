@@ -46,16 +46,29 @@ struct TORCH_API BaseMutator {
 };
 
 struct TORCH_API ReplaceAll : public BaseMutator{
+private:
 
   const Statement* mutate(const Val* const);
+  const Statement* mutate(const Expr* const expr){
+    return BaseMutator::mutate(expr);
+  }
 
-  TORCH_API static void instancesOf(const Val* const instance, const Val* const with);
-
-private:
   ReplaceAll(const Val* _instance, const Val* const _with):instance_(_instance), with_(_with){}
 
   const Val* instance_;
   const Val* with_;
+
+public:
+  
+  //Traverses Statement, and replaces all instances of _instance with _with.
+  TORCH_API static void instancesWithin(const Val* _instance, const Val* const _with, const Expr* _within){
+    if(_within == nullptr)
+      return;
+    ReplaceAll ra(_instance, _with);
+    ra.mutate(_within);
+  }
+
+  TORCH_API static void instancesOf(const Val* const instance, const Val* const with);
 
 };
 
