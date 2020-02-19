@@ -25,8 +25,8 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, r
 from torch.testing._internal.common_utils import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     TEST_LIBROSA, TEST_WITH_ROCM, run_tests, skipIfNoLapack, suppress_warnings, \
     IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, do_test_dtypes, do_test_empty_full, \
-    IS_SANDCASTLE, load_tests, pdist_single, brute_cdist, slowTest, \
-    skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext, skipIfRocm
+    IS_SANDCASTLE, load_tests, slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, \
+    BytesIOContext, skipIfRocm
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCPUIfNoLapack, skipCUDAIfNoMagma, skipCUDAIfRocm, onlyCUDA, onlyCPU, \
@@ -9686,6 +9686,13 @@ class TestTorchDeviceType(TestCase):
         y = torch.randn((0, 0), device=device)
         self.assertEqual(torch.empty(2, 0, device=device), torch.cdist(x, y))
 
+    def _brute_cdist(self, x, y, p=2):
+        r1 = x.shape[-2]
+        r2 = y.shape[-2]
+        if r1 == 0 or r2 == 0:
+            return torch.empty(r1, r2, device=x.device)
+        return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
+
     def test_cdist_norm(self, device):
         for r1 in [3, 4, 5, 6]:
             for m in [2, 3, 4, 10]:
@@ -9696,11 +9703,11 @@ class TestTorchDeviceType(TestCase):
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
                                 actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                                expected = brute_cdist(x, y, p=2)
+                                expected = self._brute_cdist(x, y, p=2)
                                 self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
-                            expected = brute_cdist(x, y, p=p)
+                            expected = self._brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_norm_batch(self, device):
@@ -9713,11 +9720,11 @@ class TestTorchDeviceType(TestCase):
                         if p == 2:
                             for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
                                 actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                                expected = brute_cdist(x, y, p=2)
+                                expected = self._brute_cdist(x, y, p=2)
                                 self.assertTrue(torch.allclose(expected, actual, rtol=0, atol=0.02))
                         else:
                             actual = torch.cdist(x, y, p=p)
-                            expected = brute_cdist(x, y, p=p)
+                            expected = self._brute_cdist(x, y, p=p)
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self, device):
@@ -9725,7 +9732,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(1000, 10, device=device)
             y = torch.randn(1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large_batch(self, device):
@@ -9733,7 +9740,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 3, 1000, 10, device=device)
             y = torch.randn(4, 3, 1000, 10, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous(self, device):
@@ -9741,7 +9748,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(5, 7, device=device).transpose(-1, -2)
             y = torch.randn(5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9749,7 +9756,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(7, 5, device=device)
             y = torch.randn(5, 3, device=device).t()
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9757,7 +9764,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(5, 7, device=device).t()
             y = torch.randn(3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9767,7 +9774,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 3, 2, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 2, 5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9775,7 +9782,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(7, 2, 7, 5, device=device)
             y = torch.randn(7, 2, 5, 3, device=device).transpose(-1, -2)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(x.is_contiguous())
             self.assertFalse(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -9783,7 +9790,7 @@ class TestTorchDeviceType(TestCase):
             x = torch.randn(4, 5, 7, device=device).transpose(-1, -2)
             y = torch.randn(4, 3, 5, device=device)
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            expected = brute_cdist(x, y, p=2)
+            expected = self._brute_cdist(x, y, p=2)
             self.assertFalse(x.is_contiguous())
             self.assertTrue(y.is_contiguous())
             self.assertTrue(torch.allclose(expected, actual))
@@ -10592,6 +10599,13 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          0)
 
+        # Check for race condition (correctness when applied on a large tensor).
+        y = torch.linspace(0, 1000000-1, 1000000, device=device, dtype=dtype)
+        correct = True
+        for i in range(y.shape[0] - 1):
+            correct = correct and y[i] < y[i+1]
+        self.assertTrue(y)
+
         # Check linspace for non-contiguous tensors.
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
@@ -11108,24 +11122,56 @@ class TestTorchDeviceType(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def _brute_pdist(self, inp, p=2):
+        """Computes the same as torch.pdist using primitives"""
+        n = inp.shape[-2]
+        k = n * (n - 1) // 2
+        if k == 0:
+            # torch complains about empty indices
+            return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
+        square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
+        unroll = square.view(square.shape[:-2] + (n * n,))
+        inds = torch.ones(k, dtype=torch.int)
+        inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
+        return unroll[..., inds.cumsum(0)]
+
+    def _pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
+        x = torch.randn(shape, dtype=dtype, device=device)
+        if trans:
+            x.transpose_(-2, -1)
+        if grad_check:
+            x.requires_grad_()
+            y = x.detach().clone().requires_grad_()
+        else:
+            y = x
+        actual = torch.pdist(x, p=p)
+        expected = self._brute_pdist(y, p=p)
+        self.assertEqual(expected.shape, actual.shape)
+        self.assertTrue(torch.allclose(expected, actual))
+        if grad_check and expected.size() != torch.Size([0]):
+            g0 = torch.rand_like(actual)
+            actual.backward(g0)
+            expected.backward(g0)
+            self.assertTrue(torch.allclose(x.grad, y.grad))
+
     def test_pdist_norm_forward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
                     for dtype in [torch.float32, torch.float64]:
-                        pdist_single(self, shape, device, p, dtype, trans, grad_check=False)
+                        self._pdist_single(shape, device, p, dtype, trans, grad_check=False)
 
         # do a simplified comparison with big inputs, see:
         # https://github.com/pytorch/pytorch/issues/15511
         for dtype in [torch.float32, torch.float64]:
-            pdist_single(self, (1000, 2), device, 2, dtype, trans=False, grad_check=False)
+            self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
     @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                 for trans in [False, True]:
-                    pdist_single(self, shape, device, p, torch.float64, trans, grad_check=True)
+                    self._pdist_single(shape, device, p, torch.float64, trans, grad_check=True)
 
     @skipIfRocm
     def test_pdist_norm_large(self, device):
@@ -14980,18 +15026,6 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
     ('geqrf', '', _new_t((20, 20)), lambda t, d: [],
         1e-5, 1e-5, 3e-4, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'square', _new_t((10, 10)), lambda t, d: [],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'square_col_maj', lambda t, d: _new_t((10, 10))(t, d).t(), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'tall_some', _new_t((20, 5)), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'tall_all', _new_t((20, 5)), lambda t, d: [False],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'tall_some_col_maj', lambda t, d: _new_t((5, 20))(t, d).t(), lambda t, d: [True],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
-    ('svd', 'tall_all_col_maj', lambda t, d: _new_t((5, 20))(t, d).t(), lambda t, d: [False],
-        1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, False, [skipCUDAIfNoMagma]),
     ('abs', '', _small_3d, lambda t, d: []),
@@ -15155,7 +15189,53 @@ def generate_not_implemented_tests(cls):
 
 
 class TestTensorDeviceOps(TestCase):
-    pass
+    def _test_svd_helper(self, shape, some, col_maj, device, dtype):
+        cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
+        device_tensor = cpu_tensor.to(device=device)
+        if col_maj:
+            cpu_tensor = cpu_tensor.t()
+            device_tensor = device_tensor.t()
+        cpu_result = torch.svd(cpu_tensor, some=some)
+        device_result = torch.svd(device_tensor, some=some)
+        m = min(cpu_tensor.shape[-2:])
+        # torch.svd returns torch.return_types.svd which is a tuple of (U, V, S).
+        # - When some==False, U[..., m:] can be arbitrary.
+        # - When some==True, U shape: [..., m], V shape: [m, m]
+        # - Signs are not deterministic. If the sign of a column of U is changed
+        #   then the corresponding column of the V has to be changed.
+        # Thus here we only compare result[..., :m].abs() from CPU and device.
+        for x, y in zip(cpu_result, device_result):
+            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), prec=1e-5)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_square(self, device, dtype):
+        self._test_svd_helper((10, 10), True, False, device, dtype)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_square_col_maj(self, device, dtype):
+        self._test_svd_helper((10, 10), True, True, device, dtype)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_tall_some(self, device, dtype):
+        self._test_svd_helper((20, 5), True, False, device, dtype)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_tall_all(self, device, dtype):
+        self._test_svd_helper((20, 5), False, False, device, dtype)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_tall_some_col_maj(self, device, dtype):
+        self._test_svd_helper((5, 20), True, True, device, dtype)
+
+    @skipCUDAIfNoMagma
+    @dtypes(*_float_types_no_half)
+    def test_svd_tall_all_col_maj(self, device, dtype):
+        self._test_svd_helper((5, 20), False, True, device, dtype)
 
 class TestTorch(TestCase, _TestTorchMixin):
     pass
