@@ -68,3 +68,10 @@ output = [[1, 2], [2, 1], [1, 2]]
 
 NO_GRADIENT(BucketizeOp);
 } // namespace caffe2
+
+using BucketizeInt = caffe2::BucketizeOp<int, caffe2::CPUContext>;
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    Bucketize,
+    "_caffe2::Bucketize(Tensor data, float[] boundaries) -> Tensor output",
+    BucketizeInt);
