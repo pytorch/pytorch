@@ -334,7 +334,23 @@ private:
      case aten::div:
      case aten::t:
      case aten::sigmoid:
+     case aten::sin:
+     case aten::cos:
+     case aten::tan:
+     case aten::sinh:
+     case aten::cosh:
      case aten::tanh:
+     case aten::asin:
+     case aten::acos:
+     case aten::atan:
+     case aten::atan2:
+     case aten::floor:
+     case aten::fmod:
+     case aten::ceil:
+     case aten::trunc:
+     case aten::sqrt:
+     case aten::rsqrt:
+     case aten::remainder:
      case aten::mm:
      case aten::min:
      case aten::max:
@@ -346,17 +362,29 @@ private:
      case aten::eq:
      case aten::ne:
      case aten::neg:
+     case prim::ConstantChunk:
      case aten::size:
      case aten::abs:
      case aten::sign:
      case aten::pow:
      case aten::relu:
      case aten::threshold:
+     case aten::avg_pool2d:
      case prim::AutogradAdd:
      case prim::AutogradZero:
      case aten::rand_like:
      case aten::erf:
      case aten::erfc:
+     case aten::exp:
+     case aten::expm1:
+     case aten::log:
+     case aten::log2:
+     case aten::log10:
+     case aten::frac:
+     case aten::lerp:
+     case aten::lgamma:
+     case aten::reciprocal:
+     case aten::addcmul:
      case prim::inflate: {
        // auto ttype = type->cast<TensorType>();
        // TORCH_INTERNAL_ASSERT(ttype);
@@ -367,9 +395,17 @@ private:
        //     checkSimpleBroadcastableInputs(n, ttype);
        break;
      }
+     case aten::slice:
+       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+           // check that the dimension argument is constant
+           n->input(1)->node()->kind() == prim::Constant &&
+           // the start offset is constant
+           n->input(2)->node()->kind() == prim::Constant &&
+           // the end offset is constant
+           n->input(3)->node()->kind() == prim::Constant &&
+           // the stride is constant
+           n->input(4)->node()->kind() == prim::Constant;
      case aten::cat:
-       // TODO: re-enable
-       return false;
        // check that the dimension argument is constant
        return n->input(1)->node()->kind() == prim::Constant &&
            n->input(0)->node()->kind() == prim::ListConstruct &&
