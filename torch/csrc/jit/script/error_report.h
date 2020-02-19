@@ -38,7 +38,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);
 
   mutable std::stringstream ss;
-  c10::optional<SourceRange> context;
+  SourceRange context;
   mutable std::string the_message;
   std::vector<Call> error_stack;
 };

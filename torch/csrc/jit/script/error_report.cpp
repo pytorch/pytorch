@@ -50,12 +50,8 @@ ErrorReport::CallStack::~CallStack() {
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
   msg << "\n" << ss.str();
-  if (context) {
-    msg << ":\n";
-    context->highlight(msg);
-  } else {
-    msg << ".\n";
-  }
+  msg << ":\n";
+  context.highlight(msg);
 
   if (error_stack.size() > 0) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
