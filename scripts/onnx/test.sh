@@ -54,6 +54,7 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
+  --ignore "$top_dir/test/onnx/test_utility_funs.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
@@ -62,5 +63,6 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   pytest "${args[@]}" \
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
-    "$top_dir/test/onnx/test_models_onnxruntime.py"
+    "$top_dir/test/onnx/test_models_onnxruntime.py" \
+    "$top_dirtest/test/onnx/test_utility_funs.py"
 fi
