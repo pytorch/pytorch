@@ -186,6 +186,7 @@ struct CAFFE2_API TensorIterator {
   int ntensors() const { return operands_.size(); }
   int noutputs() const { return num_outputs_; }
   int ninputs() const { return ntensors() - noutputs(); }
+  IntArrayRef view_offsets() const { return view_offsets_; }
 
   /// number of elements in the output operand. this is the same as numel() for
   /// operations that are not reductions.
@@ -377,6 +378,8 @@ protected:
 protected:
   DimVector shape_;
   DimVector perm_;
+  /// The index offsets into the original tensors for each dimension
+  DimVector view_offsets_;
   NameVector names_;
   SmallVector<OperandInfo, 4> operands_;
   int num_outputs_ = 0;
