@@ -56,36 +56,6 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
-  } else if (ivalue.isIntList()) {
-    pushSpecializedList(
-        ivalue, "build_intlist", [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntVector()) {
-            pushInt(item);
-          }
-        });
-  } else if (ivalue.isTensorList()) {
-    pushSpecializedList(
-        ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorVector()) {
-            pushIValue(item);
-          }
-        });
-  } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(
-        ivalue, "build_doublelist", [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleVector()) {
-            pushDouble(item);
-          }
-        });
-  } else if (ivalue.isBoolList()) {
-    pushSpecializedList(
-        ivalue, "build_boollist", [=](const IValue& ivalue) {
-          for (bool item : ivalue.toBoolList()) {
-            pushBool(item);
-          }
-        });
-  // note: isList must be after isIntList and friends because
-  // isList is true for all lists.
   } else if (ivalue.isList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
@@ -378,33 +348,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::TUPLE);
 
   // Call torch._utils._rebuild_tensor_v2
-  push<PickleOpCode>(PickleOpCode::REDUCE);
-}
-
-void Pickler::pushSpecializedList(
-    const IValue& ivalue,
-    const char* list_name,
-    const std::function<void(const IValue&)>& item_pusher) {
-  pushGlobal("torch.jit._pickle", list_name);
-
-  // Reduce arguments are spread (e.g. `*args`) before calling the global,
-  // so wrap in a tuple
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-  // Mark list
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Add all items
-  item_pusher(ivalue);
-
-  // Finish list
-  push<PickleOpCode>(PickleOpCode::APPENDS);
-
-  // Finish tuple
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  // Call reduce
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 

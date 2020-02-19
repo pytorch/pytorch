@@ -1,6 +1,12 @@
 # These functions are referenced from the pickle archives produced by
 # ScriptModule.save()
 
+
+# These (`build_*`) functions used to be used by `pickler.cpp` to specify
+# the type of the list for certain special types, but now all lists get
+# a type attached and restored via `restore_type_tag` below. The legacy
+# functions should stick around for backwards-compatibility.
+
 def build_intlist(data):
     return data
 
