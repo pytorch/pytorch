@@ -19,6 +19,7 @@
 #include <map>
 #include <cmath>
 #include <cfloat>
+#include <type_traits>
 
 namespace at {
 namespace native {
