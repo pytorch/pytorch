@@ -181,13 +181,6 @@ Module& Module::operator=(Module&&) noexcept = default;
 // TODO: Error if an operator is def'ed multiple times.  Right now we just
 // merge everything
 
-Module&& Module::def(const char* schema) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(schema)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
-  return std::move(*this);
-}
-
 namespace {
   std::string addNamespace(const char* ns, const char* unqual_name_or_schema) { if (ns) {
       // TODO: slow!  Fix internal data structures so I don't have to paste the
@@ -199,6 +192,13 @@ namespace {
       return unqual_name_or_schema;
     }
   }
+}
+
+Module&& Module::def(const char* schema) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, schema))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+  return std::move(*this);
 }
 
 Module&& Module::def(const char* schema_or_unqual_name, CppFunction&& f) && {
