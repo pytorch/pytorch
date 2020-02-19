@@ -8,7 +8,9 @@
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.
+#ifndef CAFFE2_USING_CUSTOM_GENERATED_MACROS
 #include "caffe2/core/macros.h"
+#endif // CAFFE2_USING_CUSTOM_GENERATED_MACROS
 
 #include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"

@@ -1,6 +1,8 @@
 #pragma once
 
+#ifndef CAFFE2_USING_CUSTOM_GENERATED_MACROS
 #include <caffe2/core/macros.h>  // For caffe2 macros.
+#endif // CAFFE2_USING_CUSTOM_GENERATED_MACROS
 
 // All caffe2 ideep related headers
 #include <ideep.hpp>

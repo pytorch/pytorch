@@ -1,7 +1,9 @@
 // This is the exact cblas.h header file, placed here purely in order to get
 // the enums.
 
+#ifndef CAFFE2_USING_CUSTOM_GENERATED_MACROS
 #include "caffe2/core/macros.h"
+#endif // CAFFE2_USING_CUSTOM_GENERATED_MACROS
 
 #ifndef CBLAS_H
 #ifdef CAFFE2_USE_MKL

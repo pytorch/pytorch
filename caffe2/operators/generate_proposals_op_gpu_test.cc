@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/flags.h"
-#include "caffe2/core/macros.h"
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
