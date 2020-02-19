@@ -160,7 +160,10 @@ IValue Unpickler::parse_ivalue() {
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
-  restoreAccurateTypeTagsIfPossible(stack_[0]);
+  if (version_ <= 2) {
+    // See [type tag serialization]
+    restoreAccurateTypeTagsIfPossible(stack_[0]);
+  }
   return stack_[0];
 }
 
