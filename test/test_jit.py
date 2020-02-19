@@ -60,7 +60,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode
+    enable_profiling_mode, TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -10023,6 +10023,15 @@ a")
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_torch_functional(self):
+        def foo(input, n_fft):
+            # type: (Tensor, int) -> Tensor
+            return torch.stft(input, n_fft)
+
+        inps = (torch.randn(10), 7)
+        self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
