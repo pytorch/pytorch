@@ -10603,7 +10603,7 @@ class TestTorchDeviceType(TestCase):
         y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
         correct = True
         for i in range(y.shape[0] - 1):
-            correct = correct and y[i] < y[i+1]
+            correct = correct and y[i] < y[i + 1]
         self.assertTrue(y)
 
         # Check linspace for non-contiguous tensors.
