@@ -4015,6 +4015,10 @@ class TestFrontend(JitTestCase):
 
 class TestScript(JitTestCase):
     def test_inlined_graph(self):
+        """
+        Check that the `inlined_graph` property correctly returns an inlined
+        graph, both through function calls and method calls.
+        """
         @torch.jit.script
         def foo(x):
             return torch.add(x, x)
@@ -4038,7 +4042,6 @@ class TestScript(JitTestCase):
                 return torch.mul(x, x)
 
         m = torch.jit.script(MyMod())
-        # call graph looks like MyMod.forward -> MyNestedMod.forward -> foo
         FileCheck().check("aten::sub") \
             .check("aten::add") \
             .check("aten::mul") \
