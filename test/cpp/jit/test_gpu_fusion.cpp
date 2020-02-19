@@ -530,7 +530,7 @@ void testGPU_FusionComputeAt(){
     {2, 0},
     {3, 4}
   });
-  //[R0, I0i*I1, I0o, I2i, I2o]
+  //[R0, I0i{4}*I1, I0o, I2i, I2o{2}]
   
   TransformReplay TR;
   const TensorView* replayed = TR.replay(tv, tv2, 2);
@@ -538,7 +538,7 @@ void testGPU_FusionComputeAt(){
   //When replayed tv2 should be: [I1, I0i*I0o, R0, I2]
   std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
   std::cout<<"Produced domain should be something along the lines of:";
-  std::cout<<"[I1, I0i{4}*I0o, R0, I2]"<<std::endl;
+  std::cout<<"[R0, I0i{4}*I1, I0o, I2]"<<std::endl;
 }
 
 void testGPU_FusionComputeAt2(){
