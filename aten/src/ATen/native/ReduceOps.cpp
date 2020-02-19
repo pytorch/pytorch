@@ -240,16 +240,16 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, c10::option
 namespace {
 #ifdef _MSC_VER
 template<typename T>
-typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
   return false;
 }
 template<typename T>
-typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
   return std::isnan(x);
 }
 #else
 template<typename T>
-bool isnan_(T x) {
+inline bool isnan_(T x) {
   return std::isnan(x);
 }
 #endif
