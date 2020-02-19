@@ -24,18 +24,9 @@ constexpr int CAT_ARRAY_MAX_INPUT_DIMS = 4;
 
 namespace {
 
-inline bool getCatGrid(THCState* state, ptrdiff_t nTensors, dim3& grid) {
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
+inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
+  const int numSM = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-  if (curDevice == -1) {
-     return false;
-  }
-
-  // Assume a reasonable number of SMs if no state is available
-  int numSM = state
-                ? at::cuda::getCurrentDeviceProperties()->multiProcessorCount 
-                : 15;
   //X dim of grid for cat array cooperates on a single tensor in the cat.
   //Given half of the GPU, full utilization will always occur.
   grid = dim3( 2LL * numSM, (long long) nTensors );
@@ -231,7 +222,7 @@ void parallel_cat(Tensor &out, THCState *state, const TensorList &inputs,
     //This will have cating two tensors fill the entire grid, but prevent
     //many threads from needlessly load meta data if their sizes is small.
     dim3 catGrid;
-    getCatGrid(state, batchCounter, catGrid);
+    getCatGrid(batchCounter, catGrid);
 
 
     // Template Declarations for dim = 1, 2, 3, 4
