@@ -15,7 +15,6 @@ struct Call {
 struct CAFFE2_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
-  ErrorReport();
   explicit ErrorReport(SourceRange r);
   explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
   explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
