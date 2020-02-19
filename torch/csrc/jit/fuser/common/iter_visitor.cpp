@@ -63,26 +63,17 @@ void IterVisitor::handle(const Merge* const merge) {}
 
 void IterVisitor::handle(const Reorder* const reoder) {}
 
-void IterVisitor::traverse(const Fusion* const fusion, bool from_outputs_only, bool breadth_first) {
-  if(breadth_first)
-    throw std::runtime_error("Not implemented yet.");
+void IterVisitor::traverse(
+    const Fusion* const fusion,
+    std::vector<const Val*> from) {
   std::set<const Statement*> visited;
   std::deque<const Statement*> to_visit;
 
   if (FusionGuard::getCurFusion() != fusion)
     throw std::runtime_error("fusion is not active.");
-
   std::queue<const Val*> outputs_to_visit;
-
-  if(from_outputs_only){
-    for(const Val* out : fusion->outputs())
-      outputs_to_visit.push(out);
-  }else 
-    for (const Val* it : fusion->vals()) {
-      const std::set<const Expr*>& uses = fusion->uses(it);
-      if(uses.empty())
-        outputs_to_visit.push(it);
-    }
+  for (const Val* entry : from)
+    outputs_to_visit.emplace(entry);
 
   while (!outputs_to_visit.empty()) {
     to_visit.push_front(outputs_to_visit.front());
@@ -107,7 +98,33 @@ void IterVisitor::traverse(const Fusion* const fusion, bool from_outputs_only, b
       }
     }
   }
+}
 
+void IterVisitor::traverse(
+    const Fusion* const fusion,
+    bool from_outputs_only,
+    bool breadth_first) {
+  if (breadth_first)
+    throw std::runtime_error("Not implemented yet.");
+  std::set<const Statement*> visited;
+  std::deque<const Statement*> to_visit;
+
+  if (FusionGuard::getCurFusion() != fusion)
+    throw std::runtime_error("fusion is not active.");
+
+  std::vector<const Val*> outputs_to_visit;
+
+  if (from_outputs_only) {
+    for (const Val* out : fusion->outputs())
+      outputs_to_visit.push_back(out);
+  } else
+    for (const Val* it : fusion->vals()) {
+      const std::set<const Expr*>& uses = fusion->uses(it);
+      if (uses.empty())
+        outputs_to_visit.push_back(it);
+    }
+
+  traverse(fusion, outputs_to_visit);
 }
 
 } // namespace fuser
