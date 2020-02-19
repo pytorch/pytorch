@@ -156,8 +156,9 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
 }
 
 template <typename scalar_t>
-void parallel_cat(Tensor &out, THCState *state, const TensorList &inputs,
-    int64_t dimension, int nDims) {
+void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
+                  int nDims) {
+  THCState *state = at::globalContext().getTHCState();
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = out.data_ptr<scalar_t>();
@@ -259,7 +260,6 @@ Tensor cat_cuda(TensorList inputs, int64_t dimension) {
 }
 
 Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
-  THCState *state = at::globalContext().getTHCState();
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were
@@ -368,7 +368,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
         out.scalar_type(), "cat_cuda", [&]() {
-      parallel_cat<scalar_t>(out, state, inputs, dimension, nDims);
+      parallel_cat<scalar_t>(out, inputs, dimension, nDims);
     });
 
   } else {
