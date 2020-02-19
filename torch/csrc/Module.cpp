@@ -450,7 +450,7 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
-#ifdef USE_ROCM
+#ifdef __HIP_PLATFORM_HCC__
   if (arg == Py_False) {
     TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
     arg = Py_True;
