@@ -4040,24 +4040,42 @@ class TestScript(JitTestCase):
                 t2 = t1 * c
                 return t2
 
-            j = torch.jit.script(sym_shape)
-            #j = torch.jit.script(simple_add)
+            # j = torch.jit.script(sym_shape)
+            j = torch.jit.script(simple_add)
 
             # a = torch.ones(7, 1, 4)
             # b = torch.ones(7, 5, 1)
             # c = torch.ones(7, 5, 4)
 
-            a = torch.ones(7, 1)
-            b = torch.ones(7, 5)
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(7, 6)
+            # j (a, b)
+            # j (b, b)
+            # j (a, b)
+
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(7, 6)
+            # j (a, b)
+            # j (c, a)
+            # j (a, b)
+
+            a = torch.ones(7)
+            b = torch.ones(8)
+            j(a, a)
+            j(b, b)
+            j(a, a)
+
             #b = torch.ones(1)
 
             # (7, 1, 4)
             # (7, 5, 1)
             # (7, 5, 1)
 
-            j(b, b, a)
-            j(a, b, a)
-            j(a, a, b)
+            # j(b, b, a)
+            # j(a, b, a)
+            # j(a, a, b)
             #j(a, b, b)
             #j(b, b, b)
 

@@ -555,6 +555,18 @@ TensorTypePtr TensorType::merge(TensorTypePtr other) const {
 
 // }
 
+bool TensorType::operator==(const c10::Type& rhs) const {
+  if (rhs.kind() != kind()) {
+    return false;
+  }
+  auto rt = rhs.expect<TensorType>();
+
+  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
+      strides() == rt->strides() && contiguity() == rt->contiguity() &&
+      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
+      undefined() == rt->undefined();
+}
+
 TensorTypePtr TensorType::merge(
     const at::Tensor& t,
     std::map<int64_t, size_t>& symbols2dims) const {
@@ -570,7 +582,7 @@ TensorTypePtr TensorType::merge(
         new_symbols.push_back(c10::nullopt);
       } else {
         // refactor into bind
-        TORCH_INTERNAL_ASSERT(*symbol < 0);
+        // TORCH_INTERNAL_ASSERT(*symbol < 0);
         if (symbols2dims.count(symbol.value()) == 0) {
           symbols2dims[symbol.value()] = new_sizes[i];
           new_symbols.push_back(symbol);

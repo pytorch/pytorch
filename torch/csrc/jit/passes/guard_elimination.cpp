@@ -158,6 +158,21 @@ struct GuardElimination {
     }
   }
 
+  // void eliminateInflates(Block* b) {
+  //   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+  //     auto n = *it;
+  //     if (n->kind() == prim::inflate) {
+  //         n->output()->replaceAllUsesWith(n->input());
+  //         GRAPH_UPDATE(
+  //             "Replacing ",
+  //             n->output()->debugName(),
+  //             " with ",
+  //             n->input()->debugName());
+  //         it.destroyCurrent();
+  //     }
+  //   }
+  // }
+
   bool checkSimpleBroadcastableInputs(Node* n, TensorTypePtr type) {
     auto bced_sizes = *type->sizes().concrete_sizes();
     for (auto input : n->inputs()) {
@@ -202,6 +217,58 @@ struct GuardElimination {
     }
     return true;
   }
+
+  // bool checkSimpleBroadcastableInputs(Node* n, std::vector<size_t>
+  // input_indices) {
+  //   auto bced_sizes = *type->sizes().concrete_sizes();
+
+  //     if (input->node()->kind() != prim::Guard) {
+  //       GRAPH_DEBUG("%", input->debugName(), " isn't a guard!");
+  //       return false;
+  //     }
+
+  //     TORCH_INTERNAL_ASSERT(input->type()->cast<TensorType>());
+  //     auto isizes = input->type()->cast<TensorType>()->sizes();
+  //     // even rank isn't fixed
+  //     if (!isizes.size().has_value()) {
+  //       GRAPH_DEBUG("%", input->debugName(), "'s rank isn't fixed!");
+  //       return false;
+  //     }
+
+  //     // TODO: just copy and pad isizes as needed
+
+  //     for (size_t i = 0; i < bced_sizes.size(); i++) {
+
+  //       bool match = false;
+
+  //       for (auto ii : input_indices) {
+  //         auto isizes = n->input(ii)->type()->cast<TensorType>()->sizes();
+  //         auto padding_size = bced_sizes.size() - *isizes.size();
+  //         auto input_dim =
+  //           (i < padding_size) ? -1 : bced_sizes[i];
+  //       }
+
+  //       if (!match) {
+
+  //       }
+
+  //       if (input_dim.has_value() && *input_dim != bced_sizes[i]) {
+  //         GRAPH_DEBUG(
+  //             i,
+  //             "-th dimension of %",
+  //             input->debugName(),
+  //             " doesn't match output ",
+  //             getHeader(n),
+  //             " i.e. ",
+  //             *input_dim,
+  //             " != ",
+  //             bced_sizes[i]);
+  //         return false;
+  //       }
+  //     }
+
+  //   return true;
+  // }
 
   // `checkInputs` check the invariants specified in `removableGuard`
   // on inputs to `n`. The invariants must hold, or an input must
@@ -296,6 +363,9 @@ private:
        //  return !ttype->isSummarized2() &&
        //      checkSimpleBroadcastableInputs(n, ttype);
        checkInputs(n, no_exceptions);
+       // return !ttype->isSummarized() &&
+       //     checkSimpleBroadcastableInputs(n, ttype);
+       break;
      }
      case aten::cat:
        // TODO: re-enable

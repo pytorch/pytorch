@@ -479,17 +479,7 @@ struct CAFFE2_API TensorType : public Type {
 
   bool isCompatibleWithInCurrentExecutionContext(at::Tensor& t) const;
 
-  bool operator==(const Type& rhs) const override {
-    if (rhs.kind() != kind()) {
-      return false;
-    }
-
-    auto rt = rhs.expect<TensorType>();
-    return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-        strides() == rt->strides() && contiguity() == rt->contiguity() &&
-        device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
-        undefined() == rt->undefined();
-  }
+  bool operator==(const Type& rhs) const override;
   bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
 
   std::string str() const override;
@@ -541,6 +531,12 @@ struct CAFFE2_API TensorType : public Type {
   TensorTypePtr withSymbolicShapes(at::IntArrayRef sizes) const {
     auto cloned = clone();
     cloned->sizes_ = VaryingShape(sizes);
+    return cloned;
+  }
+
+  TensorTypePtr withSymbolicShapes(const at::VaryingShape& sizes) const {
+    auto cloned = clone();
+    cloned->sizes_ = sizes;
     return cloned;
   }
 

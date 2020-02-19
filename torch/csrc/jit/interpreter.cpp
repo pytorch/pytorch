@@ -1080,7 +1080,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             const TypePtr& expected = af.types[inst.X];
             auto expected_type = expected->cast<TensorType>();
             auto bound_type = expected_type->merge(t, af.symbols2dims);
-            push(stack, expected_type == bound_type);
+            push(stack, *expected_type == *bound_type);
             ++af.pc;
           } break;
           case TAIL_CALL: {
