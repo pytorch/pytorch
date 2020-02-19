@@ -3008,6 +3008,26 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::all(int[] self) -> bool",
+        [](Stack& stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          push(stack, std::move(l));
+
+          for(int i = 0; i < l.size(); i++){
+            std::cout << l.get(i) << std::endl;
+            if(l[i] == 0){
+              std::cout << "I will execute!" << std::endl;
+              push(stack, false);
+              break;
+            }
+            else{
+              push(stack, true);
+            }
+          }
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::_list_to_tensor(int[] self) -> Tensor",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
