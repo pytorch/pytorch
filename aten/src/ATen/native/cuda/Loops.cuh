@@ -3,7 +3,13 @@
 
 #include <ATen/detail/FunctionTraits.h>
 
-namespace at { namespace native { namespace modern { namespace detail {
+namespace at { namespace native {
+
+constexpr int num_threads = C10_WARP_SIZE * 2;
+constexpr int thread_work_size = 4;
+constexpr int block_work_size = thread_work_size * num_threads;
+
+namespace modern { namespace detail {
 
 template<typename func_t, int remaining=function_traits<func_t>::arity-1>
 struct has_same_arg_types {
@@ -96,7 +102,7 @@ void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
         c10::cast_and_store<arg0_t>(dtypes[0], out, result);
       });
     } else if (iter.has_contiguous_first_dim() && modern::detail::has_same_arg_types<func_t>::value) {
-      modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
+      modern::launch_kernel(numel, f, data);
     } else {
       legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
         arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
@@ -173,59 +179,6 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   } else {
     gpu_kernel(iter, f);
   }
-}
-
-template <typename func_t>
-void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
-  using traits = function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
-
-
-  // Note:
-  // `gpu_kernel_with_index` was originally implemented in PR #28175 with support
-  // of having an arbitrary number of tensors as arguments. This support was removed
-  // during the process of refactoring Loops.cuh to support vectorized memory access
-  // in PR #32777 (See also issue #31975). The removal of this support is soly because
-  // at that time, there is no operator using that functionality. If you need this
-  // functionality, feel free to add it back.
-  static_assert(traits::arity == 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
-
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == 1);
-
-  char* data = (char*)iter.data_ptr(0);
-
-  int64_t numel = iter.numel();
-  if (iter.is_trivial_1d()) {
-    int stride = iter.get_inner_strides()[0];
-    legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-      arg0_t* out = (arg0_t*)(data + stride * idx);
-      *out = f(idx);
-    });
-  } else {
-    auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
-    legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-      auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)(data + offsets[0]);
-      *out = f(idx);
-    });
-  }
-}
-
-template <typename func_t>
-void gpu_kernel_with_index(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
-
-  TORCH_INTERNAL_ASSERT(iter.device(0).is_cuda(), "gpu_kernel_with_index only support cuda tensor.");
-
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  // Split will change index, thus is not supported
-  // The caller should handle the split and pass in different func
-  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing(), "gpu_kernel_with_index only support 32-bit indexing.");
-
-  gpu_kernel_with_index_impl(iter, f);
 }
 
 }} //namespace at::native
