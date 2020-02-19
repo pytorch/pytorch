@@ -1025,6 +1025,13 @@ void initJitScriptBindings(PyObject* module) {
           })
       .def_property_readonly("graph", &Method::graph)
       .def_property_readonly(
+          "inlined_graph",
+          [](const Method& self) {
+            auto g = self.function().graph()->copy();
+            Inline(*g);
+            return g;
+          })
+      .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
       .def_property_readonly("code", [](Method& self) {
