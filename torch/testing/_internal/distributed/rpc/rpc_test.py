@@ -1747,6 +1747,7 @@ class RpcJitTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rpc_async_op(self):
+        # Define Script functions on both client and server sides.
         @torch.jit.script
         def two_args_two_kwargs(
             first_arg,
@@ -1755,6 +1756,17 @@ class RpcJitTest(RpcAgentTestFixture):
             second_kwarg=torch.tensor([4, 4]),
         ):
             return first_arg + second_arg + first_kwarg + second_kwarg
+
+        @torch.jit.script
+        def assorted_types_args_kwargs(
+            tensor_arg: Tensor,
+            str_arg: str,
+            int_arg: int,
+            tensor_kwarg: Tensor = torch.tensor([2, 2]),
+            str_kwarg: str = "str_kwarg",
+            int_kwarg: int = 2,
+        ):
+            return tensor_arg + tensor_kwarg, str_arg + str_kwarg, int_arg + int_kwarg
 
         if self.rank != 0:
             return
@@ -1765,8 +1777,8 @@ class RpcJitTest(RpcAgentTestFixture):
         @torch.jit.script
         def rpc_async_in_torchscript(
             dst_worker_name: str,
-            args: typing.Tuple[Tensor, Tensor],
-            kwargs: typing.Dict[str, Tensor],
+            args: Tuple[Tensor, Tensor],
+            kwargs: Dict[str, Tensor],
         ):
             fut = rpc.api._invoke_rpc_torchscript(
                 dst_worker_name, two_args_two_kwargs, args, kwargs
@@ -1778,19 +1790,19 @@ class RpcJitTest(RpcAgentTestFixture):
 
         FileCheck().check("dst_worker_name").run(str(rpc_async_in_torchscript.graph))
 
-        # Case 1. All kwargs are populated by default values.
+        # Case, All kwargs are populated by default values.
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {}
         ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([10, 10]))
 
-        # Case 2. Some kwargs are populated by defaults.
+        # Case, Some kwargs are populated by defaults.
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {"first_kwarg": torch.tensor([2, 2])}
         ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([9, 9]))
 
-        # Case 3. All kwargs are specified.
+        # Case, All kwargs are specified.
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {
             "first_kwarg": torch.tensor([2, 2]),
@@ -1799,7 +1811,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([8, 8]))
 
-        # Case 4. kwargs in the front can be specified by extra args.
+        # Case, kwargs in the front can be specified by extra args.
         @torch.jit.script
         def rpc_async_in_torchscript_with_extra_arg(
             dst_worker_name: str,
@@ -1821,3 +1833,26 @@ class RpcJitTest(RpcAgentTestFixture):
         kwargs = {"second_kwarg": torch.tensor([3, 3])}
         ret = rpc_async_in_torchscript_with_extra_arg(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([8, 8]))
+
+        # Case, args and kwargs contain different types.
+        @torch.jit.script
+        def rpc_async_in_torchscript_with_assorted_types(dst_worker_name: str):
+            args = (torch.tensor([1, 1]), "str_arg", 1)
+            # Must annotate the value type as `Any`, because JIT type inference
+            # does not support multiple types when defining a Dict.
+            # The error JIT gives is,
+            # "Dict values must contain only a single type, "
+            # "expected: Tensor but found str instead."
+            kwargs: Dict[str, Any] = {
+                "tensor_kwarg": torch.tensor([3, 3]),
+                "str_kwarg": "_str_kwarg",
+                "int_kwarg": 3,
+            }
+            fut = rpc.api._invoke_rpc_torchscript(
+                dst_worker_name, assorted_types_args_kwargs, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_in_torchscript_with_assorted_types(dst_worker_name)
+        self.assertEqual(ret, (torch.tensor([4, 4]), "str_arg_str_kwarg", 4))
