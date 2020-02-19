@@ -422,84 +422,39 @@ void qadd_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qadd", [&]() {
     using Vec = Vec256<scalar_t>;
-    constexpr auto vec_width = Vec256<scalar_t>::size();
-
-    scalar_t* xdata = static_cast<scalar_t*>(self.data_ptr());
-    scalar_t* ydata = static_cast<scalar_t*>(other.data_ptr());
-    scalar_t* odata = static_cast<scalar_t*>(out.data_ptr());
-    auto* x_p =
-        reinterpret_cast<typename scalar_t::underlying*>(self.data_ptr());
-    auto* y_p =
-        reinterpret_cast<typename scalar_t::underlying*>(other.data_ptr());
-    auto* o_p =
-        reinterpret_cast<typename scalar_t::underlying*>(out.data_ptr());
-
-    int64_t num_of_elem = self.numel();
-    int64_t i = 0;
-    for (; i + vec_width < num_of_elem; i += vec_width) {
-      auto x_vec = Vec::loadu(x_p + i);
-      auto y_vec = Vec::loadu(y_p + i);
-      const auto x_float_values = x_vec.dequantize(self_scale_vec, self_zero_point_vec, self_scale_neg_zp_premul_vec);
-      const auto y_float_values = y_vec.dequantize(other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
-      Vec::float_vec_return_type retvals;
-      for (int i = 0; i < Vec::float_num_vecs(); ++i) {
-        auto c = x_float_values[i] + y_float_values[i];
-        if (ReLUFused) {
-          retvals[i] =
-              vec256::maximum(c, Vec256<float>(0.0f));
-        } else {
-          retvals[i] = c;
-        }
-      }
-      auto quantized =
-          Vec::quantize(retvals, scale, zero_point, inv_scale);
-      quantized.store(o_p + i);
-    }
-
-    // remaining elements
-    for (; i < num_of_elem; i++) {
-      const auto x_float_value = at::dequantize_val(self_scale, self_zero_point, reinterpret_cast<scalar_t*>(x_p)[i]);
-      const auto y_float_value = at::dequantize_val(self_scale, self_zero_point, reinterpret_cast<scalar_t*>(y_p)[i]);
-      float c = x_float_value + y_float_value;
-      if (ReLUFused) {
-        c = std::max<float>(c, 0.0);
-      }
-      o_p[i] = at::quantize_val<scalar_t>(scale, zero_point, c).val_;
-    }
-
-    // cpu_kernel_vec(
-    //     iter,
-    //     [&](scalar_t a, scalar_t b) -> scalar_t {
-    //       const auto da = at::dequantize_val(self_scale, self_zero_point, a);
-    //       const auto db = at::dequantize_val(other_scale, other_zero_point, b);
-    //       float c = da + db;
-    //       if (ReLUFused) {
-    //         c = std::max<float>(c, 0.0);
-    //       }
-    //       return at::quantize_val<scalar_t>(scale, zero_point, c);
-    //     },
-    //     [&](Vec a, Vec b) -> Vec {
-    //       const auto da = a.dequantize(
-    //           self_scale_vec, self_zero_point_vec, self_scale_neg_zp_premul_vec);
-    //       const auto db = b.dequantize(
-    //           other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
-    //       Vec::float_vec_return_type retvals;
-    //       for (int i = 0; i < Vec::float_num_vecs(); ++i) {
-    //         auto c = da[i] + db[i];
-    //         if (ReLUFused) {
-    //           c = vec256::maximum(c, Vec256<float>(0.0f));
-    //         }
-    //         retvals[i] = c;
-    //       }
-    //       // TODO: fbgemm::Quantize doesn't support taking in the
-    //       // pre-broadcasted parameters. We might be able to save some cycles by
-    //       // enabling that in the API.
-    //       // TODO: specialize fbgemm::Quantize for a single vector and make it
-    //       // inlineable. This could help with interleaving as suggested by the
-    //       // TensorIterator implementations
-    //       auto rv = Vec::quantize(retvals, scale, zero_point, inv_scale);
-    //       return rv;
-    //     });
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t a, scalar_t b) -> scalar_t {
+          const auto da = at::dequantize_val(self_scale, self_zero_point, a);
+          const auto db = at::dequantize_val(other_scale, other_zero_point, b);
+          float c = da + db;
+          if (ReLUFused) {
+            c = std::max<float>(c, 0.0);
+          }
+          return at::quantize_val<scalar_t>(scale, zero_point, c);
+        },
+        [&](Vec a, Vec b) -> Vec {
+          const auto da = a.dequantize(
+              self_scale_vec, self_zero_point_vec, self_scale_neg_zp_premul_vec);
+          const auto db = b.dequantize(
+              other_scale_vec, other_zero_point_vec, other_scale_zp_premul_vec);
+          Vec::float_vec_return_type retvals;
+          for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+            auto c = da[i] + db[i];
+            if (ReLUFused) {
+              c = vec256::maximum(c, Vec256<float>(0.0f));
+            }
+            retvals[i] = c;
+          }
+          // TODO: fbgemm::Quantize doesn't support taking in the
+          // pre-broadcasted parameters. We might be able to save some cycles by
+          // enabling that in the API.
+          // TODO: specialize fbgemm::Quantize for a single vector and make it
+          // inlineable. This could help with interleaving as suggested by the
+          // TensorIterator implementations
+          auto rv = Vec::quantize(retvals, scale, zero_point, inv_scale);
+          return rv;
+        });
   });
 }
 
