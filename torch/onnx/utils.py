@@ -31,7 +31,7 @@ def is_in_onnx_export():
 
 
 @contextlib.contextmanager
-def set_training(model, mode, onnx_opset_version):
+def set_training(model, mode):
     if not isinstance(model, torch.jit.ScriptFunction):
         old_mode = model.training
 
@@ -51,6 +51,7 @@ def set_training(model, mode, onnx_opset_version):
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
         if mode is True:
+            from torch.onnx.symbolic_helper import onnx_opset_version
             if onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
                               "Note that onnx opset version 12 was updated for better support of training "
@@ -71,7 +72,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            operator_export_type=None, opset_version=None, _retain_param_name=True,
            do_constant_folding=True, example_outputs=None, strip_doc_string=True,
            dynamic_axes=None, keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True):
+           enable_onnx_checker=True, use_external_data_format=False):
     if aten or export_raw_ir:
         assert operator_export_type is None
         assert aten ^ export_raw_ir
@@ -86,7 +87,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
             example_outputs=example_outputs, strip_doc_string=strip_doc_string,
             dynamic_axes=dynamic_axes, keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker)
+            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
+            use_external_data_format=use_external_data_format)
 
 
 # ONNX can't handle constants that are lists of tensors, which can
@@ -268,6 +270,18 @@ def _decide_constant_folding(do_constant_folding, operator_export_type):
     return _resolve_args_by_export_type("do_constant_folding", do_constant_folding, operator_export_type)
 
 
+def _decide_external_data_format(use_external_data_format, operator_export_type, f):
+    val_use_external_data_format = _resolve_args_by_export_type("use_external_data_format",
+                                                                use_external_data_format,
+                                                                operator_export_type)
+    # f can be a non-string in regular-sized model export case, but for large model export, f must be a non-empty 
+    # string specifying the location of the model. For large model cases, if f is not a non-empty string,
+    # then this method returns an empty string, which is an error condition for the large model export code
+    # path later (but not for regular model export code path).
+    model_file_location = f if val_use_external_data_format and isinstance(f, str) else str()
+    return val_use_external_data_format, model_file_location
+
+
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
     if isinstance(args, torch.Tensor):
@@ -428,7 +442,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
-    with set_training(model, training, opset_version):
+    with set_training(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -455,7 +469,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True):
+            enable_onnx_checker=True, use_external_data_format=False):
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -475,7 +489,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             else:
                 operator_export_type = OperatorExportTypes.ONNX
 
-        with set_training(model, training, opset_version):
+        with set_training(model, training):
             _set_opset_version(opset_version)
             _set_operator_export_type(operator_export_type)
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
@@ -483,6 +497,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                                              opset_version)
             val_add_node_names = _decide_add_node_names(add_node_names, operator_export_type)
             val_do_constant_folding = _decide_constant_folding(do_constant_folding, operator_export_type)
+            val_use_external_data_format, model_file_location = _decide_external_data_format(use_external_data_format,
+                                                                                             operator_export_type,
+                                                                                             f)
             graph, params_dict, torch_out = _model_to_graph(model, args, verbose,
                                                             training, input_names,
                                                             output_names, operator_export_type,
@@ -503,14 +520,18 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 proto, export_map = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, strip_doc_string, val_keep_init_as_ip, custom_opsets,
-                    val_add_node_names)
+                    val_add_node_names, val_use_external_data_format, model_file_location)
             else:
                 proto, export_map = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
-                    strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
+                    strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
+                    val_use_external_data_format, model_file_location)
 
-            if enable_onnx_checker and operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                # Only run checker if enabled and we are not using ATEN fallback
+            if enable_onnx_checker and \
+                operator_export_type is OperatorExportTypes.ONNX_ATEN_FALLBACK and \
+                    not val_use_external_data_format:
+                # Only run checker if enabled and we are not using ATEN fallback and
+                # large model format export in not enabled.
                 _check_onnx_proto(proto)
 
             if export_type == ExportTypes.PROTOBUF_FILE:
@@ -531,18 +552,44 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 if os.path.exists(f):
                     assert(os.path.isdir(f))
                 else:
-                    os.makedirs(f)
+                    proto, export_map = graph._export_onnx(
+                        {}, opset_version, dynamic_axes, False, operator_export_type,
+                        strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
-                model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-                with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
-                    opened_file.write(proto)
+                if enable_onnx_checker and operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
+                    # Only run checker if enabled and we are not using ATEN fallback
+                    _check_onnx_proto(proto)
 
-                for k, v in export_map.items():
-                    weight_proto_file = os.path.join(f, k)
-                    with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
-                        opened_file.write(v)
-            else:
-                raise RuntimeError('Unknown export type')
+                if export_type == ExportTypes.PROTOBUF_FILE:
+                    assert(len(export_map) == 0)
+                    with torch.serialization._open_file_like(f, 'wb') as opened_file:
+                        opened_file.write(proto)
+                elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
+                    import zipfile
+                    compression = zipfile.ZIP_DEFLATED \
+                        if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
+                        else zipfile.ZIP_STORED
+                    with zipfile.ZipFile(f, 'w', compression=compression) as z:
+                        z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+                        for k, v in export_map.items():
+                            z.writestr(k, v)
+                elif export_type == ExportTypes.DIRECTORY:
+                    import os
+                    if os.path.exists(f):
+                        assert(os.path.isdir(f))
+                    else:
+                        os.makedirs(f)
+
+                    model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
+                    with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                        opened_file.write(proto)
+
+                    for k, v in export_map.items():
+                        weight_proto_file = os.path.join(f, k)
+                        with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                            opened_file.write(v)
+                else:
+                    raise RuntimeError('Unknown export type')
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
@@ -882,7 +929,11 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    sym_registry.register_op(op_name, symbolic_fn, ns, opset_version)
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets
+
+    for version in _onnx_stable_opsets:
+        if version >= opset_version:
+            sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 # This helper function ensures dynamic axes argument is following the expected format
 def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):

@@ -189,6 +189,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
 
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_;
+
   bool is_view_;
 
   // The "output number" of this variable; e.g., if this variable
@@ -228,6 +231,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
+    retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
 
@@ -295,6 +299,14 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///   + if an in-place op is done on view, in rebase_history() of view, which is
 ///     called after every in-place op in VariableType.cpp, the grad_fn of base
 ///     is updated.
+///   + if a single autograd Node returns multiple differentiable views, if any
+///     output is modified by an inplace operation, the autograd engine will make
+///     an equivalent graph (corresponding to the view operations) without using
+///     equivalent graph, where each output is treated as if it were produced by a
+///     distinct view operation. This discards the original (e.g., user provided)
+///     grad_fn. If the provided grad_fn does more than the backward of the view,
+///     then the DifferentiableViewMeta must be created with allow_rebase_history=false
+///     to prevent the engine from ignoring the provided grad_fn.
 ///
 ///
 /// Non-Differentiable Views
@@ -313,8 +325,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///      function are non-differentiable.
 /// These are called non-differentiable views as the gradients do not flow
 /// through the view relation.
-/// Relevant logic for non-differentiable views is implemented in
-/// make_variable_view below, and wrap_output of gen_variable_type.py.
+///
+/// Relevant logic for both differentiable and non-differentiable views is implemented in
+/// make_variable_(non_)differentiable_view below, and wrap_output of gen_variable_type.py.
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// The base `Variable` (never a view).
   Variable base_;
@@ -324,11 +337,15 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version;
 
+  /// Boolean flag that signifies if the history of this Tensor can be rebased
+  /// or if it is forbidden.
+  bool allow_rebase_history;
+
   bool requires_grad() const override {
     return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base);
+  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base, bool allow_rebase_history=true);
   ~DifferentiableViewMeta();
 };
 
@@ -353,28 +370,34 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 /// prevent those changes from happening and is undesirable.
 
 // See NOTE [ Autograd View Variables ] for details.
-inline Variable make_variable_view(
+// Differentiable view. Track history with DifferentiableViewMeta.
+inline Variable make_variable_differentiable_view(
     Variable base,
     at::Tensor data,
-    bool is_differentiable = true,
+    bool allow_rebase_history) {
+  if (data.defined()) {
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/0,
+      /*allow_tensor_metadata_change=*/true);
+    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+      data_impl_copy.get(), std::move(base), allow_rebase_history));
+    return Variable(data_impl_copy);
+    }
+  return Variable();
+}
+
+// See NOTE [ Autograd View Variables ] for details.
+// Non-differentiable view. Just share version counter.
+inline Variable make_variable_non_differentiable_view(
+    Variable base,
+    at::Tensor data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    if (is_differentiable) {
-      /// Differentiable view. Track history with DifferentiableViewMeta.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-        data_impl_copy.get(), std::move(base)));
-      return Variable(data_impl_copy);
-    } else {
-      /// Non-differentiable view. Just share version counter.
-      auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/impl::version_counter(base),
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(nullptr);
-      return Variable(data_impl_copy);
-    }
+    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+      /*version_counter=*/impl::version_counter(base),
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+    data_impl_copy->set_autograd_meta(nullptr);
+    return Variable(data_impl_copy);
   }
   return Variable();
 }
