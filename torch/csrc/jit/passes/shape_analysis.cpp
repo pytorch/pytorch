@@ -862,14 +862,6 @@ class ShapePropagator {
             "aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
             "aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor",
             "aten::alias(Tensor self) -> Tensor",
-            "aten::empty_like(Tensor self) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value) -> Tensor",
-            "aten::ones_like(Tensor self) -> Tensor",
-            "aten::rand_like(Tensor self) -> Tensor",
-            "aten::randint_like(Tensor self, int high) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high) -> Tensor",
-            "aten::randn_like(Tensor self) -> Tensor",
-            "aten::zeros_like(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           auto input_type = node->input(0)->type()->cast<TensorType>();
