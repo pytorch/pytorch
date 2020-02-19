@@ -123,7 +123,7 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
   const TensorDomain* split_td = new TensorDomain(new_domain);
   const TensorView* split_view = new TensorView(tv->tensor(), split_td);
   const Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
-
+  ReplaceAll::instancesWithin(tv, split_view, FusionGuard::getCurFusion()->origin(tv));
   return split_view;
 }
 
@@ -154,17 +154,15 @@ const TensorView* merge(const TensorView* tv, int axis) {
     }
   }
   const TensorDomain* merged_td = new TensorDomain(new_domain);
-  const TensorView* merged_tv = new TensorView(tv->tensor(), merged_td);
+  const TensorView* merged_view = new TensorView(tv->tensor(), merged_td);
   const Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
-  return merged_tv;
+  ReplaceAll::instancesWithin(tv, merged_view, FusionGuard::getCurFusion()->origin(tv));
+  return merged_view;
 }
 
 /*
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of the iter
  * axes.
- * TODO: Figure out if this is a valid reorder. That will be dependant on compute_at
- * and any reduction axes in the tensor/tensorview. We can't reorder so that any reduction
- * dimension ends up inside the compute_at axis.
  */ 
 const TensorView* reorder(
     const TensorView* tv,
@@ -240,6 +238,7 @@ const TensorView* reorder(
   const TensorDomain* reordered_td = new TensorDomain(reordered_domain);
   const TensorView* reordered_view = new TensorView(tv->tensor(), reordered_td);
   const Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
+  ReplaceAll::instancesWithin(tv, reordered_view, FusionGuard::getCurFusion()->origin(tv));
   return reordered_view;
 }
 
@@ -264,7 +263,6 @@ const TensorView* reorder(
   throw std::runtime_error("For now tensors must be converted to tensor views before calling reorder.");
   //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
 }
-
 
 void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
   /*
