@@ -155,11 +155,6 @@ c10::Allocator* THCState_getCudaHostAllocator(THCState* state)
   return state->cudaHostAllocator;
 }
 
-int THCState_getNumDevices(THCState *state)
-{
-  return state->numDevices;
-}
-
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device)
 {
