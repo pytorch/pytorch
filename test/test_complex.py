@@ -1,11 +1,11 @@
 import unittest
 
-import torch as th
+import torch
 import numpy as np
 
 from numpy.testing import *
 
-devices = (th.device('cpu'), th.device('cuda:0'))
+devices = (torch.device('cpu'), torch.device('cuda:0'))
 
 class TestComplexTensor(unittest.TestCase):
     def test_to_list_with_complex_64(self):
