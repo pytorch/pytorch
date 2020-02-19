@@ -9,15 +9,15 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 
 // For debug:
-/*
+/**/
 #include <torch/csrc/jit/fuser/common/iriostream.h>
-*/
+/**/
 namespace torch {
 namespace jit {
 namespace fuser {
 
 // For debug:
-/*
+/**/
 std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
   os << "<";
   for(int i=0; i<vec.size(); i++){
@@ -32,7 +32,7 @@ std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
   }
   return os;
 }
-*/
+/**/
 /*
  * compute_at is a relative property between two TensorViews which marks at what
  * iteration domain we're going to generate a tensor to be consumed by another.
@@ -204,13 +204,14 @@ struct TORCH_API TransformReplay : public IterVisitor {
     // Get my origin
     const Expr* orig = fusion->origin(root);
     std::set<const Expr*> visited_exprs;
-    visited_exprs.emplace(orig);
+
     // If I'm not back to the original td
     while (orig != nullptr) {
       if (visited_exprs.find(orig) != visited_exprs.end())
         throw std::runtime_error(
             "TransformReplay::get_root is not traversing a correct history.");
 
+      visited_exprs.emplace(orig);
       const TensorDomain* previous_td = nullptr;
       // Check inputs of this operation, make sure there isn't more than one TD
       // I can only record operations that only take this TD as an input.
@@ -220,13 +221,14 @@ struct TORCH_API TransformReplay : public IterVisitor {
             throw std::runtime_error(
                 "TransformReplay::get_root could not decifer transform history of a TensorDomain.");
 
+          // Place transform op on top of stack.
+          if (create_record)
+            record.push_back(orig);
+          
           // Traverse back
           root = static_cast<const TensorDomain*>(inp);
           orig = fusion->origin(root);
 
-          // Place transform op on top of stack.
-          if (create_record)
-            record.push_back(orig);
         }
     }
     if (create_record)
@@ -343,6 +345,7 @@ struct TORCH_API TransformReplay : public IterVisitor {
       const TensorView* replay_ref,
       const TensorView* replay_target,
       int compute_at_axis) {
+
     /* STEP 1 */
     // Trace back to the root TensorDomain's of ref and target
     const TensorDomain* target_root = get_root(replay_target->domain());
@@ -389,7 +392,7 @@ struct TORCH_API TransformReplay : public IterVisitor {
     for (decltype(target_root->size()) i = 0; i < target_root->size(); i++)
       if (!root_influence_vector[i])
         compute_at_domain.push_back(target_root->axis(i));
-        
+    std::cout<<4<<std::endl;
     //Return the newly produced view!
     return new TensorView(
         replay_target->tensor(), new TensorDomain(compute_at_domain));
