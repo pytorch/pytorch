@@ -138,7 +138,7 @@ class TestDdpWithRpc(TestCase):
         dist.destroy_process_group()
 
     def run_remote_worker(self):
-        print(f"Starting the remote worker...")
+        gLogger.info(f"Starting the remote worker...")
         # This group includes the remote worker
         rpc.init_rpc(
             name=self.REMOTE_WORKER_NAME,
