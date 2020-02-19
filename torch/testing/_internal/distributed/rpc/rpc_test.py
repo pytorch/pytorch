@@ -12,7 +12,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
-from torch._jit_internal import _qualified_name
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
@@ -834,6 +833,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_torchscript_function(self):
+        # Call ScriptFunction from Python.
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
 
         ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
@@ -865,7 +865,7 @@ class RpcTest(RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptClass), args=()
+                "worker{}".format(dst_rank), MyScriptClass, args=()
             )
         ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
 
@@ -873,7 +873,7 @@ class RpcTest(RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptModule), args=()
+                "worker{}".format(dst_rank), MyScriptModule, args=()
             )
 
         with self.assertRaisesRegex(
@@ -881,7 +881,7 @@ class RpcTest(RpcAgentTestFixture):
         ):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
+                MyScriptModule().my_method,
                 args=(),
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
@@ -1760,6 +1760,9 @@ class RpcJitTest(RpcAgentTestFixture):
         if self.rank != 0:
             return
 
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Call ScriptFunction from Script.
         @torch.jit.script
         def rpc_async_in_torchscript(dst_worker_name, args, kwargs):
             # type: (str, Tuple[Tensor, Tensor], Dict[str, Tensor])
@@ -1772,9 +1775,16 @@ class RpcJitTest(RpcAgentTestFixture):
         from torch.testing import FileCheck
         FileCheck().check("dst_worker_name").run(str(rpc_async_in_torchscript.graph))
 
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        # Case 1. All kwargs are populated by default values.
+        args = (
+            torch.tensor([1, 1]),
+            torch.tensor([2, 2]),
+        )
+        kwargs = {}
+        ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
+        self.assertEqual(ret, torch.tensor([10, 10]))
 
-        # Case 1. Some kwargs are populated by default values.
+        # Case 2. Some kwargs are populated by defaults.
         args = (
             torch.tensor([1, 1]),
             torch.tensor([2, 2]),
@@ -1785,7 +1795,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([9, 9]))
 
-        # Case 2. All kwargs are specified.
+        # Case 3. All kwargs are specified.
         args = (
             torch.tensor([1, 1]),
             torch.tensor([2, 2]),
@@ -1797,7 +1807,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ret = rpc_async_in_torchscript(dst_worker_name, args, kwargs)
         self.assertEqual(ret, torch.tensor([8, 8]))
 
-        # Case 3. kwargs in the front can be specified by extra args.
+        # Case 4. kwargs in the front can be specified by extra args.
         @torch.jit.script
         def rpc_async_in_torchscript_with_extra_arg(dst_worker_name, args, kwargs):
             # type: (str, Tuple[Tensor, Tensor, Tensor], Dict[str, Tensor])
