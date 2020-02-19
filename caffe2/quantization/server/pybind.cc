@@ -61,6 +61,15 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("delimiter") = " ");
 
   m.def(
+      "DumpHistogramFile",
+      [](Observable<NetBase>::Observer* ob) {
+        HistogramNetObserver* hist_ob =
+            dynamic_cast_if_rtti<HistogramNetObserver*>(ob);
+        hist_ob->DumpHistogramFile();
+      },
+      pybind11::arg("ob"));
+
+  m.def(
       "AddHistogramObserver",
       [](const string& net_name,
          const string& out_file_name,
