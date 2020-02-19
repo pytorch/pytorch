@@ -653,6 +653,8 @@ def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         if ceil_mode and not input.isCompleteTensor():
             return _unimplemented(name, "input size not accessible")
+        if not stride:
+            stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if ceil_mode:
             padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
@@ -1759,14 +1761,14 @@ def rand(g, *shapes):
     return g.op('RandomUniform', shape_i=shape)
 
 
-def randn_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
     return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
-def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def rand_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
@@ -2214,46 +2216,8 @@ def dim(g, self):
 def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
 
-def nll_loss(g, self, target, weight, reduction, ignore_index):
-    # none reduction : onnx::Constant[value={0}]
-    # mean reduction : onnx::Constant[value={1}]
-    # sum reduction : onnx::Constant[value={2}]
-    reduction = sym_help._maybe_get_const(reduction, 'i')
-    reduction_vals = ['none', 'mean', 'sum']
-    reduction = reduction_vals[reduction]
-
-    if weight.node().mustBeNone():
-        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction)
-    else:
-        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
-
-    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
-    if sym_help._maybe_get_const(ignore_index, 'i') == -100:
-        return nllloss
-
-    # if ignore_index
-    zeros = zeros_like(g, nllloss)
-    ignored_mask = eq(g, target, ignore_index)
-    nllloss = where(g, ignored_mask, zeros, nllloss)
-
-    if reduction == 'sum' or reduction == 'mean':
-        zeros = zeros_like(g, target)
-        ones = ones_like(g, target)
-        nb_elem = where(g, ignored_mask, zeros, ones)
-        if not sym_help._is_none(weight):
-            # take(weight, target)
-            weight_flattened = g.op('Reshape', weight, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
-            weight = index_select(g, weight_flattened, 0, target)
-            weight = reshape_as(g, weight, target)
-
-            nb_elem = g.op("Div", nb_elem, weight)
-
-        nb_elem = g.op("ReduceSum", nb_elem)
-        nllloss = g.op("ReduceSum", nllloss)
-
-        if reduction == 'mean':
-            nllloss = g.op("Div", nllloss, nb_elem)
-    return nllloss
-
-def nll_loss2d(g, self, target, weight, reduction, ignore_index):
-    return nll_loss(g, self, target, weight, reduction, ignore_index)
+def take(g, self, index):
+    self_flattened = g.op('Reshape', self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    out = index_select(g, self_flattened, 0, index)
+    out = reshape_as(g, out, index)
+    return out
