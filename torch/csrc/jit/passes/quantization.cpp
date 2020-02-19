@@ -415,6 +415,8 @@ class InsertObserversHelper {
 
   c10::optional<script::Module> getObserverFor(Value* v, std::unordered_set<Value*>& observed);
 
+  bool isObserved(Value* v);
+
   void insertObserverFor(
       Value* v, script::Module module);
 
@@ -454,6 +456,11 @@ class InsertObserversHelper {
       const script::Module& module,
       const std::string& method_name);
 
+  void getPassThroughValueMap(
+      script::Module& module,
+      const std::string& method_name
+  );
+
   const ModuleQConfigMap& module_qconfig_map_;
   // Values we want to skip observing, used to skip values in
   // the middle of the ops that are supposed to be fused, e.g.
@@ -464,6 +471,9 @@ class InsertObserversHelper {
   // Map from values from callsite into the values in the CallMethod graph
   std::unordered_map<Value*, std::vector<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
+  // This is used for the observed values to pass through the ops like max_pool2d,
+  // so that output values of max_pool2d do not need to be observed
+  std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
   // record the current unique id used to avoid incrementing from 0
@@ -889,6 +899,39 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
+void InsertObserversHelper::getPassThroughValueMap(
+    script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (auto num_inputs = getGeneralOpNumTensorInputs(n)) {
+        for (auto i = 0; i < *num_inputs; ++i) {
+          for (auto j = 0; j < n->outputs().size(); ++j) {
+            pass_through_value_map_[n->outputs()[j]].push_back(n->inputs()[i]);
+          }
+        }
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    getPassThroughValueMap(invoked_module, invoked_method_name);
+  }
+
+}
+
 void InsertObserversHelper::preprocess(
     script::Module& module,
     const std::string& method_name) {
@@ -1036,9 +1079,30 @@ InsertObserversHelper::getObserverFor(
   return result;
 }
 
+bool InsertObserversHelper::isObserved(Value* v) {
+  if (observed_values_.count(v)) {
+    return true;
+  }
+  if (pass_through_value_map_.count(v)) {
+    // since the vector is always non-empty, we will
+    // not return the initial value
+    bool all_observed = true;
+    for (Value* prev_value : pass_through_value_map_.at(v)) {
+      all_observed &= isObserved(prev_value);
+    }
+    if (all_observed) {
+      // This is to propagate observed property through
+      // all ops that doesn't require observation
+      observed_values_.insert(v);
+    }
+    return all_observed;
+  }
+  return false;
+}
+
 void InsertObserversHelper::insertObserverFor(
     Value* v, script::Module module) {
-  if (observed_values_.count(v)) {
+  if (isObserved(v)) {
     return;
   }
   std::unordered_set<Value*> observed;
