@@ -120,20 +120,6 @@ __global__ void CatArrayBatchedCopy(
     }
 }
 
-int64_t dim_size(const Tensor &self, int dim)
-{
-  TORCH_CHECK((dim >= 0) && (dim < self.dim()), 
-      "dimension ", dim, " out of range of tensor");
-  return at::native::size(self, dim);
-}
-
-int64_t dim_stride(const Tensor &self, int dim)
-{
-  TORCH_CHECK((dim >= 0) && (dim < self.dim()),
-      "dimension ", dim, " out of range");
-  return self.stride(dim);
-}
-
 void check_shape_except_dim(const Tensor &first, const Tensor &second,
                             int dimension)
 {
@@ -174,8 +160,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 
   // Next, let's initialize the size, stride arrays for the output Tensor.
   for (int i = 0; i < nDims; ++i) {
-    param.outputSize[i] = dim_size(out, i);
-    param.outputStride[i] = dim_stride(out, i);
+    param.outputSize[i] = at::native::size(out, i);
+    param.outputStride[i] = out.stride(i);
   }
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -195,7 +181,7 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
            batchCounter < CAT_ARRAY_BATCH_SIZE &&
              (i+batchCounter) < inputs.size();
            ++batchCounter) {
-        int64_t dimSize = dim_size(inputs[i+batchCounter], dimension);
+        int64_t dimSize = at::native::size(inputs[i+batchCounter], dimension);
 
         stackInputs[batchCounter].input =
           inputs[i+batchCounter].data_ptr<scalar_t>();
@@ -308,12 +294,12 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
       continue;
     }
     check_shape_except_dim(*notSkippedTensor, tensor, dimension);
-    cat_dim_size += dim_size(tensor, dimension);
+    cat_dim_size += at::native::size(tensor, dimension);
   }
 
   // Compute the size of the result
   for (int dim = 0; dim < nDims; dim++) {
-    int64_t out_dim_size = dim_size(*notSkippedTensor, dim);
+    int64_t out_dim_size = at::native::size(*notSkippedTensor, dim);
     if (dim == dimension) {
       out_dim_size = cat_dim_size;
     }
@@ -371,7 +357,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
     for (int j = 0; j < inputs.size(); j++)
     {
       if (should_skip(inputs[j])) continue;
-      int64_t dimSize = dim_size(inputs[j], dimension);
+      int64_t dimSize = at::native::size(inputs[j], dimension);
       Tensor nt = at::narrow(out, dimension, offset, dimSize);
       copy_(nt, inputs[j]);
       offset += dimSize;
