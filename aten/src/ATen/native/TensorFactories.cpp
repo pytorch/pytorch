@@ -272,7 +272,7 @@ Tensor empty_like(
           self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
-          options.memory_format(memory_format)
+          options.memory_format(memory_format),
           // See Note [Explicit nullopt MemoryFormat argument]
           c10::nullopt);
     } else {
