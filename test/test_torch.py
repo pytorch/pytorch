@@ -11882,50 +11882,62 @@ class TestTorchDeviceType(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # test_<func>_type_upcasting are sample test functions (to test implicit dtype promotion) for sample functions of each category
+    # test_type_<1/2/3/4>_upcasting are sample test functions (to test implicit dtype promotion) for sample functions of each category
     # Check https://github.com/pytorch/pytorch/pull/33322 for more details
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
-    def test_ceil_type_upcasting(self, device, dtype):
-        x = torch.tensor([2.3], dtype=dtype, device=device)
-        out = torch.ceil(x)
+    def test_type_1_upcasting(self, device, dtype):
+        # list below will be used when all the ops support type_1 upcasting
+        # op_list = ["ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "tan"]
+        op_list = ["ceil"]
+        for op_name in op_list:
+            x = torch.tensor([2.3], dtype=dtype, device=device)
+            out = getattr(torch, op_name)(x)
 
-        if(dtype == torch.int8):
+            if(dtype == torch.int8):
+                if(out.device.type == 'cpu'):
+                    self.assertIs(out.dtype, torch.float32)
+                else:
+                    self.assertIs(out.dtype, torch.float16)
+            elif(dtype == torch.int16):
+                self.assertIs(out.dtype, torch.float32)
+            elif(dtype == torch.int32):
+                self.assertIs(out.dtype, torch.float64)
+            elif(dtype == torch.int64):
+                self.assertIs(out.dtype, torch.float64)
+            elif(dtype == torch.bool):
+                if (out.device.type == 'cpu'):
+                    self.assertIs(out.dtype, torch.float32)
+                else:
+                    self.assertIs(out.dtype, torch.float16)
+
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
+    def test_type_2_upcasting(self, device, dtype):
+        op_list = ["angle"]
+        for op_name in op_list:
+            x = torch.tensor([2.3], dtype=dtype, device=device)
+            out = getattr(torch, op_name)(x)
+            self.assertIs(out.dtype, torch.float64)
+
+    @dtypes(torch.bool)
+    def test_type_3_upcasting(self, device, dtype):
+        # list below will be used when all the ops listed will support type 3 upcasting
+        # op_list = ["conj", "reciprocal", "square"]
+        op_list = ["conj"]
+        for op_name in op_list:
+            x = torch.tensor(False, dtype=dtype, device=device)
+            out = getattr(torch, op_name)(x)
+            self.assertIs(out.dtype, torch.int8)
+
+    @dtypes(torch.bool)
+    def test_type_4_upcasting(self, device, dtype):
+        op_list = ["round"]
+        for op_name in op_list:
+            x = torch.tensor(False, dtype=dtype, device=device)
+            out = getattr(torch, op_name)(x)
             if(out.device.type == 'cpu'):
                 self.assertIs(out.dtype, torch.float32)
             else:
                 self.assertIs(out.dtype, torch.float16)
-        elif(dtype == torch.int16):
-            self.assertIs(out.dtype, torch.float32)
-        elif(dtype == torch.int32):
-            self.assertIs(out.dtype, torch.float64)
-        elif(dtype == torch.int64):
-            self.assertIs(out.dtype, torch.float64)
-        elif(dtype == torch.bool):
-            if (out.device.type == 'cpu'):
-                self.assertIs(out.dtype, torch.float32)
-            else:
-                self.assertIs(out.dtype, torch.float16)
-
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
-    def test_angle_type_upcasting(self, device, dtype):
-        x = torch.tensor([2.3], dtype=dtype, device=device)
-        out = torch.angle(x)
-        self.assertIs(out.dtype, torch.float64)
-
-    @dtypes(torch.bool)
-    def test_conj(self, device, dtype):
-        x = torch.tensor(False, dtype=dtype, device=device)
-        out = torch.conj(x)
-        self.assertIs(out.dtype, torch.int8)
-
-    @dtypes(torch.bool)
-    def test_round(self, device, dtype):
-        x = torch.tensor(False, dtype=dtype, device=device)
-        out = torch.round(x)
-        if(out.device.type == 'cpu'):
-            self.assertIs(out.dtype, torch.float32)
-        else:
-            self.assertIs(out.dtype, torch.float16)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self, device):
