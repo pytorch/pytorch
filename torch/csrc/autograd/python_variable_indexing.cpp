@@ -248,23 +248,27 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   OptionalDeviceGuard device_guard(device_of(self_));
   bool is_tracing = torch::jit::tracer::isTracing();
 
+  auto wrap_var = [&](Variable&& var) {
+    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
+  };
+
   // handle simple types: integers, slices, none, ellipsis
   if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, is_tracing)));
+    return wrap_var(std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, is_tracing)));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex({start, stop, step})}, is_tracing)));
+    return wrap_var(std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex({start, stop, step})}, is_tracing)));
   } else if (index == Py_None) {
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, is_tracing)));
+    return wrap_var(std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, is_tracing)));
   } else if (index == Py_Ellipsis) {
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, is_tracing)));
+    return wrap_var(std::move(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, is_tracing)));
   }
 
   // wrap index in a tuple if it's not already one
@@ -277,11 +281,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(sliced));
+    return wrap_var(std::move(sliced));
   }
 
   // indexing by tensors ("advanced" indexing)
-  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(([&]() {
+  return wrap_var(std::move(([&]() {
     pybind11::gil_scoped_release no_gil;
     return at::indexing::dispatch_index(sliced, std::move(variableIndices));
   })()));
