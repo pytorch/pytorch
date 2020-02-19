@@ -31,7 +31,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variab
   base_ = std::move(base);
   TORCH_CHECK(base_.defined(), "base is undefined");
   if (base_.is_view()) {
-    base_ = base_.base();
+    base_ = base_._base();
   }
   is_view_ = true;
   self_impl->set_version_counter(impl::version_counter(base_));

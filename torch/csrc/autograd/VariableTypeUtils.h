@@ -109,7 +109,7 @@ inline Tensor as_view(const Tensor & base, Tensor tensor, bool is_differentiable
                       CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
   if (is_differentiable) {
     return make_variable_differentiable_view(std::move(base_var), std::move(tensor), creation_meta);
@@ -125,7 +125,7 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
                                    CreationMeta creation_meta=CreationMeta::DEFAULT) {
   auto base_var = Variable(base);
   if (base_var.is_view()) {
-    base_var = base_var.base();
+    base_var = base_var._base();
   }
   for(Tensor &tensor : tensors) {
     if (is_differentiable) {

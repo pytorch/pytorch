@@ -187,6 +187,9 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_;
 
+  // Only meaningful on non-leaf variables (must be false otherwise)
+  bool retains_grad_;
+
   bool is_view_;
 
   // The "output number" of this variable; e.g., if this variable
@@ -226,6 +229,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
     requires_grad_ = false;
+    retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
 
