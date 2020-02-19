@@ -1924,7 +1924,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertTrue(p_a == p_g or p_b == p_g)
 
             # Run backwards multiple times.
-            for i in range(100):
+            for i in range(10):
                 dist_autograd.backward([loss], retain_graph=True)
 
         # non-contiguous indices and value should not trigger copy either.
@@ -1942,7 +1942,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             self.assertTrue(p_a == p_g or p_b == p_g)
 
             # Run backwards multiple times.
-            for i in range(100):
+            for i in range(10):
                 dist_autograd.backward([loss], retain_graph=True)
 
 

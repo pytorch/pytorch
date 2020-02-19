@@ -3292,7 +3292,7 @@ class TestAutograd(TestCase):
         self.assertTrue(p_a == p_g or p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(100):
+        for i in range(10):
             loss.backward(retain_graph=True)
 
         # non-contiguous indices and value should not trigger copy either.
@@ -3309,7 +3309,7 @@ class TestAutograd(TestCase):
         self.assertTrue(p_a == p_g or p_b == p_g)
 
         # Run backwards multiple times to ensure accumulation works.
-        for i in range(100):
+        for i in range(10):
             loss.backward(retain_graph=True)
 
     def test_gradcheck_single_input(self):
