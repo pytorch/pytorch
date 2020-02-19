@@ -187,11 +187,9 @@ static TensorIterator make_reduction(
 }
 
 template<typename scalar_t, typename func_t>
-void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
+static void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
     int64_t dim, scalar_t init_v, func_t && op) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  TORCH_CHECK((0 <= wrap_dim && wrap_dim < self.dim())
-              || (0 == wrap_dim && wrap_dim == self.dim()) , "invaild dim to reduce");
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }

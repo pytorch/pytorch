@@ -10030,6 +10030,7 @@ class TestTorchDeviceType(TestCase):
         # Check a scalar example
         raw_tensor = torch.tensor(3., requires_grad=True)
         integrated = raw_tensor.cumsum(dim=-1)
+        self.assertEqual(raw_tensor, integrated)
         # Check that backward does not crash
         integrated.sum().backward()
         # Check that output maintained correct shape
@@ -10077,6 +10078,7 @@ class TestTorchDeviceType(TestCase):
         # Check a scalar example
         raw_tensor = torch.tensor(3., requires_grad=True)
         integrated = raw_tensor.cumprod(dim=-1)
+        self.assertEqual(raw_tensor, integrated)
         # Check that backward does not crash
         integrated.sum().backward()
         # Check that output maintained correct shape
