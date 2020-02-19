@@ -264,7 +264,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return wrap_var(std::move(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing)));
   };
 
-  // handle simple types: integers, slices
+  // handle simple types: integers, slices, bool
   if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
@@ -277,6 +277,15 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       recordSliceTrace(index);
     }
     return handle_simple_type(at::indexing::TensorIndex({start, stop, step}));
+  } else if (index == Py_False || index == Py_True) {
+    Tensor result = self_.unsqueeze(0);
+    return wrap_var(std::move(([&]() {
+      pybind11::gil_scoped_release no_gil;
+      variable_list variableIndices{
+        at::indexing::boolToIndexingTensor(result, index == Py_True, self_.device())
+      };
+      return at::indexing::dispatch_index(result, std::move(variableIndices));
+    })()));
   }
 
   // wrap index in a tuple if it's not already one
