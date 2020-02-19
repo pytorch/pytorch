@@ -371,7 +371,7 @@ static inline Tensor handleDimInMultiDimIndexing(
   }
 }
 
-static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor> indices) {
+static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
   std::vector<Tensor> converted_inds(indices.size());
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
@@ -384,12 +384,12 @@ static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::ve
   return converted_inds;
 }
 
-static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor> indices) {
+static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor>&& indices) {
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index(typeConvertIndices(self, std::move(indices)));
 }
 
-static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor> indices, const Tensor& value) {
+static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& indices, const Tensor& value) {
   OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(typeConvertIndices(self, std::move(indices)), value);
 }
