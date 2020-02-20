@@ -1,5 +1,4 @@
 import logging
-import multiprocessing
 import os
 import sys
 
@@ -11,6 +10,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.multiprocessing as multiprocessing
 
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -22,11 +22,12 @@ def init_logger():
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
     formatter = logging.Formatter(
-        "%(asctime)s %(filename)s:%(lineno)s %(levelname)s: %(message)s"
+        "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(process)s t:%(thread)s: %(message)s"
     )
     console.setFormatter(formatter)
     # add the handlers to the logger
     logger.addHandler(console)
+    logger.propagate = False
     logger.info("Set up a logger.")
     return logger
 
@@ -57,25 +58,32 @@ class SimpleNet(nn.Module):
         return self.relu(self.net(input))
 
 
-class DdpModelWithRpc(nn.Module):
-    def __init__(self, remote_server, process_group_name=None):
+class HybridModel(nn.Module):
+    def __init__(self, remote_net_rref, process_group_name=None):
         ddp_transform = (
-            lambda net, process_group_name: net if process_group_name is None else DDP
+            lambda net, process_group_name: net
+            if process_group_name is None
+            else DDP
         )
-        super(DdpModelWithRpc, self).__init__()
+        super(HybridModel, self).__init__()
         self.net1 = ddp_transform(SimpleNet(4, 3), process_group_name)
-        self.rref = rpc.remote(remote_server, SimpleNet, args=(3, 2))
+        # self.rref = rpc.remote(remote_server, SimpleNet, args=(3, 2))
+        self.rref = remote_net_rref
+        # gLogger.info(f"Created a rref to a remote net: {self.rref}")
         self.net2 = ddp_transform(SimpleNet(2, 1), process_group_name)
+        gLogger.info(
+            f"HybridModel has {len(list(self.parameters()))} groups of parameters."
+        )
 
     def forward(self, x):
-        gLogger.info(f"Running DdpModelWithRpc.forward on {x}")
+        gLogger.info(f"Running HybridModel.forward on {x}")
         x = self.net1(x)
         x = _remote_method(SimpleNet.forward, self.rref, x)
         return self.net2(x)
 
 
 class TestDdpWithRpc(TestCase):
-    TRAINER_NAME_TEMPLATE = "trainer{:02d}"
+    TRAINER_NAME_TEMPLATE = "trainer:{:02d}"
     REMOTE_WORKER_NAME = "remote_worker"
     TRAINER_GROUP = "trainer_group"
     NUM_TRAINERS = 3
@@ -115,7 +123,7 @@ class TestDdpWithRpc(TestCase):
             # Run the distributed optimizer step.
             dist_optim.step()
 
-    def run_trainer(self, rank, func, use_ddp=True):
+    def run_trainer(self, rank, remote_net_rref, func, use_ddp=True):
         trainer_name = self.TRAINER_NAME_TEMPLATE.format(rank)
         gLogger.info(f"Starting trainer: {trainer_name}...")
         if use_ddp:
@@ -128,10 +136,10 @@ class TestDdpWithRpc(TestCase):
             )
         # This group includes the remote worker
         rpc.init_rpc(
-            name=trainer_name, rank=rank, world_size=self.NUM_TRAINERS + 1
+            name=trainer_name, rank=rank + 1, world_size=self.NUM_TRAINERS + 2
         )
-        self.model = DdpModelWithRpc(
-            self.REMOTE_WORKER_NAME, self.TRAINER_GROUP if use_ddp else None
+        self.model = HybridModel(
+            remote_net_rref, self.TRAINER_GROUP if use_ddp else None
         )
         func()
         rpc.shutdown()
@@ -142,20 +150,13 @@ class TestDdpWithRpc(TestCase):
         # This group includes the remote worker
         rpc.init_rpc(
             name=self.REMOTE_WORKER_NAME,
-            rank=self.NUM_TRAINERS,
-            world_size=self.NUM_TRAINERS + 1,
+            rank=self.NUM_TRAINERS + 1,
+            world_size=self.NUM_TRAINERS + 2,
         )
+        gLogger.info(f"Remote server is shutting down rpc.")
         rpc.shutdown()
 
     def spawn_processes(self, func, use_ddp=True):
-        for rank in range(self.NUM_TRAINERS):
-            process = multiprocessing.Process(
-                target=self.run_trainer,
-                name=self.TRAINER_NAME_TEMPLATE.format(rank),
-                args=(rank, func, use_ddp),
-            )
-            process.start()
-            self.processes.append(process)
 
         remote_worker_process = multiprocessing.Process(
             target=self.run_remote_worker, name=self.REMOTE_WORKER_NAME
@@ -163,11 +164,29 @@ class TestDdpWithRpc(TestCase):
         remote_worker_process.start()
         self.processes.append(remote_worker_process)
 
+        gLogger.info(f"Initing RPC in the main process.")
+        # This group includes the remote worker and this main process
+        rpc.init_rpc(name="main", rank=0, world_size=self.NUM_TRAINERS + 2)
+        gLogger.info(f"Creating a remote net.")
+        # Start the remote server first before creating a net rref on it.
+        self.remote_net_rref = rpc.remote(
+            self.REMOTE_WORKER_NAME, SimpleNet, args=(3, 2)
+        )
+        for rank in range(self.NUM_TRAINERS):
+            process = multiprocessing.Process(
+                target=self.run_trainer,
+                name=self.TRAINER_NAME_TEMPLATE.format(rank),
+                args=(rank, self.remote_net_rref, func, use_ddp),
+            )
+            process.start()
+            self.processes.append(process)
+
     def test_rpc(self):
         def run_one_forward():
             gLogger.info(f"Forward pass on {self.model(torch.randn((2, 4)))}")
 
         self.spawn_processes(run_one_forward, False)
+        rpc.shutdown()
         self.join_processes()
 
 
