@@ -499,7 +499,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool2d_with_indices(
     const Tensor& input,
     const ExpandingArray<2>& kernel_size,
     const c10::optional<ExpandingArray<2>>& output_size,
-    const c10::optional<ExpandingArray<2>>& output_ratio,
+    const c10::optional<ExpandingArray<2,double>>& output_ratio,
     const Tensor& _random_samples) {
   if (output_size == c10::nullopt && output_ratio == c10::nullopt) {
     TORCH_CHECK(
@@ -536,7 +536,7 @@ namespace detail {
 inline Tensor fractional_max_pool2d(const Tensor& input,
                                     ExpandingArray<2> kernel_size,
                                     c10::optional<ExpandingArray<2>> output_size,
-                                    c10::optional<ExpandingArray<2>> output_ratio,
+                                    c10::optional<ExpandingArray<2,double>> output_ratio,
                                     const Tensor& _random_samples) {
   return std::get<0>(fractional_max_pool2d_with_indices(input, kernel_size, output_size,
                                                         output_ratio, _random_samples));
@@ -557,7 +557,7 @@ inline std::tuple<Tensor, Tensor> fractional_max_pool3d_with_indices(
     const Tensor& input,
     const ExpandingArray<3>& kernel_size,
     const c10::optional<ExpandingArray<3>>& output_size,
-    const c10::optional<ExpandingArray<3>>& output_ratio,
+    const c10::optional<ExpandingArray<3,double>>& output_ratio,
     const Tensor& _random_samples) {
   if (output_size == c10::nullopt && output_ratio == c10::nullopt) {
     TORCH_CHECK(
@@ -595,7 +595,7 @@ namespace detail {
 inline Tensor fractional_max_pool3d(const Tensor& input,
                                     ExpandingArray<3> kernel_size,
                                     c10::optional<ExpandingArray<3>> output_size,
-                                    c10::optional<ExpandingArray<3>> output_ratio,
+                                    c10::optional<ExpandingArray<3,double>> output_ratio,
                                     const Tensor& _random_samples) {
   return std::get<0>(fractional_max_pool3d_with_indices(input, kernel_size, output_size,
                                                         output_ratio, _random_samples));

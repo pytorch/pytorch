@@ -362,7 +362,13 @@ struct FunctionValue : public SugaredValue {
       size_t n_binders) override {
     std::vector<const FunctionSchema*> schemas;
     for (Function* callee : callees_) {
-      callee->ensure_defined();
+      try {
+        callee->ensure_defined();
+      } catch (const RecursiveMethodCallError&) {
+        throw script::ErrorReport(loc)
+            << " function '" << callee->name() << "' is called recursively. "
+            << "Recursive calls are not supported";
+      }
       schemas.push_back(&callee->getSchema());
     }
     auto match = matchSchemas(schemas, loc, *f.graph(), inputs, attributes);
@@ -415,7 +421,13 @@ struct MethodValue : public SugaredValue {
       if (auto class_type = self_->type()->cast<ClassType>()) {
         auto method = class_type->getMethod(method_name);
         TORCH_INTERNAL_ASSERT(method);
-        method->ensure_defined();
+        try {
+          method->ensure_defined();
+        } catch (const RecursiveMethodCallError&) {
+          throw script::ErrorReport(loc)
+              << " method '" << method->name() << "' is called recursively. "
+              << "Recursive calls are not supported";
+        }
         schemas.push_back(&method->getSchema());
       } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
