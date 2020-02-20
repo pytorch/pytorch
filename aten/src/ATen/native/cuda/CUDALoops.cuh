@@ -226,15 +226,12 @@ struct compute_base_ptrs {
   }
 };
 
-// TODO (@zasdfgbnm):
-// clean this up, remove fake_args_t and static cast when we no longer need
-// the CUDA9 workaround
 template<int i>
 struct load_with_policy {
-  template <typename args_t, typename fake_args_t, typename policy_t>
-  static __device__ void apply(fake_args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(args_t *args, policy_t policy, detail::pointers<args_t> args_base) {
     using arg_t = std::tuple_element_t<i, args_t>;
-    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(static_cast<args_t>(args[index])); };
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
     policy.load(args_accessor, std::get<i>(args_base));
   }
 };
@@ -255,17 +252,16 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   detail::static_unroll<compute_base_ptrs, arity>::with_args(args_base, data, idx);
 
   return_t results[thread_work_size];
-  cuda9::workaround::enable_default_constructor<args_t> args[thread_work_size];
+  cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
+  args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  detail::static_unroll<load_with_policy, arity>::template with_args<args_t>(args, policy, args_base);
+  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
 
   // compute
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    // TODO (@zasdfgbnm): remove the following cast when we no longer need the
-    // CUDA9 workaround.
-    results[i] = c10::guts::apply(f, static_cast<args_t>(args[i]));
+    results[i] = c10::guts::apply(f, args[i]);
   }
 
   // store
