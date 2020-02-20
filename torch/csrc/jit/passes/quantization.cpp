@@ -1874,6 +1874,41 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
+void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> dequant_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+      if (n->kind() == Symbol::aten("dequantize") &&
+          n->output()->uses().size() > 1) {
+        dequant_nodes_to_rewrite.push_back(n);
+      }
+    }
+  }
+  for (Node* n : dequant_nodes_to_rewrite) {
+    WithInsertPoint ins(n->next());
+    auto* quantized_val = n->inputs()[0];
+    auto* dequantized_val = n->output();
+    // copy uses to vector since value->uses() is a reference
+    // and changing the graph will also change the uses() list
+    std::vector<Use> uses = dequantized_val->uses();
+    insertDeQuantCall(graph.get(), quantized_val, dequantized_val, uses);
+  }
+
+  for (Node* n : dequant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : dequant_nodes_to_rewrite) {
+    n->destroy();
+  }
+}
+
 // This is the pass to handle ops that does not require observation
 // for example: flatten, average_pool, upsample
 // This is called after inline and before graph execution
@@ -1885,7 +1920,7 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       if (auto num_inputs = getGeneralOpNumTensorInputs(n)) {
-        bool is_dequantized = false;
+        bool is_dequantized = true;
         for (auto i = 0; i < *num_inputs; ++i) {
           is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
         }
@@ -1908,8 +1943,10 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
         TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
                     " with one output right now");
         auto* output = n->output();
+        WithInsertPoint ins(n->next());
+        std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
-        insertDeQuantCall(graph.get(), output, output, output->uses());
+        insertDeQuantCall(graph.get(), output, output, uses);
       }
     }
   }
