@@ -46,7 +46,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
                                   self->data(),
                                   THMin(self->numel(), size) * itemsize,
                                   cudaMemcpyDeviceToDevice,
-                                  THCState_getCurrentStream(state)));
+                                  c10::cuda::getCurrentCUDAStream()));
     }
 
     // Destructively overwrite data_ptr
