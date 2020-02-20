@@ -84,6 +84,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   specializeAutogradZero(*copy);
 
   runRequiredPasses(copy);
+  PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
 
