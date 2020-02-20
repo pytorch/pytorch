@@ -49,6 +49,8 @@ white_list = [
     ('prim::Print', datetime.date(2020, 3, 1)),
     ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
     ('prim::Constant', datetime.date(2020, 3, 1)),
+    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('_aten::format', datetime.date(2020, 3, 1)),
 ]
 
 
