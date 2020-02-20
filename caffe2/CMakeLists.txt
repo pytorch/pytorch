@@ -397,6 +397,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/cuda_graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/liveness.cpp
@@ -419,6 +420,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/cuda_fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops_c10.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp

@@ -318,6 +318,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:

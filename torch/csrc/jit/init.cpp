@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
+#include <torch/csrc/jit/cuda_fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
@@ -338,6 +339,20 @@ void initJITBindings(PyObject* module) {
              const std::string& unqualified_op_name) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
+          })
+      .def(
+          "_jit_set_cuda_fusion_group_executor",
+          [](bool pass_flag) {
+            bool oldState = getCudaFusionGroupExecutorMode();
+            getCudaFusionGroupExecutorMode() = pass_flag;
+            return oldState;
+          })
+      .def(
+          "_jit_set_cuda_fusion_group_pass",
+          [](bool pass_flag) {
+            bool oldState = getCudaFusionGroupOptimizationPassMode();
+            getCudaFusionGroupOptimizationPassMode() = pass_flag;
+            return oldState;
           })
       .def(
           "_jit_set_profiling_mode",

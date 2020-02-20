@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
@@ -36,6 +37,7 @@
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/cuda_fuser/interface.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -728,6 +730,10 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
+
+  if (getCudaFusionGroupOptimizationPassMode()) {
+    CudaFuseGraph(graph);
+  }
 
   FuseGraph(graph);
 
