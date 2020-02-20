@@ -108,7 +108,8 @@ class GradScaler(object):
             self._init_growth_tracker = 0
             # self._growth_tracker will be lazily initialized during the first call to scale()
             self._growth_tracker = None
-            self._per_optimizer_states = defaultdict(lambda: {"stage": self.READY, "found_inf_per_device": {}})
+            READY = self.READY
+            self._per_optimizer_states = defaultdict(lambda: {"stage": READY, "found_inf_per_device": {}})
 
     def _check_scale_growth_tracker(self, funcname):
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
