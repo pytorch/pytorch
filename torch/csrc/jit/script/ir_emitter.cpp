@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
@@ -46,6 +46,7 @@ struct Refinement {
   TypePtr type() const {
     return type_;
   }
+
  private:
   std::string identifier_;
   TypePtr type_;
@@ -1130,8 +1131,12 @@ struct to_ir {
             }
           }
         }
-        return CondValue(
-            emitToBool(emitExpr(expr)), RefinementSet({}), c10::nullopt);
+        auto expr_out = emitToBool(emitExpr(expr));
+        c10::optional<bool> static_if = c10::nullopt;
+        if (expr_out->node()->kind() == aten::is_scripting) {
+          static_if = true;
+        }
+        return CondValue(expr_out, RefinementSet({}), static_if);
       } break;
     }
   }
@@ -1506,28 +1511,11 @@ struct to_ir {
           }
           return;
         }
-        if (classinfo.kind() == TK_VAR) {
-          // Special casing for list and tuple since isinstance(x, list) and
-          // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
-          // subscript type annotation in python
-          auto name = Var(classinfo).name().name();
-          if (name == "tuple") {
-            tuple_check = true;
-            return;
-          } else if (name == "list") {
-            list_check = true;
-            return;
-          }
-        }
         TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
         types.emplace_back(type);
       }
       bool staticallyTrue(const TypePtr& actual_type) {
         // is this isinstance check statically true?
-        if ((list_check && actual_type->kind() == ListType::Kind) ||
-            (tuple_check && actual_type->kind() == TupleType::Kind)) {
-          return true;
-        }
         for (const TypePtr& typ : types) {
           if (actual_type->isSubtypeOf(typ)) {
             return true;
@@ -1545,30 +1533,31 @@ struct to_ir {
         return false;
       }
       bool staticallyFalse(const TypePtr& actual_type) {
-        if ((list_check && maybeOfKind(ListType::Kind, actual_type)) ||
-            (tuple_check && maybeOfKind(TupleType::Kind, actual_type))) {
-          return false;
-        }
         for (const TypePtr& typ : types) {
           if (typ->isSubtypeOf(actual_type)) {
+            return false;
+          }
+          if ((typ->isSubtypeOf(AnyListType::get()) &&
+                  maybeOfKind(ListType::Kind, actual_type)) ||
+              (typ->isSubtypeOf(AnyTupleType::get()) &&
+                  maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
         return true;
       }
       ScriptTypeParser typeParser_;
-      bool list_check = false;
-      bool tuple_check = false;
       std::vector<TypePtr> types;
     };
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
     auto val = emitExpr(obj);
     RefinementSet refinement;
-    if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
+    if (gathered.types.size() == 1 &&
+        gathered.types.at(0)->isSubtypeOf(val->type()) &&
+        obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
-      Refinement isinstance(
-          std::move(ident), gathered.types.at(0));
+      Refinement isinstance(std::move(ident), gathered.types.at(0));
       refinement = RefinementSet({isinstance}, {});
     }
 
@@ -1580,9 +1569,7 @@ struct to_ir {
     }
     // check maybe true/false at runtime, need an actual op
     Value* result =
-        graph
-            ->insertNode(graph->createIsInstance(
-                val, gathered.types, gathered.list_check, gathered.tuple_check))
+        graph->insertNode(graph->createIsInstance(val, gathered.types))
             ->output();
     return CondValue(result, std::move(refinement), c10::nullopt);
   }
@@ -2227,11 +2214,10 @@ struct to_ir {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
     const auto lhs = Select(stmt.lhs());
-    const auto basename = Var(lhs.value()).name();
+    auto lhsObject = emitSugaredExpr(lhs.value(), 1);
     const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
                               ->asValue(stmt.rhs().range(), method);
-    auto userObject = environment_stack->getSugaredVar(basename);
-    userObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
+    lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -2645,7 +2631,10 @@ struct to_ir {
     }
   }
 
-  Value* emitUnaryOp(const TreeRef& tree, const std::string &magicMethod, const c10::Symbol &opSymbol) {
+  Value* emitUnaryOp(
+      const TreeRef& tree,
+      const std::string& magicMethod,
+      const c10::Symbol& opSymbol) {
     const auto& inputs = tree->trees();
     auto named_values = getNamedValues(inputs, /*maybe_unpack=*/false);
     auto val =

@@ -216,6 +216,8 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     if isinstance(f, string_classes):
         if not os.path.exists(f):
             raise ValueError("The provided filename {} does not exist".format(f))
+        if os.path.isdir(f):
+            raise ValueError("The provided filename {} is a directory".format(f))
     if isinstance(map_location, string_classes):
         map_location = torch.device(map_location)
     elif not (map_location is None or
@@ -668,6 +670,10 @@ def _check_trace(check_inputs, func, traced_func, check_tolerance,
             all_ok = True
             for i, (orig, ref) in enumerate(zip(original, reference)):
                 try:
+                    if orig.is_quantized:
+                        orig = orig.dequantize()
+                    if ref.is_quantized:
+                        ref = ref.dequantize()
                     torch.testing.assert_allclose(orig.double(), ref.double(), rtol=check_tolerance,
                                                   atol=torch.testing._get_default_tolerance(orig, ref)[1])
                 except AssertionError as e:
@@ -1870,6 +1876,9 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 tmp_module._buffers[name] = buf
                 check_unique(buf)
+        for name, val in orig.__dict__.items():
+            if torch._C._jit_is_script_object(val) and name not in orig._parameters and name not in orig._buffers:
+                setattr(tmp_module, name, val)
 
         if orig._backward_hooks:
             raise ValueError("Modules that have backward hooks assigned can't be compiled: " + str(orig))

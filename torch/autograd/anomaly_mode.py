@@ -1,5 +1,5 @@
 import torch
-
+import warnings
 
 class detect_anomaly(object):
     r"""Context-manager that enable anomaly detection for the autograd engine.
@@ -67,6 +67,9 @@ class detect_anomaly(object):
 
     def __init__(self):
         self.prev = torch.is_anomaly_enabled()
+        warnings.warn('Anomaly Detection has been enabled. '
+                      'This mode will increase the runtime '
+                      'and should only be enabled for debugging.')
 
     def __enter__(self):
         torch.set_anomaly_enabled(True)

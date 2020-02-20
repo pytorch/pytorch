@@ -87,6 +87,17 @@ class TestScriptPy3(JitTestCase):
 
         self.assertEqual(foo(torch.rand(3, 4)), 18.0)
 
+    def test_named_tuple_constant(self):
+        class Tup(NamedTuple):
+            a: int
+            b: int
+
+        @torch.jit.script
+        def foo():
+            return Tup(1, 2)
+
+        self.assertEqual(foo(), Tup(1, 2))
+
     @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
     def test_dict_preserves_order(self):
         def dict_ordering():
@@ -390,11 +401,11 @@ class TestScriptPy3(JitTestCase):
 
         scripted_M_mod = torch.jit.script(M())
         self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal', 'prim::Constant'])
+                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
         self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant'])
+                         ['aten::add.Tensor', 'aten::mul.Scalar'])
 
 
 if __name__ == '__main__':

@@ -1356,6 +1356,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
         break;
       }
+      case MemoryFormat::ChannelsLast3d: {
+        TORCH_CHECK(
+            dim() == 5,
+            "required rank 5 tensor to use channels_last_3d format");
+        TORCH_CHECK(false, "unsupported memory format ", memory_format);
+        //TODO Implement set_sizes_and_strides for channels last 3d
+        break;
+      }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
         // Cleaning warning messages, no need to break as TORCH_CHECK(false)
