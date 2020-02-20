@@ -264,12 +264,10 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
     Operator(
         "aten::format(str self, ...) -> str",
-        [](const Node* node) -> Operation {
-          size_t num_inputs = node->inputs().size();
-          return [num_inputs](Stack& stack) {
-            formatFunc(num_inputs, stack);
-            return 0;
-          };
+        [](Stack& stack) {
+          size_t num_inputs = pop(stack).toInt();
+          format(stack, num_inputs);
+          return 0;
         },
         aliasAnalysisFromSchema()),
 
