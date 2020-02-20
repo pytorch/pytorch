@@ -226,12 +226,15 @@ struct compute_base_ptrs {
   }
 };
 
+// TODO (@zasdfgbnm):
+// clean this up, remove fake_args_t and static cast when we no longer need
+// the CUDA9 workaround
 template<int i>
 struct load_with_policy {
-  template <typename args_t, typename policy_t>
-  static __device__ void apply(args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
+  template <typename args_t, typename fake_args_t, typename policy_t>
+  static __device__ void apply(fake_args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
     using arg_t = std::tuple_element_t<i, args_t>;
-    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(static_cast<args_t>(args[index])); };
     policy.load(args_accessor, std::get<i>(args_base));
   }
 };
