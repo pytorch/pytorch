@@ -33,6 +33,11 @@ std::unordered_map<const detail::RegisteredClassRecord*, ClassTypePtr> &register
   return table;
 }
 
+std::set<ClassTypePtr> &getstateSetstateValidated() {
+  static std::set<ClassTypePtr> s;
+  return s;
+}
+
 void classCallback(const detail::RegisteredClassRecord& clazz) {
   auto classTypePtr =
       ClassType::create(c10::QualifiedName(clazz.qualClassName), classCU());
@@ -83,7 +88,46 @@ void methodCallback(const detail::RegisteredClassRecord& clazz, const std::strin
 
   auto method = classCU()->create_function(qualClassName + "." + method_name, graph);
   TORCH_INTERNAL_ASSERT(registeredClassTypes().count(&clazz));
-  registeredClassTypes().at(&clazz)->addMethod(method);
+  ClassTypePtr classTypePtr = registeredClassTypes().at(&clazz);
+  classTypePtr->addMethod(method);
+
+  if (auto getstate_method = classTypePtr->getMethod("__getstate__")) {
+    if (auto setstate_method = classTypePtr->getMethod("__setstate__")) {
+      if (getstateSetstateValidated().count(classTypePtr)) {
+        return;
+      }
+      auto getstate_schema = getstate_method->getSchema();
+      auto format_getstate_schema = [&getstate_schema]() {
+        std::stringstream ss;
+        ss << getstate_schema;
+        return ss.str();
+      };
+      TORCH_CHECK(
+          getstate_schema.arguments().size() == 1,
+          "__getstate__ should take exactly one argument: self. Got: ",
+          format_getstate_schema());
+      auto first_arg_type = getstate_schema.arguments().at(0).type();
+      TORCH_CHECK(
+          *first_arg_type == *classTypePtr,
+          "self argument of __getstate__ must be the custom class type. Got ",
+          first_arg_type->python_str());
+      TORCH_CHECK(
+          getstate_schema.returns().size() == 1,
+          "__getstate__ should return exactly one value for serialization. Got: ",
+          format_getstate_schema());
+      auto ser_type = getstate_schema.returns().at(0).type();
+      auto setstate_schema = setstate_method->getSchema();
+      auto arg_type = setstate_schema.arguments().at(1).type();
+      TORCH_CHECK(
+          (*arg_type == *ser_type),
+          "__setstate__'s argument should be the same type as the "
+          "return value of __getstate__. Got ",
+          arg_type->python_str(),
+          " but expected ",
+          ser_type->python_str());
+      getstateSetstateValidated().insert(classTypePtr);
+    }
+  }
 }
 
 static auto init_jit_custom_class = []() {
