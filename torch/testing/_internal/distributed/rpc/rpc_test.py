@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import concurrent.futures
 import sys
 import time
@@ -1761,7 +1760,7 @@ class RpcJitTest(RpcAgentTestFixture):
 
         @torch.jit.script
         def assorted_types_args_kwargs(
-            tensor_arg: Tensor,
+            tensor_arg: Tensor,  # noqa: E999
             str_arg: str,
             int_arg: int,
             tensor_kwarg: Tensor = torch.tensor([2, 2]),
@@ -1769,6 +1768,10 @@ class RpcJitTest(RpcAgentTestFixture):
             int_kwarg: int = 2,
         ):
             return tensor_arg + tensor_kwarg, str_arg + str_kwarg, int_arg + int_kwarg
+
+        @torch.jit.script
+        def no_arg():
+            return 0
 
         @torch.jit.script
         def raise_script():
@@ -1874,6 +1877,39 @@ class RpcJitTest(RpcAgentTestFixture):
             dst_worker_name
         )
         self.assertEqual(ret, (torch.tensor([4, 4]), "str_arg_str_kwarg", 4))
+
+        # Case, kwargs not passed.
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
+            dst_worker_name: str
+        ):
+            args = ()
+            fut = rpc.api._invoke_rpc_torchscript(
+                dst_worker_name, no_arg, args,
+            )
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
+            dst_worker_name
+        )
+        self.assertEqual(ret, 0)
+
+        # Case, args, kwargs not passed.
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
+            dst_worker_name: str
+        ):
+            fut = rpc.api._invoke_rpc_torchscript(
+                dst_worker_name, no_arg,
+            )
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
+            dst_worker_name
+        )
+        self.assertEqual(ret, 0)
 
         # Case, less args are specified.
         # Notice, args matching happens during scripting.

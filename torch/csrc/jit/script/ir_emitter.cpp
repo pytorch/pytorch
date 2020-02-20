@@ -2717,21 +2717,21 @@ struct to_ir {
   }
 
   std::shared_ptr<SugaredValue> emitRpcAsyncExpr(
-      SourceRange loc,
+      const SourceRange& loc,
       const std::shared_ptr<SugaredValue>& dst_worker_name,
       const std::shared_ptr<SugaredValue>& user_func,
       TreeList args_trees,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     auto graphPtr = method.graph();
-
+LOG(ERROR) << "111";
     // Get user function qualified name as an IR Value.
     std::shared_ptr<FunctionValue> user_func_function_sugared_value =
         std::dynamic_pointer_cast<FunctionValue>(user_func);
     auto& functionPtrs = user_func_function_sugared_value->functions();
     TORCH_INTERNAL_ASSERT(functionPtrs.size() == 1, "User-provided functions size is 1.")
     Function* functionPtr = functionPtrs.at(0);
-    auto qual_name = functionPtr->qualname();
+    const auto& qual_name = functionPtr->qualname();
     IValue userFunctionQualNameIValue(qual_name.qualifiedName());
     Value* userFunctionQualNameValue = graphPtr->insertConstant(userFunctionQualNameIValue, loc);
 
@@ -2761,12 +2761,15 @@ struct to_ir {
       // Do similar work in getNamedValues(),
       // from a Var that is known to be a Tuple.
       std::vector<NamedValue> inputValues;
-      auto entries = emitSugaredExpr(Expr(args_trees[0]), 1)
-                         ->asTuple(args_trees[0]->range(), method);
-      inputValues.reserve(entries.size());
-      for (const auto& entry : entries) {
-        inputValues.emplace_back(
-            args_trees[0]->range(), entry->asValue(args_trees[0]->range(), method));
+      // If `args` is an empty tuple, users are allowed to not pass `args`.
+      if (args_trees.size() > 0) {
+        auto entries = emitSugaredExpr(Expr(args_trees[0]), 1)
+                           ->asTuple(args_trees[0]->range(), method);
+        inputValues.reserve(entries.size());
+        for (const auto& entry : entries) {
+          inputValues.emplace_back(
+              args_trees[0]->range(), entry->asValue(args_trees[0]->range(), method));
+        }
       }
 
       auto output_sugared_value = user_func->call(loc, method, inputValues, attributes, 1);

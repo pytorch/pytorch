@@ -72,16 +72,23 @@ RegisterOperators reg_rpc_ops({
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
            return [num_inputs](Stack& stack) {
-             // Pop inputs from the stack.
+             // Get inputs from the stack.
              auto stackIter = stack.end() - num_inputs;
              auto& dstWorkerNameIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
-             auto& argsTupleIValue = *stackIter++;
-             auto& kwargsDictIValue = *stackIter++;
+             IValue emptyTuple(c10::ivalue::Tuple::create({}));
+             IValue emptyDict{c10::impl::GenericDict(AnyType::get(), AnyType::get())};
+             // Equavalent to Python statment
+             // `args = args if args is not None else ()`.
+             auto& argsTupleIValue = num_inputs >= 3 ? *stackIter++ : emptyTuple;
+             // `kwargs = kwargs if kwargs is not None else {}`.
+             auto& kwargsDictIValue = num_inputs >= 4 ? *stackIter++ : emptyDict;
              TORCH_INTERNAL_ASSERT(dstWorkerNameIValue.isString());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
+             LOG(ERROR) << "argsTupleIValue: " << argsTupleIValue;
+             LOG(ERROR) << "kwargsDictIValue: " << kwargsDictIValue;
 
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName = c10::QualifiedName(qualifiedNameIValue.toStringRef());
@@ -97,8 +104,8 @@ RegisterOperators reg_rpc_ops({
              Stack userFuncStack;
              auto argsTuplePtr = argsTupleIValue.toTuple();
              auto kwargsDict = kwargsDictIValue.toGenericDict();
-             auto numAllArgsKwargs = argsTuplePtr->elements().size();
-             userFuncStack.reserve(numAllArgsKwargs);
+             auto numArgsAndKwargs = argsTuplePtr->elements().size() + kwargsDict.size();
+             userFuncStack.reserve(numArgsAndKwargs);
 
              // Push args.
              for (auto& elem : argsTupleIValue.toTuple()->elements()) {
