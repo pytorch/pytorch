@@ -193,6 +193,7 @@ struct CAFFE2_API TensorIndex final {
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index);
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices);
 
+namespace impl {
 static inline Tensor applySlice(
     const Tensor& self,
     int64_t dim,
@@ -273,102 +274,12 @@ static inline Tensor scalarToTensorNonNativeDeviceType(Scalar v, const TensorOpt
   return at::scalar_tensor(v, options);
 }
 
-static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU || self_device == at::kCUDA) {
-    return scalarToTensorCPUOrCUDA(v, options);
-  } else {
-    return scalarToTensorNonNativeDeviceType(v, options);
-  }
-}
-
-// To match numpy semantics:
-// As a special case for backwards compatibility,
-// strip away unit dimensions from the left of 'src'
-static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
-  size_t first_non1_src = sizes.size();
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    if (sizes[i] != 1) {
-      first_non1_src = i;
-      break;
-    }
-  }
-
-  return sizes.slice(first_non1_src);
-}
-
-static inline void copy_to(const Tensor& dst, const Tensor& src) {
-  Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
-  dst.copy_(b_src);
-}
-
 static inline void recordTensorIndex(const Tensor& tensor, std::vector<Tensor>& outIndices, int64_t* dim_ptr) {
   // TODO: check scalarType
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
   (*dim_ptr)++;
 };
-
-static inline Tensor handleDimInMultiDimIndexing(
-    const Tensor& prev_dim_result,
-    const Tensor& original_tensor,
-    const TensorIndex& index,
-    int64_t* dim_ptr,
-    int64_t* specified_dims_ptr,
-    int64_t real_dim,
-    std::vector<Tensor>& outIndices,
-    bool is_tracing,
-    const at::Device& original_tensor_device,
-    const IntArrayRef& prev_dim_result_sizes) {
-  if (index.is_integer()) {
-    return applySelect(prev_dim_result, *dim_ptr, index.integer(), real_dim, original_tensor_device, prev_dim_result_sizes);
-  } else if (index.is_slice()) {
-    Tensor result = applySlice(
-      prev_dim_result,
-      *dim_ptr,
-      index.slice().start(),
-      index.slice().stop(),
-      index.slice().step(),
-      /*ensure_view=*/false,
-      /*is_tracing=*/is_tracing,
-      original_tensor_device,
-      prev_dim_result_sizes);
-    (*dim_ptr)++;
-    return result;
-  } else if (index.is_ellipsis()) {
-    (*dim_ptr) += original_tensor.dim() - (*specified_dims_ptr);
-    return prev_dim_result;
-  } else if (index.is_none()) {
-    Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
-    (*dim_ptr)++;
-    return result;
-  } else if (index.is_boolean()) {
-    Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
-    recordTensorIndex(boolToIndexingTensor(result, index.boolean(), original_tensor_device), outIndices, dim_ptr);
-    return result;
-  } else if (index.is_tensor()) {
-    Tensor result = prev_dim_result;
-    const Tensor& tensor = index.tensor();
-    auto scalar_type = tensor.scalar_type();
-    if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
-      if (scalar_type != at::kByte && scalar_type != at::kBool) {
-        result = applySelect(result, *dim_ptr, tensor.item<int64_t>(), real_dim, original_tensor_device, prev_dim_result_sizes);
-      } else {
-        result = result.unsqueeze(*dim_ptr);
-        if (scalar_type == at::kBool) {
-          recordTensorIndex(boolToIndexingTensor(result, tensor.item<bool>() != 0, original_tensor_device), outIndices, dim_ptr);
-        } else {
-          recordTensorIndex(boolToIndexingTensor(result, tensor.item<uint8_t>() != 0, original_tensor_device), outIndices, dim_ptr);
-        }
-      }
-    } else {
-      recordTensorIndex(tensor, outIndices, dim_ptr);
-    }
-    return result;
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
-  }
-}
 
 static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::vector<Tensor>&& indices) {
   std::vector<Tensor> converted_inds(indices.size());
@@ -381,14 +292,6 @@ static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::ve
     }
   }
   return converted_inds;
-}
-
-static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor>&& indices) {
-  return self.index(typeConvertIndices(self, std::move(indices)));
-}
-
-static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& indices, const Tensor& value) {
-  return self.index_put_(typeConvertIndices(self, std::move(indices)), value);
 }
 
 // NOTE: Why do we mirror instead of replace the `count_specified_dimensions` function
@@ -418,7 +321,99 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
   }
   return count;
 }
+} // namespace impl
 
+static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
+  if (self_device == at::kCPU || self_device == at::kCUDA) {
+    return impl::scalarToTensorCPUOrCUDA(v, options);
+  } else {
+    return impl::scalarToTensorNonNativeDeviceType(v, options);
+  }
+}
+
+// To match numpy semantics:
+// As a special case for backwards compatibility,
+// strip away unit dimensions from the left of 'src'
+static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
+  size_t first_non1_src = sizes.size();
+  for (size_t i = 0; i < sizes.size(); ++i) {
+    if (sizes[i] != 1) {
+      first_non1_src = i;
+      break;
+    }
+  }
+
+  return sizes.slice(first_non1_src);
+}
+
+static inline void copy_to(const Tensor& dst, const Tensor& src) {
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(dst, src.view(slicePrefix1sSize(src.sizes())), "setitem");
+  dst.copy_(b_src);
+}
+
+static inline Tensor handleDimInMultiDimIndexing(
+    const Tensor& prev_dim_result,
+    const Tensor& original_tensor,
+    const TensorIndex& index,
+    int64_t* dim_ptr,
+    int64_t* specified_dims_ptr,
+    int64_t real_dim,
+    std::vector<Tensor>& outIndices,
+    bool is_tracing,
+    const at::Device& original_tensor_device,
+    const IntArrayRef& prev_dim_result_sizes) {
+  if (index.is_integer()) {
+    return impl::applySelect(prev_dim_result, *dim_ptr, index.integer(), real_dim, original_tensor_device, prev_dim_result_sizes);
+  } else if (index.is_slice()) {
+    Tensor result = impl::applySlice(
+      prev_dim_result,
+      *dim_ptr,
+      index.slice().start(),
+      index.slice().stop(),
+      index.slice().step(),
+      /*ensure_view=*/false,
+      /*is_tracing=*/is_tracing,
+      original_tensor_device,
+      prev_dim_result_sizes);
+    (*dim_ptr)++;
+    return result;
+  } else if (index.is_ellipsis()) {
+    (*dim_ptr) += original_tensor.dim() - (*specified_dims_ptr);
+    return prev_dim_result;
+  } else if (index.is_none()) {
+    Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
+    (*dim_ptr)++;
+    return result;
+  } else if (index.is_boolean()) {
+    Tensor result = prev_dim_result.unsqueeze(*dim_ptr);
+    impl::recordTensorIndex(impl::boolToIndexingTensor(result, index.boolean(), original_tensor_device), outIndices, dim_ptr);
+    return result;
+  } else if (index.is_tensor()) {
+    Tensor result = prev_dim_result;
+    const Tensor& tensor = index.tensor();
+    auto scalar_type = tensor.scalar_type();
+    if (tensor.dim() == 0 && at::isIntegralType(scalar_type, /*includeBool=*/true)) {
+      if (scalar_type != at::kByte && scalar_type != at::kBool) {
+        result = impl::applySelect(result, *dim_ptr, tensor.item<int64_t>(), real_dim, original_tensor_device, prev_dim_result_sizes);
+      } else {
+        result = result.unsqueeze(*dim_ptr);
+        if (scalar_type == at::kBool) {
+          impl::recordTensorIndex(impl::boolToIndexingTensor(result, tensor.item<bool>() != 0, original_tensor_device), outIndices, dim_ptr);
+        } else {
+          impl::recordTensorIndex(impl::boolToIndexingTensor(result, tensor.item<uint8_t>() != 0, original_tensor_device), outIndices, dim_ptr);
+        }
+      }
+    } else {
+      impl::recordTensorIndex(tensor, outIndices, dim_ptr);
+    }
+    return result;
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Invalid TensorIndex type");
+  }
+}
+
+namespace impl {
 // This mirrors `applySlicing` in torch/csrc/autograd/python_variable_indexing.cpp
 static inline Tensor applySlicing(
     const Tensor& self,
@@ -428,7 +423,7 @@ static inline Tensor applySlicing(
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
   int64_t dim = 0;
-  int64_t specified_dims = count_specified_dimensions(indices);
+  int64_t specified_dims = impl::count_specified_dimensions(indices);
 
   TORCH_CHECK_INDEX(specified_dims <= self_sizes.size(), "too many indices for tensor of dimension ", (int)self_sizes.size());
 
@@ -449,6 +444,15 @@ static inline Tensor applySlicing(
   }
   return result;
 }
+} // namespace impl
+
+static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor>&& indices) {
+  return self.index(impl::typeConvertIndices(self, std::move(indices)));
+}
+
+static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& indices, const Tensor& value) {
+  return self.index_put_(impl::typeConvertIndices(self, std::move(indices)), value);
+}
 
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
 static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool is_tracing) {
@@ -459,9 +463,9 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   if (indices.size() == 1) {
     const TensorIndex& index = indices[0];
     if (index.is_integer()) {
-      return applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
+      return impl::applySelect(self, 0, index.integer(), 0, self_device, self_sizes);
     } else if (index.is_slice()) {
-      return applySlice(
+      return impl::applySlice(
         self,
         0,
         index.slice().start(),
@@ -480,14 +484,14 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
       return dispatch_index(
         result,
         std::move(std::vector<Tensor>{
-          boolToIndexingTensor(result, index.boolean(), self_device)
+          impl::boolToIndexingTensor(result, index.boolean(), self_device)
         })
       );
     }
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
@@ -520,10 +524,10 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
       copy_to(self.unsqueeze(0), value);
       return;
     } else if (index.is_integer()) {
-      copy_to(applySelect(self, 0, index.integer(), 0, self_device, self_sizes), value);
+      copy_to(impl::applySelect(self, 0, index.integer(), 0, self_device, self_sizes), value);
       return;
     } else if (index.is_slice()) {
-      copy_to(applySlice(
+      copy_to(impl::applySlice(
         self,
         0,
         index.slice().start(),
@@ -538,7 +542,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
