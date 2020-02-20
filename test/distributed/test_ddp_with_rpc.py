@@ -8,11 +8,15 @@ import os
 =======
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 import sys
 >>>>>>> e13cee7da0... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
 =======
 >>>>>>> 56d6cd92d3... 1. Removed unused import
+=======
+import sys
+>>>>>>> ebcd8eef67... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
 import enum
 
 from typing import Callable, List, NamedTuple
@@ -467,6 +471,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     @staticmethod
     def run_one_forward(model: nn.Module):
         n = 2
@@ -484,6 +489,8 @@ class TestDdpWithRpc(MultiProcessTestCase):
     def test_forward_with_ddp(self):
         self.spawn_trainers(self.run_one_forward, DdpMode.OUTSIDE)
 =======
+=======
+>>>>>>> ebcd8eef67... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
     def test_no_ddp(self):
         def run_one_forward(model: nn.Module):
             n = 2
@@ -496,6 +503,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
             gLogger.info(f"Forward pass on {model(features)}")
 
         self.spawn_trainers(run_one_forward, DdpMode.NONE)
+<<<<<<< HEAD
 >>>>>>> e13cee7da0... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
 =======
 
@@ -516,7 +524,12 @@ class TestDdpWithRpc(MultiProcessTestCase):
     def test_forward_with_ddp(self):
         self.spawn_trainers(self.run_one_forward, DdpMode.OUTSIDE)
 >>>>>>> 56d6cd92d3... 1. Removed unused import
+<<<<<<< HEAD
 >>>>>>> 1. Removed unused import
+=======
+=======
+>>>>>>> ebcd8eef67... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
+>>>>>>> Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
 
 
 if __name__ == "__main__":
