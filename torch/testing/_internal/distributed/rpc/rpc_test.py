@@ -1791,6 +1791,24 @@ class RpcJitTest(RpcAgentTestFixture):
         res_hat = [torch.ones(2, 2) + 1 for _ in range(4)]
         self.assertEquals(res, res_hat)
 
+    @dist_init
+    def test_rref_python_annotation(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.ignore
+        def rref_python_annotation(rref_var):
+            # type: (RRef[Tensor]) -> RRef[Tensor]
+            return rref_var
+
+        @torch.jit.script
+        def rref_script_annotation(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_python_annotation(rref_var).to_here()
+
+        res = rref_script_annotation(rref_var)
+        self.assertEqual(res, torch.ones(2, 2) + 1)
 
     @dist_init
     def test_local_rref_with_script_module(self):
