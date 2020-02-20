@@ -218,6 +218,9 @@ class LambdaLR(_LRScheduler):
         warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
@@ -292,6 +295,9 @@ class MultiplicativeLR(_LRScheduler):
         """
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
+        # Restore state_dict keys in order to prevent side effects
+        # https://github.com/pytorch/pytorch/issues/32756
+        state_dict['lr_lambdas'] = lr_lambdas
 
         for idx, fn in enumerate(lr_lambdas):
             if fn is not None:
