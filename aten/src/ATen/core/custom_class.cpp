@@ -17,9 +17,9 @@ namespace {
     return cbs;
   }
 
-  std::vector<ClassRegistrationCallback> &method_callbacks() {
+  std::vector<MethodRegistrationCallback> &method_callbacks() {
     static std::vector<MethodRegistrationCallback> cbs;
-    return cbs
+    return cbs;
   }
 }  // namespace
 
