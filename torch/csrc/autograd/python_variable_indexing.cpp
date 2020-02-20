@@ -261,14 +261,12 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, bool release_gil) {
-    Tensor result;
     if (release_gil) {
       pybind11::gil_scoped_release no_gil;
-      result = at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing);
+      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
     } else {
-      result = at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing);
+      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
     }
-    return wrap_var(std::move(result));
   };
 
   // handle simple types: integers, slices, bool
