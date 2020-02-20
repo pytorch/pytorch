@@ -8,6 +8,22 @@ namespace rpc {
 
 namespace {
 
+// A macro that grabs the GIL, profiling the acquisition time. The average GIL
+// acquisition time will be recorded in RpcAgent's getMetrics().
+#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
+  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
+  auto shouldProfileGIL =                                                \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
+  if (shouldProfileGIL) {                                                \
+    startTime = std::chrono::high_resolution_clock::now();               \
+  }                                                                      \
+  pybind11::gil_scoped_acquire ag;                                       \
+  if (shouldProfileGIL) {                                                \
+    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
+        std::chrono::high_resolution_clock::now() - startTime);          \
+    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
+  }
+
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
 struct PythonTypeResolver : public jit::script::Resolver {
@@ -121,6 +137,7 @@ void PythonRpcHandler::handleException(const py::object& obj) {
 }
 
 void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
+  assert(PyGILState_Check()); // Ensure GIL is held
   pyHandleException_(obj);
 }
 
