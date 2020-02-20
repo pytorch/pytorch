@@ -12,26 +12,33 @@ std::unordered_map<std::string, detail::RegisteredClassRecord>& registeredClasse
 }
 
 namespace {
-  std::vector<ClassRegistrationCallback> class_callbacks;
-  std::vector<MethodRegistrationCallback> method_callbacks;
+  std::vector<ClassRegistrationCallback> &class_callbacks() {
+    static std::vector<ClassRegistrationCallback> cbs;
+    return cbs;
+  }
+
+  std::vector<ClassRegistrationCallback> &method_callbacks() {
+    static std::vector<MethodRegistrationCallback> cbs;
+    return cbs
+  }
 }  // namespace
 
 void registerClassRegistrationCallback(ClassRegistrationCallback cb) {
-  class_callbacks.emplace_back(std::move(cb));
+  class_callbacks().emplace_back(std::move(cb));
 }
 
 void registerMethodRegistrationCallback(MethodRegistrationCallback cb) {
-  method_callbacks.emplace_back(std::move(cb));
+  method_callbacks().emplace_back(std::move(cb));
 }
 
 void invokeClassRegistrationCallbacks(const detail::RegisteredClassRecord& class_record) {
-  for (auto & cb : class_callbacks) {
+  for (auto & cb : class_callbacks()) {
     cb(class_record);
   }
 }
 
 void invokeMethodRegistrationCallbacks(const detail::RegisteredClassRecord& class_record, const std::string& method_name) {
-  for (auto & cb : method_callbacks) {
+  for (auto & cb : method_callbacks()) {
     cb(class_record, method_name);
   }
 }
