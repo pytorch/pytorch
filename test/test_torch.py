@@ -167,7 +167,6 @@ class _TestTorchMixin(object):
                        'coalesce',
                        'is_coalesced',
                        'is_distributed',
-                       'is_complex',
                        'is_nonzero',
                        'is_same_size',
                        'isclose',
@@ -977,10 +976,6 @@ class _TestTorchMixin(object):
         bfloat16Tensor = torch.zeros(1, 1, dtype=torch.bfloat16)
         expected = torch.tensor([[0.]], dtype=torch.bfloat16)
         self.assertEqual(bfloat16Tensor, expected)
-
-        complexTensor = torch.zeros(2, 2, dtype=torch.complex64)
-        expected = torch.tensor([[0., 0.], [0., 0.]], dtype=torch.complex64)
-        self.assertEqual(complexTensor, expected)
 
     def test_zeros_out(self):
         shape = (3, 4)
