@@ -123,6 +123,38 @@ namespace {
 
     return dtype;
   }
+
+  // This function returns the dtype to promote
+  // typeStrategy is the type of implicit dtype promotion
+  ScalarType get_promoted_dtype(const Tensor& self, TypePromotionStrategy typeStrategy) {
+    // typePromotionStrategy argument defaults to TypePromotionStrategy::None (no implicit dtype upcasting)
+    // and is set to TypePromotionStrategy::Type1/Type2/Type3/Type4 depending on the type of implicit
+    // dtype promotion
+    ScalarType promoted_dtype = ScalarType::Undefined;
+
+    if (typeStrategy != TypePromotionStrategy::None) {
+      // This enables int-to-float implicit dtype conversions
+      switch(typeStrategy) {
+        case TypePromotionStrategy::Type1:
+          promoted_dtype = promoteToFloatType1(self);
+          break;
+        case TypePromotionStrategy::Type2:
+          promoted_dtype = promoteToFloatType2(self);
+          break;
+        case TypePromotionStrategy::Type3:
+          promoted_dtype = promoteToFloatType3(self);
+          break;
+        case TypePromotionStrategy::Type4:
+          promoted_dtype = promoteToFloatType4(self);
+          break;
+        default:
+          // dtype is set to Undefined if no dtype-to-float conversion
+          promoted_dtype = ScalarType::Undefined;
+      }
+    }
+
+    return promoted_dtype;
+  }
 } // end anonymous namespace
 
 
@@ -144,29 +176,8 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl, TypePromotionStrategy typeStrategy=TypePromotionStrategy::None) {
-  // typePromotionStrategy argument defaults to TypePromotionStrategy::None (no implicit dtype upcasting) and is set to TypePromotionStrategy::Type1/Type2/Type3/Type4 depending on the type of implicit dtype promotion
-  ScalarType promoted_dtype = ScalarType::Undefined;
-
-  if (typeStrategy != TypePromotionStrategy::None) {
-    // This enables int-to-float implicit dtype conversions
-    switch(typeStrategy) {
-      case TypePromotionStrategy::Type1:
-        promoted_dtype = promoteToFloatType1(self);
-        break;
-      case TypePromotionStrategy::Type2:
-        promoted_dtype = promoteToFloatType2(self);
-        break;
-      case TypePromotionStrategy::Type3:
-        promoted_dtype = promoteToFloatType3(self);
-        break;
-      case TypePromotionStrategy::Type4:
-        promoted_dtype = promoteToFloatType4(self);
-        break;
-      default:
-        // dtype is set to Undefined if no dtype-to-float conversion
-        promoted_dtype = ScalarType::Undefined;
-    }
-  }
+  // Calculate the dtype for type promotion
+  ScalarType promoted_dtype = get_promoted_dtype(self, typeStrategy);
 
   if (promoted_dtype != ScalarType::Undefined) {
     Tensor result = at::empty({0}, self.options().dtype(promoted_dtype));
