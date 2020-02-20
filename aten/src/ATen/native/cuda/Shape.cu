@@ -316,22 +316,17 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   const bool all32BitIndexable = std::all_of(inputs.begin(), inputs.end(),
     [] (const Tensor& t) {
-      // Special case for an empty tensor is required to remain compatible with
-      // the legacy behaviour of THCTensor_canUse32BitIndexMath which skips
-      // all computation for empty tensors (because it employs
-      // THCTensor_nDimensionLegacyAll)
-      return t.numel() == 0
-          || at::cuda::detail::canUse32BitIndexMath(t);
+      return at::cuda::detail::canUse32BitIndexMath(t);
     });
   Device firstDevice = notSkippedTensor->device();
   const bool allSameDevice = std::all_of(inputs.begin(), inputs.end(),
-                                         [=](const Tensor& t) {
-                                           return t.device() == firstDevice;
-                                         });
+    [firstDevice](const Tensor& t) {
+      return t.device() == firstDevice;
+    });
   const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
-                             [=](const Tensor& t) {
-                               return !t.defined() || t.is_contiguous();
-                             });
+    [](const Tensor& t) {
+      return !t.defined() || t.is_contiguous();
+    });
   if (inputs.size() > 1 &&
       !hasSkippedInput &&
       out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
