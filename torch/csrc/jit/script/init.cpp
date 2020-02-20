@@ -160,7 +160,7 @@ struct PythonResolver : public Resolver {
             type->isSubtypeOf(tt),
             "Can't to redefine NamedTuple: ",
             tt->python_str());
-            return type;
+        return type;
       }
       get_python_cu()->register_type(tt);
       return tt;
@@ -597,7 +597,7 @@ struct slot_dict_impl {
   slot_dict_impl(script::ModulePtr module) : module_(std::move(module)) {}
   bool contains(const std::string& name) const {
     if (auto slot = module_->type()->findAttributeSlot(name)) {
-      if (Policy::valid(module_->type(), *slot)) {
+      if (Policy::valid(module_->type(), *slot, module_->getSlot(*slot))) {
         return true;
       }
     }
@@ -607,7 +607,7 @@ struct slot_dict_impl {
   std::vector<std::pair<std::string, py::object>> items() const {
     std::vector<std::pair<std::string, py::object>> result;
     for (size_t i = 0, N = module_->type()->numAttributes(); i < N; ++i) {
-      if (Policy::valid(module_->type(), i)) {
+      if (Policy::valid(module_->type(), i, module_->getSlot(i))) {
         result.emplace_back(
             module_->type()->getAttributeName(i),
             toPyObject(module_->getSlot(i)));
@@ -634,6 +634,7 @@ struct slot_dict_impl {
         .def("setattr", &slot_dict_impl<Policy>::setattr)
         .def("getattr", &slot_dict_impl<Policy>::getattr);
   }
+
  private:
   script::ModulePtr module_;
 };
@@ -885,8 +886,9 @@ void initJitScriptBindings(PyObject* module) {
             // this was ensured in python before calling this function
             auto typed_inputs = toTraceableStack(input_tuple);
 
-            std::shared_ptr<Graph> graph = std::get<0>(tracer::createGraphByTracing(
-                func, typed_inputs, var_lookup_fn, force_outplace, &self));
+            std::shared_ptr<Graph> graph =
+                std::get<0>(tracer::createGraphByTracing(
+                    func, typed_inputs, var_lookup_fn, force_outplace, &self));
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
@@ -1191,8 +1193,7 @@ void initJitScriptBindings(PyObject* module) {
       debugSetAutodiffSubgraphInlining);
   m.def("_propagate_shapes", _propagate_shapes);
   m.def(
-      "_propagate_and_assign_input_shapes",
-      _propagate_and_assign_input_shapes);
+      "_propagate_and_assign_input_shapes", _propagate_and_assign_input_shapes);
   m.def("_assign_output_shapes", _assign_output_shapes);
   m.def(
       "_last_executed_optimized_graph",
@@ -1276,10 +1277,13 @@ void initJitScriptBindings(PyObject* module) {
     return Module(get_python_cu(), type);
   });
 
-  m.def("_export_opnames",
-          [](script::Module& sm) {return debugMakeList(torch::jit::export_opnames(sm));});
+  m.def("_export_opnames", [](script::Module& sm) {
+    return debugMakeList(torch::jit::export_opnames(sm));
+  });
 
-  py::class_<ConcreteModuleTypeBuilder, std::shared_ptr<ConcreteModuleTypeBuilder>>(
+  py::class_<
+      ConcreteModuleTypeBuilder,
+      std::shared_ptr<ConcreteModuleTypeBuilder>>(
       m, "ConcreteModuleTypeBuilder")
       .def(py::init<py::object>())
       .def("add_constant", &ConcreteModuleTypeBuilder::addConstant)
@@ -1293,7 +1297,9 @@ void initJitScriptBindings(PyObject* module) {
       .def("add_module", &ConcreteModuleTypeBuilder::addModule)
       .def("add_overload", &ConcreteModuleTypeBuilder::addOverload)
       .def("set_poisoned", &ConcreteModuleTypeBuilder::setPoisoned)
-      .def("add_failed_attribute", &ConcreteModuleTypeBuilder::addFailedAttribute)
+      .def(
+          "add_failed_attribute",
+          &ConcreteModuleTypeBuilder::addFailedAttribute)
       .def(
           "set_module_dict",
           [](ConcreteModuleTypeBuilder& self) {
@@ -1303,7 +1309,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "equals",
           [](const ConcreteModuleTypeBuilder& self,
-             const ConcreteModuleTypeBuilder& other) { return self.equals(other); })
+             const ConcreteModuleTypeBuilder& other) {
+            return self.equals(other);
+          })
       .def("set_module_list", [](ConcreteModuleTypeBuilder& self) {
         self.setIterableModuleKind(IterableModuleKind::LIST);
       });
@@ -1390,12 +1398,10 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def("_check_onnx_proto",
-     [](const std::string& proto_string) {
-            check_onnx_proto(proto_string);
-        },
-        py::arg("proto_string")
-      );
+  m.def(
+      "_check_onnx_proto",
+      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
+      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<script::Object>(obj);
   });
