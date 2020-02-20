@@ -50,33 +50,53 @@ void gather_shape_check(const Tensor& self, int64_t dim, const Tensor& index) {
 
 // Used for `scatter` and `scatter_add`
 // Tests:
-//  1. index.size(d) <= src.size(d) for all d
-//  2. index.size(d) <= self.size(d) for all d != dim
+//  1. index.size(d) <= self.size(d) for all d != dim
+//  2. index.size(d) <= src.size(d) for all d if src is a Tensor
 void scatter_shape_check(
-  const Tensor& self, int64_t dim,
-  const Tensor& index, const Tensor& src
+  const Tensor& self, int64_t dim, const Tensor& index,
+  const c10::optional<Tensor>& src_opt
 ) {
   bool is_wrong_shape = false;
   int64_t self_dims = ensure_nonempty_dim(self.dim());
+
+  //  Check: index.size(d) <= self.size(d) for all d != dim
   for (int64_t d = 0; d < self_dims; ++d) {
     int64_t index_d_size = ensure_nonempty_size(index, d);
-    if (index_d_size > ensure_nonempty_size(src, d)) {
+    if (d == dim) continue;
+    if (index_d_size > ensure_nonempty_size(self, d)) {
       is_wrong_shape = true;
       break;
     }
-    if (d != dim) {
-      if (index_d_size > ensure_nonempty_size(self, d)) {
+  }
+
+  //  Check: index.size(d) <= src.size(d) for all d if src is Tensor
+  if (!is_wrong_shape && src_opt.has_value()) {
+    auto src = src_opt.value();
+    for (int64_t d = 0; d < self_dims; ++d) {
+      int64_t index_d_size = ensure_nonempty_size(index, d);
+      if (index_d_size > ensure_nonempty_size(src, d)) {
         is_wrong_shape = true;
         break;
       }
     }
   }
-  TORCH_CHECK(!is_wrong_shape,
-    "Expected index [", index.sizes(), "]",
-    " to be smaller size than src [", src.sizes(), "]",
-    " and to be smaller than self [", self.sizes(), "]",
-    " apart from dimension ", dim
-  );
+
+  if (src_opt.has_value()) {
+    auto src = src_opt.value();
+    TORCH_CHECK(!is_wrong_shape,
+      "Expected index ", index.sizes(),
+      " to be smaller than self ", self.sizes(),
+      " apart from dimension ", dim,
+      " and to be smaller size than src ", src.sizes()
+    );
+  }
+  else {
+    TORCH_CHECK(!is_wrong_shape,
+      "Expected index ", index.sizes(),
+      " to be smaller than self ", self.sizes(),
+      " apart from dimension ", dim
+    );
+  }
 }
 
 static Tensor restride_dim(
@@ -187,6 +207,73 @@ void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Te
   );
 }
 
+void scatter_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  if (index.numel() == 0) {
+    return;
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+  
+  scatter_shape_check(self, dim, index, src);
+
+  int64_t index_dim_size = ensure_nonempty_size(index, dim);
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  cpu_scatter_gather_base_kernel(
+    self, dim, index, src,
+    "scatter_cpu_", [&] (
+      auto* self_data, auto self_dim_stride,
+      const auto* index_data, auto index_dim_stride,
+      const auto* src_data, auto src_dim_stride
+    ) {
+      for (int64_t i = 0; i < index_dim_size; ++i) {
+        int64_t idx_dim = index_data[i * index_dim_stride];
+        // we are not putting idx_dim in the error message because it disables
+        // loop optimization in clang-7
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
+          "index ", index_data[i * index_dim_stride],
+          " is out of bounds for dimension ", dim,
+          " with size ", self_dim_size);
+        self_data[idx_dim * self_dim_stride] = src_data[i * src_dim_stride];
+      }
+    }, /*serial_exec=*/false
+  );
+}
+
+void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Scalar src) {
+  if (index.numel() == 0) {
+    return;
+  }
+
+  dim = maybe_wrap_dim(dim, self.dim());
+  
+  scatter_shape_check(self, dim, index);
+
+  int64_t index_dim_size = ensure_nonempty_size(index, dim);
+  int64_t self_dim_size = ensure_nonempty_size(self, dim);
+
+  cpu_scatter_gather_base_kernel(
+    self, dim, index, self,
+    "scatter_fill_cpu_", [&] (
+      auto* self_data, auto self_dim_stride,
+      const auto* index_data, auto index_dim_stride,
+      const auto* src_data, auto src_dim_stride
+    ) {
+      for (int64_t i = 0; i < index_dim_size; ++i) {
+        int64_t idx_dim = index_data[i * index_dim_stride];
+        // we are not putting idx_dim in the error message because it disables
+        // loop optimization in clang-7
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
+          "index ", index_data[i * index_dim_stride],
+          " is out of bounds for dimension ", dim,
+          " with size ", self_dim_size);
+        using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
+        self_data[idx_dim * self_dim_stride] = src.to<scalar_t>();
+      }
+    }, /*serial_exec=*/false
+  );
+}
+
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (index.numel() == 0) {
     return;
@@ -219,9 +306,11 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
       /*serial_exec=*/true);
 }
 
-} // anonymous napespace
+} // anonymous namespace
 
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
+REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
 
 }} // namespace at::native
