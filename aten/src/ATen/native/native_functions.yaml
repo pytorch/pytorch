@@ -3953,7 +3953,7 @@
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
@@ -3963,7 +3963,7 @@
 - func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_fill_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -4382,12 +4382,12 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
-- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda

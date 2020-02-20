@@ -17,11 +17,8 @@ C10_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
 
 namespace caffe2 {
 
-// Default smallest amount of work that will be partitioned between
-// multiple threads; the runtime value is configurable
-constexpr size_t kDefaultMinWorkSize = 1;
-
-std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
+namespace {
+size_t getDefaultNumThreads() {
   CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 
@@ -36,18 +33,18 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
     switch (numThreads) {
 #if C10_ANDROID && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
       case 4:
-          switch (cpuinfo_get_core(0)->midr & UINT32_C(0xFF00FFF0)) {
-            case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
-            case UINT32_C(0x51002010): /* Snapdragon 821 Kryo Silver */
-            case UINT32_C(0x51002050): /* Snapdragon 820/821 Kryo Gold */
-              /* Kryo: 2+2 big.LITTLE */
-              numThreads = 2;
-              break;
-            default:
-              /* Anything else: assume homogeneous architecture */
-              numThreads = 4;
-              break;
-          }
+        switch (cpuinfo_get_core(0)->midr & UINT32_C(0xFF00FFF0)) {
+          case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
+          case UINT32_C(0x51002010): /* Snapdragon 821 Kryo Silver */
+          case UINT32_C(0x51002050): /* Snapdragon 820/821 Kryo Gold */
+            /* Kryo: 2+2 big.LITTLE */
+            numThreads = 2;
+            break;
+          default:
+            /* Anything else: assume homogeneous architecture */
+            numThreads = 4;
+            break;
+        }
         break;
 #endif
       case 5:
@@ -73,12 +70,26 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
         break;
     }
   }
-  LOG(INFO) << "Constructing thread pool with " << numThreads << " threads";
-  return std::make_unique<ThreadPool>(numThreads);
+  return numThreads;
+}
+} // namespace
+
+// Default smallest amount of work that will be partitioned between
+// multiple threads; the runtime value is configurable
+constexpr size_t kDefaultMinWorkSize = 1;
+
+size_t ThreadPool::defaultNumThreads_ = 0;
+
+std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
+  defaultNumThreads_ = getDefaultNumThreads();
+  LOG(INFO) << "Constructing thread pool with " << defaultNumThreads_
+            << " threads";
+  return std::make_unique<ThreadPool>(defaultNumThreads_);
 }
 
 ThreadPool::ThreadPool(int numThreads)
-    : minWorkSize_(kDefaultMinWorkSize), numThreads_(numThreads),
+    : minWorkSize_(kDefaultMinWorkSize),
+      numThreads_(numThreads),
       workersPool_(std::make_shared<WorkersPool>()) {}
 
 ThreadPool::~ThreadPool() {}
@@ -87,8 +98,13 @@ int ThreadPool::getNumThreads() const {
   return numThreads_;
 }
 
+// Sets the number of threads
+// # of threads should not be bigger than the number of big cores
 void ThreadPool::setNumThreads(size_t numThreads) {
-  numThreads_ = numThreads;
+  if (defaultNumThreads_ == 0) {
+    defaultNumThreads_ = getDefaultNumThreads();
+  }
+  numThreads_ = std::min(numThreads, defaultNumThreads_);
 }
 
 // Sets the minimum work size (range) for which to invoke the
@@ -100,7 +116,7 @@ void ThreadPool::setMinWorkSize(size_t size) {
 }
 
 void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
-  const auto numThreads = numThreads_.load(std::memory_order_relaxed); 
+  const auto numThreads = numThreads_.load(std::memory_order_relaxed);
 
   std::lock_guard<std::mutex> guard(executionMutex_);
   // If there are no worker threads, or if the range is too small (too
@@ -119,7 +135,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   struct FnTask : public Task {
     FnTask(){};
     ~FnTask() override{};
-    const std::function<void(int, size_t)> *fn_;
+    const std::function<void(int, size_t)>* fn_;
     int idx_;
     size_t start_;
     size_t end_;
@@ -137,7 +153,7 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
     if (!tasks_[i]) {
       tasks_[i].reset(new FnTask());
     }
-    auto *task = (FnTask *)tasks_[i].get();
+    auto* task = (FnTask*)tasks_[i].get();
     task->fn_ = &fn;
     task->idx_ = i;
     task->start_ = std::min<size_t>(range, i * unitsPerTask);
