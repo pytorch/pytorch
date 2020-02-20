@@ -182,14 +182,14 @@ Module& Module::operator=(Module&&) noexcept = default;
 // merge everything
 
 namespace {
-  std::string addNamespace(const char* ns, const char* unqual_name_or_schema) { if (ns) {
+  std::string addNamespace(const char* ns, const char* name_or_schema) { if (ns) {
       // TODO: slow!  Fix internal data structures so I don't have to paste the
       // names together
       std::ostringstream oss;
-      oss << ns << "::" << unqual_name_or_schema;
+      oss << ns << "::" << name_or_schema;
       return oss.str();
     } else {
-      return unqual_name_or_schema;
+      return name_or_schema;
     }
   }
 }
@@ -201,17 +201,17 @@ Module&& Module::def(const char* schema) && {
   return std::move(*this);
 }
 
-Module&& Module::def(const char* schema_or_unqual_name, CppFunction&& f) && {
+Module&& Module::def(const char* name_or_schema, CppFunction&& f) && {
   register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, schema_or_unqual_name))
+    .schema(addNamespace(ns_, name_or_schema))
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
     .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
   return std::move(*this);
 }
 
-Module&& Module::impl(const char* schema_or_unqual_name, CppFunction&& f) && {
+Module&& Module::impl(const char* name_or_schema, CppFunction&& f) && {
   register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, schema_or_unqual_name))
+    .schema(addNamespace(ns_, name_or_schema))
     // NB: Don't specify AliasAnalysis; the def() is expected to provide
     // this
     .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
