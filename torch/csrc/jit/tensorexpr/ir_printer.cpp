@@ -130,6 +130,13 @@ void IRPrinter::visit(const Let* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const LetStmt* v) {
+  Var var = v->var();
+  os() << var.dtype().ToCppString() << " " << var << " = " << v->value() << "; "
+       << std::endl;
+  v->body().accept(this);
+}
+
 void IRPrinter::visit(const Ramp* v) {
   os() << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes()
        << ")";

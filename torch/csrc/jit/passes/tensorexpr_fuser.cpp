@@ -288,7 +288,7 @@ void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
 }
 
 Operation createTensorExprOp(const Node* node) {
-  auto kernel = std::make_shared<TensorExprKernel>(node);
+  auto kernel = std::make_shared<TensorExprKernel>(*node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
     kernel->run(stack);

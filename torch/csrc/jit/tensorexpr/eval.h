@@ -304,6 +304,22 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     eval_context_.erase(var);
   }
 
+  TORCH_API void visit(const LetStmt* v) override {
+    const Variable* var = v->var().AsNode<Variable>();
+    CHECK(var != nullptr);
+    v->value().accept(this);
+    Value value = value_;
+    auto iter = eval_context_.find(var);
+    // TODO: make the same value settable multiple times.
+    CHECK(iter == eval_context_.end())
+        << "var must not exist in the context before";
+    eval_context_[var] = value_;
+
+    v->body().accept(this);
+
+    eval_context_.erase(var);
+  }
+
   TORCH_API void visit(const Variable* v) override {
     auto iter = eval_context_.find(v);
     CHECK(iter != eval_context_.end())

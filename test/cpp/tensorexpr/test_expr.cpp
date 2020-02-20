@@ -63,6 +63,28 @@ void testExprLetTest02() {
   EXPECT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
+void testExprLetStmtTest01() {
+  KernelScope kernel_scope;
+  Buffer a_buf("a", kFloat32, {1});
+  Buffer b_buf("b", kFloat32, {1});
+
+  Expr load_a = Load::make(a_buf, 0, 1);
+  Var var = Var("v", kFloat32);
+  Stmt store_b = Store::make(b_buf, 0, var, 1);
+  Stmt let_store = LetStmt::make(var, load_a, store_b);
+  SimpleIREvaluator eval(let_store, a_buf, b_buf);
+
+  PaddedBuffer<float> a_v(1);
+  PaddedBuffer<float> b_v(1);
+  PaddedBuffer<float> b_ref(1);
+
+  a_v(0) = 23;
+  b_ref(0) = a_v(0);
+  eval(a_v, b_v);
+
+  ExpectAllNear(b_v, b_ref, 1e-5);
+}
+
 static Expr test_01(const Expr& expr) {
   return expr;
 }

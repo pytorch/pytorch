@@ -743,15 +743,15 @@ SplitAxisWithTail::SplitAxisWithTail(
   const std::string& loop_var_name = loop_axis->var().name_hint();
   Dtype loop_var_dtype = loop_axis->var().dtype();
   LoopAxis* outer = this->NewAxis(
-      Var(loop_var_name + ".outer", loop_var_dtype), Range(0, split_count));
+      Var(loop_var_name + "_outer", loop_var_dtype), Range(0, split_count));
   LoopAxis* inner = this->NewAxis(
-      Var(loop_var_name + ".inner", loop_var_dtype), Range(0, factor));
+      Var(loop_var_name + "_inner", loop_var_dtype), Range(0, factor));
   this->set_output_group(0, {outer, inner});
 
   // The tail group
   if (tail_size) {
     LoopAxis* tail = this->NewAxis(
-        Var(loop_var_name + ".tail", loop_var_dtype), Range(0, tail_size));
+        Var(loop_var_name + "_tail", loop_var_dtype), Range(0, tail_size));
     this->set_output_group(1, {tail});
   }
 }
@@ -779,9 +779,9 @@ SplitAxisWithMask::SplitAxisWithMask(
   const std::string& loop_var_name = loop_axis->var().name_hint();
   Dtype loop_var_dtype = loop_axis->var().dtype();
   LoopAxis* outer = this->NewAxis(
-      Var(loop_var_name + ".outer", loop_var_dtype), Range(0, split_count));
+      Var(loop_var_name + "_outer", loop_var_dtype), Range(0, split_count));
   LoopAxis* inner = this->NewAxis(
-      Var(loop_var_name + ".inner", loop_var_dtype), Range(0, factor));
+      Var(loop_var_name + "_inner", loop_var_dtype), Range(0, factor));
   this->set_output_group(0, {outer, inner});
 }
 

@@ -115,6 +115,25 @@ Expr IRMutator::mutate(const Let* v) {
   return Let::make(var_new, value_new, body_new);
 }
 
+Stmt IRMutator::mutate(const LetStmt* v) {
+  Var var = v->var();
+  Expr value = v->value();
+  Stmt body = v->body();
+  Expr var_new_expr = var.accept_mutator(this);
+  Variable* var_new_ptr = var_new_expr.AsNode<Variable>();
+  if (var_new_ptr == nullptr) {
+    throw std::runtime_error("LetStmt var must be variable");
+  }
+  Var var_new{var_new_ptr};
+  Expr value_new = value.accept_mutator(this);
+  Stmt body_new = body.accept_mutator(this);
+  if (same_node(var, var_new) && same_node(value, value_new) &&
+      same_node(body, body_new)) {
+    return Stmt(v);
+  }
+  return LetStmt::make(var_new, value_new, body_new);
+}
+
 Expr IRMutator::mutate(const Ramp* v) {
   Expr base = v->base();
   Expr stride = v->stride();

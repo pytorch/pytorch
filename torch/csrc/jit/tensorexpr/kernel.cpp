@@ -1,8 +1,34 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/schedule.h>
 
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+static int te_cuda_pointwise_loop_levels = -1;
+static int te_cuda_pointwise_block_count = -1;
+static int te_cuda_pointwise_block_size = -1;
+
+int& GetTECudaPointwiseLoopLevels() {
+  return te_cuda_pointwise_loop_levels;
+}
+
+int& GetTECudaPointwiseBlockCount() {
+  return te_cuda_pointwise_block_count;
+}
+
+int& GetTECudaPointwiseBlockSize() {
+  return te_cuda_pointwise_block_size;
+}
+
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
+
 
 static Dtype texprType(const c10::optional<at::ScalarType>& st) {
   switch (*st) {
@@ -95,12 +121,67 @@ Expr TensorExprKernel::demoteOutput(const Expr& e, const torch::jit::Value* v) {
   return e;
 }
 
+static bool isOne(Expr e) {
+  auto const& n = e.AsNode<IntImm>();
+  if (!n) {
+    return false;
+  }
+  return n->value() == 1;
+}
+
+static std::vector<Expr> broadcastShapes(
+    const std::vector<Expr>& a,
+    const std::vector<Expr>& b) {
+  auto at = a.rbegin();
+  auto bt = b.rbegin();
+  std::vector<Expr> ret;
+  while (at != a.rend() || bt != b.rend()) {
+    if (at == a.rend()) {
+      ret.push_back(*bt++);
+      continue;
+    }
+    if (bt == b.rend()) {
+      ret.push_back(*at++);
+      continue;
+    }
+    // TODO: if neither *at nor *bt is 1, ensure they are identical
+    // expressions.  Nb: `==` doesn't work since that simply produces a new
+    // Expr.
+    Expr dim = isOne(*at) ? *bt : *at;
+    ret.push_back(dim);
+    at++;
+    bt++;
+  }
+  std::reverse(ret.begin(), ret.end());
+  return ret;
+}
+
+template <typename... Args>
+static std::vector<Expr> broadcastShapes(
+    const std::vector<Expr>& a,
+    const std::vector<Expr>& b,
+    Args... args) {
+  return broadcastShapes(broadcastShapes(a, b), args...);
+}
+
+std::vector<Expr> TensorExprKernel::valueShape(const torch::jit::Value* v) {
+  auto it = tensors_.find(v->unique());
+  if (it == tensors_.end()) {
+    return {1};
+  }
+  return it->second.dims();
+}
+
 Tensor TensorExprKernel::ComputeOneOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&)> inner_expr) {
+  auto const& n = v->node();
+  auto const& shape = valueShape(n->inputs()[0]);
   return Compute(
-      name, texprDims(v), [this, v, inner_expr](const std::vector<Var>& axes) {
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<Var>& axes) {
         auto const& n = v->node();
         std::vector<Expr> inputs = {tensorOrConstant(n->inputs()[0], axes)};
 
@@ -114,8 +195,13 @@ Tensor TensorExprKernel::ComputeTwoOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&)> inner_expr) {
+  auto const& n = v->node();
+  auto const& shape =
+      broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
   return Compute(
-      name, texprDims(v), [this, v, inner_expr](const std::vector<Var>& axes) {
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<Var>& axes) {
         auto const& n = v->node();
         std::vector<Expr> inputs = {
             tensorOrConstant(n->inputs()[0], axes),
@@ -132,8 +218,13 @@ Tensor TensorExprKernel::ComputeTwoOperandWithAlpha(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&)> inner_expr) {
+  auto const& n = v->node();
+  auto const& shape =
+      broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
   return Compute(
-      name, texprDims(v), [this, v, inner_expr](const std::vector<Var>& axes) {
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<Var>& axes) {
         auto const& n = v->node();
         std::vector<Expr> inputs = {
             tensorOrConstant(n->inputs()[0], axes),
@@ -151,8 +242,15 @@ Tensor TensorExprKernel::ComputeThreeOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&, const Expr&)> inner_expr) {
+  auto const& n = v->node();
+  auto const& shape = broadcastShapes(
+      valueShape(n->inputs()[0]),
+      valueShape(n->inputs()[1]),
+      valueShape(n->inputs()[2]));
   return Compute(
-      name, texprDims(v), [this, v, inner_expr](const std::vector<Var>& axes) {
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<Var>& axes) {
         auto const& n = v->node();
         std::vector<Expr> inputs = {
             tensorOrConstant(n->inputs()[0], axes),
@@ -169,9 +267,18 @@ Tensor TensorExprKernel::ComputeThreeOperand(
 Tensor TensorExprKernel::ComputeFourOperand(
     const std::string& name,
     const torch::jit::Value* v,
-    std::function<Expr(const Expr&, const Expr&, const Expr&, const Expr&)> inner_expr) {
+    std::function<Expr(const Expr&, const Expr&, const Expr&, const Expr&)>
+        inner_expr) {
+  auto const& n = v->node();
+  auto const& shape = broadcastShapes(
+      valueShape(n->inputs()[0]),
+      valueShape(n->inputs()[1]),
+      valueShape(n->inputs()[2]),
+      valueShape(n->inputs()[3]));
   return Compute(
-      name, texprDims(v), [this, v, inner_expr](const std::vector<Var>& axes) {
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<Var>& axes) {
         auto const& n = v->node();
         std::vector<Expr> inputs = {
             tensorOrConstant(n->inputs()[0], axes),
@@ -646,10 +753,37 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       tensor_outputs_[i].ComputeInline();
       Tensor tensor = tensor_outputs[i];
       Var index = tensor.arg(0);
-      Var outer;
-      Var inner;
-      tensor.SplitWithMask(index, 512, true, &outer, &inner);
-      tensor.GPUExecConfig({outer}, {inner});
+      int loop_levels = GetTECudaPointwiseLoopLevels();
+      const int kDefaultLoopLevels = 2;
+      loop_levels = (loop_levels > 0) ? loop_levels : kDefaultLoopLevels;
+      int block_count = GetTECudaPointwiseBlockCount();
+      int block_size = GetTECudaPointwiseBlockSize();
+
+      if (loop_levels == 2) {
+	Var outer;
+	Var inner;
+	int kDefaultBlockSize = 512;
+	if (block_size < 0) {
+	  block_size = kDefaultBlockSize;
+	}
+	tensor.SplitWithMask(index, block_size, true, &outer, &inner);
+	tensor.GPUExecConfig({outer}, {inner});
+      } else if (loop_levels == 3) {
+	Var outer;
+	Var inner;
+	Var inner_1;
+	Var inner_2;
+	// TODO: change the number of microprocessors
+	const int kDefaultBlockCount = 1280;
+	const int kDefaultBlockSize = 256;
+	block_count = (block_count > 0) ? block_count : kDefaultBlockCount;
+	block_size = (block_size > 0) ? block_size : kDefaultBlockSize;
+	tensor.SplitWithMask(index, block_count * block_size, true, &outer, &inner);
+	tensor.SplitWithMask(inner, block_size, true, &inner_1, &inner_2);
+	tensor.GPUExecConfig({inner_1}, {inner_2});
+      } else {
+	throw std::runtime_error("Invalid loop-level: " + std::to_string(loop_levels));
+      }
     }
   }
 
@@ -779,22 +913,21 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   }
 }
 
-TensorExprKernel::TensorExprKernel(const Node* node) {
+TensorExprKernel::TensorExprKernel(const Graph& subgraph) {
   KernelScope kernel_scope(kernel_arena_);
-  auto subgraph = node->g(attr::Subgraph);
 
   // Bind inputs to buffers.
-  n_inputs_ = subgraph->inputs().size();
-  for (auto const& input : subgraph->inputs()) {
+  n_inputs_ = subgraph.inputs().size();
+  for (auto const& input : subgraph.inputs()) {
     bindInput(input);
   }
 
   // Bind nodes to tensor compute expressions.
-  for (auto const& n : subgraph->nodes()) {
+  for (auto const& n : subgraph.nodes()) {
     if (n->kind() == prim::Constant || n->kind() == prim::ListConstruct) {
       continue;
     } else {
-      for (torch::jit::Value* output : n->outputs()) {
+      for (auto const& output : n->outputs()) {
         if (output->hasUses()) {
           tensors_.emplace(output->unique(), ComputeValue(output));
         }
@@ -803,7 +936,7 @@ TensorExprKernel::TensorExprKernel(const Node* node) {
   }
 
   // Move output operands from `tensors_` to `tensor_outputs_`
-  for (const auto& output : subgraph->outputs()) {
+  for (const auto& output : subgraph.outputs()) {
     CHECK(tensors_.count(output->unique())) << "Output must be a tensor";
     tensor_outputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());

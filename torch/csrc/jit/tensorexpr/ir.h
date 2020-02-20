@@ -194,7 +194,9 @@ class CompareSelect : public ExprNode<CompareSelect> {
   CompareSelectOperation compare_op_;
   CompareSelect(const Expr& lhs, const Expr& rhs, CompareSelectOperation cmp_op)
       : ExprNodeBase(ToDtype<int>()),
-        lhs_(lhs), rhs_(rhs), compare_op_(cmp_op) {}
+        lhs_(lhs),
+        rhs_(rhs),
+        compare_op_(cmp_op) {}
 };
 
 // Encode an integer immediate value.
@@ -302,6 +304,33 @@ class Let : public ExprNode<Let> {
   Expr var_;
   Expr value_;
   Expr body_;
+};
+
+class LetStmt : public StmtNode<LetStmt> {
+ public:
+  const Var& var() const {
+    return var_;
+  }
+
+  const Expr& value() const {
+    return value_;
+  }
+
+  const Stmt& body() const {
+    return body_;
+  }
+
+  static Stmt make(const Var& var, const Expr& value, const Stmt& body) {
+    return Stmt(new LetStmt(var, value, body));
+  }
+
+ private:
+  LetStmt(const Var& var, const Expr& value, const Stmt& body)
+      : var_(var), value_(value), body_(body) {}
+
+  Var var_;
+  Expr value_;
+  Stmt body_;
 };
 
 class Block : public StmtNode<Block> {

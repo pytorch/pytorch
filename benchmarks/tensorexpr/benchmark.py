@@ -2,6 +2,7 @@ import argparse
 import itertools
 import framework
 import os
+import types
 import tensor_engine
 #import normalization
 import broadcast
@@ -31,7 +32,13 @@ Works only with Python3.\n A few examples:
                         help='the underlying tensor engine. only pt for now')
     parser.add_argument('--jit_mode', type=str, default='trace',
                         help='the jit mode to use: one of {trace, none}')
-    
+    parser.add_argument('--cuda_pointwise_loop_levels', type=int, default=None,
+                        help='num of loop levesl for Cuda pointwise operations: 2 or 3')
+    parser.add_argument('--cuda_pointwise_block_count', type=int, default=None,
+                        help='num of block for Cuda pointwise operations')
+    parser.add_argument('--cuda_pointwise_block_size', type=int, default=None,
+                        help='num of blocks for Cuda pointwise operations')
+
     args = parser.parse_args()
 
     def set_global_threads(num_threads):
@@ -73,7 +80,7 @@ Works only with Python3.\n A few examples:
                     continue
                 else:
                     raise ValueError('attempted to run an unsupported benchmark: %s' % (benchmark.desc()))
-            framework.run_benchmark(benchmark)
+            framework.run_benchmark(benchmark, args)
 
     benchmark_classes = framework.benchmark_classes
     if not args.benchmark_names:
@@ -116,7 +123,7 @@ Works only with Python3.\n A few examples:
                             pass
                     benchmark = bench_cls(*config)
                     benchmark.jit_mode = args.jit_mode
-                    framework.run_benchmark(benchmark)
+                    framework.run_benchmark(benchmark, args)
 
             if not match_class_name:
                 available_classes = ', '.join([bench_cls.module() for bench_cls in benchmark_classes])

@@ -338,13 +338,14 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
   auto lhs = this->value_;
   v->rhs().accept(this);
   auto rhs = this->value_;
+  auto type_used = v->lhs().dtype();
 
   llvm::Value* cmp_;
   llvm::Value* false_int_ = llvm::ConstantInt::getSigned(int32Ty_, 0);
   llvm::Value* true_int_ = llvm::ConstantInt::getSigned(int32Ty_, 1);
   CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-  if (v->dtype() == kInt32) {
+  if (type_used == kInt32) {
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
         cmp_ = irb_.CreateICmpEQ(lhs, rhs);
@@ -371,19 +372,22 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
   } else { // FP32
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
-        cmp_ = irb_.CreateFCmpUEQ(lhs, rhs);
+        cmp_ = irb_.CreateFCmpOEQ(lhs, rhs);
+        break;
+      case CompareSelectOperation::kNE:
+        cmp_ = irb_.CreateFCmpONE(lhs, rhs);
         break;
       case CompareSelectOperation::kGT:
-        cmp_ = irb_.CreateFCmpUGT(lhs, rhs);
+        cmp_ = irb_.CreateFCmpOGT(lhs, rhs);
         break;
       case CompareSelectOperation::kGE:
-        cmp_ = irb_.CreateFCmpUGE(lhs, rhs);
+        cmp_ = irb_.CreateFCmpOGE(lhs, rhs);
         break;
       case CompareSelectOperation::kLT:
-        cmp_ = irb_.CreateFCmpULT(lhs, rhs);
+        cmp_ = irb_.CreateFCmpOLT(lhs, rhs);
         break;
       case CompareSelectOperation::kLE:
-        cmp_ = irb_.CreateFCmpULE(lhs, rhs);
+        cmp_ = irb_.CreateFCmpOLE(lhs, rhs);
         break;
       default:
         // TODO: change to a proper error report
@@ -442,6 +446,25 @@ void LLVMCodeGen::visit(const Variable* v) {
 }
 
 void LLVMCodeGen::visit(const Let* v) {
+  const Variable* var = v->var().AsNode<Variable>();
+  CHECK(var != nullptr);
+  v->value().accept(this);
+  auto value = value_;
+  if (!varToVal_.count(var)) {
+    varToVal_.emplace(var, value);
+  } else {
+    throw std::runtime_error("var should not exist before");
+  }
+  v->body().accept(this);
+  if (varToVal_.count(var)) {
+    varToVal_.erase(var);
+  } else {
+    throw std::runtime_error("erasing var that doesn't exist");
+  }
+}
+
+// TODO: refactor this and merge with Let
+void LLVMCodeGen::visit(const LetStmt* v) {
   const Variable* var = v->var().AsNode<Variable>();
   CHECK(var != nullptr);
   v->value().accept(this);

@@ -574,7 +574,7 @@ def test_binary_ops():
         test_ne,
         test_div,
         test_eq,
-        test_fmod,
+        #test_fmod,
         test_sub,
         # test_remainder,
         test_pow,

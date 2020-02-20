@@ -76,6 +76,7 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   void visit(const Cast* v) override;
   void visit(const Variable* v) override;
   void visit(const Let* v) override;
+  void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
   void visit(const For* v) override;

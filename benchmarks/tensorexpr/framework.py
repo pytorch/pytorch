@@ -1,3 +1,4 @@
+import contextlib
 import numpy as np
 import os
 import time
@@ -24,7 +25,7 @@ class BenchmarkBase(object):
 
     def check(self):
         np.testing.assert_allclose(
-            self.reference(), self.numpy(self.forward(*self.inputs)), atol=1e-2)
+            self.reference(), self.numpy(self.compute()), atol=1e-2)
 
     def config(self):
         '''returns an array for the current benchmark configs
@@ -93,8 +94,43 @@ class Benchmark(BenchmarkBase):
             self.grad_variables.append(v)
         return v
 
+    def compute(self):
+        if self.bm_jit:
+            return self.bm_jit(*self.inputs)
+        else:
+            return self.forward(*self.inputs)
 
-def run_benchmark(benchmark):
+
+@contextlib.contextmanager
+def cuda_pointwise_context(loop_levels, block_count, block_size):
+    if loop_levels:
+        old_loop_levels = torch._C._jit_get_te_cuda_pointwise_loop_levels()
+        torch._C._jit_set_te_cuda_pointwise_loop_levels(loop_levels)
+    if block_count:
+        old_block_count = torch._C._jit_get_te_cuda_pointwise_block_count()
+        torch._C._jit_set_te_cuda_pointwise_block_count(block_count)
+    if block_size:
+        old_block_size = torch._C._jit_get_te_cuda_pointwise_block_size()
+        torch._C._jit_set_te_cuda_pointwise_block_size(block_size)
+
+    yield
+
+    if loop_levels:
+        torch._C._jit_set_te_cuda_pointwise_loop_levels(old_loop_levels)
+    if block_count:
+        torch._C._jit_set_te_cuda_pointwise_block_count(old_block_count)
+    if block_size:
+        torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
+    
+        
+def run_benchmark(benchmark, args):
+    with cuda_pointwise_context(args.cuda_pointwise_loop_levels,
+                                args.cuda_pointwise_block_count,
+                                args.cuda_pointwise_block_size):
+        run_benchmark_impl(benchmark)
+
+
+def run_benchmark_impl(benchmark):
     warmups = 10
     if benchmark.device == 'cuda':
         iters = 1000
@@ -102,24 +138,21 @@ def run_benchmark(benchmark):
         iters = 10
     engine = tensor_engine.get_engine()
 
-    if callable(getattr(benchmark, 'reference', None)):
-        benchmark.check()
-    else:
-        print(f"Warning: no reference result for {benchmark.module()}")
-
-    bm_jit = None
+    benchmark.bm_jit = None
     for i in range(warmups + iters):
         if i == warmups:
             if benchmark.device == 'cuda':
                 engine.sync_cuda()
             time_start = time.time()
 
-        if i == 0 and benchmark.jit_mode == 'trace':
-            bm_jit = torch.jit.trace(benchmark.forward, example_inputs=benchmark.inputs)
-        if bm_jit:
-            z = bm_jit(*benchmark.inputs)
-        else:
-            z = benchmark.forward(*benchmark.inputs)
+        if i == 0:
+            if benchmark.jit_mode == 'trace':
+                benchmark.bm_jit = torch.jit.trace(benchmark.forward, example_inputs=benchmark.inputs)
+            if callable(getattr(benchmark, 'reference', None)):
+                benchmark.check()
+            else:
+                print(f"Warning: no reference result for {benchmark.module()}")
+        z = benchmark.compute()
         if benchmark.mode == 'both':
             if benchmark.result_grad is None:
                 benchmark.result_grad = engine.rand_like(z)

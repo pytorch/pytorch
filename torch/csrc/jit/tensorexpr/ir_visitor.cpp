@@ -58,6 +58,12 @@ void IRVisitor::visit(const Let* v) {
   v->body().accept(this);
 }
 
+void IRVisitor::visit(const LetStmt* v) {
+  v->var().accept(this);
+  v->value().accept(this);
+  v->body().accept(this);
+}
+
 void IRVisitor::visit(const Ramp* v) {
   v->base().accept(this);
   v->stride().accept(this);

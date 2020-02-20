@@ -80,10 +80,10 @@ void testExprSimple02() {
 
   {
     // Compare to a reference loop structure structure.
-    Var x_outer("x.outer", kInt32);
-    Var x_inner("x.inner", kInt32);
+    Var x_outer("x_outer", kInt32);
+    Var x_inner("x_inner", kInt32);
     Var y("y", kInt32);
-    Var x_tail("x.tail", kInt32);
+    Var x_tail("x_tail", kInt32);
     Var f("f", kHandle);
     Expr x_1 = x_outer * 4 + x_inner;
     Stmt stmt1 = For::make(
