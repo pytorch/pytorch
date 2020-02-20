@@ -1410,7 +1410,7 @@ Example::
 add_docstr(torch.cummin,
            r"""
 cummin(input, dim, out=None) -> (Tensor, LongTensor)
-Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative maximum of
+Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative minimum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
 
@@ -6185,7 +6185,7 @@ Example::
 
 add_docstr(torch.unsqueeze,
            r"""
-unsqueeze(input, dim, out=None) -> Tensor
+unsqueeze(input, dim) -> Tensor
 
 Returns a new tensor with a dimension of size one inserted at the
 specified position.
@@ -6199,7 +6199,6 @@ applied at :attr:`dim` = ``dim + input.dim() + 1``.
 Args:
     {input}
     dim (int): the index at which to insert the singleton dimension
-    {out}
 
 Example::
 
