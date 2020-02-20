@@ -1,6 +1,9 @@
 import logging
 import os
 import sys
+import enum
+
+from typing import Callable, List, NamedTuple
 
 import torch.distributed.autograd as dist_autograd
 from torch.distributed import rpc
@@ -14,6 +17,12 @@ import torch.multiprocessing as multiprocessing
 
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+
+
+D_SPARSE = 3
+D_DENSE = 2
+D_OUT = 2
+NUM_EM_ROW = 3
 
 
 def init_logger():
@@ -46,65 +55,149 @@ def _remote_method(method, rref, *args, **kwargs):
     )
 
 
-class SimpleNet(nn.Module):
-    def __init__(self, d_in, d_out):
-        gLogger.info(f"Initing SimpleNet with {d_in} {d_out}")
-        super(SimpleNet, self).__init__()
-        self.net = nn.Linear(d_in, d_out)
-        self.relu = nn.ReLU()
+class FeatureSet(NamedTuple):
+    dense_features: torch.Tensor
+    sparse_features: torch.Tensor
 
-    def forward(self, input):
-        gLogger.info(f"Running SimpleNet.forward on: {input}")
-        return self.relu(self.net(input))
+
+class RemoteEM(nn.Module):
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
+        super(RemoteEM, self).__init__()
+        init_em = [1] * embedding_dim
+        self.em = nn.EmbeddingBag(
+            num_embeddings,
+            embedding_dim,
+            _weight=torch.Tensor([init_em] * num_embeddings),
+        )
+
+    def forward(self, input: torch.Tensor):
+        gLogger.info(f"Running RemoteEM.forward() on: {input}")
+        return self.em(input)
 
 
 class HybridModel(nn.Module):
-    @staticmethod
-    def identicalTransform(net, process_group_name, *args, **kwargs):
-        return net
-
-    def __init__(self, remote_net_rref, process_group_name=None):
-        ddp_transform = (
-            HybridModel.identicalTransform
-            if process_group_name is None
-            else DDP
-        )
+    def __init__(
+        self, remote_em_rref: rpc.RRef, process_group_name_for_ddp: str = None
+    ):
         super(HybridModel, self).__init__()
-        self.net1 = ddp_transform(
-            SimpleNet(4, 3), process_group_name, check_reduction=True
-        )
-        # self.rref = rpc.remote(remote_server, SimpleNet, args=(3, 2))
-        self.rref = remote_net_rref
-        # gLogger.info(f"Created a rref to a remote net: {self.rref}")
-        self.net2 = ddp_transform(
-            SimpleNet(2, 1), process_group_name, check_reduction=True
-        )
+        self.rref = remote_em_rref
+        self.local_net = nn.Linear(D_DENSE + D_SPARSE, D_OUT)
+        if process_group_name_for_ddp is not None:
+            gLogger.info(f"Use DDP for the local net.")
+            self.local_net = DDP(
+                self.local_net,
+                process_group=process_group_name,
+                check_reduction=True,
+            )
         gLogger.info(
             f"HybridModel has {len(list(self.parameters()))} groups of parameters."
         )
 
-    def forward(self, x):
-        gLogger.info(f"Running HybridModel.forward on {x}")
-        x = self.net1(x)
-        x = _remote_method(SimpleNet.forward, self.rref, x)
-        return self.net2(x)
+    def forward(self, input: FeatureSet):
+        gLogger.info(f"Running HybridModel.forward on {input}")
+        sparse = _remote_method(
+            RemoteEM.forward, self.rref, input.sparse_features
+        )
+        assert sparse.sharp[0] == input.dense_features.share[0]
+        x = torch.cat((input.dense_features, sparse), 1)
+        gLogger.info(f"Running the local net on joined feature: {x}")
+        return self.local_net(x)
+
+
+class RpcContext:
+    def __init__(
+        self, name: str, rank: int, world_size: int, group_name: str = ""
+    ):
+        self.group_name = group_name
+        self.name = name
+        gLogger.info(
+            f"Initing RPC group [{group_name}]: {name} {rank} out of {world_size} peers."
+        )
+        rpc.init_rpc(name=name, rank=rank, world_size=world_size)
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        gLogger.info(f"Shutting down RPC group [{self.group_name}] from process self.name.")
+        if exc_type is not None:
+            raise exc_value
+        rpc.shutdown()
+
+
+class DdpMode(enum.Enum):
+    # Don't apply DDP
+    NONE = enum.auto()
+    # Apply DDP to the top level nn.Module
+    OUTSIDE = enum.auto()
+    # Embed DDP inside the top level nn.Module
+    INSIDE = enum.auto()
 
 
 class TestDdpWithRpc(TestCase):
     TRAINER_NAME_TEMPLATE = "trainer:{:02d}"
     REMOTE_WORKER_NAME = "remote_worker"
     TRAINER_GROUP = "trainer_group"
-    NUM_TRAINERS = 3
+    NUM_TRAINERS = 1
+    MASTER_NAME = "master"
+
+    @classmethod
+    def _remote_worker(cls):
+        gLogger.info(f"Starting the remote worker...")
+        # This RPC group is only for the master and remote worker.
+        with RpcContext(
+            name=cls.REMOTE_WORKER_NAME,
+            rank=1,
+            world_size=2,
+            group_name="master/remote RPC",
+        ):
+            # They master will make a RPC and create a rref.
+            pass
+
+        with RpcContext(
+            name=cls.REMOTE_WORKER_NAME,
+            rank=cls.NUM_TRAINERS,
+            world_size=cls.NUM_TRAINERS + 1,
+            group_name="trainers/remote RPC",
+        ):
+            pass
+        gLogger.info(f"Exiting remote worker.")
+
+    def spawn_remote_worker(self):
+        remote_worker_process = multiprocessing.Process(
+            target=self._remote_worker, name=self.REMOTE_WORKER_NAME
+        )
+        remote_worker_process.start()
+        self.processes.append(remote_worker_process)
 
     def setUp(self):
         super(TestDdpWithRpc, self).setUp()
-        self.processes = []
+
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
         os.environ["MASTER_PORT"] = str(MASTER_PORT)
-        os.environ["WORLD_SIZE"] = str(self.NUM_TRAINERS + 1)
+        # os.environ["WORLD_SIZE"] = str(self.NUM_TRAINERS + 1)
+
+        self.processes: List[multiprocessing.Process] = []
+        self.remote_em_rref: rpc.RRef = None
+
+        self.spawn_remote_worker()
+
+        with RpcContext(
+            name=self.MASTER_NAME,
+            rank=0,
+            world_size=2,
+            group_name="master/remote RPC",
+        ):
+            gLogger.info(f"Creating a remote em.")
+            # Start the remote server first before creating a net rref on it.
+            self.remote_em_rref = rpc.remote(
+                self.REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
+            )
 
     def tearDown(self):
         super(TestDdpWithRpc, self).tearDown()
+        self.join_processes()
         for p in self.processes:
             p.terminate()
 
@@ -131,71 +224,71 @@ class TestDdpWithRpc(TestCase):
             # Run the distributed optimizer step.
             dist_optim.step()
 
-    def run_trainer(self, rank, remote_net_rref, func, use_ddp=True):
-        trainer_name = self.TRAINER_NAME_TEMPLATE.format(rank)
-        gLogger.info(f"Starting trainer: {trainer_name}...")
-        if use_ddp:
+    @classmethod
+    def _trainer(
+        cls,
+        remote_em_rref: rpc.RRef,
+        rank: int,
+        func: Callable[[nn.Module], None],
+        ddp_mode: DdpMode,
+    ):
+        trainer_name = cls.TRAINER_NAME_TEMPLATE.format(rank)
+        gLogger.info(f"Starting trainer {trainer_name}")
+        if ddp_mode in (DdpMode.OUTSIDE, DdpMode.INSIDE):
+            gLogger.info(f"Initing trainer process group for DDP.")
             dist.init_process_group(
                 # TODO: test other rpc backend.
                 "gloo",
-                group_name=self.TRAINER_GROUP,
+                group_name=cls.TRAINER_GROUP,
                 rank=rank,
-                world_size=self.NUM_TRAINERS,
+                world_size=cls.NUM_TRAINERS,
             )
+        gLogger.info(f"Creating a model on trainer #{rank}")
+        model = HybridModel(
+            remote_em_rref,
+            cls.TRAINER_GROUP if ddp_mode == DdpMode.INSIDE else None,
+        )
+        if ddp_mode == DdpMode.OUTSIDE:
+            gLogger.info(f"Apply DDP to the top level module. ")
+            model = DDP(model)
+
         # This group includes the remote worker
-        rpc.init_rpc(
-            name=trainer_name, rank=rank + 1, world_size=self.NUM_TRAINERS + 2
-        )
-        self.model = HybridModel(
-            remote_net_rref, self.TRAINER_GROUP if use_ddp else None
-        )
-        func()
-        rpc.shutdown()
-        dist.destroy_process_group()
+        with RpcContext(
+            name=trainer_name,
+            rank=rank,
+            world_size=cls.NUM_TRAINERS + 1,
+            group_name="trainers/remote RPC",
+        ):
+            func(model)
 
-    def run_remote_worker(self):
-        gLogger.info(f"Starting the remote worker...")
-        # This group includes the remote worker
-        rpc.init_rpc(
-            name=self.REMOTE_WORKER_NAME,
-            rank=self.NUM_TRAINERS + 1,
-            world_size=self.NUM_TRAINERS + 2,
-        )
-        gLogger.info(f"Remote server is shutting down rpc.")
-        rpc.shutdown()
+        if ddp_mode in (DdpMode.OUTSIDE, DdpMode.INSIDE):
+            gLogger.info(f"Destroying down trainer process group.")
+            dist.destroy_process_group()
 
-    def spawn_processes(self, func, use_ddp=True):
-
-        remote_worker_process = multiprocessing.Process(
-            target=self.run_remote_worker, name=self.REMOTE_WORKER_NAME
-        )
-        remote_worker_process.start()
-        self.processes.append(remote_worker_process)
-
-        gLogger.info(f"Initing RPC in the main process.")
-        # This group includes the remote worker and this main process
-        rpc.init_rpc(name="main", rank=0, world_size=self.NUM_TRAINERS + 2)
-        gLogger.info(f"Creating a remote net.")
-        # Start the remote server first before creating a net rref on it.
-        self.remote_net_rref = rpc.remote(
-            self.REMOTE_WORKER_NAME, SimpleNet, args=(3, 2)
-        )
+    def spawn_trainers(
+        self, func: Callable[[nn.Module], None], ddp_mode: DdpMode
+    ):
         for rank in range(self.NUM_TRAINERS):
             process = multiprocessing.Process(
-                target=self.run_trainer,
+                target=self._trainer,
                 name=self.TRAINER_NAME_TEMPLATE.format(rank),
-                args=(rank, self.remote_net_rref, func, use_ddp),
+                args=(self.remote_em_rref, rank, func, ddp_mode),
             )
             process.start()
             self.processes.append(process)
 
-    def test_rpc(self):
-        def run_one_forward():
-            gLogger.info(f"Forward pass on {self.model(torch.randn((2, 4)))}")
+    def test_no_ddp(self):
+        def run_one_forward(model: nn.Module):
+            n = 2
+            features = FeatureSet(
+                sparse_features=torch.LongTensor(
+                    [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1]]
+                ),
+                dense_features=torch.rannd((n, D_DENSE)),
+            )
+            gLogger.info(f"Forward pass on {model(torch.randn((2, 4)))}")
 
-        self.spawn_processes(run_one_forward, False)
-        rpc.shutdown()
-        self.join_processes()
+        self.spawn_trainers(run_one_forward, DdpMode.NONE)
 
 
 if __name__ == "__main__":
