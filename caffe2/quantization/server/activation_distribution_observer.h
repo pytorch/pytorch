@@ -141,6 +141,9 @@ class HistogramNetObserver final : public NetObserver {
       string op_filter = "",
       string delimiter = " ");
   ~HistogramNetObserver();
+  void DumpHistogramFile() {
+    DumpAndReset_(out_file_name_, true);
+  }
 
  private:
   void Stop() override;
@@ -217,5 +220,15 @@ class RegisterQuantizationParamsWithHistogramNetObserver final
       bool is_weight = false,
       const std::string& qparams_output_file_name = "");
 };
+
+#ifdef _MSC_VER
+struct tm* localtime_r(time_t* _clock, struct tm* _result) {
+  struct tm* candidate_result = localtime(_clock);
+  if (candidate_result) {
+    *(_result) = *candidate_result;
+  }
+  return candidate_result;
+}
+#endif
 
 } // namespace caffe2
