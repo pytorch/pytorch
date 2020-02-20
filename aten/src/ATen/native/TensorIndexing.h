@@ -499,9 +499,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
       Tensor result = self.unsqueeze(0);
       return dispatch_index(
         result,
-        std::move(std::vector<Tensor>{
-          impl::boolToIndexingTensor(result, index.boolean(), self_device)
-        })
+        std::vector<Tensor>{impl::boolToIndexingTensor(result, index.boolean(), self_device)}
       );
     }
   }
