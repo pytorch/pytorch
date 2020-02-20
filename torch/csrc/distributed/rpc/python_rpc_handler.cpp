@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
@@ -137,7 +138,7 @@ void PythonRpcHandler::handleException(const py::object& obj) {
 }
 
 void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
-  assert(PyGILState_Check()); // Ensure GIL is held
+  TORCH_CHECK(PyGILState_Check(), "GIL should be held");
   pyHandleException_(obj);
 }
 
