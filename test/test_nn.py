@@ -8159,9 +8159,9 @@ class TestNNInit(TestCase):
         for dims in [1, 2, 4]:
             input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50)
             mean = self._random_float(-3, 3)
-            std = self._random_float(1, 5)
-            a = mean - 2. * std
-            b = mean + 2. * std
+            std = self._random_float(.01, 1)
+            a = self._random_float(mean - 2 * std, mean)
+            b = self._random_float(mean, mean + 2 * std)
             init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
 
             assert self._is_trunc_normal(input_tensor, mean, std, a, b)
