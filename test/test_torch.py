@@ -8516,30 +8516,6 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
-    @onlyCPU
-    @dtypes(torch.bfloat16)
-    def test_std_var(self, device, dtype):
-        fns_to_test = [
-            ('var', torch.var, nan),
-            ('std', torch.std, nan)
-        ]
-
-        device = 'cpu'
-        shape = (2, 0, 4)
-        x = torch.randn(shape, device=device).bfloat16()
-        for item in fns_to_test:
-            name, fn, identity = item
-            self.assertEqual(torch.empty((2, 0), device=device, dtype=torch.bfloat16), fn(x, dim=2))
-            self.assertEqual(torch.empty((2, 0, 1), device=device, dtype=torch.bfloat16), fn(x, dim=2, keepdim=True))
-            check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else self.assertEqual)
-            check(torch.full((2, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1))
-            check(torch.full((2, 1, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1, keepdim=True))
-            try:
-                check(torch.full((), identity, device=device, dtype=torch.bfloat16), fn(x))
-            except TypeError as err:
-                # ignore if there is no allreduce.
-                self.assertTrue('dim' in str(err))
-
     @slowTest
     def test_argminmax_large_axis(self, device):
         # Regression test for gh-32863
