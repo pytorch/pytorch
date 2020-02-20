@@ -36,23 +36,36 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     ignored_mask = eq(g, target, ignore_index)
     nllloss = where(g, ignored_mask, zeros, nllloss)
 
-    if reduction == 'sum' or reduction == 'mean':
-        zeros = zeros_like(g, target)
-        ones = ones_like(g, target)
-        nb_elem = where(g, ignored_mask, zeros, ones)
-        if not sym_help._is_none(weight):
-            # take(weight, target)
-            weight_flattened = g.op('Reshape', weight, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
-            weight = index_select(g, weight_flattened, 0, target)
-            weight = reshape_as(g, weight, target)
+    if reduction == 'none':
+        return nllloss
 
-            nb_elem = g.op("Div", nb_elem, weight)
+    nllloss = g.op("ReduceSum", nllloss)
 
-        nb_elem = g.op("ReduceSum", nb_elem)
-        nllloss = g.op("ReduceSum", nllloss)
+    if reduction == 'sum':
+        return nllloss
 
-        if reduction == 'mean':
-            nllloss = g.op("Div", nllloss, nb_elem)
+    # reduction == 'mean'
+    # if reduction = mean, we want to divide the reduced sum of nllloss
+    # by the sum of the non ignored weights (if weights are available),
+    # or by the number of non ignored targets (if weights are not available);
+    # denominator acts like a mask of which indices to ignore and is then
+    # multiplied by weight to set the ignored ones to 0, before summing
+    # the values in it
+    zeros = zeros_like(g, target)
+    ones = ones_like(g, target)
+    denominator = where(g, ignored_mask, zeros, ones)
+    if not sym_help._is_none(weight):
+        # take(weight, target)
+        weight_flattened = g.op('Reshape', weight, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+        weight = index_select(g, weight_flattened, 0, target)
+        weight = reshape_as(g, weight, target)
+
+        denominator = g.op("Mul", denominator, weight)
+
+    # denominator is the number of elements if weights are not provided,
+    # otherwise it is the sum of the non ignored weights
+    denominator = g.op("ReduceSum", denominator)
+    nllloss = g.op("Div", nllloss, denominator)
     return nllloss
 
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
