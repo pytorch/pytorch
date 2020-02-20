@@ -18,7 +18,7 @@
 // of the A rows. The column offsets are needed for the asymmetric quantization
 // (affine quantization) of input matrix.
 // Note that in JIT mode we can think of a way to fuse col_offsets with bias.
-struct FBGEMM_API PackedLinearWeight : public LinearPackedParamsBase {
+struct CAFFE2_API PackedLinearWeight : public LinearPackedParamsBase {
   PackedLinearWeight(
       std::unique_ptr<fbgemm::PackBMatrix<int8_t>> w,
       c10::optional<at::Tensor> bias,
@@ -76,7 +76,7 @@ struct FBGEMM_API PackedLinearWeight : public LinearPackedParamsBase {
   at::Tensor apply_dynamic_impl(at::Tensor input);
 };
 
-struct FBGEMM_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
+struct CAFFE2_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   PackedLinearWeightFp16(
       std::unique_ptr<fbgemm::PackedGemmMatrixFP16> w,
       c10::optional<at::Tensor> bias)
@@ -121,7 +121,7 @@ struct FBGEMM_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
 };
 
 template <int kSpatialDim = 2>
-struct FBGEMM_API PackedConvWeight {
+struct CAFFE2_API PackedConvWeight {
   std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
   c10::optional<at::Tensor> bias;
   std::vector<int32_t> col_offsets;
