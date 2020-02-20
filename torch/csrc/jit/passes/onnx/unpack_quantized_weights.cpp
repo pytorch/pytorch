@@ -126,7 +126,7 @@ Node* CreateQuantizedBias(
 // caffe2::Int8GivenTensorFill nodes.
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict,
+    std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
     const std::string& unpack_fn) {
   Graph pattern_graph;
@@ -145,13 +145,10 @@ void unpackQuantizedWeightsHelper(
       throw std::runtime_error(
           "getValues: Quantized weight value not found amongst constant parameters.");
     }
-    at::Tensor packed_weight = itr->second;
-    auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
-    assert(op.has_value());
-    std::tuple<at::Tensor, c10::optional<at::Tensor>> result = callOpUnboxed<
-        std::tuple<at::Tensor, c10::optional<at::Tensor>>,
-        at::Tensor>(*op, packed_weight);
-    at::Tensor unpacked_weight = std::get<0>(result);
+    auto ser_tup = itr->second.toTuple();
+    at::Tensor unpacked_weight = ser_tup->elements()[0].toTensor();
+    c10::optional<at::Tensor> bias =
+        ser_tup->elements()[1].toOptional<at::Tensor>();
 
     // Permute weights
     std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
@@ -186,8 +183,8 @@ void unpackQuantizedWeightsHelper(
 
     // Add bias
     at::Tensor original_bias;
-    if (std::get<1>(result).has_value()) {
-      original_bias = std::get<1>(result).value();
+    if (bias.has_value()) {
+      original_bias = bias.value();
       original_bias.set_requires_grad(false);
     } else {
       // Caffe2 ops always expect bias tensor so if not present create empty
@@ -232,7 +229,7 @@ void unpackQuantizedWeightsHelper(
 }
 void UnpackQuantizedWeights(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict) {
+    std::map<std::string, IValue>& paramsDict) {
   std::string qlinear = R"(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
@@ -258,7 +255,7 @@ void UnpackQuantizedWeights(
 // conv op and add another permute from NHWC to NCHW after the conv op.
 void insertPermutesHelper(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict,
+    std::map<std::string, IValue>& paramsDict,
     const std::string& pattern) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
@@ -290,7 +287,7 @@ void insertPermutesHelper(
 
 void insertPermutes(
     std::shared_ptr<Graph>& graph,
-    std::map<std::string, at::Tensor>& paramsDict) {
+    std::map<std::string, IValue>& paramsDict) {
   std::string qconv = R"(
   graph(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point):
         %r = quantized::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups, %w_scale, %w_zero_point)

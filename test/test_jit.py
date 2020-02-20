@@ -5088,6 +5088,42 @@ def foo(x):
         for exp in [7, 3, 3, 1]:
             self.assertEqual(nt_loaded.pop(), exp)
 
+    def test_torchbind_lower_graph(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.qconfig = torch.quantization.default_qconfig
+                self.fc1 = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10).to(dtype=torch.float))
+
+            def forward(self, x):
+                x = self.fc1(x)
+                return x
+
+        qconfig = torch.quantization.default_qconfig
+        model = LinearModel()
+        model.qconfig = qconfig
+        model = torch.quantization.prepare(model)
+        model = torch.quantization.convert(model)
+
+        def export_to_onnx(model, input, input_names):
+            outputs = model(input)
+
+            traced = torch.jit.trace(model, input)
+            buf = io.BytesIO()
+            torch.jit.save(traced, buf)
+            buf.seek(0)
+
+            model = torch.jit.load(buf)
+            f = io.BytesIO()
+            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+                              operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
+
+        x_numpy = np.random.rand(1, 2, 5).astype(np.float32)
+        x = torch.from_numpy(x_numpy).to(dtype=torch.float)
+        outputs = model(x)
+        input_names = ["x"]
+        onnx_model = export_to_onnx(model, x, input_names)
+
     def test_jitter_bug(self):
         @torch.jit.script
         def fn2(input, kernel_size):
