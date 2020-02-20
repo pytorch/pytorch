@@ -78,7 +78,6 @@ bool isSimpleMap(Node* node) {
       "aten::sqrt(Tensor self) -> Tensor",
       "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
-      "aten::rand_like(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
       "aten::tanh(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
