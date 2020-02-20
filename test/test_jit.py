@@ -2222,6 +2222,14 @@ graph(%Ra, %Rb):
         example = torch.rand(3, 4)
         self.checkTrace(stuff, (example, example[0] + 1))
 
+    def test_list_from_tensor(self):
+        def f(x):
+            return list(x)
+
+        self.checkScript(f, (torch.randn(2, 2, 2),))
+        self.checkScript(f, (torch.empty(0),))
+        self.checkScript(f, (torch.empty(2, 0),))
+
     # TODO: implement
     @unittest.expectedFailure
     def test_output_unflatten(self):

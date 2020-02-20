@@ -2102,6 +2102,24 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::list(Tensor(a -> *) t) -> Tensor[]",
+        [](Stack& stack) {
+          at::Tensor t = pop(stack).toTensor();
+
+          if (t.size(0) == 0) {
+            push(stack, c10::List<at::Tensor>{});
+            return 0;
+          }
+
+          std::vector<at::Tensor> rows = t.split(1);
+          for (at::Tensor& r : rows) {
+            r = at::squeeze(r, 0);
+          }
+          push(stack, c10::List<at::Tensor>{rows});
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
 // Mutable ops for lists containing mutable types.
 #define CREATE_MUTABLE_LIST_OPS(decl_type, value_type)                        \
   Operator(                                                                   \
