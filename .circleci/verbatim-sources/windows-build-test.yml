@@ -6,13 +6,13 @@
             - setup
       - pytorch_windows_test:
           name: pytorch_windows_test1
-          test_name: pytorch_windows_test1
+          test_name: pytorch-windows-test1
           requires:
             - setup
             - pytorch_windows_build
       - pytorch_windows_test:
           name: pytorch_windows_test2
-          test_name: pytorch_windows_test2
+          test_name: pytorch-windows-test2
           requires:
             - setup
             - pytorch_windows_build

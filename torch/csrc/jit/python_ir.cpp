@@ -688,7 +688,10 @@ void initPythonIRBindings(PyObject* module_) {
           "isSubtypeOf",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
             return self->isSubtypeOf(other);
-          });
+          })
+      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
+        return self->cast<InterfaceType>() != nullptr;
+      });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
@@ -706,6 +709,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &StringType::get);
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
+      m, "PyObjectType")
+      .def_static("get", &PyObjectType::get);
   py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
       .def_static("get", &NoneType::get);
 

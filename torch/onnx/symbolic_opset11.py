@@ -137,7 +137,7 @@ upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
-def __interpolate(g, input, size, scale_factor, mode, align_corners, use_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
     mode = sym_help._maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -249,7 +249,12 @@ def _len(g, self):
 
 
 def __getitem_(g, self, i):
-    return g.op("SequenceAt", self, i)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        # SequenceAt requires that the input be a List of Tensors
+        return g.op("SequenceAt", self, i)
+    else:
+        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        return getitem(g, self, i)
 
 
 def append(g, self, tensor):
@@ -292,6 +297,8 @@ def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
+        if not stride:
+            stride = kernel_size
         if count_include_pad:
             input = g.op("Pad", input,
                          g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)), mode_s='constant')
@@ -519,7 +526,7 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
     # Input is always 4-D (N, C, H, W)
     # Calculate indices of sliding blocks along spatial dimension
     # Slide kernel over input each dim d:
-    # each dimension d ranges from 0 to input[d]+2×padding[d]−dilation[d]×(kernel_size[d]−1)
+    # each dimension d ranges from 0 to input[d]+2xpadding[d]-dilation[d]x(kernel_size[d]-1)
     # with steps = stride
 
     blocks_d = g.op("Add", input_d, g.op("Constant", value_t=torch.tensor(padding_d * 2)))

@@ -912,7 +912,7 @@ class MultiRNNCell(RNNCell):
     '''
     Multilayer RNN via the composition of RNNCell instance.
 
-    It is the resposibility of calling code to ensure the compatibility
+    It is the responsibility of calling code to ensure the compatibility
     of the successive layers in terms of input/output dimensiality, etc.,
     and to ensure that their blobs do not have name conflicts, typically by
     creating the cells with names that specify layer number.

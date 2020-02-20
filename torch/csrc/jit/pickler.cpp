@@ -18,23 +18,6 @@ Pickler::~Pickler() {
   flush();
 }
 
-const char* getClassName(PicklerClass cls) {
-  switch (cls) {
-    case PicklerClass::TENSOR:
-      return "build_tensor_from_id";
-    case PicklerClass::INTLIST:
-      return "build_intlist";
-    case PicklerClass::TENSORLIST:
-      return "build_tensorlist";
-    case PicklerClass::DOUBLELIST:
-      return "build_doublelist";
-    case PicklerClass::BOOLLIST:
-      return "build_boollist";
-    default:
-      AT_ERROR("Unknown class for pickler");
-  }
-}
-
 void Pickler::protocol() {
   push<PickleOpCode>(PickleOpCode::PROTO);
   push<uint8_t>(PROTOCOL_VERSION);
@@ -69,40 +52,42 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushBool(ivalue.toBool());
   } else if (ivalue.isString()) {
     pushString(ivalue.toStringRef());
-  } else if (ivalue.isGenericList()) {
-    pushGenericList(ivalue);
   } else if (ivalue.isGenericDict()) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
   } else if (ivalue.isIntList()) {
     pushSpecializedList(
-        ivalue, PicklerClass::INTLIST, [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntListRef()) {
+        ivalue, "build_intlist", [=](const IValue& ivalue) {
+          for (const int64_t item : ivalue.toIntVector()) {
             pushInt(item);
           }
         });
   } else if (ivalue.isTensorList()) {
     pushSpecializedList(
-        ivalue, PicklerClass::TENSORLIST, [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorListRef()) {
+        ivalue, "build_tensorlist", [=](const IValue& ivalue) {
+          for (const at::Tensor& item : ivalue.toTensorVector()) {
             pushIValue(item);
           }
         });
   } else if (ivalue.isDoubleList()) {
     pushSpecializedList(
-        ivalue, PicklerClass::DOUBLELIST, [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleListRef()) {
+        ivalue, "build_doublelist", [=](const IValue& ivalue) {
+          for (double item : ivalue.toDoubleVector()) {
             pushDouble(item);
           }
         });
   } else if (ivalue.isBoolList()) {
     pushSpecializedList(
-        ivalue, PicklerClass::BOOLLIST, [=](const IValue& ivalue) {
+        ivalue, "build_boollist", [=](const IValue& ivalue) {
           for (bool item : ivalue.toBoolList()) {
             pushBool(item);
           }
         });
+  // note: isList must be after isIntList and friends because
+  // isList is true for all lists.
+  } else if (ivalue.isList()) {
+    pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
@@ -130,6 +115,17 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::BUILD);
   } else if (ivalue.isDevice()) {
     pushDevice(ivalue);
+  } else if (ivalue.isCapsule()) {
+    std::stringstream err;
+    err << "Cannot serialize custom bound C++ class";
+    if (memorized_class_types_ && memorized_class_types_->size()) {
+      if (auto qualname = memorized_class_types_->back()->name()) {
+        err << " " << qualname->qualifiedName();
+      }
+    }
+    err << ". Please define serialization methods via torch::jit::pickle_ for "
+           "this class.";
+    AT_ERROR(err.str());
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -137,13 +133,14 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 
 void Pickler::pushDevice(const IValue& ivalue) {
   auto device = ivalue.toDevice();
-  auto it = memoized_devices_map_.find(device.str());
+  auto deviceStr = device.str();
+  auto it = memoized_devices_map_.find(deviceStr);
   if (it == memoized_devices_map_.end()) {
     pushGlobal("torch", "device");
-    pushString(ivalue.toDevice().str());
+    pushString(deviceStr);
     push<PickleOpCode>(PickleOpCode::TUPLE1);
     push<PickleOpCode>(PickleOpCode::REDUCE);
-    memoized_devices_map_[device.str()] = pushNextBinPut();
+    memoized_devices_map_[deviceStr] = pushNextBinPut();
   } else {
     pushBinGet(it->second);
   }
@@ -174,7 +171,7 @@ void Pickler::pushIValue(const IValue& ivalue) {
     pushIValueImpl(ivalue);
 
     memoized_ivalues_.push_back(ivalue);
-    memoized_ivalue_map_[ivalue.internalToPointer()] = pushNextBinPut();
+    memoized_ivalue_map_[ptr] = pushNextBinPut();
   } else {
     pushIValueImpl(ivalue);
   }
@@ -384,15 +381,11 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushClass(PicklerClass cls) {
-  pushGlobal("torch.jit._pickle", getClassName(cls));
-}
-
 void Pickler::pushSpecializedList(
     const IValue& ivalue,
-    PicklerClass cls,
+    const char* list_name,
     const std::function<void(const IValue&)>& item_pusher) {
-  pushClass(cls);
+  pushGlobal("torch.jit._pickle", list_name);
 
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
   // so wrap in a tuple
@@ -443,7 +436,7 @@ void Pickler::pushLong(const std::string& data) {
 }
 
 void Pickler::pushTensorReference(const IValue& ivalue) {
-  pushClass(PicklerClass::TENSOR);
+  pushGlobal("torch.jit._pickle", "build_tensor_from_id");
   tensor_table_->push_back(ivalue.toTensor());
   int64_t tensor_id = tensor_table_->size() - 1;
   // Reduce arguments are spread (e.g. `*args`) before calling the global,
@@ -491,7 +484,7 @@ size_t Pickler::pushNextBinPut() {
 }
 
 void Pickler::pushGenericList(const IValue& ivalue) {
-  auto list = ivalue.toGenericListRef();
+  auto list = ivalue.toListRef();
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
 
   push<PickleOpCode>(PickleOpCode::MARK);

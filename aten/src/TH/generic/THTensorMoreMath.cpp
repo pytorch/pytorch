@@ -6,6 +6,7 @@
 #include <ATen/CPUGenerator.h>
 #include <ATen/Utils.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
 
 ptrdiff_t THTensor_(numel)(THTensor *t)
 {
@@ -257,6 +258,7 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
       dimension);
 
@@ -274,6 +276,7 @@ void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 
 void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
       dimension);
 
@@ -425,13 +428,13 @@ accreal THTensor_(trace)(THTensor *t)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(t) == 1 || THTensor_(nDimensionLegacyNoScalars)(t) == 2, 1, "matrix or a vector expected");
+  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
 
-  if(THTensor_(nDimensionLegacyNoScalars)(t) == 1)
+  if(THTensor_(nDimension)(t) == 1)
   {
     scalar_t *t_data = t->data<scalar_t>();
-    int64_t t_stride_0 = THTensor_strideLegacyNoScalars(t, 0);
-    int64_t t_size = THTensor_sizeLegacyNoScalars(t, 0);
+    int64_t t_stride_0 = THTensor_(stride)(t, 0);
+    int64_t t_size = THTensor_(size)(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
     scalar_t *r__data;
     int64_t r__stride_0;
@@ -691,6 +694,7 @@ static void THTensor_(quicksortdescend)(scalar_t *arr, int64_t *idx, int64_t ele
 
 void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
 {
+  dimension = at::maybe_wrap_dim(dimension, t);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "invalid dimension %d",
       dimension);
 
@@ -1007,168 +1011,10 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-void THTensor_(std_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       // Uses Welford's algorithm for numeric stability
-                       accreal mean = 0;
-                       accreal M2 = 0;
-
-                       int64_t i;
-                       for (i = 0; i < t_size; i++)
-                       {
-                         scalar_t z = t_data[i*t_stride];
-                         scalar_t delta = z - mean;
-                         mean += delta / (i + 1);
-                         scalar_t delta2 = z - mean;
-                         M2 += delta * delta2;
-                       }
-
-                       if (!unbiased && t_size >= 2)
-                       {
-                         *r__data = TH_MATH_NAME(sqrt)(M2 / t_size);
-                       } else if (unbiased && t_size >= 2) {
-                         *r__data = TH_MATH_NAME(sqrt)(M2 / (t_size - 1));
-                       } else if (!unbiased && t_size == 1) {
-                         *r__data = 0;
-                       } else {
-                         *r__data = NAN;
-                       });
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-void THTensor_(var_single)(THTensor *r_, THTensor *t, int dimension, bool unbiased, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       // Uses Welford's algorithm for numeric stability
-                       accreal mean = 0;
-                       accreal M2 = 0;
-
-                       int64_t i;
-                       for (i = 0; i < t_size; i++)
-                       {
-                         scalar_t z = t_data[i*t_stride];
-                         scalar_t delta = z - mean;
-                         mean += delta / (i + 1);
-                         scalar_t delta2 = z - mean;
-                         M2 += delta * delta2;
-                       }
-
-                       if (!unbiased && t_size >= 2)
-                       {
-                         *r__data = M2 / t_size;
-                       } else if (unbiased && t_size >= 2) {
-                         *r__data = M2 / (t_size - 1);
-                       } else if (!unbiased && t_size == 1) {
-                         *r__data = 0;
-                       } else {
-                         *r__data = NAN;
-                       });
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-void THTensor_(norm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, int keepdim)
-{
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyAll)(t), 3, "invalid dimension %d",
-      dimension);
-
-  THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimensionLegacyAll)(t), dimension, keepdim);
-  std::vector<int64_t> dim = THTensor_sizesLegacyNoScalars(t);
-  dim[dimension] = 1;
-  THTensor_(resize)(r_, dim, {});
-
-  #define DIM_REDUCE(reduce, transform, init) \
-    TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,      \
-                         accreal sum = init;                \
-                         int64_t i;                         \
-                         for(i = 0; i < t_size; i++) {      \
-                           (reduce);                        \
-                         }                                  \
-                         (transform);)                      \
-
-  if(value == 0) {
-    DIM_REDUCE(sum += t_data[i*t_stride] != 0.0,
-               *r__data = sum, 0);
-  } else if (value == 1) {
-    DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride]),
-               *r__data = sum, 0);
-  } else if (value == 2) {
-    DIM_REDUCE(sum += t_data[i*t_stride] * t_data[i*t_stride],
-               *r__data = TH_MATH_NAME(sqrt)(sum), 0);
-  } else if (value == 3) {
-    DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride] * t_data[i*t_stride] * t_data[i*t_stride]),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3), 0);
-  } else if (value == INFINITY) {
-    DIM_REDUCE(sum = THMax(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-               *r__data = sum, 0);
-  } else if (value == -INFINITY) {
-    DIM_REDUCE(sum = THMin(sum, TH_MATH_NAME(fabs)(t_data[i*t_stride])),
-               *r__data = sum, INFINITY);
-  } else {
-    DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
-               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value), 0);
-  }
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-  #undef DIM_REDUCE
-}
-
-accreal THTensor_(normall)(THTensor *tensor, scalar_t value)
-{
-  accreal sum = 0;
-  if(value == 0) {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum += *tensor_data != 0.0;);
-    return sum;
-  } else if(value == 1) {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum += TH_MATH_NAME(fabs)(*tensor_data););
-    return sum;
-  } else if(value == 2) {
-    TH_TENSOR_APPLY(scalar_t, tensor, accreal z = *tensor_data; sum += z*z;);
-    return sqrt(sum);
-  } else if(value == 3) {
-    TH_TENSOR_APPLY(scalar_t, tensor, accreal z = *tensor_data; sum += std::abs(z*z*z););
-    return TH_MATH_NAME(pow)(sum, 1.0/3);
-  } else if(value == INFINITY) {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data)););
-    return sum;
-  } else if(value == -INFINITY) {
-    sum = INFINITY;
-    TH_TENSOR_APPLY(scalar_t, tensor, sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data)););
-    return sum;
-  } else {
-    TH_TENSOR_APPLY(scalar_t, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
-    return TH_MATH_NAME(pow)(sum, 1.0/value);
-  }
-}
-
 void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimension, scalar_t maxnorm)
 {
   THTensor *rowR, *rowS;
-
+  dimension = at::maybe_wrap_dim(dimension, src);
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(src), 3, "invalid dimension %d",
       dimension);
   THArgCheck(value > 0, 2, "non-positive-norm not supported");

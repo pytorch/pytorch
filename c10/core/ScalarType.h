@@ -2,6 +2,7 @@
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Half.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Optional.h>
 #include <c10/util/typeid.h>
 
@@ -117,6 +118,24 @@ struct ScalarTypeToCPPType<c10::ScalarType::Long> {
   // TODO: remove once the bug is fixed.
   static type t;
 };
+
+// These are used to map C++ types to ScalarTypes.
+
+template <typename>
+struct CPPTypeToScalarType {
+  constexpr static c10::ScalarType value = c10::ScalarType::Undefined;
+};
+
+#define SPECIALIZE_CPPTypeToScalarType(cpp_type, scalar_type)                  \
+  template <>                                                                  \
+  struct CPPTypeToScalarType<cpp_type> {                                       \
+    constexpr static c10::ScalarType value = c10::ScalarType::scalar_type;     \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CPPTypeToScalarType)
+
+#undef SPECIALIZE_CPPTypeToScalarType
+
 }
 
 #define AT_FORALL_SCALAR_TYPES(_) \
@@ -253,7 +272,7 @@ static inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-[[deprecated("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")]]
+C10_DEPRECATED_MESSAGE("isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
 static inline bool isIntegralType(ScalarType t) {
   return (
       t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||

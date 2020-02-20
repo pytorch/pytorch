@@ -26,19 +26,19 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
 }
 
-[[deprecated("passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, " \
-                       "pass an at::ScalarType instead")]]
+C10_DEPRECATED_MESSAGE("passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, " \
+                       "pass an at::ScalarType instead")
 inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties &t) {
   return t.scalarType();
 }
 
-[[deprecated("AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, " \
-                       "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")]]
+C10_DEPRECATED_MESSAGE("AT_DISPATCH_ALL_TYPES_AND_HALF is deprecated, " \
+                       "use AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, ...) instead")
 inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF() {}
 
-[[deprecated("AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX is deprecated, "            \
+C10_DEPRECATED_MESSAGE("AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX is deprecated, "            \
                        "use AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, ...) " \
-                       "instead")]]
+                       "instead")
 inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 
 }
@@ -133,6 +133,23 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                     \
       AT_PRIVATE_CASE_TYPE(SCALARTYPE,                                                                    \
           decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE>::t), __VA_ARGS__)                           \
+      default:                                                                                            \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                   \
+    }                                                                                                     \
+  }()
+
+#define AT_DISPATCH_FLOATING_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                                       \
+  [&] {                                                                                                   \
+    const auto& the_type = TYPE;                                                                          \
+    /* don't use TYPE again in case it is an expensive or side-effect op */                               \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                                                 \
+    switch (_st) {                                                                                        \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)                                   \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)                                     \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE1,                                                                    \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE1>::t), __VA_ARGS__)                           \
+      AT_PRIVATE_CASE_TYPE(SCALARTYPE2,                                                                    \
+          decltype(c10::impl::ScalarTypeToCPPType<SCALARTYPE2>::t), __VA_ARGS__)                           \
       default:                                                                                            \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");                                   \
     }                                                                                                     \

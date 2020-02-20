@@ -6,6 +6,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dimname.h>
 
+#include <torch/csrc/jit/script/object.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>
@@ -236,20 +237,13 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
-TORCH_API void addInputs(Node* n, const char* name, at::IntArrayRef value);
+TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    at::TensorList value,
+    ArrayRef<at::Tensor> value,
     bool allow_undefined = false);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    const ArrayRef<double>& value);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<double>& value);
+TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
@@ -279,10 +273,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(Node* n, const char* name, at::Generator* value);
 
 template <typename T>
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    const std::vector<T>& value);
+TORCH_API void addInputs(Node* n, const char* name, ArrayRef<T> value);
 
 template <typename K, typename V>
 TORCH_API void addInputs(
@@ -290,8 +281,15 @@ TORCH_API void addInputs(
     const char* name,
     const std::unordered_map<K, V>& value);
 
+inline void addInputs(
+    Node* n,
+    const char* name,
+    const std::vector<bool>& value) {
+  AT_ERROR("Tracing a list of bool type is currently not supported!");
+}
+
 template <typename T>
-void addInputs(Node* n, const char* name, const std::vector<T>& value) {
+void addInputs(Node* n, const char* name, ArrayRef<T> value) {
   AT_ERROR("Tracing a list of arbitrary type is currently not supported!");
 }
 template <typename K, typename V>
@@ -308,6 +306,11 @@ void addInputs(Node* n, const char* name, std::array<bool, N> value) {
       "Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj);
+
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const at::Tensor& tensor);
@@ -316,6 +319,7 @@ template <
     typename T,
     typename = torch::enable_if_t<
         (!std::is_convertible<torch::decay_t<T>, at::TensorList>::value &&
+         !std::is_convertible<torch::decay_t<T>, c10::List<at::Tensor>>::value &&
          !std::is_convertible<torch::decay_t<T>, at::Tensor>::value)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
@@ -326,6 +330,7 @@ void addOutput(Node* node, T&&) {
 TORCH_API void addOutput(Node* node, const at::Tensor& tensor);
 TORCH_API void setOutput(Value* value, const at::Tensor& output);
 TORCH_API void addOutput(Node* node, const std::vector<at::Tensor>& list);
+TORCH_API void addOutput(Node* node, const c10::List<at::Tensor>& list);
 
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,

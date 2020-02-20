@@ -436,12 +436,14 @@ class CosineAnnealingLR(_LRScheduler):
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
-        \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 +
-        \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
-        T_{cur} \neq (2k+1)T_{max};\\
-        \eta_{t+1} = \eta_{t} + (\eta_{max} - \eta_{min})\frac{1 -
-        \cos(\frac{1}{T_{max}}\pi)}{2},
-        T_{cur} = (2k+1)T_{max}.\\
+        \begin{aligned}
+            \eta_t & = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1
+            + \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right),
+            & T_{cur} \neq (2k+1)T_{max}; \\
+            \eta_{t+1} & = \eta_{t} + \frac{1}{2}(\eta_{max} - \eta_{min})
+            \left(1 - \cos\left(\frac{1}{T_{max}}\pi\right)\right),
+            & T_{cur} = (2k+1)T_{max}.
+        \end{aligned}
 
     When last_epoch=-1, sets initial lr as lr. Notice that because the schedule
     is defined recursively, the learning rate can be simultaneously modified
@@ -946,12 +948,12 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
             >>> for epoch in range(20):
             >>>     for i, sample in enumerate(dataloader):
             >>>         inputs, labels = sample['inputs'], sample['labels']
-            >>>         scheduler.step(epoch + i / iters)
             >>>         optimizer.zero_grad()
             >>>         outputs = net(inputs)
             >>>         loss = criterion(outputs, labels)
             >>>         loss.backward()
             >>>         optimizer.step()
+            >>>         scheduler.step(epoch + i / iters)
 
         This function can be called in an interleaved way.
 

@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -93,7 +94,9 @@ bool loadPythonClasses() {
 }
 } // anonymous namespace
 
+#if !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
 TORCH_API void runJITCPPTests(bool runCuda);
+#endif
 
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -134,7 +137,9 @@ void initJITBindings(PyObject* module) {
           },
           pybind11::return_value_policy::move)
       .def("_jit_pass_onnx_scalar_type_analysis", ScalarTypeAnalysisForONNX)
-      .def("_jit_pass_onnx_prepare_inplace_ops_for_onnx", PrepareInplaceOpsForONNX)
+      .def(
+          "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
+          PrepareInplaceOpsForONNX)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -280,6 +285,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_create_autodiff_subgraphs",
           [](std::shared_ptr<Graph> graph) { CreateAutodiffSubgraphs(graph); })
+#if defined(BUILDING_TESTS) && !defined(_WIN32) && !defined(__HIP_PLATFORM_HCC__)
       .def(
           "_jit_run_cpp_tests",
           [](bool runCuda) {
@@ -291,6 +297,11 @@ void initJITBindings(PyObject* module) {
             return runJITCPPTests(runCuda);
           },
           py::arg("run_cuda"))
+      .def("_jit_has_cpp_tests", []() { return true; })
+#else
+      .def("_jit_run_cpp_tests", []() { throw std::exception(); })
+      .def("_jit_has_cpp_tests", []() { return false; })
+#endif
       .def(
           "_jit_flatten",
           [](py::handle& obj) {
@@ -305,6 +316,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
+      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
       .def("_jit_pass_canonicalize_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -341,6 +353,20 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def(
+          "_jit_set_num_profiled_runs",
+          [](size_t num) {
+            size_t old_num = getNumProfiledRuns();
+            getNumProfiledRuns() = num;
+            return old_num;
+          })
+      .def(
+          "_jit_set_bailout_depth",
+          [](size_t depth) {
+            size_t old_depth = getBailoutDepth();
+            getBailoutDepth() = depth;
+            return old_depth;
+          })
+      .def(
           "_jit_set_inline_everything_mode",
           [](bool enabled) { script::getInlineEverythingMode() = enabled; })
       .def(
@@ -360,20 +386,22 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, std::vector<at::Tensor> inps) {
             return debugGetFusedKernelCode(g, inps);
           })
-      .def("_jit_pass_onnx_unpack_quantized_weights",
+      .def(
+          "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                UnpackQuantizedWeights(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move)
-      .def("_jit_pass_onnx_quantization_insert_permutes",
+             std::map<std::string, at::Tensor>& paramsDict) {
+            UnpackQuantizedWeights(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_quantization_insert_permutes",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, at::Tensor>& paramsDict){
-                insertPermutes(graph, paramsDict);
-                return paramsDict;
-             },
-             pybind11::return_value_policy::move);
+             std::map<std::string, at::Tensor>& paramsDict) {
+            insertPermutes(graph, paramsDict);
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
@@ -384,13 +412,20 @@ void initJITBindings(PyObject* module) {
       });
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ArgumentSpec>(m, "ArgumentSpec");
-  py::class_<Code>(m, "Code").def("grad_executor_states", [](Code& c) {
-    std::vector<GraphExecutorState> states;
-    for (auto& e : c.grad_executors()) {
-      states.emplace_back(e->getDebugState());
-    }
-    return states;
-  });
+  py::class_<Code>(m, "Code")
+      .def(
+          "grad_executor_states",
+          [](Code& c) {
+            std::vector<GraphExecutorState> states;
+            for (auto& e : c.grad_executors()) {
+              states.emplace_back(e->getDebugState());
+            }
+            return states;
+          })
+      .def("num_bailouts", [](Code& c) { return c.num_bailouts(); })
+      .def("request_bailout", [](Code& c, size_t index) {
+        c.request_bailout(index);
+      });
 
   py::class_<ExecutionPlan>(m, "ExecutionPlan")
       .def_property_readonly("graph", [](ExecutionPlan& s) { return s.graph; })
@@ -451,19 +486,50 @@ void initJITBindings(PyObject* module) {
     BufferAdapter(const py::object& buffer) : buffer_(buffer) {
       // Jump to the end of the buffer to get its size
       auto current = buffer.attr("tell")();
+      start_offset_ = py::cast<size_t>(current);
       buffer.attr("seek")(current, py::module::import("os").attr("SEEK_END"));
-      size_ = py::cast<size_t>(buffer.attr("tell")());
+      size_ = py::cast<size_t>(buffer.attr("tell")()) - start_offset_;
       buffer.attr("seek")(current);
+
+      // If we can read directly into a buffer, do that instead of an extra copy
+      use_readinto_ = py::hasattr(buffer, "readinto");
     }
 
     size_t size() const override {
       return size_;
     }
 
+    THPObjectPtr getMemview(void* buf, size_t n) const {
+#if PY_MAJOR_VERSION >= 3
+      THPObjectPtr memview(PyMemoryView_FromMemory(
+          reinterpret_cast<char*>(buf), n, PyBUF_WRITE));
+#else
+      THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, n));
+#endif
+      if (!memview) {
+        throw python_error();
+      }
+      return memview;
+    }
+
     size_t read(uint64_t pos, void* buf, size_t n, const char* what)
         const override {
-      // Seek to desired position
-      buffer_.attr("seek")(pos);
+      // Seek to desired position (NB: this has to be a Py_ssize_t or Python
+      // throws a weird error)
+      Py_ssize_t absolute_pos = start_offset_ + pos;
+      buffer_.attr("seek")(absolute_pos);
+
+      if (use_readinto_) {
+        auto memview = getMemview(buf, n);
+        auto res =
+            PyObject_CallMethod(buffer_.ptr(), "readinto", "O", memview.get());
+        if (res) {
+          int i = PyInt_AsLong(res);
+          if (i > 0) {
+            return i;
+          }
+        }
+      }
 
       // Read bytes into `buf` from the buffer
       std::string bytes = py::cast<std::string>(buffer_.attr("read")(n));
@@ -476,6 +542,8 @@ void initJITBindings(PyObject* module) {
 
     py::object buffer_;
     size_t size_;
+    size_t start_offset_;
+    bool use_readinto_;
   };
 
   py::class_<PyTorchStreamReader>(m, "PyTorchFileReader")
@@ -620,7 +688,7 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup);
 
-        // Convert the output of the user-supplied funciton to IValue. The type
+        // Convert the output of the user-supplied function to IValue. The type
         // information of this IValue is used both to record the correct type in
         // the trace.
         output_ivalue = toTypeInferredIValue(py_func_output);

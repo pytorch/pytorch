@@ -18,7 +18,12 @@ from torch._C import parse_schema
 # Whitelist entries can be removed after the date listed on them passes.
 white_list = [
     ('c10_experimental', datetime.date(2222, 1, 1)),
-    ('prim::AutogradAnyNonZero', datetime.date(2020, 2, 1)),
+    # We export some functions and classes for test_jit.py directly from libtorch.so,
+    # it's not important to have BC for them
+    ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('split_with_sizes', datetime.date(2020, 2, 1)),
+    ('linear_relu_dynamic_fp16', datetime.date(2020, 2, 5)),
+    ('aten::join', datetime.date(2020, 2, 10)),
 ]
 
 
@@ -80,7 +85,7 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "__torch__.torch.classes" in line:
+            if "torch.classes" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
                 continue
             s = parse_schema(line.strip())

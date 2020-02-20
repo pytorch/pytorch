@@ -18,7 +18,7 @@ class CAFFE2_API SignalHandler {
     STOP
   };
 
-  // Contructor. Specify what action to take when a signal is received.
+  // Constructor. Specify what action to take when a signal is received.
   SignalHandler(Action SIGINT_action,
                 Action SIGHUP_action);
   ~SignalHandler();

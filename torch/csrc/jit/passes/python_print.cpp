@@ -188,7 +188,7 @@ struct PythonPrintImpl {
   //     and would appear in the same order when the expression tree is
   //     reparsed.
   // The last case can be checked
-  // becuase when we emit a expresion tree in the parser,
+  // because when we emit a expresion tree in the parser,
   // we do a left-to-right postorder traversal of the expression tree (emit
   // children, then emit op). The reverse of this is a right-to-left preorder
   // traversal of the tree. By doing a right-to-left preorder traversal of the
@@ -777,48 +777,22 @@ struct PythonPrintImpl {
     }
   }
 
-  void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
-      const IValue& the_list) {
-    if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
-    } else {
-      stmt << the_list;
-    }
-  }
-
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
-    std::stringstream ss;
-    if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if (v.isString()) {
-      c10::printQuotedString(ss, v.toStringRef());
-    } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      c10::printQuotedString(ss, device_stream.str());
-      ss << ")";
-    } else if (v.isTensorList()) {
-      ss << "[";
-      const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-        delim = ", ";
+    const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isTensor()) {
+        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+        return true;
       }
-      ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
-    } else {
-      ss << v;
-    }
+      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+        // print the namedtuple constructor and let rest of tuple printing
+        // continue
+        ss << v.type()->expect<TupleType>()->python_str();
+      }
+      return false;
+    };
+
+    std::stringstream ss;
+    v.repr(ss, customFormatter);
     stmt << ss.str();
   }
 
@@ -937,32 +911,38 @@ struct PythonPrintImpl {
       case prim::ListConstruct: {
         ListTypePtr list_type = node->output()->type()->expect<ListType>();
         TypePtr elem_type = list_type->getElementType();
-        if (!elem_type->isSubtypeOf(TensorType::get())) {
-          // when the list is empty and is not a list of tensors,
-          // we need to annotate it, otherwise it won't be possible
-          // to infer the type on import
-          if (node->inputs().size() == 0) {
-            stmt << "annotate(" << node->output()->type()->python_str()
-                 << ", [])";
-          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-            stmt << "annotate(" << node->output()->type()->python_str() << ",";
-            printValueList(stmt, node->inputs(), "[", "]");
-            stmt << ")";
-          } else {
-            printValueList(stmt, node->inputs(), "[", "]");
-          }
+        // Empty lists must be annotated with their type so the compiler knows
+        // what type is supposed to be inside them
+        if (node->inputs().size() == 0) {
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", [])";
+          // If we can't infer the type based on what's inside, explicitly
+          // annotate it to disambiguate.
+          // This happens for List[Tensor] vs. List[Optional[Tensor]]
+        } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printValueList(stmt, node->inputs(), "[", "]");
+          stmt << ")";
+          // Otherwise just print a list
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        bool is_default_type =
-            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
-        if (node->inputs().size() == 0 && !is_default_type) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
+        // There are cases where we must annotate the dict with an explicit type
+        // to help the compiler out:
+        //   - the dict is empty
+        //   - the dict has potentially ambiguous element types
+        //       (e.g. Tensor vs. Optional[Tensor])
+        if (
+            node->inputs().size() == 0 ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printDict(stmt, node->inputs());
+          stmt << ")";
+          // Otherwise just print a dict
         } else {
           printDict(stmt, node->inputs());
         }
@@ -1214,59 +1194,79 @@ struct PythonPrintImpl {
         deps_table_(deps_table),
         enforce_importable_(enforce_importable) {}
 
-  void printModuleMetadata(const ClassTypePtr& moduleType) {
-    std::vector<std::string> params;
-    size_t numAttrs = moduleType->numAttributes();
-    // Populate the __parameters__ field. This tells the importer which
-    // attributes are parameters.
-    for (size_t i = 0; i < numAttrs; i++) {
-      if (moduleType->is_parameter(i)) {
-        params.push_back(moduleType->getAttributeName(i));
-      }
+  void printClass(const ClassTypePtr& classType) {
+    bool is_module = classType->is_module();
+    body_ << "class " << classType->name()->name();
+    if (is_module) {
+      body_ << "(Module)";
     }
-    indent();
-    body_ << "__parameters__ = [";
-    for (const auto& param : params) {
-      body_ << "\"" << param << "\", ";
-    }
-    body_ << "]\n";
 
-    for (size_t i = 0; i < numAttrs; i++) {
-      const auto& name = moduleType->getAttributeName(i);
-      const auto& type = moduleType->getAttribute(i);
-      registerClassDependencies(type);
-
-      indent();
-
-      // Handling for when the attribute name is not a valid Python identifier.
-      // This happens for, e.g. ModuleList.
-      if (!isValidIdentifier(name)) {
-        if (i == 0) {
-          // Initialize the annotations dict if necessary.
-          body_ << "__annotations__ = []\n";
-          indent();
+    body_ << ":\n";
+    {
+      const auto guard = WithIndented();
+      size_t numAttrs = classType->numAttributes();
+      // For modules, we need to print special information about the module's
+      // attributes and parameters.
+      if (is_module) {
+        std::vector<std::string> params;
+        // Populate the __parameters__ field. This tells the importer which
+        // attributes are parameters.
+        for (size_t i = 0; i < numAttrs; i++) {
+          if (classType->is_parameter(i)) {
+            params.push_back(classType->getAttributeName(i));
+          }
         }
-        // Print out a direct manipulation of the annotations dict, like:
-        //   __annotations__["0"] = SomeType
-        body_ << "__annotations__["
-              << "\"" << name << "\"] = " << type->python_str() << "\n";
-      } else {
-        // Otherwise: just emit a python 3 attribute annotation, like:
-        //   foo : SomeType
-        body_ << name << " : " << type->python_str() << "\n";
+        indent();
+        body_ << "__parameters__ = [";
+        for (const auto& param : params) {
+          body_ << "\"" << param << "\", ";
+        }
+        body_ << "]\n";
       }
-    }
 
-    size_t numConstants = moduleType->numConstants();
-    for (size_t i = 0; i < numConstants; i++) {
-      const auto& name = moduleType->getConstantName(i);
-      const auto& v = moduleType->getConstant(name).value();
+      for (size_t i = 0; i < numAttrs; i++) {
+        const auto& name = classType->getAttributeName(i);
+        const auto& type = classType->getAttribute(i);
+        registerClassDependencies(type);
 
-      indent();
-      body_ << name << " : " << "Final[" << v.type()->python_str() << "] = ";
-      auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
-      printConstant(*ss, v);
-      body_ << ss->str() << "\n";
+        indent();
+
+        // Handling for when the attribute name is not a valid Python
+        // identifier. This happens for, e.g. ModuleList.
+        if (!isValidIdentifier(name)) {
+          if (i == 0) {
+            // Initialize the annotations dict if necessary.
+            body_ << "__annotations__ = []\n";
+            indent();
+          }
+          // Print out a direct manipulation of the annotations dict, like:
+          //   __annotations__["0"] = SomeType
+          body_ << "__annotations__["
+                << "\"" << name << "\"] = " << type->python_str() << "\n";
+        } else {
+          // Otherwise: just emit a python 3 attribute annotation, like:
+          //   foo : SomeType
+          body_ << name << " : " << type->python_str() << "\n";
+        }
+      }
+
+      size_t numConstants = classType->numConstants();
+      for (size_t i = 0; i < numConstants; i++) {
+        const auto& name = classType->getConstantName(i);
+        IValue v = classType->getConstant(i);
+
+        indent();
+        body_ << name << " : "
+              << "Final[" << v.type()->python_str() << "] = ";
+        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        printConstant(*ss, v);
+        body_ << ss->str() << "\n";
+      }
+
+      // TODO fields
+      for (auto& method : classType->methods()) {
+        printFunction(*method);
+      }
     }
   }
 
@@ -1274,25 +1274,7 @@ struct PythonPrintImpl {
     if (auto functionType = type->cast<FunctionType>()) {
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
-      bool is_module = classType->is_module();
-      body_ << "class " << classType->name()->name();
-      if (is_module) {
-        body_ << "(Module)";
-      }
-
-      body_ << ":\n";
-      {
-        const auto guard = WithIndented();
-        // For modules, we need to print special information about the module's
-        // attributes and parameters.
-        if (is_module) {
-          printModuleMetadata(classType);
-        }
-        // TODO fields
-        for (auto& method : classType->methods()) {
-          printFunction(*method);
-        }
-      }
+      printClass(classType);
     } else if (auto tupleType = type->cast<TupleType>()) {
       TORCH_INTERNAL_ASSERT(tupleType->schema());
       body_ << "class " << tupleType->name()->name();
