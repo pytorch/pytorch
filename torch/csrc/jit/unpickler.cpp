@@ -160,7 +160,10 @@ IValue Unpickler::parse_ivalue() {
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
-  restoreAccurateTypeTagsIfPossible(stack_[0]);
+  if (version_ <= 2) {
+    // See [type tag serialization]
+    restoreAccurateTypeTagsIfPossible(stack_[0]);
+  }
   return stack_[0];
 }
 
@@ -475,14 +478,13 @@ void Unpickler::readGlobal(
         auto data = stack_.back().toTuple()->elements();
         auto type_str = data.at(1).toStringRef();
         stack_.pop_back();
-        const void* ptr = type_str.data();
         TypePtr type = nullptr;
-        auto entry = type_cache_.find(ptr);
+        auto entry = type_cache_.find(type_str);
         if (entry != type_cache_.end()) {
           type = entry->second;
         } else {
           type = c10::parseType(type_str);
-          type_cache_[ptr] = type;
+          type_cache_[type_str] = type;
         }
         // TODO: Use lookahead to avoid creating the tuple and immediately
         // destroying it here

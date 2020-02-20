@@ -91,6 +91,7 @@ IValue readArchiveAndTensors(
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
       device);
+  unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }
 
