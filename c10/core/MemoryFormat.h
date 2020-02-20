@@ -273,7 +273,8 @@ inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef 
           case 4:
             return is_channels_last_strides_2d_s4(sizes, strides);
           case 3:
-            return is_channels_last_strides_2d_s3(sizes, strides);
+            // Allow dim == 4 only for channels last 2d until dim == 3 is fully tested
+            // return is_channels_last_strides_2d_s3(sizes, strides);
           default:
             return false;
         }
@@ -284,7 +285,8 @@ inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef 
           case 5:
             return is_channels_last_strides_3d_s5(sizes, strides);
           case 4:
-            return is_channels_last_strides_3d_s4(sizes, strides);
+            // Allow dim == 5 only for channels last 3d until dim == 4 is fully tested
+            //return is_channels_last_strides_3d_s4(sizes, strides);
           default:
             return false;
         }
