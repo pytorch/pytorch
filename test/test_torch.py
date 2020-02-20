@@ -12276,7 +12276,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x.stride(), x_rep.stride())
         self.assertEqual(x.is_contiguous(), x_rep.is_contiguous())
         self.assertEqual(x.is_contiguous(memory_format=torch.channels_last), x_rep.is_contiguous(memory_format=torch.channels_last))
-        self.assertEqual(x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
+        self.assertEqual(
+            x.is_contiguous(memory_format=torch.channels_last_3d), x_rep.is_contiguous(memory_format=torch.channels_last_3d))
 
     def test_memory_format_operators(self, device):
         def chunk_op(x, y):
@@ -13185,7 +13186,8 @@ class TestTorchDeviceType(TestCase):
 
         for memft, input_generator_fn in input_generator_fns:
             for fn_name in shortcuts:
-                self._test_memory_format_transformations(device, input_generator_fn, get_fn(fn_name), memft, default_is_preserve=True)
+                self._test_memory_format_transformations(
+                    device, input_generator_fn, get_fn(fn_name), memft, default_is_preserve=True)
 
         # Test 'float' separately to avoid float->float no-op.
         input_generator_fns_double = [
@@ -13197,7 +13199,8 @@ class TestTorchDeviceType(TestCase):
                 .round().contiguous(memory_format=torch.channels_last_3d)]]
 
         for memft, input_generator_fn_double in input_generator_fns_double:
-            self._test_memory_format_transformations(device, input_generator_fn_double, get_fn('float'), memft, default_is_preserve=True)
+            self._test_memory_format_transformations(
+                device, input_generator_fn_double, get_fn('float'), memft, default_is_preserve=True)
 
     @onlyCUDA
     def test_memory_format_cpu_and_cuda_ops(self, device):
