@@ -278,8 +278,6 @@ inline InferredType tryToInferContainerType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(RRefType::create(rref_ivalue.type()));
   }
-#else
-  AT_ERROR("RRef is only supported with the distributed package");
 #endif
 
   // TODO: this message is not correct anymore, since this InferredType is
