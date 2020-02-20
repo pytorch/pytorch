@@ -646,3 +646,5 @@ def quantize_rnn_modules(module, dtype=torch.int8):
     if isinstance(module, torch.nn.GRU):
         return QuantizedGRU(module)
     return module
+
+# REVERT ME: This change will trigger test_jit but not test_nn
