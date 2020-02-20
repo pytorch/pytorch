@@ -198,12 +198,12 @@ def _test_cpp_extensions_aot(executable, test_module, test_directory, options, u
 
 
 def test_cpp_extensions_aot_ninja(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, test_module, test_directory,
+    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot', test_directory,
                                     options, use_ninja=True)
 
 
 def test_cpp_extensions_aot(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot',
+    return _test_cpp_extensions_aot(executable, test_module,
                                     test_directory, options, use_ninja=False)
 
 
