@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/hooks_for_testing.h>
 #include <torch/csrc/jit/import_source.h>
 #include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/python_print.h>
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/jit/python_tracer.h>
@@ -941,7 +942,6 @@ void initJitScriptBindings(PyObject* module) {
             // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
             Function& callee = *strongPtr.function_;
-            bool tracing = tracer::isTracing();
             py::object result = invokeScriptFunctionFromPython(
                 callee, tuple_slice(std::move(args), 1), std::move(kwargs));
             return result;
@@ -983,6 +983,13 @@ void initJitScriptBindings(PyObject* module) {
           "graph",
           [](const StrongFunctionPtr& self) { return self.function_->graph(); })
       .def_property_readonly(
+          "inlined_graph",
+          [](const StrongFunctionPtr& self) {
+            auto g = self.function_->graph()->copy();
+            Inline(*g);
+            return g;
+          })
+      .def_property_readonly(
           "schema",
           [](const StrongFunctionPtr& self) {
             return self.function_->getSchema();
@@ -1019,6 +1026,13 @@ void initJitScriptBindings(PyObject* module) {
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
           })
       .def_property_readonly("graph", &Method::graph)
+      .def_property_readonly(
+          "inlined_graph",
+          [](const Method& self) {
+            auto g = self.function().graph()->copy();
+            Inline(*g);
+            return g;
+          })
       .def_property_readonly(
           "schema", [](Method& m) { return m.function().getSchema(); })
       .def_property_readonly("name", &Method::name)
