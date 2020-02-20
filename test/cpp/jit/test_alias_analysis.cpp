@@ -746,7 +746,7 @@ graph():
     script::parseIR(
         R"IR(
 graph():
-  %10 : bool = prim::Constant[value=0]()
+  %10 : bool? = prim::Constant()
   %8 : Device? = prim::Constant()
   %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
@@ -791,7 +791,7 @@ graph():
     script::parseIR(
         R"IR(
 graph():
-  %10 : bool = prim::Constant[value=0]()
+  %10 : bool? = prim::Constant()
   %8 : Device? = prim::Constant()
   %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
@@ -826,7 +826,7 @@ graph():
         R"IR(
 graph():
   %35 : int = prim::Constant[value=1]()
-  %10 : bool = prim::Constant[value=0]()
+  %10 : bool? = prim::Constant()
   %8 : Device? = prim::Constant()
   %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()
@@ -868,7 +868,7 @@ graph():
         R"IR(
 graph():
   %38 : int = prim::Constant[value=1]()
-  %10 : bool = prim::Constant[value=0]()
+  %10 : bool? = prim::Constant()
   %8 : Device? = prim::Constant()
   %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()

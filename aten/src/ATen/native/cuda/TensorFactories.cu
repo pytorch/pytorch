@@ -65,7 +65,11 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  TORCH_CHECK(
+    !(options.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto memory_format = options.memory_format_opt().value_or(optional_memory_format.value_or(MemoryFormat::Contiguous));
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
@@ -321,10 +325,7 @@ void tril_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor tril_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -398,10 +399,7 @@ void triu_indices_kernel(scalar_t * tensor,
 // implementation, please enable them in test/test_cuda.py and make sure they
 // pass on your local server.
 Tensor triu_indices_cuda(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

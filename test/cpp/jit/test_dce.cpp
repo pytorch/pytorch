@@ -22,7 +22,7 @@ void testDCE() {
 graph():
   %48 : None = prim::Constant()
   %50 : bool = prim::Constant[value=1]()
-  %10 : bool = prim::Constant[value=0]()
+  %10 : bool? = prim::Constant()
   %8 : Device? = prim::Constant()
   %4 : int? = prim::Constant()
   %0 : int = prim::Constant[value=2]()

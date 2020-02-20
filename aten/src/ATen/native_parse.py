@@ -216,14 +216,10 @@ def parse_arguments(name, args, func_variants, declaration, func_return):
             'name': name,
             'type': ty,
             'annotation': None,
-            'kwarg_only': True
+            'kwarg_only': True,
+            'is_nullable': True,
+            'default': 'c10::nullopt',
         }
-        if name == 'pin_memory':
-            arg['is_nullable'] = False
-            arg['default'] = False
-        else:
-            arg['is_nullable'] = True
-            arg['default'] = 'c10::nullopt'
         return arg
 
     supported_topt_arguments = [

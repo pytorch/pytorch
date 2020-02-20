@@ -50,7 +50,7 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 void init_msnpu_extension() {
   static auto registry = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
-      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, MemoryFormat? memory_format=None) -> Tensor")
+      .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
       .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPUTensorId)
       .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
     .op(torch::RegisterOperators::options()
