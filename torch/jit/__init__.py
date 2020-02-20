@@ -392,24 +392,9 @@ def _clone_inputs(args):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
 _JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
 _JIT_STATS = os.environ.get('PYTORCH_JIT_STATS', False)
-
-
-def _dump_trace(trace_name, pass_name, input_key, trace):
-    if not _JIT_DUMP:
-        return
-
-    import torch.contrib._graph_vis as graph_vis
-
-    filename = "{}_{}".format(trace_name, pass_name)
-    # TODO: Also paste out the backtrace when the trace was compiled
-    # (and maybe also when it was run?)
-    with open(filename + ".ir", "w") as f:
-        f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
-    graph_vis.write(trace.graph(), filename + ".html")
 
 
 @contextlib.contextmanager
@@ -1641,6 +1626,15 @@ if _enabled:
             ``forward`` method. See `Interpreting Graphs`_ for details.
             """
             return self.forward.graph
+
+        @property
+        def inlined_graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            See `Interpreting Graphs`_ for details.
+            """
+            return self.forward.inlined_graph
 
         @property
         def code(self):
