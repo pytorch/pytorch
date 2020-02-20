@@ -196,11 +196,6 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 #undef DEFINE_CAST_OP
 
 Tensor empty_like(
-    const Tensor& self) {
-  return native::empty_like(self, {}, c10::nullopt);
-}
-
-Tensor empty_like(
     const Tensor& self,
     const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -365,13 +360,6 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 
 Tensor full_like(
     const Tensor& self,
-    Scalar fill_value) {
-  return native::full_like(
-      self, fill_value, {}, c10::nullopt);
-}
-
-Tensor full_like(
-    const Tensor& self,
     Scalar fill_value,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -431,12 +419,6 @@ Tensor ones_like(
   return result.fill_(1);
 }
 
-Tensor ones_like(
-    const Tensor& self) {
-  return native::ones_like(
-      self, {}, c10::nullopt);
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
@@ -473,11 +455,6 @@ Tensor& rand_out(Tensor& result, IntArrayRef size) {
 Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
-}
-
-Tensor rand_like(
-    const Tensor& self) {
-  return native::rand_like(self, {}, c10::nullopt);
 }
 
 Tensor rand_like(
@@ -549,21 +526,6 @@ Tensor& randint_out(
 
 Tensor randint_like(
     const Tensor& self,
-    int64_t high) {
-  return native::randint_like(
-      self, high, {}, c10::nullopt);
-}
-
-Tensor randint_like(
-    const Tensor& self,
-    int64_t low,
-    int64_t high) {
-  return native::randint_like(
-      self, low, high, {}, c10::nullopt);
-}
-
-Tensor randint_like(
-    const Tensor& self,
     int64_t high,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
@@ -612,11 +574,6 @@ Tensor& normal_out(Tensor& result, double mean, double std,
                    IntArrayRef size, Generator* generator) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
-}
-
-Tensor randn_like(
-    const Tensor& self) {
-  return native::randn_like(self, {}, c10::nullopt);
 }
 
 Tensor randn_like(
@@ -796,11 +753,6 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
     result.resize_(size);
   }
   return result.zero_();
-}
-
-Tensor zeros_like(
-    const Tensor& self) {
-  return native::zeros_like(self, {}, c10::nullopt);
 }
 
 Tensor zeros_like(
