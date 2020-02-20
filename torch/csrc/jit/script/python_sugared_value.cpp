@@ -546,7 +546,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      obj.ptr() == py::module::import("torch.distributed.rpc.api").attr("_invoke_rpc_torchscript").ptr()) {
+      obj.ptr() == py::module::import("torch.distributed.rpc.api").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {

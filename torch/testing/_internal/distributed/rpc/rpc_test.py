@@ -1787,7 +1787,7 @@ class RpcJitTest(RpcAgentTestFixture):
         def rpc_async_call_remote_torchscript_in_torchscript(
             dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
         ):
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, two_args_two_kwargs, args, kwargs
             )
             ret = fut.wait()
@@ -1833,7 +1833,7 @@ class RpcJitTest(RpcAgentTestFixture):
             args: Tuple[Tensor, Tensor, Tensor],
             kwargs: Dict[str, Tensor],
         ):
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, two_args_two_kwargs, args, kwargs
             )
             ret = fut.wait()
@@ -1867,7 +1867,7 @@ class RpcJitTest(RpcAgentTestFixture):
                 "str_kwarg": "_str_kwarg",
                 "int_kwarg": 3,
             }
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, assorted_types_args_kwargs, args, kwargs
             )
             ret = fut.wait()
@@ -1884,7 +1884,7 @@ class RpcJitTest(RpcAgentTestFixture):
             dst_worker_name: str
         ):
             args = ()
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, no_arg, args,
             )
             ret = fut.wait()
@@ -1900,7 +1900,7 @@ class RpcJitTest(RpcAgentTestFixture):
         def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
             dst_worker_name: str
         ):
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, no_arg,
             )
             ret = fut.wait()
@@ -1921,7 +1921,7 @@ class RpcJitTest(RpcAgentTestFixture):
             ):
                 args = (torch.tensor([1, 1]),)
                 kwargs = {}
-                fut = rpc.api._invoke_rpc_torchscript(
+                fut = rpc.api.rpc_async(
                     dst_worker_name, two_args_two_kwargs, args, kwargs
                 )
                 ret = fut.wait()
@@ -1946,7 +1946,7 @@ class RpcJitTest(RpcAgentTestFixture):
                     torch.tensor([5, 5]),
                 )
                 kwargs = {}
-                fut = rpc.api._invoke_rpc_torchscript(
+                fut = rpc.api.rpc_async(
                     dst_worker_name, two_args_two_kwargs, args, kwargs
                 )
                 ret = fut.wait()
@@ -1960,7 +1960,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ):
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {"third_kwarg": torch.tensor([1, 1])}
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, two_args_two_kwargs, args, kwargs
             )
             ret = fut.wait()
@@ -1977,7 +1977,7 @@ class RpcJitTest(RpcAgentTestFixture):
         def rpc_async_call_remote_py_function_in_torchscript(dst_worker_name: str):
             args = ()
             kwargs = {}
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, light_rpc, args, kwargs
             )
             ret = fut.wait()
@@ -1999,7 +1999,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ):
             args = ()
             kwargs = {}
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, raise_script, args, kwargs
             )
             ret = fut.wait()
@@ -2022,7 +2022,7 @@ class RpcJitTest(RpcAgentTestFixture):
         ):
             args = ()
             kwargs = {}
-            fut = rpc.api._invoke_rpc_torchscript(
+            fut = rpc.api.rpc_async(
                 dst_worker_name, nonexisting_script, args, kwargs
             )
             ret = fut.wait()
