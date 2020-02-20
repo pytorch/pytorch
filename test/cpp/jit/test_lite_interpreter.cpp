@@ -190,38 +190,5 @@ void testLiteInterpreterLoadOrigJit() {
   ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
 }
 
-//void testLiteInterpreterPytext() {
-//  std::vector<torch::jit::IValue> inputs;
-//
-////  auto L = c10::List<int64_t>({1, 1, 1});
-////  auto length = L.size();
-////  auto LL = c10::List<c10::List<int64_t>>({L});
-////  inputs.emplace_back(torch::jit::IValue(LL));
-////  auto bite_lens = c10::List<int64_t>({3});
-////  inputs.emplace_back(torch::jit::IValue(bite_lens));
-//
-//  auto options = c10::TensorOptions().dtype(c10::kLong);
-//  int length = 3;
-//  inputs.push_back(torch::ones({1, length}, options));
-//  auto stensor = length * torch::ones({1}, options);
-//  inputs.push_back(stensor);
-//
-//  auto m = load("/Users/myuan/data/pytext/BI/model_1115_0220.pt1");
-////  m.save("/Users/myuan/data/pytext/BI/model_1115_0220.pt1");
-//  auto ref = m.forward(inputs);
-//  std::cout << ref << std::endl;
-//
-//  std::stringstream ss;
-//  m._save_for_mobile(ss);
-////  m._save_for_mobile("/Users/myuan/data/pytext/BI/model_1115.bc");
-//  mobile::Module bc = _load_for_mobile(ss);
-//  IValue res;
-//  auto bcinputs = inputs;
-//  for (int i = 0; i < 3; ++i) {
-//    res = bc.run_method("forward", bcinputs);
-//  }
-//  std::cout << res << std::endl;
-//}
-
 } // namespace jit
 } // namespace torch
