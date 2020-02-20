@@ -9932,27 +9932,6 @@ class TestTorchDeviceType(TestCase):
                                r"For integral input tensors, argument alpha must not be a floating point number\.",
                                lambda: torch.add(m1, m2, alpha=1.0))
 
-    @dtypes(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
-    def test_add_scalar(self, device, dtype):
-        m1 = torch.tensor([1, 2], dtype=dtype, device=device)
-        if dtype == torch.bool:
-            m2 = True
-        else:
-            m2 = 3
-        res = torch.tensor([4, 5], dtype=dtype, device=device)
-        if dtype == torch.half and not device.startswith('cuda'):
-            self.assertRaises(RuntimeError, lambda: m1 + m2)
-            self.assertRaises(RuntimeError, lambda: m2 + m1)
-            self.assertRaises(RuntimeError, lambda: torch.add(m1, m2))
-            self.assertRaises(RuntimeError, lambda: torch.add(m2, m1))
-            return
-        self.assertEqual(m1 + m2, res)
-        self.assertEqual(m2 + m1, res)
-        self.assertEqual(torch.add(m1, m2), res)
-        self.assertEqual(torch.add(m2, m1), res)
-        self.assertEqual(torch.add(m1, m2, alpha=2), torch.tensor([7, 8], dtype=dtype, device=device))
-        self.assertEqual(torch.add(m2, m1, alpha=2), torch.tensor([5, 7], dtype=dtype, device=device))
 
     def test_sub_typing(self, device):
         m1 = torch.tensor([True, False, False, True, False, False], dtype=torch.bool, device=device)
@@ -9998,26 +9977,6 @@ class TestTorchDeviceType(TestCase):
             a2 = torch.tensor([1.1, 0.1], dtype=torch.bfloat16, device=device)
             self.assertEqual(a1 * a2, torch.tensor([0.11, 0.01], dtype=torch.bfloat16, device=device), 0.01)
             self.assertEqual(a1.mul(a2), a1 * a2)
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
-    def test_mul_scalar(self, device, dtype):
-        m1 = torch.tensor([1, 2], dtype=dtype, device=device)
-        if dtype == torch.bool:
-            m2 = True
-        else:
-            m2 = 3
-        res = torch.tensor([3, 6], dtype=dtype, device=device)
-        if dtype == torch.half and not device.startswith('cuda'):
-            self.assertRaises(RuntimeError, lambda: m1 * m2)
-            self.assertRaises(RuntimeError, lambda: m2 * m1)
-            self.assertRaises(RuntimeError, lambda: torch.mul(m1, m2))
-            self.assertRaises(RuntimeError, lambda: torch.mul(m2, m1))
-            return
-        self.assertEqual(m1 * m2, res)
-        self.assertEqual(m2 * m1, res)
-        self.assertEqual(torch.mul(m1, m2), res)
-        self.assertEqual(torch.mul(m2, m1), res)
 
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
@@ -13462,24 +13421,6 @@ class TestTorchDeviceType(TestCase):
         else:
             self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
 
-        # Scalar
-        m1 = torch.tensor([1, 2], dtype=dtype, device=device)
-        m2 = 3
-        res1 = torch.tensor([-2, -1], dtype=dtype, device=device)
-        res2 = torch.tensor([2, 1], dtype=dtype, device=device)
-        if (dtype == torch.bool or
-           (dtype == torch.half and not device.startswith('cuda')) or
-           (dtype == torch.bfloat16 and device != 'cpu')):
-            self.assertRaises(RuntimeError, lambda: m1 - m2)
-            self.assertRaises(RuntimeError, lambda: m2 - m1)
-            self.assertRaises(RuntimeError, lambda: torch.sub(m1, m2))
-            self.assertRaises(RuntimeError, lambda: torch.sub(m2, m1))
-        else:
-            self.assertEqual(m1 - m2, res1)
-            self.assertEqual(m2 - m1, res2)
-            self.assertEqual(torch.sub(m1, m2), res1)
-            self.assertEqual(torch.sub(m2, m1), res2)
-
     @onlyCPU
     @dtypes(torch.float)
     def test_csub(self, device, dtype):
@@ -13563,28 +13504,6 @@ class TestTorchDeviceType(TestCase):
                              torch.tensor([2.1, 3.1], dtype=dtype, device=device),
                              0.01)
             self.assertEqual(a1.div(a2), a1 / a2)
-
-        # Scalar
-        m1 = torch.tensor([3, 6], dtype=dtype, device=device)
-        m2 = 3
-        m3 = 12
-        res1 = torch.tensor([1, 2], dtype=dtype, device=device)
-        res2 = torch.tensor([4, 2], dtype=dtype, device=device)
-        if (dtype == torch.bool or
-           (dtype == torch.half and not device.startswith('cuda'))):
-            self.assertRaises(RuntimeError, lambda: m1 / m2)
-            self.assertRaises(RuntimeError, lambda: m3 / m1)
-            self.assertRaises(RuntimeError, lambda: torch.div(m1, m2))
-            self.assertRaises(RuntimeError, lambda: torch.div(m3, m1))
-        else:
-            self.assertEqual(m1 / m2, res1)
-            self.assertEqual(torch.div(m1, m2), res1)
-            if dtype == torch.bfloat16 and device == 'cpu':
-                # RuntimeError: "reciprocal_cpu" not implemented for 'BFloat16'
-                self.assertRaises(RuntimeError, lambda: m3 / m1)
-            else:
-                self.assertEqual(m3 / m1, res2)
-            self.assertEqual(torch.div(m3, m1), res2)
 
     @onlyCPU
     @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
