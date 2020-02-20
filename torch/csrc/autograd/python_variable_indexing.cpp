@@ -242,6 +242,15 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
   return res;
 }
 
+// NOTE: Here is the dispatch structure for `THPVariable_getitem`:
+//
+// 1. Python 1-D getter calls C++ `at::indexing::get_item` after
+// converting Python index to C++ TensorIndex, except `t[...]` and `t[None]`
+// in which we perform direct operations on `t` instead.
+//
+// 2. Python N-D getter calls C++ `at::indexing::handleDimInMultiDimIndexing`
+// for each dim, after converting Python index to C++ TensorIndex. If advanced
+// indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -305,6 +314,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
+// NOTE: Here is the dispatch structure for `THPVariable_setitem`:
+//
+// 1. Python 1-D setter calls C++ `at::indexing::set_item` after
+// converting Python index to C++ TensorIndex.
+//
+// 2. Python N-D setter calls C++ `at::indexing::handleDimInMultiDimIndexing`
+// for each dim, after converting Python index to C++ TensorIndex. If advanced
+// indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   if (py_value == nullptr) {
