@@ -81,7 +81,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     }
 
     SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         count,
         toDeviceTensor<scalar_t, 4>(state, input),
         toDeviceTensor<THCIndex_t, 3>(state, target),
@@ -115,7 +115,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     int total_blocks = blocks_per_sample * batch_size;
 
     cunn_SpatialClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
-      <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<total_blocks, CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         output_data,
         total_weight_data,
         input_data,
@@ -131,7 +131,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     THCudaCheck(cudaGetLastError());
   }
   if (reduction == at::Reduction::Mean) {
-    cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(
       output_data, total_weight_data, THCTensor_(nElement)(state, input)
     );
     THCudaCheck(cudaGetLastError());
@@ -185,7 +185,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     }
 
     SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
-      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         count,
         toDeviceTensor<THCIndex_t, 3>(state, target),
         toDeviceTensor<scalar_t, 3>(state, gradOutput),
@@ -217,7 +217,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     int total_blocks = blocks_per_sample * batch_size;
 
     cunn_SpatialClassNLLCriterion_updateGradInput_kernel
-      <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<total_blocks, CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         gradInput_data,
         gradOutput_data,
         target_data,

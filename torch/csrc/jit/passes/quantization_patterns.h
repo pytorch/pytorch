@@ -79,7 +79,7 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
         %conv_out = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r = aten::relu(%conv_out)
+        %r = aten::relu_(%conv_out)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
@@ -88,13 +88,29 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %r_quant = quantized::conv2d_relu(%a_quant, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_zero_point)
         return (%r_quant) )";
 
+  std::string inplace_add_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %alpha = prim::Constant[value=1]()
+         %a_dequant = aten::dequantize(%a_quant)
+         %b_dequant = aten::dequantize(%b_quant)
+         %r_add = aten::add_(%a_dequant, %b_dequant, %alpha)
+         %r_relu = aten::relu_(%r_add)
+         %r = aten::quantize_per_tensor(%r_relu, %scale, %zero_point, %dtype)
+         return (%r) )";
+
+  std::string quantized_add_relu = R"(
+graph(%a_quant, %b_quant, %scale, %zero_point, %dtype):
+         %r = quantized::add_relu(%a_quant, %b_quant, %scale, %zero_point)
+         return (%r) )";
+
   return {
     {conv2d, quantized_conv2d},
     {conv2d_relu, quantized_conv2d_relu},
     {conv2d_inplace_relu, quantized_conv2d_relu},
     {addmm, quantized_linear},
     {matmul_with_bias, quantized_linear},
-    {matmul_no_bias, quantized_linear_no_bias}
+    {matmul_no_bias, quantized_linear_no_bias},
+    {inplace_add_relu, quantized_add_relu},
   };
 
 }
