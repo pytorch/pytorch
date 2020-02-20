@@ -5,6 +5,8 @@
 #include <deque>
 #include <iostream>
 
+#include <torch/csrc/jit/fuser/common/iriostream.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -81,11 +83,13 @@ void IterVisitor::traverse(
 
     while (!to_visit.empty()) {
       const Statement* stmt = to_visit.front();
-
-      for (const Statement* inp : next(stmt))
+      std::vector<const Statement*> inps = next(stmt);
+      for (auto it = inps.rbegin(); it != inps.rend(); it++){
+        const Statement* inp = *it;
         if (visited.find(inp) == visited.end()) {
           to_visit.emplace_front(inp);
         }
+      }
 
       if (to_visit.front() != stmt) {
         continue;
@@ -127,7 +131,10 @@ void IterVisitor::traverse(
   traverse(fusion, outputs_to_visit);
 }
 
+
+
 void DependencyCheck::handle(const Val* val){
+  IterVisitor::handle(val);
   if(val->same_as(dependency_))
     is_dependency = true;
 }
