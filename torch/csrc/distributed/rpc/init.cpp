@@ -100,10 +100,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "enable_gil_profiling",
-              &RpcAgent::enableGILProfiling,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
@@ -385,9 +381,9 @@ If the future completes with an error, an exception is thrown.
                                   .getSchema();
         auto stack = torch::jit::createStackForSchema(
             functionSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(
+        auto rrefPtr = remoteTorchscript(
             dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(userRRefPtr);
+        return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -412,6 +408,19 @@ If the future completes with an error, an exception is thrown.
 
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "enable_gil_profiling",
+      [](bool flag) {
+        RpcAgent::getCurrentRpcAgent()->enableGILProfiling(flag);
+      },
+      R"(
+    Set whether GIL wait times should be enabled or not. This incurs a slight
+    overhead cost. Default is disabled for performance reasons.
+
+    Arguments:
+        flag (bool): True to set GIL profiling, False to disable.
       )");
 
   module.def(

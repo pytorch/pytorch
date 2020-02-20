@@ -155,11 +155,6 @@ c10::Allocator* THCState_getCudaHostAllocator(THCState* state)
   return state->cudaHostAllocator;
 }
 
-int THCState_getNumDevices(THCState *state)
-{
-  return state->numDevices;
-}
-
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device)
 {
@@ -170,16 +165,6 @@ THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   }
 
   return &(state->resourcesPerDevice[device]);
-}
-
-// TODO: delete me
-cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::cuda::getCurrentCUDAStream(device).stream();
-}
-
-// TODO: delete me
-cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::cuda::getCurrentCUDAStream().stream();
 }
 
 size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state)

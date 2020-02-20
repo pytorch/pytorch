@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/pooling.h>
 #include <torch/nn/functional/pooling.h>
+#include <torch/nn/modules/common.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -353,6 +354,8 @@ class TORCH_API MaxUnpool1dImpl : public MaxUnpoolImpl<1, MaxUnpool1dImpl> {
   using MaxUnpoolImpl<1, MaxUnpool1dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
                  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({2, AnyValue(c10::optional<std::vector<int64_t>>())})
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool1dImpl`.
@@ -371,6 +374,8 @@ class TORCH_API MaxUnpool2dImpl : public MaxUnpoolImpl<2, MaxUnpool2dImpl> {
   using MaxUnpoolImpl<2, MaxUnpool2dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
                  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({2, AnyValue(c10::optional<std::vector<int64_t>>())})
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool2dImpl`.
@@ -389,6 +394,8 @@ class TORCH_API MaxUnpool3dImpl : public MaxUnpoolImpl<3, MaxUnpool3dImpl> {
   using MaxUnpoolImpl<3, MaxUnpool3dImpl>::MaxUnpoolImpl;
   Tensor forward(const Tensor& input, const Tensor& indices,
                  const c10::optional<std::vector<int64_t>>& output_size = c10::nullopt);
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({2, AnyValue(c10::optional<std::vector<int64_t>>())})
 };
 
 /// A `ModuleHolder` subclass for `MaxUnpool3dImpl`.

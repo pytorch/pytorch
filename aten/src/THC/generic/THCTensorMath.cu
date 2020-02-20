@@ -24,7 +24,7 @@ void THCTensor_(zero)(THCState *state, THCTensor *self_)
     THCudaCheck(cudaMemsetAsync(THCTensor_(data)(state, self_),
                                 0,
                                 sizeof(scalar_t) * THCTensor_(nElement)(state, self_),
-                                THCState_getCurrentStream(state)));
+                                c10::cuda::getCurrentCUDAStream()));
   } else {
     if (!THC_pointwiseApply1<scalar_t>(
           state, self_,
@@ -284,7 +284,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
                                      tensor_data+N*num_dim_noscalars, num_dim_noscalars);
 
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 #endif
 
   strided_range<Iter>::iterator dend = thrust::copy_if(
@@ -344,7 +344,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
       const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
       int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
-      THCTensor_copyFromDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      THCTensor_copyFromDiagonal<scalar_t><<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>
       (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, size, stride0 + stride1, strideSelf);
     }
   } else {
@@ -359,7 +359,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
       const dim3 threads(min((int64_t)at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, (int64_t)size));
       dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
       ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
-      THCTensor_copyToDiagonal<scalar_t><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
+      THCTensor_copyToDiagonal<scalar_t><<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>
       (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, totalElements, stride0 + stride1, strideSrc);
     }
   }

@@ -11,7 +11,7 @@
 
 #include <vector>
 
-static const int MIOPEN_DIM_MAX = 4;
+static const int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
@@ -493,6 +493,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && ((running_mean.defined() && running_var.defined())
                  || (!running_mean.defined() && !running_var.defined() && training))
                && detail::getCUDAHooks().compiledWithMIOpen()
+               && cudnn_enabled
                );
 
   if (use_miopen) {

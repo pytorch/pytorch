@@ -58,6 +58,8 @@ namespace jit {
   _(SubgraphRewriter)                  \
   _(ModuleClone)                       \
   _(ModuleCloneInstance)               \
+  _(ModuleConstant)                    \
+  _(ModuleParameter)                   \
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
@@ -81,7 +83,8 @@ namespace jit {
   _(CommonAncestor)                    \
   _(AutogradSymbols)                   \
   _(MobileTypeParser)                  \
-  _(LiteInterpreterPrim)
+  _(LiteInterpreterPrim)               \
+  _(LiteInterpreterLoadOrigJit)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
