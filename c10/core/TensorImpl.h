@@ -1482,8 +1482,10 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
-    is_channels_last_3d_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
+    // Only allow dim == 4 for 2d channels last and dim == 5 for 3d channels last for now
+    // More batch sizes will be supported later
+    is_channels_last_contiguous_ = dim() == 4 && compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
+    is_channels_last_3d_contiguous_ = dim() == 5 && compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
     // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
     // Being channels_last_contiguous doesn't necessarily mean the tensor is
     // strided like channels_last: for strides on channel dimension could suggest

@@ -90,6 +90,12 @@
   manual_kernel_registration: True
   variants: method
 
+# Enables .grad attribute for non-leaf Tensors.
+- func: retain_grad(Tensor(a!) self) -> ()
+  use_c10_dispatcher: full
+  manual_kernel_registration: True
+  variants: method
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
   supports_named_tensor: True
@@ -394,12 +400,16 @@
   use_c10_dispatcher: full
 
 - func: argmax(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU: argmax
+    CUDA: argmax
 
 - func: argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU: argmin
+    CUDA: argmin
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
@@ -471,6 +481,11 @@
 - func: bartlett_window.periodic(int window_length, bool periodic, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
+
+- func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
+  requires_tensor: True
+  dispatch:
+    QuantizedCPU: quantized_batch_norm
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
 
@@ -909,6 +924,12 @@
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
 
+- func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  variants: function
+  dispatch:
+    CPU: cummax_helper_cpu
+    CUDA: cummax_helper_cuda
+
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
   variants: function, method
@@ -922,6 +943,12 @@
 
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
+
+- func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  variants: function
+  dispatch:
+    CPU: cummin_helper_cpu
+    CUDA: cummin_helper_cuda
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   supports_named_tensor: True
@@ -2938,9 +2965,6 @@
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: function
-  dispatch:
-    CPU: _s_where_cpu
-    CUDA: _s_where_cuda
 
 - func: norm_except_dim(Tensor v, int pow=2, int dim=0) -> Tensor
   variants: function
@@ -3802,8 +3826,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_tensor_
+    CUDA: set_tensor_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
@@ -4302,13 +4326,6 @@
   dispatch:
     CPU: legacy::cpu::_th_uniform_
     CUDA: uniform_cuda_
-  supports_named_tensor: True
-
-- func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_normal_
-    CUDA: normal_cuda_
   supports_named_tensor: True
 
 - func: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
@@ -4931,9 +4948,6 @@
 - func: dist(Tensor self, Tensor other, Scalar p=2) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-  dispatch:
-    CPU: legacy::cpu::_th_dist
-    CUDA: legacy::cuda::_th_dist
 
 - func: atan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
@@ -5171,34 +5185,41 @@
     CPU: pow
     CUDA: pow
 
+- func: normal_(Tensor(a!) self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: normal_cpu_
+    CUDA: normal_cuda_
+  supports_named_tensor: True
+
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_normal_out
+    CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_float(Tensor mean, float std=1, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_normal
+    CPU: normal_cpu
     CUDA: normal_cuda
 
 - func: normal.float_Tensor_out(float mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_normal_out
+    CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
 - func: normal.float_Tensor(float mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_normal
+    CPU: normal_cpu
     CUDA: normal_cuda
 
 - func: normal.Tensor_Tensor_out(Tensor mean, Tensor std, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_normal_out
+    CPU: normal_out_cpu
     CUDA: normal_out_cuda
 
 - func: normal.Tensor_Tensor(Tensor mean, Tensor std, *, Generator? generator=None) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_normal
+    CPU: normal_cpu
     CUDA: normal_cuda
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -5268,13 +5289,13 @@
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
-    CPU: legacy::cpu::_th_cat
+    CPU: _cat_cpu
     CUDA: legacy::cuda::_th_cat
     QuantizedCPU: quantized_cat
 
 - func: _cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cat_out
+    CPU: _cat_out_cpu
     CUDA: legacy::cuda::_th_cat_out
     QuantizedCPU: quantized_cat_out
 
@@ -5520,14 +5541,14 @@
 - func: glu.out(Tensor self, int dim=-1, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_glu_forward_out
+    CPU: glu_out
     CUDA: legacy::cuda::_thnn_glu_forward_out
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
-    CPU: legacy::cpu::_thnn_glu_forward
+    CPU: glu
     CUDA: legacy::cuda::_thnn_glu_forward
 
 - func: glu_backward.grad_input(Tensor grad_output, Tensor self, int dim, *, Tensor(a!) grad_input) -> Tensor(a!)
@@ -5565,10 +5586,18 @@
 
 - func: leaky_relu.out(Tensor self, Scalar negative_slope=0.01, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_out
+    CUDA: leaky_relu_out
+    QuantizedCPU: quantized_leaky_relu_out
 
 - func: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
+  dispatch:
+    CPU: leaky_relu
+    CUDA: leaky_relu
+    QuantizedCPU: quantized_leaky_relu
 
 - func: leaky_relu_backward.grad_input(Tensor grad_output, Tensor self, Scalar negative_slope, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -5582,6 +5611,10 @@
 
 - func: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CPU: leaky_relu_
+    CUDA: leaky_relu_
+    QuantizedCPU: quantized_leaky_relu_
 
 - func: log_sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn

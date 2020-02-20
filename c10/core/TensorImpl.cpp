@@ -97,22 +97,78 @@ bool TensorImpl::compute_contiguous() const {
 }
 
 bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) const {
-  if (!is_supported_channels_last_memory_format(sizes_, memory_format)) {
-    return false;
-  }
-
-  std::vector<int64_t> indices = get_channels_last_stride_indices(sizes_, memory_format);
-  int64_t expected = 1;
-  for (auto& d : indices) {
-    if (sizes_[d] != 1) {
-      if (strides_[d] == expected) {
-        expected *= sizes_[d];
-      } else {
-        return false;
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (memory_format) {
+    case MemoryFormat::ChannelsLast:
+      {
+        switch (sizes_.size()) {
+          case 4:
+            {
+              int64_t expected = 1;
+              for (auto& d : {1, 3, 2, 0}) {
+                if (sizes_[d] != 1) {
+                  if (strides_[d] != expected) {
+                    return false;
+                  }
+                  expected *= sizes_[d];
+                  }
+                }
+              return true;
+            }
+          case 3:
+            {
+              int64_t expected = 1;
+              for (auto& d : {0, 2, 1}) {
+                if (sizes_[d] != 1) {
+                  if (strides_[d] != expected) {
+                    return false;
+                  }
+                  expected *= sizes_[d];
+                }
+              }
+              return true;
+            }
+          default:
+            return false;
+        }
       }
-    }
+    case MemoryFormat::ChannelsLast3d:
+      {
+        switch (sizes_.size()) {
+          case 5:
+            {
+              int64_t expected = 1;
+              for (auto& d : {1, 4, 3, 2, 0}) {
+                if (sizes_[d] != 1) {
+                  if (strides_[d] != expected) {
+                    return false;
+                  }
+                  expected *= sizes_[d];
+                }
+              }
+              return true;
+            }
+          case 4:
+            {
+              int64_t expected = 1;
+              for (auto& d : {0, 3, 2, 1}) {
+                if (sizes_[d] != 1) {
+                  if (strides_[d] != expected) {
+                    return false;
+                  }
+                  expected *= sizes_[d];
+                }
+              }
+              return true;
+            }
+          default:
+            return false;
+        }
+      }
+    default:
+      return false;
   }
-  return true;
 }
 
 bool TensorImpl::compute_strides_like_channels_last(MemoryFormat memory_format) const {
