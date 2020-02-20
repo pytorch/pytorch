@@ -14,7 +14,7 @@ try:
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
-        "`python run_test.py -i test_cpp_extensions_aot` instead."
+        "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
     )
 
 
@@ -24,7 +24,7 @@ class TestCppExtensionAOT(common.TestCase):
     NOTE: run_test.py's test_cpp_extensions_aot_ninja target
     also runs this test case, but with ninja enabled. If you are debugging
     a test failure here from the CI, check the logs for which target
-    (test_cpp_extensions_aot vs test_cpp_extensions_aot_ninja)
+    (test_cpp_extensions_aot_no_ninja vs test_cpp_extensions_aot_ninja)
     failed.
     """
 
