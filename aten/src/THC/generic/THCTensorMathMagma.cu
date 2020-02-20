@@ -228,7 +228,7 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper
   else if (info < 0)
     THError("MAGMA potri : Argument %d : illegal value", -info);
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
   const int len = n*n;
   dim3 blocks(std::min(DIVUP(len, 128), 65535));
   dim3 threads(128);
