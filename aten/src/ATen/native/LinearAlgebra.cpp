@@ -312,12 +312,12 @@ Tensor& baddbmm__cpu(Tensor& self, const Tensor& batch1, const Tensor& batch2, S
   return bmm_out_or_baddbmm_(self, batch1, batch2, beta, alpha, false);
 }
 
-Tensor bmm_cpu(const Tensor& self, const Tensor& mat2) {
+Tensor bmm_cpu(const Tensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
   Tensor result = at::empty({0}, self.options());
-  return at::native::bmm_out_cpu(result, self, mat2);
+  return at::native::bmm_out_cpu(result, self, mat2, deterministic_opt);
 }
 
-Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) {
+Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2, c10::optional<bool> deterministic_opt) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
   {

@@ -1417,9 +1417,9 @@ Tensor any_sparse(const Tensor& self) {
   return at::any(self._values());
 }
 
-Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2) {
+Tensor bmm_sparse_cpu(const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
   Tensor result = at::empty({}, mat2.options());
-  return bmm_out_sparse_cpu(result, self, mat2);
+  return bmm_out_sparse_cpu(result, self, mat2, deterministic_opt);
 }
 
 // Search a sorted array for the rightmost instance of a value.
@@ -1449,7 +1449,7 @@ scalar_t binary_search_rightmost(scalar_t search_val, scalar_t* sorted_arr, int6
   }
 }
 
-Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
 
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
@@ -1498,7 +1498,7 @@ Tensor& bmm_out_sparse_cpu(Tensor& result, const SparseTensor& self, const Tenso
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each one.
   int64_t start_mat_num = indices_dim0[0];
-  for (int64_t cur_mat_num = 0; 
+  for (int64_t cur_mat_num = 0;
     (cur_mat_num < num_matrices);
     cur_mat_num++
   ) {
