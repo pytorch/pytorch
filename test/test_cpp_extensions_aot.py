@@ -21,10 +21,10 @@ except ImportError:
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
-    NOTE: run_test.py's test_cpp_extensions_aot_no_ninja target
-    also runs this test case, but with ninja disabled. If you are debugging
+    NOTE: run_test.py's test_cpp_extensions_aot_ninja target
+    also runs this test case, but with ninja enabled. If you are debugging
     a test failure here from the CI, check the logs for which target
-    (test_cpp_extensions_aot vs test_cpp_extensions_aot_no_ninja)
+    (test_cpp_extensions_aot vs test_cpp_extensions_aot_ninja)
     failed.
     """
 
