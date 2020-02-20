@@ -1,10 +1,15 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/custom_class.h>
+#include <torch/custom_class.h>
 
 #include <atomic>
 
 namespace torch {
 namespace jit {
+
+std::vector<c10::RegisterOperators>& registeredOps() {
+  static std::vector<c10::RegisterOperators> ops;
+  return ops;
+}
 
 std::unordered_map<std::string, detail::RegisteredClassRecord>& registeredClasses() {
   static std::unordered_map<std::string, detail::RegisteredClassRecord> registry;
