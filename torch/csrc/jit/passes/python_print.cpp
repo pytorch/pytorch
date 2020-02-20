@@ -867,7 +867,9 @@ struct PythonPrintImpl {
           stmt << "None";
         }
       } break;
-      case prim::ImplicitTensorToNum: {
+      case aten::ScalarImplicit:
+      case aten::FloatImplicit:
+      case aten::IntImplicit: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
@@ -1024,11 +1026,8 @@ struct PythonPrintImpl {
       case prim::isinstance: {
         stmt << "isinstance(" << useOf(node->input()) << ", ";
         const auto& types = node->tys(attr::types);
-        const auto& kinds = node->ss(attr::kinds);
-        if (types.size() == 1 && kinds.size() == 0) {
+        if (types.size() == 1) {
           stmt << types.at(0)->python_str();
-        } else if (kinds.size() == 1 && types.size() == 0) {
-          stmt << kinds.at(0);
         } else {
           // check multiple things, e.g. (str, list, int)
           stmt << "(";
@@ -1038,13 +1037,6 @@ struct PythonPrintImpl {
               stmt << ", ";
             }
             stmt << typ->python_str();
-            first = false;
-          }
-          for (const std::string& kind : kinds) {
-            if (!first) {
-              stmt << ", ";
-            }
-            stmt << kind;
             first = false;
           }
           stmt << ")";
@@ -1374,70 +1366,5 @@ const SourceRangeRecords& PythonPrint::ranges() const {
 
 PythonPrint::~PythonPrint() = default;
 
-bool printerHasSpecialCaseFor(Symbol sym) {
-  // WARNING: by adding a value to this set, you are asserting
-  // that you have also added special handling of this symbol to
-  // the printer above. Not adding handling will cause import and export
-  // of modules with this new operator to fail. This is only required
-  // for operators without schema. Prefer registering your operator with
-  // schema to editing this list here. These cases should only be things
-  // that require special handling because they do not fit normal schema
-  const static std::unordered_set<Symbol> handled = {
-      prim::Constant,
-      prim::Uninitialized,
-      prim::fork,
-      prim::ListConstruct,
-      prim::DictConstruct,
-      prim::ListUnpack,
-      prim::Print,
-      prim::PythonOp,
-      prim::TupleConstruct,
-      prim::TupleIndex,
-      prim::TupleSlice,
-      prim::TupleUnpack,
-      prim::CreateObject,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::CallFunction,
-      prim::isinstance,
-      prim::unchecked_cast,
-  };
-
-  // WARNING: by adding a value to this set, you are asserting that your
-  // primitive is only ever added during optimization and does not need
-  // to be correctly printed for export (a process that happens before
-  // optimization passes run)
-  const static std::unordered_set<Symbol> unneeded = {
-      c10::onnx::Reshape, // only used in onnx
-      c10::onnx::Shape, // only used in onnx
-      prim::AutogradZero, // temporarily inserted by autograd
-      prim::AutogradAnyNonZero, // temporarily inserted by autograd
-      prim::AutogradAdd, // temporarily inserted by autograd
-      prim::ConstantChunk, // optimization pass adds it
-      prim::DifferentiableGraph, // optimization pass adds it
-      prim::BroadcastSizes, // optimization pass (fuser) adds it
-      prim::ChunkSizes, // optimization pass (fuser) adds it
-      prim::Drop, // used in interpreter only
-      prim::FusedConcat, // optimization pass adds it
-      prim::FusionGroup, // optimization pass adds it
-      prim::Load, // used in interpreter only
-      prim::MMTreeReduce, // used as an optimization
-      prim::MMBatchSide, // used as an optimization
-      prim::Store, // used in interpreter only
-      prim::profile, // used in interpreter only
-
-  };
-
-  // These namespaces are required to have Python printers unless
-  // otherwise noted in unneeded.
-  const static std::unordered_set<Symbol> required_namespaces = {
-      c10::namespaces::prim,
-      c10::namespaces::aten,
-      c10::namespaces::onnx,
-  };
-
-  return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
-}
 } // namespace jit
 } // namespace torch

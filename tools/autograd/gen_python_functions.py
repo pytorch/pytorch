@@ -70,7 +70,7 @@ SKIP_PYTHON_BINDINGS = [
     'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -1293,7 +1293,7 @@ def make_python_arglists(declaration, is_python_method):
 
 # TODO blowtorch
 def dtype_default_type_hack(name):
-    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
+    if name.startswith('randperm'):
         return 'torch.int64'
     else:
         return 'None'

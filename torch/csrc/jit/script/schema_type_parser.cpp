@@ -21,6 +21,7 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
 using c10::QSchemeType;
@@ -53,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
+      {"Any", at::AnyType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -201,6 +203,14 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     value = FutureType::create(subtype);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+    L.next(); // RRef
+    L.expect('(');
+    auto p = parseType();
+    auto subtype = std::move(p.first);
+    auto subalias = std::move(p.second);
+    L.expect(')');
+    value = RRefType::create(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
     value = TensorType::get();
