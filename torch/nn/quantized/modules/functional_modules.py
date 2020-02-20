@@ -124,6 +124,14 @@ class QFunctional(torch.nn.Module):
         super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                        missing_keys, unexpected_keys, error_msgs)
 
+    def _get_name(self):
+        return 'QFunctional'
+
+    def extra_repr(self):
+        return 'scale={}, zero_point={}'.format(
+            self.scale, self.zero_point
+        )
+
     def forward(self, x):
         raise RuntimeError("Functional is not intended to use the " +
                            "'forward'. Please use the underlying operation")

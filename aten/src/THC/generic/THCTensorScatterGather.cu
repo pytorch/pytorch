@@ -4,7 +4,7 @@
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_gatherKernel<TYPE, REAL, DIMS>                                \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(gather)(THCState* state, THCTensor *tensor,
@@ -101,7 +101,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -200,7 +200,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterAddKernel<TYPE, REAL, DIMS>                               \
-  <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
+  <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
 void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaLongTensor *index, THCTensor *src) {
@@ -300,7 +300,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
 
 #define RUN(TYPE, DIMS, REAL)                                           \
   THCudaTensor_scatterFillKernel<TYPE, REAL, DIMS>                           \
-      <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(      \
+      <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(      \
           tensorInfo, indexInfo, value, dim, (TYPE)totalElements);
 
 void
