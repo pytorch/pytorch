@@ -425,16 +425,6 @@ EXAMPLES = [
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
     ]),
-    Example(VonMises, [
-        {
-            'loc': torch.tensor(1.0, requires_grad=True),
-            'concentration': torch.tensor(10.0, requires_grad=True)
-        },
-        {
-            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
-            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
-        }
-    ]),
     Example(Weibull, [
         {
             'scale': torch.randn(5, 5).abs().requires_grad_(),
@@ -453,7 +443,17 @@ EXAMPLES = [
                 loc=torch.randn(5, 2, requires_grad=True),
                 covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
         },     
-    ]) 
+    ]),
+    Example(VonMises, [
+        {
+            'loc': torch.tensor(1.0, requires_grad=True),
+            'concentration': torch.tensor(10.0, requires_grad=True)
+        },
+        {
+            'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
+            'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
+        }
+    ])
 ]
 
 BAD_EXAMPLES = [

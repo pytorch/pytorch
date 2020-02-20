@@ -36,7 +36,8 @@ def _log_modified_bessel_fn(x, order=0):
     assert order == 0 or order == 1
 
     # compute small solution
-    y = (x / 3.75).pow(2)
+    y = (x / 3.75)
+    y = y * y
     small = _eval_poly(y, _COEF_SMALL[order])
     if order == 1:
         small = x.abs() * small
