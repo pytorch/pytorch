@@ -30,11 +30,12 @@ struct TORCH_API RMSpropOptions : public OptimizerCloneableOptions<RMSpropOption
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(double, momentum) = 0;
   TORCH_ARG(bool, centered) = false;
+
 public:
-void serialize(torch::serialize::InputArchive& archive) override;
-void serialize(torch::serialize::OutputArchive& archive) const override;
-TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
-~RMSpropOptions() = default;
+  void serialize(torch::serialize::InputArchive& archive) override;
+  void serialize(torch::serialize::OutputArchive& archive) const override;
+  TORCH_API friend bool operator==(const RMSpropOptions& lhs, const RMSpropOptions& rhs);
+  ~RMSpropOptions() = default;
 };
 
 struct TORCH_API RMSpropParamState : public OptimizerCloneableParamState<RMSpropParamState> {
@@ -52,7 +53,6 @@ public:
 
 class TORCH_API RMSprop : public Optimizer {
  public:
-  template <typename ParameterContainer>
   explicit RMSprop(std::vector<OptimizerParamGroup> param_groups,
       RMSpropOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<RMSpropOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
@@ -61,6 +61,9 @@ class TORCH_API RMSprop : public Optimizer {
     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid weight_decay value: ", defaults.weight_decay());
     TORCH_CHECK(defaults.alpha() >= 0, "Invalid alpha value: ", defaults.alpha());
   }
+
+  explicit RMSprop(std::vector<Tensor> params,
+      RMSpropOptions defaults) : RMSprop({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   void step() override;
 
@@ -82,7 +85,7 @@ class TORCH_API RMSprop : public Optimizer {
  private:
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
   }
 };
 } // namespace optim
