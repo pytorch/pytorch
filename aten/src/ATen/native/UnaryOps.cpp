@@ -41,7 +41,8 @@ namespace {
     Type4  // bool - fp16
   };
 
-  // promoteToFloatType[1/2/3/4] functions are helper functions to support input dtype to Float implicit promotions based on NumPy's conversion rules
+  // promoteToFloatType[1/2/3/4] functions are helper functions to support input dtype to Float implicit promotions 
+  // based on NumPy's conversion rules
   // For discussion, check https://github.com/pytorch/pytorch/pull/33322 and https://github.com/pytorch/pytorch/issues/28703
   // There are 4 type of dtype promotions in NumPy: (float16 is replaced by float32 for CPU devices)
   // Type - 1: int8 - float16, int16 - float32, int32 - float64, int64 - float64, bool - float16
@@ -144,7 +145,8 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
 static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl, TypePromotionStrategy typeStrategy=TypePromotionStrategy::None) {
-  // typePromotionStrategy argument defaults to TypePromotionStrategy::None (no implicit dtype upcasting) and is set to TypePromotionStrategy::Type1/Type2/Type3/Type4 depending on the type of implicit dtype promotion
+  // typePromotionStrategy argument defaults to TypePromotionStrategy::None (no implicit dtype upcasting) and 
+  // is set to TypePromotionStrategy::Type1/Type2/Type3/Type4 depending on the type of implicit dtype promotion
   ScalarType promoted_dtype = ScalarType::Undefined;
 
   if (typeStrategy != TypePromotionStrategy::None) {

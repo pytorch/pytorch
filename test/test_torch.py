@@ -11882,12 +11882,14 @@ class TestTorchDeviceType(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # test_type_<1/2/3/4>_upcasting are sample test functions (to test implicit dtype promotion) for sample functions of each category
+    # test_type_<1/2/3/4>_upcasting are sample test functions (to test implicit dtype promotion)
+    # for sample functions of each category
     # Check https://github.com/pytorch/pytorch/pull/33322 for more details
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_type_1_upcasting(self, device, dtype):
         # list below will be used when all the ops support type_1 upcasting
-        # op_list = ["ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "tan"]
+        # op_list = ["ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sin", "sinh",
+        # "sqrt", "trunc", "atan", "cos", "tan"]
         op_list = ["ceil"]
         for op_name in op_list:
             x = torch.tensor([2.3], dtype=dtype, device=device)
