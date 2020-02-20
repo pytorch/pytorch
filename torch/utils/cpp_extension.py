@@ -345,15 +345,13 @@ class BuildExtension(build_ext, object):
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
                     if is_hip_extension:
-                        cflags = COMMON_HIPCC_FLAGS + cflags + _get_rocm_arch_flags(cflags)
+                        cflags = cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
-                elif is_hip_extension:
-                    if isinstance(cflags, dict):
-                        cflags = cflags['cxx']
-                    cflags = COMMON_HIPCC_FLAGS + cflags
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
+                if is_hip_extension:
+                    cflags = cflags + COMMON_HIPCC_FLAGS
                 append_std14_if_no_std_present(cflags)
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
