@@ -65,6 +65,8 @@ Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, 
            "but got self.layout being ", self.layout(),
            " and options.layout set as ", options.layout());
 
+  // TODO: refactor all of this code to just use merge_in
+
   auto device_opt = options.device_opt();
   if (device_opt) {
     device_opt = ensure_has_index(device_opt.value());
@@ -77,7 +79,7 @@ Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, 
   if (dtype_opt) {
     specified_options = specified_options.dtype(dtype_opt.value());
   }
-  return to_impl(self, specified_options, non_blocking, copy);
+  return to_impl(self, specified_options.memory_format(optional_memory_format), non_blocking, copy);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
