@@ -13,6 +13,8 @@ Function::Function(c10::QualifiedName name)
     : name_(name), code_(std::make_shared<Code>()) {}
 
 void Function::append_instruction(OpCode op, int X, int N) {
+  if (op == WARN)
+    int debugint = 0;
   TORCH_CHECK(isOpSupportedInMobile(op), toString(op),
               " is not supported in mobile module.");
   code_->instructions_.emplace_back(op, X, N);
