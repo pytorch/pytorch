@@ -39,6 +39,13 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+Tensor& set_tensor_(Tensor& result, const Tensor& source) {
+  if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
+    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+  }
+  return result;
+}
+
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().

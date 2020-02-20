@@ -69,13 +69,15 @@ struct TORCH_API Operator {
         c10Handle_(opHandle),
         options_(c10Handle_->options()) {}
 
+
   Operator(
-      FunctionSchema schema,
-      OperationCreator op_creator,
+      const std::string& schema,
+      int(*op)(Stack&),
       c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_creator_(std::move(op_creator)),
+      : schema_string_(schema),
+        op_(std::make_shared<Operation>(std::move(op))),
         options_(std::move(options)) {}
+
 
   Operator(
       const std::string& schema,
@@ -88,40 +90,13 @@ struct TORCH_API Operator {
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
   // This is accomplished by marking the schema varargs and having no required
-  // arguments. This is used for things like prim::While or prim::If that can
-  // take a number of different valid input types and lengths.
+  // arguments.
   Operator(
       Symbol name,
       OperationCreator op_creator,
       c10::OperatorOptions options = c10::OperatorOptions())
-      : Operator(
-            varArgSchemaWithName(name),
-            std::move(op_creator),
-            std::move(options)) {}
-
-  Operator(
-      Symbol name,
-      Operation op,
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : Operator(
-            varArgSchemaWithName(name),
-            std::move(op),
-            std::move(options)) {}
-
-  Operator(
-      FunctionSchema schema,
-      Operation op,
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_(std::make_shared<Operation>(std::move(op))),
-        options_(std::move(options)) {}
-
-  Operator(
-      const std::string& schema,
-      int(*op)(Stack&),
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))),
+      : schema_(std::make_shared<FunctionSchema>(varArgSchemaWithName(name))),
+        op_creator_(std::move(op_creator)),
         options_(std::move(options)) {}
 
   Operation getOperation(const Node* node = nullptr) const {
@@ -159,7 +134,9 @@ struct TORCH_API Operator {
     }
     return options_.aliasAnalysis();
   }
-
+  bool hasOperation() const {
+    return op_ != nullptr;
+  }
  private:
   static FunctionSchema varArgSchemaWithName(Symbol name) {
     return FunctionSchema(

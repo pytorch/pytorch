@@ -24,6 +24,7 @@ void reset_buffers() {
   }
 }
 
+#ifdef __HIP_PLATFORM_HCC__
 TEST(TestLoops, HasSameArgTypes) {
   // This is a compile-time unit test. If this file compiles without error,
   // then the test passes and during runtime, we just need to return.
@@ -38,6 +39,7 @@ TEST(TestLoops, HasSameArgTypes) {
   static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
   return;
 }
+#endif
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);

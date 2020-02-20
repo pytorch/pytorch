@@ -99,7 +99,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  auto new_grad = std::move(grads[0]);
+  const auto& new_grad = grads[0];
   at::Tensor& grad = variable.grad();
   accumulateGradAndCallHooks(
       variable,
