@@ -79,7 +79,7 @@ graph(%a_quant, %packed_params, %r_scale, %r_zero_point, %r_dtype, %stride, %pad
         %w_quant : Tensor, %b : Tensor? = quantized::conv2d_unpack(%packed_params)
         %w_dequant = aten::dequantize(%w_quant)
         %conv_out = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
-        %r = aten::relu(%conv_out)
+        %r = aten::relu_(%conv_out)
         %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
         return (%r_quant) )";
 
