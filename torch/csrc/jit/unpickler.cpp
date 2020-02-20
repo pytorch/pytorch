@@ -574,13 +574,13 @@ void Unpickler::rebuildTensor(bool quantized) {
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
         case at::kPerChannelAffine: {
-          std::vector<double> scales = convertList<double>(qparams.at(1));
-          std::vector<int64_t> zero_points = convertList<int64_t>(qparams.at(2));
+          const auto& scales = qparams.at(1).toTensor();
+          const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
           result = _empty_per_channel_affine_quantized(
               {0},
-              at::tensor(scales),
-              at::tensor(zero_points),
+              scales,
+              zero_points,
               axis,
               storage_tensor.options());
         } break;
