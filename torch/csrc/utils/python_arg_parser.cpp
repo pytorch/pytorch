@@ -192,7 +192,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         }
         return true;
       }
-      return THPUtils_checkScalar(obj);
+      return false;
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
