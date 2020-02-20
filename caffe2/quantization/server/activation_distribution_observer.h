@@ -221,4 +221,14 @@ class RegisterQuantizationParamsWithHistogramNetObserver final
       const std::string& qparams_output_file_name = "");
 };
 
+#ifdef _MSC_VER
+struct tm* localtime_r(time_t* _clock, struct tm* _result) {
+  struct tm* candidate_result = localtime(_clock);
+  if (candidate_result) {
+    *(_result) = *candidate_result;
+  }
+  return candidate_result;
+}
+#endif
+
 } // namespace caffe2

@@ -46,7 +46,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     dim3 threads(MULTILABELMARGIN_THREADS);
 
     cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+      <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
@@ -69,7 +69,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       THCTensor_(resize0d)(state, output);
 
       cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-        <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+        <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output_tmp),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -86,7 +86,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
       THCTensor_(resize1d)(state, output, input->size(0));
 
       cunn_MultiLabelMarginCriterion_updateOutput_kernel<scalar_t, accreal>
-        <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+        <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -132,7 +132,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     dim3 threads(MULTILABELMARGIN_THREADS);
 
     cunn_MultiLabelMarginCriterion_updateGradInput_kernel<scalar_t, accreal>
-      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+      <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),
@@ -155,7 +155,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     dim3 threads(MULTILABELMARGIN_THREADS);
 
     cunn_MultiLabelMarginCriterion_updateGradInput_kernel<scalar_t, accreal>
-      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+      <<<blocks, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),
