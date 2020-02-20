@@ -508,13 +508,13 @@ class BuildExtension(build_ext, object):
                                              include_dirs, sources,
                                              depends, extra_postargs)
             common_cflags = extra_preargs or []
-            common_cflags.append('/c')
+            cflags = []
             if debug:
-                common_cflags.extend(self.compiler.compile_options_debug)
+                cflags.extend(self.compiler.compile_options_debug)
             else:
-                common_cflags.extend(self.compiler.compile_options)
+                cflags.extend(self.compiler.compile_options)
             common_cflags.extend(COMMON_MSVC_FLAGS)
-            cflags = common_cflags + pp_opts
+            cflags = cflags + common_cflags + pp_opts
             with_cuda = any(map(_is_cuda_file, sources))
 
             # extra_postargs can be either:
@@ -531,11 +531,8 @@ class BuildExtension(build_ext, object):
             if with_cuda:
                 cuda_cflags = []
                 for common_cflag in common_cflags:
-                    if common_cflag == '/c':
-                        cuda_cflags.append('-c')
-                    else:
-                        cuda_cflags.append('-Xcompiler')
-                        cuda_cflags.append(common_cflag)
+                    cuda_cflags.append('-Xcompiler')
+                    cuda_cflags.append(common_cflag)
                 cuda_cflags.extend(pp_opts)
                 if isinstance(extra_postargs, dict):
                     cuda_post_cflags = extra_postargs['nvcc']
