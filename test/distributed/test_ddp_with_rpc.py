@@ -22,7 +22,7 @@ from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 D_SPARSE = 3
 D_DENSE = 2
 D_OUT = 2
-NUM_EM_ROW = 3
+NUM_EM_ROW = 2
 
 
 def init_logger():
@@ -99,7 +99,7 @@ class HybridModel(nn.Module):
         sparse = _remote_method(
             RemoteEM.forward, self.rref, input.sparse_features
         )
-        assert sparse.sharp[0] == input.dense_features.share[0]
+        assert sparse.shape[0] == input.dense_features.shape[0]
         x = torch.cat((input.dense_features, sparse), 1)
         gLogger.info(f"Running the local net on joined feature: {x}")
         return self.local_net(x)
@@ -120,7 +120,9 @@ class RpcContext:
         pass
 
     def __exit__(self, exc_type, exc_value, traceback):
-        gLogger.info(f"Shutting down RPC group [{self.group_name}] from process self.name.")
+        gLogger.info(
+            f"Shutting down RPC group [{self.group_name}] from process self.name."
+        )
         if exc_type is not None:
             raise exc_value
         rpc.shutdown()
@@ -139,22 +141,12 @@ class TestDdpWithRpc(TestCase):
     TRAINER_NAME_TEMPLATE = "trainer:{:02d}"
     REMOTE_WORKER_NAME = "remote_worker"
     TRAINER_GROUP = "trainer_group"
-    NUM_TRAINERS = 1
+    NUM_TRAINERS = 3
     MASTER_NAME = "master"
 
     @classmethod
     def _remote_worker(cls):
         gLogger.info(f"Starting the remote worker...")
-        # This RPC group is only for the master and remote worker.
-        with RpcContext(
-            name=cls.REMOTE_WORKER_NAME,
-            rank=1,
-            world_size=2,
-            group_name="master/remote RPC",
-        ):
-            # They master will make a RPC and create a rref.
-            pass
-
         with RpcContext(
             name=cls.REMOTE_WORKER_NAME,
             rank=cls.NUM_TRAINERS,
@@ -182,18 +174,6 @@ class TestDdpWithRpc(TestCase):
         self.remote_em_rref: rpc.RRef = None
 
         self.spawn_remote_worker()
-
-        with RpcContext(
-            name=self.MASTER_NAME,
-            rank=0,
-            world_size=2,
-            group_name="master/remote RPC",
-        ):
-            gLogger.info(f"Creating a remote em.")
-            # Start the remote server first before creating a net rref on it.
-            self.remote_em_rref = rpc.remote(
-                self.REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
-            )
 
     def tearDown(self):
         super(TestDdpWithRpc, self).tearDown()
@@ -243,6 +223,19 @@ class TestDdpWithRpc(TestCase):
                 rank=rank,
                 world_size=cls.NUM_TRAINERS,
             )
+
+        rpc_context = RpcContext(
+            name=trainer_name,
+            rank=rank,
+            world_size=cls.NUM_TRAINERS + 1,
+            group_name="trainers/remote RPC",
+        )
+        if remote_em_rref is None:
+            # TODO: All trainers should share the same remote embedding table.
+            gLogger.warning(f"Creating a remote em for trainer #{rank}")
+            remote_em_rref = rpc.remote(
+                cls.REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
+            )
         gLogger.info(f"Creating a model on trainer #{rank}")
         model = HybridModel(
             remote_em_rref,
@@ -252,18 +245,13 @@ class TestDdpWithRpc(TestCase):
             gLogger.info(f"Apply DDP to the top level module. ")
             model = DDP(model)
 
-        # This group includes the remote worker
-        with RpcContext(
-            name=trainer_name,
-            rank=rank,
-            world_size=cls.NUM_TRAINERS + 1,
-            group_name="trainers/remote RPC",
-        ):
-            func(model)
+        func(model)
 
         if ddp_mode in (DdpMode.OUTSIDE, DdpMode.INSIDE):
             gLogger.info(f"Destroying down trainer process group.")
             dist.destroy_process_group()
+
+        rpc_context.__exit__(None, None, None)
 
     def spawn_trainers(
         self, func: Callable[[nn.Module], None], ddp_mode: DdpMode
@@ -282,11 +270,11 @@ class TestDdpWithRpc(TestCase):
             n = 2
             features = FeatureSet(
                 sparse_features=torch.LongTensor(
-                    [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1]]
+                    [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
                 ),
-                dense_features=torch.rannd((n, D_DENSE)),
+                dense_features=torch.randn((n, D_DENSE)),
             )
-            gLogger.info(f"Forward pass on {model(torch.randn((2, 4)))}")
+            gLogger.info(f"Forward pass on {model(features)}")
 
         self.spawn_trainers(run_one_forward, DdpMode.NONE)
 
