@@ -160,7 +160,9 @@
 #   USE_TBB
 #      enable TBB support
 #
-
+#   USE_SYSTEM_LIB
+#       A comma seperated list of libraries for which should not be checked 
+#       under the directory third_party
 from __future__ import print_function
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
@@ -287,22 +289,25 @@ def build_deps():
     report('-- Building version ' + version)
 
     def check_file(f):
-        if not os.path.exists(f):
-            report("Could not find {}".format(f))
-            report("Did you run 'git submodule update --init --recursive'?")
-            sys.exit(1)
+        if os.path.dirname(f) in str(os.getenv('USE_SYSTEM_LIB')):
+            report("Not checking for {} in third_party".format(f))
+        else:
+            if not os.path.exists(os.path.join(third_party_path,f)):
+                report("Could not find {}".format(os.path.join(third_party_path,f)))
+                report("Did you run 'git submodule update --init --recursive'?")
+                sys.exit(1)
 
-    check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
-    check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
-    check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'foxi', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'QNNPACK', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'fbgemm', 'third_party',
+    check_file(os.path.join("gloo", "CMakeLists.txt"))
+    check_file(os.path.join("pybind11", "CMakeLists.txt"))
+    check_file(os.path.join('cpuinfo', 'CMakeLists.txt'))
+    check_file(os.path.join('tbb', 'Makefile'))
+    check_file(os.path.join('onnx', 'CMakeLists.txt'))
+    check_file(os.path.join('foxi', 'CMakeLists.txt'))
+    check_file(os.path.join('QNNPACK', 'CMakeLists.txt'))
+    check_file(os.path.join('fbgemm', 'CMakeLists.txt'))
+    check_file(os.path.join('fbgemm', 'third_party',
                             'asmjit', 'CMakeLists.txt'))
-    check_file(os.path.join(third_party_path, 'onnx', 'third_party',
+    check_file(os.path.join('onnx', 'third_party',
                             'benchmark', 'CMakeLists.txt'))
 
     check_pydep('yaml', 'pyyaml')
