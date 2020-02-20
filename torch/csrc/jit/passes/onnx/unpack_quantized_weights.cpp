@@ -145,10 +145,25 @@ void unpackQuantizedWeightsHelper(
       throw std::runtime_error(
           "getValues: Quantized weight value not found amongst constant parameters.");
     }
-    auto ser_tup = itr->second.toTuple();
-    at::Tensor unpacked_weight = ser_tup->elements()[0].toTensor();
-    c10::optional<at::Tensor> bias =
-        ser_tup->elements()[1].toOptional<at::Tensor>();
+
+    at::Tensor unpacked_weight;
+    c10::optional<at::Tensor> bias;
+
+    if (itr->second.isTuple()) {
+      // Pre-unpacked weights. Comes from Linear weights which are
+      // stored as bound C++ classes.
+      auto ser_tup = itr->second.toTuple();
+      unpacked_weight = ser_tup->elements()[0].toTensor();
+      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+    } else {
+      TORCH_INTERNAL_ASSERT(itr->second.isTensor());
+      at::Tensor packed_weight = itr->second.toTensor();
+      auto op = Dispatcher::singleton().findSchema({unpack_fn, ""});
+      assert(op.has_value());
+      std::tie(unpacked_weight, bias) = callOpUnboxed<
+          std::tuple<at::Tensor, c10::optional<at::Tensor>>,
+          at::Tensor>(*op, packed_weight);
+    }
 
     // Permute weights
     std::vector<int64_t> wt_sizes = unpacked_weight.sizes().vec();
