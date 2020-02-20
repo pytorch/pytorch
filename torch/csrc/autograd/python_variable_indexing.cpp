@@ -260,9 +260,13 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 
   bool is_tracing = torch::jit::tracer::isTracing();
 
-  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index) {
-    pybind11::gil_scoped_release no_gil;
-    return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
+  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, bool release_gil) {
+    if (release_gil) {
+      pybind11::gil_scoped_release no_gil;
+      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
+    } else {
+      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
+    }
   };
 
   // handle simple types: integers, slices, bool
@@ -270,16 +274,16 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)));
+    return handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), /*release_gil=*/false);
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    return handle_simple_type(at::indexing::TensorIndex({start, stop, step}));
+    return handle_simple_type(at::indexing::TensorIndex({start, stop, step}), /*release_gil=*/false);
   } else if (index == Py_False || index == Py_True) {
-    return handle_simple_type(at::indexing::TensorIndex(index == Py_True));
+    return handle_simple_type(at::indexing::TensorIndex(index == Py_True), /*release_gil=*/true);
   }
 
   // wrap index in a tuple if it's not already one
@@ -323,7 +327,6 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, Variable&& value) {
-    pybind11::gil_scoped_release no_gil;
     at::indexing::set_item(self_, {std::move(tensor_index)}, std::move(value), is_tracing);
   };
 
