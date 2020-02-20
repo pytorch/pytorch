@@ -650,7 +650,7 @@ void THCTensor_(baddbmm)(THCState *state, THCTensor *result, THCTensor *t,
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
 
-  createBatchGemmBuffer3<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  createBatchGemmBuffer3<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
     d_matrices1, d_matrices2, (const scalar_t**)d_result_matrices, THCTensor_(data)(state, batch1_),
     THCTensor_(data)(state, batch2_), THCTensor_(data)(state, result_),
     batch1_->stride(0), batch2_->stride(0), result_->stride(0), num_batches);

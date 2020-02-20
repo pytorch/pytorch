@@ -8,7 +8,7 @@ void THCStorage_(fill)(THCState *state, THCStorage *self, scalar_t value)
   thrust::device_ptr<scalar_t> self_data(THCStorage_(data)(state, self));
   thrust::fill(
 #if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
 #endif
     self_data, self_data+self->numel(), value);
 }
