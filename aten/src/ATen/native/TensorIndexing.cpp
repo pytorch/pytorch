@@ -7,10 +7,12 @@ namespace indexing {
 
 const EllipsisIndexType Ellipsis = EllipsisIndexType();
 
+namespace impl {
 std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
   stream << slice.start() << ":" << slice.stop() << ":" << slice.step();
   return stream;
 }
+} // namespace impl
 
 std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index) {
   if (tensor_index.is_none()) {

@@ -18,6 +18,7 @@ constexpr c10::nullopt_t None{c10::nullopt_t::init()};
 struct CAFFE2_API EllipsisIndexType final { EllipsisIndexType() {} };
 CAFFE2_API extern const EllipsisIndexType Ellipsis;
 
+namespace impl {
 struct CAFFE2_API Slice final {
  public:
   Slice() {}
@@ -74,6 +75,7 @@ inline Slice unpackSlice(
   }
   return Slice(start, stop, step);
 }
+} // namespace impl
 
 // `at::indexing::TensorIndex` is used for converting C++ tensor indices such as
 // `{None, "...", Ellipsis, 0, true, {1, None, 2}, torch::tensor({1, 2})}`
@@ -125,11 +127,11 @@ struct CAFFE2_API TensorIndex final {
   // where `start` / `stop` / `step` can be integer or `at::indexing::None`
   TensorIndex(std::initializer_list<c10::optional<int64_t>> slice) : type_(TensorIndexType::Slice) {
     if (slice.size() == 0) {
-      slice_ = unpackSlice(c10::nullopt, c10::nullopt, c10::nullopt);
+      slice_ = impl::unpackSlice(c10::nullopt, c10::nullopt, c10::nullopt);
     } else if (slice.size() == 2) {
-      slice_ = unpackSlice(*slice.begin(), *(slice.begin() + 1), c10::nullopt);
+      slice_ = impl::unpackSlice(*slice.begin(), *(slice.begin() + 1), c10::nullopt);
     } else if (slice.size() == 3) {
-      slice_ = unpackSlice(*slice.begin(), *(slice.begin() + 1), *(slice.begin() + 2));
+      slice_ = impl::unpackSlice(*slice.begin(), *(slice.begin() + 1), *(slice.begin() + 2));
     } else {
       TORCH_CHECK_VALUE(
         false,
@@ -170,7 +172,7 @@ struct CAFFE2_API TensorIndex final {
     return type_ == TensorIndexType::Slice;
   }
 
-  inline const Slice& slice() const {
+  inline const impl::Slice& slice() const {
     return slice_;
   }
 
@@ -185,7 +187,7 @@ struct CAFFE2_API TensorIndex final {
  private:
   int64_t integer_;
   bool boolean_;
-  Slice slice_;
+  impl::Slice slice_;
   Tensor tensor_;
   TensorIndexType type_;
 };
@@ -323,6 +325,20 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 }
 } // namespace impl
 
+// NOTE: Many functions below are only for consumption from Python indexing
+// implementation, they include:
+//
+// - `Tensor scalarToTensor(...)`
+// - `IntArrayRef slicePrefix1sSize(...)`
+// - `void copy_to(...)`
+// - `Tensor handleDimInMultiDimIndexing(...)`
+// - `Tensor dispatch_index(...)`
+// - `Tensor dispatch_index_put_(...)`
+// - `Tensor get_item(...)`
+// - `void set_item(...)`
+//
+// The rest of the functions are in `at::indexing::impl` namespace, signifying
+// that they shouldn't be used from Python indexing implementation.
 static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
   if (self_device == at::kCPU || self_device == at::kCUDA) {
     return impl::scalarToTensorCPUOrCUDA(v, options);

@@ -11,7 +11,7 @@ using namespace torch::indexing;
 using namespace torch::test;
 
 TEST(TensorIndexingTest, Slice) {
-  Slice slice(1, 2, 3);
+  torch::indexing::impl::Slice slice(1, 2, 3);
   ASSERT_EQ(slice.start(), 1);
   ASSERT_EQ(slice.stop(), 2);
   ASSERT_EQ(slice.step(), 3);
