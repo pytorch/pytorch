@@ -91,7 +91,11 @@ _builtin_ops = [
 # instead looking up a builtin "aten::" schema
 
 def _gen_torch_functional_registered_ops():
-    ops = torch.functional.__all__
+    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__) 
+    # but we are currently only able to compile some of the functions. additionally, 
+    # some functions directly map to their aten:: implementations. 
+    # TODO: add support for more ops
+    ops = ["stft"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
