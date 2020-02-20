@@ -552,44 +552,18 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 if os.path.exists(f):
                     assert(os.path.isdir(f))
                 else:
-                    proto, export_map = graph._export_onnx(
-                        {}, opset_version, dynamic_axes, False, operator_export_type,
-                        strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names)
+                    os.makedirs(f)
 
-                if enable_onnx_checker and operator_export_type != OperatorExportTypes.ONNX_ATEN_FALLBACK:
-                    # Only run checker if enabled and we are not using ATEN fallback
-                    _check_onnx_proto(proto)
+                model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
+                with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
+                    opened_file.write(proto)
 
-                if export_type == ExportTypes.PROTOBUF_FILE:
-                    assert(len(export_map) == 0)
-                    with torch.serialization._open_file_like(f, 'wb') as opened_file:
-                        opened_file.write(proto)
-                elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
-                    import zipfile
-                    compression = zipfile.ZIP_DEFLATED \
-                        if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
-                        else zipfile.ZIP_STORED
-                    with zipfile.ZipFile(f, 'w', compression=compression) as z:
-                        z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
-                        for k, v in export_map.items():
-                            z.writestr(k, v)
-                elif export_type == ExportTypes.DIRECTORY:
-                    import os
-                    if os.path.exists(f):
-                        assert(os.path.isdir(f))
-                    else:
-                        os.makedirs(f)
-
-                    model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
-                    with torch.serialization._open_file_like(model_proto_file, 'wb') as opened_file:
-                        opened_file.write(proto)
-
-                    for k, v in export_map.items():
-                        weight_proto_file = os.path.join(f, k)
-                        with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
-                            opened_file.write(v)
-                else:
-                    raise RuntimeError('Unknown export type')
+                for k, v in export_map.items():
+                    weight_proto_file = os.path.join(f, k)
+                    with torch.serialization._open_file_like(weight_proto_file, 'wb') as opened_file:
+                        opened_file.write(v)
+            else:
+                raise RuntimeError('Unknown export type')
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
