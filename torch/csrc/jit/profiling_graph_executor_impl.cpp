@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -112,6 +113,11 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& copy) {
+  GRAPH_DUMP("before quantization passes", copy);
+  ReplicateDeQuant(copy);
+  SwapDeQuant(copy);
+  QuantFusion(copy);
+  GRAPH_DUMP("after quantization passes", copy);
   LowerGradOf(*copy);
   GRAPH_DUMP("runProfilingInsensitiveOptimizations", copy);
   // clear any residual undefinedness
