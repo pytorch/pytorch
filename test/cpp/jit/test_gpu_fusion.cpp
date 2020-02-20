@@ -161,23 +161,27 @@ void testGPU_FusionTopoSort() {
   //e0: v3, v2 = dummy(v1, v0)
   //e1: v4     =   add(v3, v2)
   //e2: v5     =   add(v2, v4)
+  //e3: v6     =   add(v5, v5)
   Float* v0 = new Float{1.f};
   Float* v1 = new Float{2.f};
   Float* v2 = new Float();
   Float* v3 = new Float();
   Float* v4 = new Float();
   Float* v5 = new Float();
+  Float* v6 = new Float();
 
   Expr* e0 = new DummyExpr(v3, v2, v1, v0);
   Expr* e1 = new BinaryOp(BinaryOpType::Add, v4, v3, v2);
   Expr* e2 = new BinaryOp(BinaryOpType::Add, v5, v2, v4);
+  Expr* e3 = new BinaryOp(BinaryOpType::Add, v6, v5, v5);
   
   std::vector<const Expr*> exprs = fusion.exprs();
 
-  TORCH_CHECK(exprs.size() == 3);
+  TORCH_CHECK(exprs.size() == 4);
   TORCH_CHECK(exprs[0] == e0);
   TORCH_CHECK(exprs[1] == e1);
   TORCH_CHECK(exprs[2] == e2);
+  TORCH_CHECK(exprs[3] == e3);
   
   fusion.addOutput(v2);
   exprs = fusion.exprs(true);
@@ -202,11 +206,19 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(exprs[1] == e1);
   TORCH_CHECK(exprs[2] == e2);
 
+  fusion.addOutput(v6);
+  exprs = fusion.exprs(true);
+  TORCH_CHECK(exprs.size() == 4);
+  TORCH_CHECK(exprs[0] == e0);
+  TORCH_CHECK(exprs[1] == e1);
+  TORCH_CHECK(exprs[2] == e2);
+  TORCH_CHECK(exprs[3] == e3);
 
   TORCH_CHECK(fusion.origin(v2)->name() == 0);
   TORCH_CHECK(fusion.origin(v3)->name() == 0);
   TORCH_CHECK(fusion.origin(v4)->name() == 1);
   TORCH_CHECK(fusion.origin(v5)->name() == 2);
+  TORCH_CHECK(fusion.origin(v6)->name() == 3);
 
 }
 
@@ -394,12 +406,10 @@ void testGPU_FusionTVReorder() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
-  
-
   std::unordered_map<int, int> shift_right{
     {-1, 0}
   };
+
   std::unordered_map<int, int> shift_left{
     {0, -1}
   };
@@ -415,18 +425,23 @@ void testGPU_FusionTVReorder() {
     {2, 0}
   };
 
+  const TensorView *tv = new TensorView(Tensor::MakeDummyTensor(3));
+  
   const TensorView *s_leftl = reorder(tv, shift_left);
   for(int i = 0; i < tv->domain()->size(); i++)
     TORCH_CHECK(tv->domain()->axis(i) == s_leftl->domain()->axis(i-1));
-  
+
+  tv = new TensorView(Tensor::MakeDummyTensor(3));
   const TensorView *s_left2 = reorder(tv, shift_left);
   for(int i = 0; i < tv->domain()->size(); i++)
     TORCH_CHECK(tv->domain()->axis(i) == s_left2->domain()->axis(i-1));
 
+  tv = new TensorView(Tensor::MakeDummyTensor(3));
   const TensorView *s_right = reorder(tv, shift_right);
   for(int i = 0; i < tv->domain()->size(); i++)
     TORCH_CHECK(tv->domain()->axis(i-1) == s_right->domain()->axis(i));
 
+  tv = new TensorView(Tensor::MakeDummyTensor(3));
   const TensorView *rswap = reorder(tv, swap);
   TORCH_CHECK(tv->domain()->axis(0) == rswap->domain()->axis(2));
   TORCH_CHECK(tv->domain()->axis(2) == rswap->domain()->axis(0));
@@ -591,26 +606,44 @@ void testGPU_FusionDependency(){
   Fusion fusion;
   FusionGuard fg(&fusion);
     
+  Float* f0 = new Float(0.f);
   Float* f1 = new Float(1.f);
-  Float* f2 = new Float(2.f);
-  auto   f3 = add(f1, f2);
+  auto   f2 = add(f0, f1);
+
+  Float* f3 = new Float(3.f);
   Float* f4 = new Float(4.f);
-  Float* f5 = new Float(5.f);
-  auto   f6 = add(f4, f5);
-  auto   f7 = add(f6, f3);
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f7));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f7));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f7));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f4, f7));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f5, f7));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f6, f7));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f1));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f2));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f3));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f4));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f5));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f7, f6));
+  auto   f5 = add(f3, f4);
+
+  auto   f6 = add(f2, f5);
+
+  Float* f7 = new Float(7.f);
+  Float* f8 = new Float(8.f);
+  auto   f9 = add(f7, f8);
+
+  Float* f10 = new Float(10.f);
+  Float* f11 = new Float(11.f);
+  auto   f12 = add(f10, f11);
+
+  auto   f13 = add(f9, f12);
+
+  auto   f14 = add(f6, f13);
   
+ //f14 = ( (f0 + f1) + (f3 + f4) ) + ( (f7 + f8) + (f10 + f11) )
+
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f14));
+  /*
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f6));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f6));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f6));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f4, f6));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f5, f6));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f0));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f1));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f2));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f3));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f4));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f5));
+  */
 }
 
 
