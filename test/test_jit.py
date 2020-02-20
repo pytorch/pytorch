@@ -5321,6 +5321,28 @@ def foo(x):
         self.assertEqual(a.child.o, sa.child.o)
         self.assertEqual(a.child.list, sa.child.list)
 
+        @torch.jit.script
+        class SomeNonAddableClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        # with self.assertRaisesRegex(RuntimeError, "")
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = SomeNonAddableClass()
+
+            def forward(self):
+                self.x += SomeNonAddableClass()
+                return self.x
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
+            torch.jit.script(A())
+
     def test_nested_list_construct(self):
         def foo():
             return [[4]] + [[4, 5]]

@@ -2576,7 +2576,7 @@ RegisterOperators reg2({
           listMulIntRight<c_type::value_type>,                                      \
           aliasAnalysisFromSchema()),                                               \
       Operator(                                                                     \
-          "aten::mul_(" decl_type "[] l, int n) -> " decl_type "[]",                \
+          "aten::mul_(" decl_type "[](a!) l, int n) -> " decl_type "[](a!)",        \
           listMulIntLeftInPlace<c_type::value_type>,                                \
           aliasAnalysisFromSchema())
 
