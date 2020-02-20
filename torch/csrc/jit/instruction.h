@@ -5,7 +5,7 @@
 
 namespace torch {
 namespace jit {
-// instructs look like:
+// instruction look like:
 // op_code X, N
 // meaning of X, N depend on the op:
 // O - index into operator table
@@ -16,6 +16,7 @@ namespace jit {
 // F - index into function table
 // T - index into the type table, used for guard instructions
 // S - index into object slots
+// C - index into code table
 
 #define FORALL_OPCODES(_)                                                   \
   _(OP, "O") /* invoke operator X */                                        \
@@ -38,7 +39,18 @@ namespace jit {
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
   _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \
-  _(SET_ATTR, "S") /* set attribute to slot X in an Object */
+  _(SET_ATTR, "S") /* set attribute to slot X in an Object */               \
+  _(LIST_UNPACK, "I") /* unpack list expecting length I */                  \
+  _(TUPLE_CONSTRUCT, "I") /* construct a tuple using X inputs */            \
+  _(NAMED_TUPLE_CONSTRUCT,                                                  \
+    "TI") /* construct a tuple of type X, using N inputs */                 \
+  _(LIST_CONSTRUCT, "TI") /* construct a list of type X, using N inputs */  \
+  _(DICT_CONSTRUCT, "TI") /* construct a dict of type X, using N inputs */  \
+  _(CREATE_OBJECT, "T") /* create an object of type X */                    \
+  _(ISINSTANCE, "TI") /* check object is one of  types[X:X+N]  */           \
+  _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                             \
+  _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */    \
+  _(WARN, "") /* emit a warning with line information */
 
 enum OpCode : uint8_t {
 #define DEFINE_OP(op, _) op,
@@ -48,12 +60,12 @@ enum OpCode : uint8_t {
 
 struct Instruction {
   OpCode op;
-  uint8_t padding; // currently unused
+  uint8_t unused;
   uint16_t N;
   int32_t X;
   // TODO: check for overflow
   Instruction(OpCode op, int32_t X, uint16_t N)
-      : op(op), padding(0), N(N), X(X) {}
+      : op(op), unused(0), N(N), X(X) {}
 };
 
 bool isOpSupportedInMobile(OpCode op);

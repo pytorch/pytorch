@@ -101,26 +101,6 @@ COMMON_NVCC_FLAGS = [
     '--expt-relaxed-constexpr'
 ]
 
-# See comment in load_inline for more information
-# The goal is to be able to call the safe version of the
-# function exactly as if it was the original one.
-# We need to create a pointer to this new function to give
-# it to pybind later.
-
-SAFE_FUNCTION_DEFINITION = '''
-#include <functional>
-
-template <typename Ret, typename ...Args>
-auto _get_safe_version(Ret (*f)(Args...)) -> std::function<Ret(Args...)> {{
-    return [f](Args&& ...args) -> Ret {{
-        HANDLE_TH_ERRORS
-        return f(std::forward<Args>(args)...);
-        END_HANDLE_TH_ERRORS_PYBIND
-    }};
-}}
-
-'''
-
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 
@@ -239,6 +219,12 @@ class BuildExtension(build_ext, object):
     attempt to build using the Ninja backend. Ninja greatly speeds up
     compilation compared to the standard ``setuptools.build_ext``.
     Fallbacks to the standard distutils backend if Ninja is not available.
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
 
     @classmethod
@@ -922,6 +908,12 @@ def load_inline(name,
         >>> module = load_inline(name='inline_extension',
                                  cpp_sources=[source],
                                  functions=['sin_add'])
+
+    .. note::
+        By default, the Ninja backend uses #CPUS + 2 workers to build the
+        extension. This may use up too many resources on some systems. One
+        can control the number of workers by setting the `MAX_JOBS` environment
+        variable to a non-negative number.
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
 
@@ -932,11 +924,6 @@ def load_inline(name,
         cuda_sources = [cuda_sources]
 
     cpp_sources.insert(0, '#include <torch/extension.h>')
-
-    # Adds a new `_get_safe_version(foo)` function that returns a new function
-    # that performs the same operation as `foo` but with pytorch error handling
-    # macros.
-    cpp_sources.append(SAFE_FUNCTION_DEFINITION)
 
     # If `functions` is supplied, we create the pybind11 bindings for the user.
     # Here, `functions` is (or becomes, after some processing) a map from
@@ -955,8 +942,9 @@ def load_inline(name,
                     type(functions)))
         for function_name, docstring in functions.items():
             if with_pytorch_error_handling:
-                module_def.append('m.def("{0}", _get_safe_version({0}), "{1}");'.format(
-                    function_name, docstring))
+                module_def.append(
+                    'm.def("{0}", torch::wrap_pybind_function({0}), "{1}");'
+                    .format(function_name, docstring))
             else:
                 module_def.append('m.def("{0}", {0}, "{1}");'.format(function_name, docstring))
         module_def.append('}')
@@ -1285,7 +1273,23 @@ def _get_build_directory(name, verbose):
     return build_directory
 
 
+def _get_num_workers(verbose):
+    max_jobs = os.environ.get('MAX_JOBS')
+    if max_jobs is not None and max_jobs.isdigit():
+        if verbose:
+            print('Using envvar MAX_JOBS ({}) as the number of workers...'.format(max_jobs))
+        return int(max_jobs)
+    if verbose:
+        print('Allowing ninja to set a default number of workers... '
+              '(overridable by setting the environment variable MAX_JOBS=N)')
+    return None
+
+
 def _run_ninja_build(build_directory, verbose, error_prefix):
+    command = ['ninja', '-v']
+    num_workers = _get_num_workers(verbose)
+    if num_workers is not None:
+        command.extend(['-j', str(num_workers)])
     try:
         sys.stdout.flush()
         sys.stderr.flush()
@@ -1304,14 +1308,14 @@ def _run_ninja_build(build_directory, verbose, error_prefix):
             # it is valid.
             stdout_fileno = 1
             subprocess.run(
-                ['ninja', '-v'],
+                command,
                 stdout=stdout_fileno if verbose else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 check=True)
         else:
             subprocess.check_output(
-                ['ninja', '-v'],
+                command,
                 stderr=subprocess.STDOUT,
                 cwd=build_directory)
     except subprocess.CalledProcessError:
