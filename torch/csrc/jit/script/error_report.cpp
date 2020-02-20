@@ -19,8 +19,6 @@ ErrorReport::ErrorReport(const ErrorReport& e)
       error_stack(e.error_stack.begin(), e.error_stack.end()) {}
 
 #ifndef C10_MOBILE
-ErrorReport::ErrorReport()
-    : context(c10::nullopt), error_stack(calls.begin(), calls.end()) {}
 ErrorReport::ErrorReport(SourceRange r)
     : context(std::move(r)), error_stack(calls.begin(), calls.end()) {}
 
@@ -36,8 +34,6 @@ ErrorReport::CallStack::~CallStack() {
   calls.pop_back();
 }
 #else // defined C10_MOBILE
-ErrorReport::ErrorReport()
-    : context(c10::nullopt) {}
 ErrorReport::ErrorReport(SourceRange r)
     : context(std::move(r)) {}
 
@@ -54,12 +50,8 @@ ErrorReport::CallStack::~CallStack() {
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
   msg << "\n" << ss.str();
-  if (context) {
-    msg << ":\n";
-    context->highlight(msg);
-  } else {
-    msg << ".\n";
-  }
+  msg << ":\n";
+  context.highlight(msg);
 
   if (error_stack.size() > 0) {
     for (auto it = error_stack.rbegin(); it != error_stack.rend() - 1; ++it) {
