@@ -10,10 +10,6 @@
   device_guard: False
   return: argument 0
   options:
-    - cname: set
-      arguments:
-        - THTensor* self
-        - THTensor* source
     - cname: setStorage
       arguments:
         - THTensor* self
@@ -191,6 +187,19 @@
     - bool accumulate
 ]]
 [[
+  name: _th_index_add_
+  cname: indexAdd
+  variants: function
+  backends:
+    - CUDA
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - long dim
+    - THIndexTensor* index
+    - THTensor* source
+]]
+[[
   name: _th_index_fill_
   cpu_bool: True
   cuda_bool: True
@@ -207,7 +216,8 @@
 [[
   name: _th_scatter_
   return: argument 0
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   options:
@@ -550,24 +560,6 @@
     - real p
     - long dim
     - real maxnorm
-]]
-[[
-  name: _th_dist
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: dist
-      return: accreal
-      arguments:
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-        - real p
 ]]
 [[
   name: _th_histc
@@ -1204,10 +1196,9 @@
   name: _th_cat
   cname: catArray
   variants: [function]
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   return: self
   arguments:
