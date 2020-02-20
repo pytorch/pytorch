@@ -21,19 +21,6 @@ struct THPVariable {
 THP_API PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
-
-// Creates a new Python object for a Variable. The Variable must not already
-// have a PyObject* associated with it.
-static inline PyObject * THPVariable_NewWithVar(PyTypeObject* type, torch::autograd::Variable var) {
-  PyObject* obj = type->tp_alloc(type, 0);
-  if (obj) {
-    auto v = (THPVariable*) obj;
-    new (&v->cdata) torch::autograd::Variable(std::move(var));
-    torch::autograd::impl::set_pyobj(v->cdata, obj);
-  }
-  return obj;
-}
-
 THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
 static inline bool THPVariable_CheckExact(PyObject *obj) {

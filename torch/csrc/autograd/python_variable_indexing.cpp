@@ -247,15 +247,11 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   OptionalDeviceGuard device_guard(device_of(self_));
 
-  auto wrap_var = [&](Variable&& var) {
-    return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
-  };
-
   // handle simple types: none, ellipsis
   if (index == Py_None) {
-    return wrap_var(std::move(self_.unsqueeze(0)));
+    return THPVariable_Wrap(self_.unsqueeze(0));
   } else if (index == Py_Ellipsis) {
-    return wrap_var(std::move(at::alias(self_)));
+    return THPVariable_Wrap(at::alias(self_));
   }
 
   bool is_tracing = torch::jit::tracer::isTracing();
@@ -263,9 +259,9 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, bool release_gil) {
     if (release_gil) {
       pybind11::gil_scoped_release no_gil;
-      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
+      return THPVariable_Wrap(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
     } else {
-      return wrap_var(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
+      return THPVariable_Wrap(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
     }
   };
 
@@ -296,14 +292,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return wrap_var(std::move(sliced));
+    return THPVariable_Wrap(std::move(sliced));
   }
 
   // indexing by tensors ("advanced" indexing)
-  return wrap_var(std::move(([&]() {
+  return THPVariable_Wrap(([&]() {
     pybind11::gil_scoped_release no_gil;
     return at::indexing::dispatch_index(sliced, std::move(variableIndices));
-  })()));
+  })());
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

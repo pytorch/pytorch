@@ -46,6 +46,19 @@ static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
 
+// Creates a new Python object for a Variable. The Variable must not already
+// have a PyObject* associated with it.
+static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
+{
+  PyObject* obj = type->tp_alloc(type, 0);
+  if (obj) {
+    auto v = (THPVariable*) obj;
+    new (&v->cdata) Variable(std::move(var));
+    torch::autograd::impl::set_pyobj(v->cdata, obj);
+  }
+  return obj;
+}
+
 PyObject * THPVariable_Wrap(Variable var)
 {
   if (!var.defined()) {
