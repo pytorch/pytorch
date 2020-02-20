@@ -1511,28 +1511,11 @@ struct to_ir {
           }
           return;
         }
-        if (classinfo.kind() == TK_VAR) {
-          // Special casing for list and tuple since isinstance(x, list) and
-          // isinstance(x, tuple) does not accept List[int] / Tuple[int] like
-          // subscript type annotation in python
-          auto name = Var(classinfo).name().name();
-          if (name == "tuple") {
-            tuple_check = true;
-            return;
-          } else if (name == "list") {
-            list_check = true;
-            return;
-          }
-        }
         TypePtr type = typeParser_.parseTypeFromExpr(classinfo);
         types.emplace_back(type);
       }
       bool staticallyTrue(const TypePtr& actual_type) {
         // is this isinstance check statically true?
-        if ((list_check && actual_type->kind() == ListType::Kind) ||
-            (tuple_check && actual_type->kind() == TupleType::Kind)) {
-          return true;
-        }
         for (const TypePtr& typ : types) {
           if (actual_type->isSubtypeOf(typ)) {
             return true;
@@ -1550,27 +1533,29 @@ struct to_ir {
         return false;
       }
       bool staticallyFalse(const TypePtr& actual_type) {
-        if ((list_check && maybeOfKind(ListType::Kind, actual_type)) ||
-            (tuple_check && maybeOfKind(TupleType::Kind, actual_type))) {
-          return false;
-        }
         for (const TypePtr& typ : types) {
           if (typ->isSubtypeOf(actual_type)) {
+            return false;
+          }
+          if ((typ->isSubtypeOf(AnyListType::get()) &&
+                  maybeOfKind(ListType::Kind, actual_type)) ||
+              (typ->isSubtypeOf(AnyTupleType::get()) &&
+                  maybeOfKind(TupleType::Kind, actual_type))) {
             return false;
           }
         }
         return true;
       }
       ScriptTypeParser typeParser_;
-      bool list_check = false;
-      bool tuple_check = false;
       std::vector<TypePtr> types;
     };
     GatheredTypes gathered(typeParser_);
     gathered.gather(classinfo);
     auto val = emitExpr(obj);
     RefinementSet refinement;
-    if (gathered.types.size() == 1 && obj.kind() == TK_VAR) {
+    if (gathered.types.size() == 1 &&
+        gathered.types.at(0)->isSubtypeOf(val->type()) &&
+        obj.kind() == TK_VAR) {
       std::string ident = Var(obj).name().name();
       Refinement isinstance(std::move(ident), gathered.types.at(0));
       refinement = RefinementSet({isinstance}, {});
@@ -1584,9 +1569,7 @@ struct to_ir {
     }
     // check maybe true/false at runtime, need an actual op
     Value* result =
-        graph
-            ->insertNode(graph->createIsInstance(
-                val, gathered.types, gathered.list_check, gathered.tuple_check))
+        graph->insertNode(graph->createIsInstance(val, gathered.types))
             ->output();
     return CondValue(result, std::move(refinement), c10::nullopt);
   }
