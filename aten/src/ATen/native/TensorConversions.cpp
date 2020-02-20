@@ -32,14 +32,15 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
-      auto r = at::empty_strided(self.sizes(), self.strides(), options);
+      auto r = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
       r.copy_(self);
       return r;
     } else {
       memory_format = self.suggest_memory_format();
     }
   }
-  auto r = at::empty(self.sizes(), options, memory_format);
+  // See Note [Explicit nullopt MemoryFormat argument]
+  auto r = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
