@@ -255,11 +255,13 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   cuda9::workaround::enable_default_constructor<args_t> args[thread_work_size];
 
   // load
-  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
+  detail::static_unroll<load_with_policy, arity>::template with_args<args_t>(args, policy, args_base);
 
   // compute
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
+    // TODO (@zasdfgbnm): remove the following cast when we no longer need the
+    // CUDA9 workaround.
     results[i] = c10::guts::apply(f, static_cast<args_t>(args[i]));
   }
 
