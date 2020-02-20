@@ -327,7 +327,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   bool is_tracing = torch::jit::tracer::isTracing();
 
   auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, Variable&& value) {
-    at::indexing::set_item(self_, {std::move(tensor_index)}, std::move(value), is_tracing);
+    at::indexing::set_item(self_, {std::move(tensor_index)}, value, is_tracing);
   };
 
   // handle simple types: integers, slices, ellipsis, none, bool
