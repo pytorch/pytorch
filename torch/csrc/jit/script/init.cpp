@@ -1037,6 +1037,7 @@ void initJitScriptBindings(PyObject* module) {
             auto g = self.function().graph()->copy();
             Inline(*g);
             return g;
+          })
       .def_property_readonly(
           "_profiled_graph",
           [](Method& self) {
