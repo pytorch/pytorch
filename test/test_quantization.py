@@ -536,8 +536,9 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
     # @unittest.skip("temporarily disable the test")
     # @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    @given(qengine=st.sampled_from(("fbgemm", )))
+    # @given(qengine=st.sampled_from(("fbgemm", )))
     def test_quantized_rnn(self, qengine):
+        qengine = "fbgemm"
         d_in, d_hid = 2, 2
 
         with override_quantized_engine(qengine):
