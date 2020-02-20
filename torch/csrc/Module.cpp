@@ -737,7 +737,7 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#if defined(USE_CUDNN) || defined(USE_ROCM)
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
