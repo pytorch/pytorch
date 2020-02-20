@@ -14,12 +14,10 @@ namespace {
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
   TORCH_CHECK(qa.qscheme() == kPerTensorAffine,
               "Only per tensor quantization is supported in Mul.");
-  TORCH_CHECK(qa.qscheme() == qb.qscheme(),
-              "Both inputs to Mul must have the same quantization scheme.");
-  TORCH_CHECK(qa.numel() == qb.numel(),
-              "Mul operands must be the same size!");
   TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
               "Mul operands should have same data type.");
+  TORCH_CHECK(qa.qscheme() == qb.qscheme(),
+              "Both inputs to Mul must have the same quantization shceme.");
 }
 
 // Note: out is assumed to be the same size as self and other.
