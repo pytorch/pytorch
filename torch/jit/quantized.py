@@ -2,8 +2,7 @@ import torch
 
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 
-from torch import Tensor  # noqa: F401
-from torch.nn import _VF
+from torch import Tensor, _VF  # noqa: F401
 
 from torch.nn.utils.rnn import PackedSequence
 

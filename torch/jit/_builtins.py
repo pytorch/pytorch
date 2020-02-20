@@ -83,7 +83,7 @@ _builtin_ops = [
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
-    (torch._C._VariableFunctions.stft, "aten::stft")
+    (torch._VF.stft, "aten::stft")
 ]
 
 # ops in torch.functional are bound to torch 

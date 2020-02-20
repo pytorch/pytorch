@@ -7,7 +7,7 @@ from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 from .. import init
-from .. import _VF
+from ... import _VF
 
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
