@@ -5138,18 +5138,18 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         torch.testing.assert_allclose(expected_norm, actual_norm)
 
     def test_memory_format(self):
-        def test_helper(x, memft):
-            y = x.contiguous(memory_format=memft)
+        def test_helper(x, memory_format):
+            y = x.contiguous(memory_format=memory_format)
             self.assertFalse(y.is_contiguous())
-            self.assertTrue(y.is_contiguous(memory_format=memft))
+            self.assertTrue(y.is_contiguous(memory_format=memory_format))
             self.assertEqual(y, x)
 
         test_helper(torch.randn(4, 3, 8, 8), torch.channels_last)
         test_helper(torch.randn(4, 3, 8, 8, 8), torch.channels_last_3d)
 
     def test_memory_format_contiguous_returns_same_tensor_if_already_satisfies(self):
-        def test_helper(x, memft):
-            alias = x.contiguous(memory_format=memft)
+        def test_helper(x, memory_format):
+            alias = x.contiguous(memory_format=memory_format)
             alias.fill_(7)
             self.assertEqual(x, alias)
 
@@ -5157,11 +5157,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         test_helper(torch.randn(4, 8, 8, 8, 3).permute(0, 4, 1, 2, 3), torch.channels_last_3d)
 
     def test_memory_format_empty(self):
-        def test_helper(dim1, dim2, memft):
+        def test_helper(dim1, dim2, memory_format):
             with self.assertRaises(RuntimeError):
-                x = torch.empty(dim1, memory_format=memft)
-            x = torch.empty(dim2, memory_format=memft)
-            self.assertTrue(x.is_contiguous(memory_format=memft))
+                x = torch.empty(dim1, memory_format=memory_format)
+            x = torch.empty(dim2, memory_format=memory_format)
+            self.assertTrue(x.is_contiguous(memory_format=memory_format))
 
         test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
         test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
@@ -12220,47 +12220,47 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(x.stride(), old_strides)
 
     def test_memory_format_resize_as(self, device):
-        def test_helper(dims, memft, device):
-            xc = torch.randn(dims, device=device).contiguous(memory_format=memft)
+        def test_helper(shape, memory_format, device):
+            xc = torch.randn(shape, device=device).contiguous(memory_format=memory_format)
             flat = torch.randn(xc.numel(), device=device)
             flat.resize_as_(xc, memory_format=torch.preserve_format)
-            self.assertTrue(flat.is_contiguous(memory_format=memft))
+            self.assertTrue(flat.is_contiguous(memory_format=memory_format))
 
         test_helper((10, 3, 32, 32), torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), torch.channels_last_3d, device)
 
     def test_memory_format_resize_(self, device):
-        def test_helper(dims, numel, memft, device):
+        def test_helper(shape, numel, memory_format, device):
             flat = torch.randn(numel, device=device)
-            flat.resize_(dims, memory_format=memft)
-            self.assertTrue(flat.is_contiguous(memory_format=memft))
+            flat.resize_(shape, memory_format=memory_format)
+            self.assertTrue(flat.is_contiguous(memory_format=memory_format))
 
         test_helper((10, 3, 32, 32), 10 * 3 * 32 * 32, torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
     def test_memory_format_empty_like(self, device):
-        def test_helper(x, memft):
-            xc = x.contiguous(memory_format=memft)
+        def test_helper(x, memory_format):
+            xc = x.contiguous(memory_format=memory_format)
 
             like = torch.empty_like(xc, memory_format=torch.preserve_format)
             self.assertFalse(like.is_contiguous())
-            self.assertTrue(like.is_contiguous(memory_format=memft))
+            self.assertTrue(like.is_contiguous(memory_format=memory_format))
 
             like_x = torch.empty_like(x, memory_format=torch.preserve_format)
             self.assertTrue(like_x.is_contiguous())
-            self.assertFalse(like_x.is_contiguous(memory_format=memft))
+            self.assertFalse(like_x.is_contiguous(memory_format=memory_format))
 
-            like = torch.empty_like(x, memory_format=memft)
+            like = torch.empty_like(x, memory_format=memory_format)
             self.assertFalse(like.is_contiguous())
-            self.assertTrue(like.is_contiguous(memory_format=memft))
+            self.assertTrue(like.is_contiguous(memory_format=memory_format))
 
             like = torch.empty_like(xc, memory_format=torch.contiguous_format)
             self.assertTrue(like.is_contiguous())
-            self.assertFalse(like.is_contiguous(memory_format=memft))
+            self.assertFalse(like.is_contiguous(memory_format=memory_format))
 
             like = torch.empty_like(xc)
             self.assertFalse(like.is_contiguous())
-            self.assertTrue(like.is_contiguous(memory_format=memft))
+            self.assertTrue(like.is_contiguous(memory_format=memory_format))
 
             sparse = x.to_sparse()
             with self.assertRaises(RuntimeError):
@@ -12292,7 +12292,7 @@ class TestTorchDeviceType(TestCase):
         def unsqueeze_op_clone(x, y):
             return x[0].unsqueeze(0).clone()
 
-        def test_helper(x, y, memft):
+        def test_helper(x, y, memory_format):
             fns = [
                 # lambda x, y: x.clone(),
                 lambda x, y: x + 3,
@@ -12363,8 +12363,8 @@ class TestTorchDeviceType(TestCase):
                 result = fn(x, y)
                 self.assertEqual(result, result_c)
                 self.assertTrue(
-                    result.is_contiguous(memory_format=memft),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memft))
+                    result.is_contiguous(memory_format=memory_format),
+                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
         test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
@@ -13033,30 +13033,30 @@ class TestTorchDeviceType(TestCase):
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
-                                            memft, compare_data=True, default_is_preserve=False):
+                                            memory_format, compare_data=True, default_is_preserve=False):
 
-        assert(memft == torch.channels_last or memft == torch.channels_last_3d)
+        assert(memory_format == torch.channels_last or memory_format == torch.channels_last_3d)
 
         # xc is a channels last tensor
         xc = input_generator_fn(device)
         # xc is not memory dense, but looks like channels last
-        if memft == torch.channels_last:
+        if memory_format == torch.channels_last:
             xc = xc[..., ::2, ::2]
         else:
             xc = xc[..., ::2, ::2, ::2]
 
         clone = transformation_fn(xc, memory_format=torch.preserve_format)
         self.assertFalse(clone.is_contiguous())
-        self.assertTrue(clone.is_contiguous(memory_format=memft))
+        self.assertTrue(clone.is_contiguous(memory_format=memory_format))
         self.assertFalse(xc.is_contiguous())
-        self.assertFalse(xc.is_contiguous(memory_format=memft))
+        self.assertFalse(xc.is_contiguous(memory_format=memory_format))
         if compare_data:
             self.assertEqual(xc, clone)
 
         xc = input_generator_fn(device)
         clone = transformation_fn(xc, memory_format=torch.contiguous_format)
         self.assertTrue(clone.is_contiguous())
-        self.assertFalse(clone.is_contiguous(memory_format=memft))
+        self.assertFalse(clone.is_contiguous(memory_format=memory_format))
         if compare_data:
             self.assertEqual(xc, clone)
 
@@ -13065,10 +13065,10 @@ class TestTorchDeviceType(TestCase):
 
         if default_is_preserve:
             self.assertFalse(clone.is_contiguous())
-            self.assertTrue(clone.is_contiguous(memory_format=memft))
+            self.assertTrue(clone.is_contiguous(memory_format=memory_format))
         else:
             self.assertTrue(clone.is_contiguous())
-            self.assertFalse(clone.is_contiguous(memory_format=memft))
+            self.assertFalse(clone.is_contiguous(memory_format=memory_format))
         if compare_data:
             self.assertEqual(xc, clone)
 
@@ -13080,51 +13080,55 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(x.stride(), transformation_fn(x, memory_format=torch.preserve_format).stride())
 
     def test_memory_format_to(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last_3d)]]
-
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
 
         def transformation_fn(tensor, **kwargs):
             return tensor.to(dtype=torch.float64, **kwargs)
 
-        for memft, input_generator_fn in input_generator_fns:
-            self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, memft, default_is_preserve=True)
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
+            self._test_memory_format_transformations(
+                device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
     def test_memory_format_type(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last_3d)]]
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
 
         def transformation_fn(tensor, **kwargs):
             return tensor.type(torch.float64, **kwargs)
 
-        for memft, input_generator_fn in input_generator_fns:
-            self._test_memory_format_transformations(device, input_generator_fn, transformation_fn, memft, default_is_preserve=True)
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
+            self._test_memory_format_transformations(
+                device, get_generator(mf, shape), transformation_fn, mf, default_is_preserve=True)
 
     def test_memory_format_clone(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last_3d)]]
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
 
         def transformation_fn(tensor, **kwargs):
             return tensor.clone(**kwargs)
 
-        for memft, input_generator_fn in input_generator_fns:
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
             self._test_memory_format_transformations(
-                device, input_generator_fn, transformation_fn, memft, True, default_is_preserve=True)
+                device, get_generator(mf, shape), transformation_fn, mf, True, default_is_preserve=True)
 
     @onlyCPU
     @dtypes(torch.double)
@@ -13141,13 +13145,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, res2)
 
     def test_memory_format_factory_like_functions_preserve(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last_3d)]]
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
 
         transformation_fns = [
             lambda t, **kwargs: torch.zeros_like(t, **kwargs),
@@ -13159,19 +13160,21 @@ class TestTorchDeviceType(TestCase):
             lambda t, **kwargs: torch.full_like(t, 7, **kwargs),
             lambda t, **kwargs: torch.empty_like(t, **kwargs)]
 
-        for memft, input_generator_fn, in input_generator_fns:
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape, in formats_shapes:
             for transformation_fn in transformation_fns:
                 self._test_memory_format_transformations(
-                    device, input_generator_fn, transformation_fn, memft, compare_data=False, default_is_preserve=True)
+                    device, get_generator(mf, shape), transformation_fn, mf, compare_data=False, default_is_preserve=True)
 
     def test_memory_format_type_shortcuts(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32).clamp(0, 1)
-                .round().contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32).clamp(0, 1)
-                .round().contiguous(memory_format=torch.channels_last_3d)]]
+        def get_generator(memory_format, shape, dtype):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=dtype).clamp(0, 1) \
+                    .round().contiguous(memory_format=memory_format)
+            return input_generator_fn
 
 
         def get_fn(fn_name):
@@ -13184,34 +13187,26 @@ class TestTorchDeviceType(TestCase):
         if device == 'cpu':
             shortcuts += ['bfloat16']
 
-        for memft, input_generator_fn in input_generator_fns:
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
             for fn_name in shortcuts:
                 self._test_memory_format_transformations(
-                    device, input_generator_fn, get_fn(fn_name), memft, default_is_preserve=True)
+                    device, get_generator(mf, shape, torch.float32), get_fn(fn_name), mf, default_is_preserve=True)
 
         # Test 'float' separately to avoid float->float no-op.
-        input_generator_fns_double = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float64).clamp(0, 1)
-                .round().contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float64).clamp(0, 1)
-                .round().contiguous(memory_format=torch.channels_last_3d)]]
-
-        for memft, input_generator_fn_double in input_generator_fns_double:
+        for mf, shape in formats_shapes:
             self._test_memory_format_transformations(
-                device, input_generator_fn_double, get_fn('float'), memft, default_is_preserve=True)
+                device, get_generator(mf, shape, torch.float64), get_fn('float'), mf, default_is_preserve=True)
 
     @onlyCUDA
     def test_memory_format_cpu_and_cuda_ops(self, device):
-        input_generator_fns = [
-            [torch.channels_last,
-             lambda device: torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last)],
-            [torch.channels_last_3d,
-             lambda device: torch.randn((4, 3, 8, 8, 8), device=device, dtype=torch.float32)
-                .contiguous(memory_format=torch.channels_last_3d)]]
-
+        def get_generator(memory_format, shape):
+            def input_generator_fn(device):
+                return torch.randn(shape, device=device, dtype=torch.float32).contiguous(memory_format=memory_format)
+            return input_generator_fn
 
         def transformation_cpu_fn(tensor, **kwargs):
             return tensor.cpu(**kwargs)
@@ -13219,11 +13214,15 @@ class TestTorchDeviceType(TestCase):
         def transformation_cuda_fn(tensor, **kwargs):
             return tensor.cuda(**kwargs)
 
-        for memft, input_generator_fn in input_generator_fns:
+        formats_shapes = (
+            (torch.channels_last, (4, 3, 8, 8)),
+            (torch.channels_last_3d, (4, 3, 8, 8, 8)))
+
+        for mf, shape in formats_shapes:
             self._test_memory_format_transformations(
-                'cuda', input_generator_fn, transformation_cpu_fn, memft, default_is_preserve=True)
+                'cuda', get_generator(mf, shape), transformation_cpu_fn, mf, default_is_preserve=True)
             self._test_memory_format_transformations(
-                'cpu', input_generator_fn, transformation_cuda_fn, memft, default_is_preserve=True)
+                'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
     @onlyCPU
     @skipCPUIfNoLapack

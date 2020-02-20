@@ -222,7 +222,6 @@ class CAFFE2_API Tensor {
         }
       }
     }
-
     return at::MemoryFormat::Contiguous;
   }
 

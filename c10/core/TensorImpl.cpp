@@ -117,19 +117,8 @@ bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) co
               return true;
             }
           case 3:
-            {
-              /* Allow dim == 4 only for channels last 2d until dim == 3 is fully tested
-              int64_t expected = 1;
-              for (auto& d : {0, 2, 1}) {
-                if (sizes_[d] != 1) {
-                  if (strides_[d] != expected) {
-                    return false;
-                  }
-                  expected *= sizes_[d];
-                }
-              }
-              return true;*/
-            }
+            // TODO dim == 3 case will be enabled once it is fully tested
+            return false;
           default:
             return false;
         }
@@ -151,19 +140,8 @@ bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) co
               return true;
             }
           case 4:
-            {
-              /* Allow dim == 5 only for channels last 3d until dim == 4 is fully tested
-              int64_t expected = 1;
-              for (auto& d : {0, 3, 2, 1}) {
-                if (sizes_[d] != 1) {
-                  if (strides_[d] != expected) {
-                    return false;
-                  }
-                  expected *= sizes_[d];
-                }
-              }
-              return true; */
-            }
+            // TODO dim == 4 case will be enabled once it is fully tested
+            return false;
           default:
             return false;
         }

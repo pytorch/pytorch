@@ -147,29 +147,6 @@ inline bool is_channels_last_strides_2d_s4(const IntArrayRef sizes, const IntArr
   return true;
 }
 
-inline bool is_channels_last_strides_2d_s3(const IntArrayRef sizes, const IntArrayRef strides) {
-  int64_t min = 0;
-  if (strides[0] == 0) {
-    return false;
-  }
-  for (auto& d : {0, 2, 1}) {
-    if (sizes[d] == 0) {
-      return false;
-    }
-    if (strides[d] < min) {
-      return false;
-    }
-    if (d == 1 && min == strides[0]) {
-      return false;
-    }
-    min = strides[d];
-    if (sizes[d] > 1) {
-      min *= sizes[d];
-    }
-  }
-  return true;
-}
-
 inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArrayRef strides) {
   int64_t min = 0;
   if (strides[1] == 0) {
@@ -183,29 +160,6 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
       return false;
     }
     if (d == 0 && min == strides[1]) {
-      return false;
-    }
-    min = strides[d];
-    if (sizes[d] > 1) {
-      min *= sizes[d];
-    }
-  }
-  return true;
-}
-
-inline bool is_channels_last_strides_3d_s4(const IntArrayRef sizes, const IntArrayRef strides) {
-  int64_t min = 0;
-  if (strides[0] == 0) {
-    return false;
-  }
-  for (auto& d : {0, 3, 2, 1}) {
-    if (sizes[d] == 0) {
-      return false;
-    }
-    if (strides[d] < min) {
-      return false;
-    }
-    if (d == 1 && min == strides[0]) {
       return false;
     }
     min = strides[d];
@@ -273,8 +227,8 @@ inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef 
           case 4:
             return is_channels_last_strides_2d_s4(sizes, strides);
           case 3:
-            // Allow dim == 4 only for channels last 2d until dim == 3 is fully tested
-            // return is_channels_last_strides_2d_s3(sizes, strides);
+            // TODO dim == 3 case will be enabled once it is fully tested
+            return false;
           default:
             return false;
         }
@@ -285,8 +239,8 @@ inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef 
           case 5:
             return is_channels_last_strides_3d_s5(sizes, strides);
           case 4:
-            // Allow dim == 5 only for channels last 3d until dim == 4 is fully tested
-            //return is_channels_last_strides_3d_s4(sizes, strides);
+            // TODO dim == 4 case will be enabled once it is fully tested
+            return false;
           default:
             return false;
         }
