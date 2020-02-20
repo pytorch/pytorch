@@ -10,10 +10,6 @@
   device_guard: False
   return: argument 0
   options:
-    - cname: set
-      arguments:
-        - THTensor* self
-        - THTensor* source
     - cname: setStorage
       arguments:
         - THTensor* self
@@ -220,7 +216,8 @@
 [[
   name: _th_scatter_
   return: argument 0
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   options:
