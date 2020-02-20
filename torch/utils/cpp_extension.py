@@ -125,7 +125,7 @@ with compiling PyTorch from source.
 '''
 ROCM_HOME = _find_rocm_home()
 MIOPEN_HOME = _join_rocm_home('miopen') if ROCM_HOME else None
-is_hip_extension = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
+IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
 CUDA_HOME = _find_cuda_home()
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # PyTorch releases have the version pattern major.minor.patch, whereas when
@@ -338,19 +338,19 @@ class BuildExtension(build_ext, object):
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
-                    nvcc = (_join_rocm_home('bin', 'hipcc') if is_hip_extension else _join_cuda_home('bin', 'nvcc'))
+                    nvcc = (_join_rocm_home('bin', 'hipcc') if IS_HIP_EXTENSION else _join_cuda_home('bin', 'nvcc'))
                     if not isinstance(nvcc, list):
                         nvcc = [nvcc]
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    if is_hip_extension:
+                    if IS_HIP_EXTENSION:
                         cflags = cflags + _get_rocm_arch_flags(cflags)
                     else:
                         cflags = unix_cuda_flags(cflags)
                 elif isinstance(cflags, dict):
                     cflags = cflags['cxx']
-                if is_hip_extension:
+                if IS_HIP_EXTENSION:
                     cflags = cflags + COMMON_HIPCC_FLAGS
                 append_std14_if_no_std_present(cflags)
 
@@ -710,7 +710,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
-    if is_hip_extension:
+    if IS_HIP_EXTENSION:
         libraries.append('c10_hip')
         libraries.append('torch_hip')
     else:
@@ -750,7 +750,7 @@ def include_paths(cuda=False):
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
-    if cuda and is_hip_extension:
+    if cuda and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
         if MIOPEN_HOME is not None:
@@ -784,7 +784,7 @@ def library_paths(cuda=False):
     lib_path = os.path.join(torch_path, 'lib')
     paths.append(lib_path)
 
-    if cuda and is_hip_extension:
+    if cuda and IS_HIP_EXTENSION:
         lib_dir = 'lib'
         paths.append(_join_rocm_home(lib_dir))
     elif cuda:
@@ -1653,6 +1653,6 @@ def _join_cuda_home(*paths):
 
 def _is_cuda_file(path):
     valid_ext = ['.cu', '.cuh']
-    if is_hip_extension:
+    if IS_HIP_EXTENSION:
         valid_ext.append('.hip')
     return os.path.splitext(path)[1] in valid_ext
