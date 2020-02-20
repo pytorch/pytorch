@@ -5343,6 +5343,65 @@ def foo(x):
         with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
             torch.jit.script(A())
 
+    def test_var_aug_assign(self):
+        @torch.jit.script
+        class SomeNonAddableClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __eq__(self, other):
+                # type: (SomeNonAddableClass) -> bool
+                return self.num == other.num
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
+            @torch.jit.script
+            def fn():
+                a = SomeNonAddableClass()
+                a += SomeNonAddableClass()
+                return a
+
+        @torch.jit.script
+        class SomeClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __iadd__(self, x):
+                # type: (int)
+                self.num += x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        @torch.jit.script
+        class SomeOutOfPlaceClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __add__(self, x):
+                # type: (int)
+                self.num = x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        def fn():
+            a = SomeClass()
+            a += 20
+            b = SomeOutOfPlaceClass()
+            b += 99
+            c = [1, 2, 3]
+            c *= 2
+            c += [4, 5, 6]
+            d = torch.ones(2, 2)
+            d += torch.ones(2, 2)
+            return a, b, c, d
+
+        self.checkScript(fn, [])
+
     def test_nested_list_construct(self):
         def foo():
             return [[4]] + [[4, 5]]
