@@ -23,15 +23,23 @@ inline at::Tensor ${name}(${formals}) {
 """)
 
 
+OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
 TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
 
 
 def fully_qualified_type(argument_type):
+    def maybe_optional_type(t, opt_match):
+        return 'c10::optional<{}>'.format(t) if opt_match else t
+
+    opt_match = OPTIONAL_TYPE_PATTERN.match(argument_type)
+    if opt_match:
+        argument_type = argument_type[opt_match.start(1):opt_match.end(1)]
     match = TYPE_PATTERN.match(argument_type)
     if match is None:
-        return argument_type
+        return maybe_optional_type(argument_type, opt_match)
     index = match.start(1)
-    return "{}at::{}".format(argument_type[:index], argument_type[index:])
+    qualified_type = "{}at::{}".format(argument_type[:index], argument_type[index:])
+    return maybe_optional_type(qualified_type, opt_match)
 
 
 def gen_variable_factories(out, declarations, template_path, disable_autograd=False):
