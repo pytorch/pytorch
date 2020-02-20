@@ -396,7 +396,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
             min(maxGridDim, THCCeilDiv(num_irows, threads.x)));
 
   kernelTransformReduceOuterDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
       tgt1->template data<ScalarTypeK>(),
       tgt2->template data<ScalarTypeIndex>(),
       src->template data<ScalarTypeK>(),
@@ -493,7 +493,7 @@ THC_transformReduceInnermostDimIndex(THCState *state,
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   kernelTransformReduceInnermostDimIndex
-    <<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
       tgt1->template data<ScalarTypeK>(),
       tgt2->template data<ScalarTypeIndex>(),
       src->template data<ScalarTypeK>(),
@@ -585,6 +585,20 @@ template <typename T>
 struct MulOp {
   __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
     return THCNumerics<T>::mul(lhs, rhs);
+  }
+};
+
+template <typename T>
+struct MaxOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::gt(lhs, rhs) ? lhs : rhs;
+  }
+};
+
+template <typename T>
+struct MinOp {
+  __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
+    return THCNumerics<T>::lt(lhs, rhs) ? lhs : rhs;
   }
 };
 
