@@ -16,6 +16,20 @@ void confirmPendingUser(
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingUser(rr->forkId());
 }
+
+c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr) {
+  RRefContext::handleException(futErr);
+  auto rr = RemoteRet::fromMessage(message);
+  TORCH_INTERNAL_ASSERT(
+      rr->rrefId() == rr->forkId(),
+      "Expecting an OwnerRRef as RemoteRet but got a fork.");
+  auto& ctx = RRefContext::getInstance();
+  auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
+  return deletedRRef;
+}
+
 } // namespace callback
 
 // Keys for RRef-related debug information.
