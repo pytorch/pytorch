@@ -52,7 +52,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     is_complex = input[0].dtype.is_complex
     if is_complex:
-        eps = eps * 1j
+        eps *= (1 + 1j)
 
     if target is None:
         target = input
