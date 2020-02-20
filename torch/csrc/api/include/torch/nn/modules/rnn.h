@@ -2,6 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/options/rnn.h>
+#include <torch/nn/modules/common.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
@@ -133,6 +134,8 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
   RNNOutput forward(const Tensor& input, Tensor state = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 
   RNNOptions options;
 };
@@ -159,6 +162,8 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
   RNNOutput forward(const Tensor& input, Tensor state = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 };
 
 /// A `ModuleHolder` subclass for `LSTMImpl`.
@@ -183,6 +188,8 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
   /// `batch_first` is true, in which case the layout should be `(batch,
   /// sequence, features)`.
   RNNOutput forward(const Tensor& input, Tensor state = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 };
 
 /// A `ModuleHolder` subclass for `GRUImpl`.

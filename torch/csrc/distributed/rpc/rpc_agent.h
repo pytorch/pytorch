@@ -11,6 +11,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+using steady_clock_time_point =
+    std::chrono::time_point<std::chrono::steady_clock>;
+
 struct RpcBackendOptions {
   RpcBackendOptions() = default;
   std::chrono::milliseconds rpcTimeout;
@@ -55,6 +58,44 @@ struct TORCH_API WorkerInfo {
   const worker_id_t id_;
 };
 
+// Struct for options to configure the RPC Retry protocol.
+struct TORCH_API RpcRetryOptions {
+  // Using a default constructor like all other Options structs in the RPC
+  // codebase. TORCH_CHECKs for input validation are done in the
+  // sendWithRetries function.
+  RpcRetryOptions() = default;
+  // Maximum number of times we will retry the RPC
+  int maxRetries{3};
+  // Initial duration between consecutive RPC send attempts
+  std::chrono::milliseconds rpcRetryDuration{std::chrono::milliseconds(1000)};
+  // Constant for exponential backoff used while calculating future wait
+  // durations
+  float retryBackoff{1.5};
+};
+
+// Struct that stores all the metadata needed to retry a given RPC.
+struct TORCH_API RpcRetryInfo {
+  RpcRetryInfo(
+      const WorkerInfo& to,
+      Message&& message,
+      std::shared_ptr<FutureMessage> originalFuture,
+      int retryCount,
+      RpcRetryOptions options)
+      : to_(to),
+        message_(message),
+        originalFuture_(std::move(originalFuture)),
+        retryCount_(retryCount),
+        options_(options) {}
+
+  const WorkerInfo& to_;
+  Message message_;
+  // Future that is returned to the caller of sendWithRetries().
+  std::shared_ptr<FutureMessage> originalFuture_;
+  // Number of send attempts completed so far.
+  int retryCount_;
+  RpcRetryOptions options_;
+};
+
 // ``RpcAgent`` is the base class for sending and receiving RPC messages. It
 // provides a unified ``send`` API for both request and response messages, and
 // will invoke the given ``RequestCallback`` to process received requests. It
@@ -92,6 +133,23 @@ class TORCH_API RpcAgent {
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
       Message&& message) = 0;
+
+  // Retries sending the message up to maxRetries times until an ACK is
+  // receieved. The duration between consecutive sends is increased over
+  // time using an exponential backoff algorithm.
+  //
+  // Sends ``message`` to the ``RpcAgent`` of id ``to`` and returns a
+  // ``FutureMessage`` ptr, just like send(). Caller can specify the maximum
+  // number of retries for this RPC (default is 3), initial duration between
+  // sends (default is 1000ms), and backoff constant (default is 1.5) by
+  // passing in the RpcRetryOptions struct. This API might end up
+  // executing a method twice on the remote end (it does not guarantee
+  // exactly-once semantics). Therefore, the user must ensure their requests
+  // are idempotent.
+  std::shared_ptr<FutureMessage> sendWithRetries(
+      const WorkerInfo& to,
+      Message&& message,
+      RpcRetryOptions retryOptions = RpcRetryOptions());
 
   // Return a reference to the ``WorkerInfo`` of this RpcAgent.
   // NB: not using ``c10::optional<const std::string&>`` here because we might
@@ -165,6 +223,68 @@ class TORCH_API RpcAgent {
   // Add GIL wait time data point to metrics
   virtual void addGilWaitTime(const std::chrono::microseconds gilWaitTime) = 0;
   friend class PythonRpcHandler;
+
+  // Function that cleans up the local state for RpcAgent. This is called from
+  // the destructor, and ensures that we can gracefully destruct even if the
+  // child class was not successfully constructed without calling a virtual
+  // function.
+  void cleanup();
+
+  // Map that stores metadata for RPC's that may need to be re-tried as well as
+  // the timepoint at which we should re-try them.
+  std::map<
+      steady_clock_time_point,
+      std::unordered_set<std::shared_ptr<RpcRetryInfo>>>
+      rpcRetryMap_;
+
+  // Thread that checks for retryable RPC's in the rpcRetryMap_ and sleeps until
+  // the next unACKed RPC's timeout has expired.
+  std::thread rpcRetryThread_;
+
+  // Function that rpcRetryThread_ calls in a loop as long as RpcAgent is
+  // running.
+  void retryExpiredRpcs();
+
+  // This is the callback attached to futures corresponding to send retries.
+  // This handles 3 cases: 1). send was completed, 2). send failed with an
+  // error and we've done maxRetries failed send attempts, and 3). send
+  // failed with an error and we have more retries to go. In case 1, we mark
+  // the original future as complete. In case 2, we mark the future with an
+  // error and do not retry again. In case 3, we move the RpcRetryInfo struct
+  // to another time point in the map to schedule the RPC for a future send.
+  void rpcRetryCallback(
+      const rpc::Message& message,
+      const c10::optional<utils::FutureError>& futErr,
+      steady_clock_time_point newTime,
+      std::shared_ptr<RpcRetryInfo> earliestRpc);
+
+  // Function that uses the exponential backoff algorithm to compute the next
+  // time point to retry a given RPC.
+  inline steady_clock_time_point computeNewRpcRetryTime(
+      RpcRetryOptions& options,
+      int retryCount) {
+    // The exponential backoff algorithm being used here is:
+    // newTime = timeNow + (retryDuration * (backoffConstant ^ retryCount)).
+    std::chrono::milliseconds timedelta =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            options.rpcRetryDuration * pow(options.retryBackoff, retryCount));
+    return std::chrono::time_point_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() + timedelta);
+  }
+
+  // Boolean that indicates whether RpcAgent is running.
+  std::atomic<bool> rpcAgentRunning_;
+
+  // storing futures before adding callback
+  std::vector<
+      std::pair<std::shared_ptr<FutureMessage>, std::shared_ptr<RpcRetryInfo>>>
+      futures;
+
+  // Condition Variable to signal when the rpcRetryMap_ has been populated.
+  std::condition_variable rpcRetryMapCV_;
+
+  // Mutex to protect RpcRetryMap_.
+  std::mutex rpcRetryMutex_;
 };
 
 } // namespace rpc
