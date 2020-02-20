@@ -59,18 +59,26 @@ class SimpleNet(nn.Module):
 
 
 class HybridModel(nn.Module):
+    @staticmethod
+    def identicalTransform(net, process_group_name, *args, **kwargs):
+        return net
+
     def __init__(self, remote_net_rref, process_group_name=None):
         ddp_transform = (
-            lambda net, process_group_name: net
+            HybridModel.identicalTransform
             if process_group_name is None
             else DDP
         )
         super(HybridModel, self).__init__()
-        self.net1 = ddp_transform(SimpleNet(4, 3), process_group_name)
+        self.net1 = ddp_transform(
+            SimpleNet(4, 3), process_group_name, check_reduction=True
+        )
         # self.rref = rpc.remote(remote_server, SimpleNet, args=(3, 2))
         self.rref = remote_net_rref
         # gLogger.info(f"Created a rref to a remote net: {self.rref}")
-        self.net2 = ddp_transform(SimpleNet(2, 1), process_group_name)
+        self.net2 = ddp_transform(
+            SimpleNet(2, 1), process_group_name, check_reduction=True
+        )
         gLogger.info(
             f"HybridModel has {len(list(self.parameters()))} groups of parameters."
         )
