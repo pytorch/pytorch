@@ -45,6 +45,11 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon
     # Load multiplier
     LD1R {v26.4s}, [x8]
 
+    # v8 := zero
+    EOR v8.16b, v8.16b, v8.16b
+    # v9 := zero
+    EOR v9.16b, v9.16b, v9.16b
+
     # v10 := zero
     EOR v10.16b, v10.16b, v10.16b
     # v11 := zero
