@@ -204,7 +204,9 @@ TEST_F(IntegrationTest, CartPole) {
 
     optimizer.zero_grad();
     loss.backward();
-    optimizer.step().clear();
+    optimizer.step();
+    
+    rewards.clear();
     saved_log_probs.clear();
     saved_values.clear();
   };
