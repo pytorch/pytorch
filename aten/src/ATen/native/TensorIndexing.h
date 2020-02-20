@@ -385,12 +385,10 @@ static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::ve
 }
 
 static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor>&& indices) {
-  OptionalDeviceGuard device_guard(device_of(self));
   return self.index(typeConvertIndices(self, std::move(indices)));
 }
 
 static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& indices, const Tensor& value) {
-  OptionalDeviceGuard device_guard(device_of(self));
   return self.index_put_(typeConvertIndices(self, std::move(indices)), value);
 }
 
@@ -455,7 +453,6 @@ static inline Tensor applySlicing(
 
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
 static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool is_tracing) {
-  OptionalDeviceGuard device_guard(device_of(self));
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
@@ -507,7 +504,6 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
 static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool is_tracing) {
-  OptionalDeviceGuard device_guard(device_of(self));
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 

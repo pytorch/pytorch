@@ -42,7 +42,6 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Scalar" case
 static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
-  OptionalDeviceGuard device_guard(device_of(self));
   Tensor value;
 
   {
@@ -61,6 +60,7 @@ static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar 
 } // namespace indexing
 
 Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
+  OptionalDeviceGuard device_guard(device_of(*this));
   return at::indexing::get_item(*this, indices, /*is_tracing=*/false);
 }
 Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) const {
@@ -68,10 +68,12 @@ Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) c
 }
 
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs) {
+  OptionalDeviceGuard device_guard(device_of(*this));
   at::indexing::set_item(*this, indices, rhs, /*is_tracing=*/false);
   return *this;
 }
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
+  OptionalDeviceGuard device_guard(device_of(*this));
   at::indexing::set_item(*this, indices, v);
   return *this;
 }
