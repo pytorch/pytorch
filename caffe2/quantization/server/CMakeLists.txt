@@ -60,13 +60,20 @@ list(APPEND Caffe2_CPU_SRCS
   #"${CMAKE_CURRENT_SOURCE_DIR}/sigmoid_test.cc")
   #"${CMAKE_CURRENT_SOURCE_DIR}/tanh_test.cc")
 
-if (NOT MSVC AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
+if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
   add_library(caffe2_dnnlowp_avx2_ops OBJECT ${caffe2_dnnlowp_avx2_ops_SRCS})
   add_dependencies(caffe2_dnnlowp_avx2_ops fbgemm Caffe2_PROTO c10)
   target_include_directories(caffe2_dnnlowp_avx2_ops BEFORE
     PRIVATE $<BUILD_INTERFACE:${FBGEMM_SOURCE_DIR}/include>)
-  set_property(SOURCE ${caffe2_dnnlowp_avx2_ops_SRCS}
-    APPEND_STRING PROPERTY COMPILE_FLAGS " -mavx2 -mfma -mf16c -mxsave ")
+
+  if (MSVC)
+    set_property(SOURCE ${caffe2_dnnlowp_avx2_ops_SRCS}
+      APPEND_STRING PROPERTY COMPILE_FLAGS " /arch:AVX2 ")
+  else()
+    set_property(SOURCE ${caffe2_dnnlowp_avx2_ops_SRCS}
+      APPEND_STRING PROPERTY COMPILE_FLAGS " -mavx2 -mfma -mf16c -mxsave ")
+  endif()
+
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
     $<TARGET_OBJECTS:caffe2_dnnlowp_avx2_ops>)
 endif()
