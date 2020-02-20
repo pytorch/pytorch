@@ -6,6 +6,8 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 
+#include <torch/custom_class.h>
+
 #include <algorithm>
 #include <string>
 
@@ -360,6 +362,17 @@ static auto registry =
         .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
                 DispatchKey::QuantizedCPUTensorId));
+
+
+struct Fox : torch::jit::CustomClassHolder {
+    void steal(c10::intrusive_ptr<Fox> other) {
+        field_ = std::move(other->field_);
+    }
+    int field_;
+};
+
+static auto fox = torch::jit::class_<Fox>("Fox");
+
 } // namespace
 } // namespace native
 } // namespace at
