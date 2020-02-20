@@ -10,11 +10,6 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/csrc/jit/custom_class.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
@@ -47,7 +42,7 @@ class class_ {
 
   std::string className;
   std::string qualClassName;
-  ClassTypePtr classTypePtr;
+  // ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
   const std::string topModule = "__torch__.torch";
@@ -56,18 +51,16 @@ class class_ {
   class_(std::string className_) : className(std::move(className_)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
-    // We currently represent custom classes as torchscript classes with a
-    // capsule attribute
-    classTypePtr =
-        ClassType::create(c10::QualifiedName(qualClassName), classCU());
-    classTypePtr->addAttribute("capsule", CapsuleType::get());
+    TORCH_CHECK(!registeredClasses().count(className),
+                "C++ class ", className, " has already been "
+                "registered!");
 
-    c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
-                              c10::StrongTypePtr(classCU(), classTypePtr)});
-    c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
-                              c10::StrongTypePtr(classCU(), classTypePtr)});
-
-    classCU()->register_type(classTypePtr);
+    registeredClasses()[className] = detail::RegisteredClassRecord{
+        qualClassName,
+        typeid(c10::intrusive_ptr<CurClass>).name(),
+        typeid(c10::tagged_capsule<CurClass>).name()
+      };
+    invokeClassRegistrationCallbacks(registeredClasses()[className]);
   }
 
   template <typename... Types>
@@ -126,79 +119,33 @@ class class_ {
         detail::wrap_func<CurClass, decltype(setstate_wrapper)>(
             std::move(setstate_wrapper)));
 
-    // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
-    auto format_getstate_schema = [&getstate_schema]() {
-      std::stringstream ss;
-      ss << getstate_schema;
-      return ss.str();
-    };
-    TORCH_CHECK(
-        getstate_schema.arguments().size() == 1,
-        "__getstate__ should take exactly one argument: self. Got: ",
-        format_getstate_schema());
-    auto first_arg_type = getstate_schema.arguments().at(0).type();
-    TORCH_CHECK(
-        *first_arg_type == *classTypePtr,
-        "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->python_str());
-    TORCH_CHECK(
-        getstate_schema.returns().size() == 1,
-        "__getstate__ should return exactly one value for serialization. Got: ",
-        format_getstate_schema());
-    auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
-    auto arg_type = setstate_schema.arguments().at(1).type();
-    TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->python_str(),
-        " but expected ",
-        ser_type->python_str());
-
     return *this;
   }
 
  private:
   template <typename Func>
   void defineMethod(std::string name, Func func) {
-    auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    ensure_c10_registerer_defined();
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
-    auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
-    auto ops = torch::jit::getAllOperatorsFor(func_symbol);
-    TORCH_CHECK(ops.size() == 1);
-    auto &schema = ops[0]->schema();
 
-    for (const auto& arg : schema.arguments()) {
-      graph->addInput()->setType(arg.type());
-    }
-
-    auto opCall = graph->insertNode(graph->create(
-        func_symbol, graph->inputs(), schema.returns().size()));
-    Value* res;
-    if (schema.returns().size() > 1) {
-      const auto& returns = schema.returns();
-      size_t op_invocation_idx = 0;
-      for (const auto& ret : returns) {
-        opCall->output(op_invocation_idx++)->setType(ret.type());
-      }
-      res = graph->insertNode(graph->createTuple(opCall->outputs()))->output();
-    } else if (schema.returns().size() == 1) {
-      const auto& returns = schema.returns();
-      res = opCall->output()->setType(returns[0].type());
-    } else {
-      res = graph->insertConstant(IValue())->setType(NoneType::get());
-    }
-    graph->registerOutput(res);
-
-    auto method = classCU()->create_function(qualClassName + "." + name, graph);
-    classTypePtr->addMethod(method);
+    TORCH_INTERNAL_ASSERT(registeredClasses().count(className));
+    auto &class_record = registeredClasses()[className];
+    TORCH_CHECK(!class_record.registeredMethods.count(name),
+                "Method ", name, " on class ", className,
+                " has already been defined!");
+    class_record.registeredMethods[name] = qualFuncName;
+    invokeMethodRegistrationCallbacks(class_record, name);
   }
 };
+
+// APIs for listeners. This allows, for example, TorchScript to listen into these class registrations
+// and do futher processing.
+using ClassRegistrationCallback = std::function<void(const detail::RegisteredClassRecord& /*class*/)>;
+using MethodRegistrationCallback = std::function<void(const detail::RegisteredClassRecord& /*class*/, const std::string& /*method name*/)>;
+
+TORCH_API void registerClassRegistrationCallback(ClassRegistrationCallback cb);
+TORCH_API void registerMethodRegistrationCallback(MethodRegistrationCallback cb);
 
 } // namespace jit
 

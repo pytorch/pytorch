@@ -6,23 +6,36 @@
 namespace torch {
 namespace jit {
 
-namespace {
-
-at::TypePtr noOpGetter(const std::string& /*unused*/) {
-  return nullptr;
+std::unordered_map<std::string, detail::RegisteredClassRecord>& registeredClasses() {
+  static std::unordered_map<std::string, detail::RegisteredClassRecord> registry;
+  return registry;
 }
 
-std::atomic<GetCustomClassFnType> custom_class_fn{noOpGetter};
-
+namespace {
+  std::vector<ClassRegistrationCallback> class_callbacks;
+  std::vector<MethodRegistrationCallback> method_callbacks;
 }  // namespace
 
-void setGetCustomClassFn(GetCustomClassFnType fn) {
-  custom_class_fn.store(fn);
+void registerClassRegistrationCallback(ClassRegistrationCallback cb) {
+  class_callbacks.emplace_back(std::move(cb));
 }
 
-at::TypePtr getCustomClass(const std::string& name) {
-  return custom_class_fn.load()(name);
+void registerMethodRegistrationCallback(MethodRegistrationCallback cb) {
+  method_callbacks.emplace_back(std::move(cb));
 }
+
+void invokeClassRegistrationCallbacks(const detail::RegisteredClassRecord& class_record) {
+  for (auto & cb : class_callbacks) {
+    cb(class_record);
+  }
+}
+
+void invokeMethodRegistrationCallbacks(const detail::RegisteredClassRecord& class_record, const std::string& method_name) {
+  for (auto & cb : method_callbacks) {
+    cb(class_record, method_name);
+  }
+}
+
 
 } // namespace jit
 } // namespace torch
