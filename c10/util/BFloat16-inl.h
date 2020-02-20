@@ -268,4 +268,5 @@ inline c10::BFloat16 tanh(c10::BFloat16 a) { return std::tanh(float(a));}
 inline c10::BFloat16 min(c10::BFloat16 a, c10::BFloat16 b) { return std::min(float(a), float(b));}
 inline c10::BFloat16 max(c10::BFloat16 a, c10::BFloat16 b) { return std::max(float(a), float(b));}
 inline c10::BFloat16 sqrt(c10::BFloat16 a) { return std::sqrt(float(a));}
+inline c10::BFloat16 pow(c10::BFloat16 a, float b) { return std::pow(float(a), b);}
 } // namespace std

@@ -3652,12 +3652,6 @@ class _TestTorchMixin(object):
         expected = torch.pow(x.pow(3).abs().sum(1), 1.0 / 3.0)
         self.assertEqual(result, expected)
 
-        inputValuesFP32 = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
-        inputValuesBF16 = inputValuesFP32.bfloat16()
-        precision_3dps = 0.004
-        for p in [0, 1, 2, 3, 4, inf, -inf]:
-            self.assertEqual(torch.norm(inputValuesFP32, p, dim=0), torch.norm(inputValuesBF16, p, dim=0), precision_3dps)
-
     @staticmethod
     def _test_bernoulli(self, t_dtype, p_dtype, device):
         for trivial_p in ([0, 1], [1, 0, 1, 1, 0, 1]):
@@ -8537,7 +8531,6 @@ class TestTorchDeviceType(TestCase):
             name, fn, identity = item
             self.assertEqual(torch.empty((2, 0), device=device, dtype=torch.bfloat16), fn(x, dim=2))
             self.assertEqual(torch.empty((2, 0, 1), device=device, dtype=torch.bfloat16), fn(x, dim=2, keepdim=True))
-            # assertEqual doesn't work with inf, -inf, nan and two tensors.
             check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else self.assertEqual)
             check(torch.full((2, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1))
             check(torch.full((2, 1, 4), identity, device=device, dtype=torch.bfloat16), fn(x, dim=1, keepdim=True))
@@ -8765,6 +8758,14 @@ class TestTorchDeviceType(TestCase):
 
         # larger tensor sanity check
         self.assertEqual(2 * torch.norm(torch.ones(10000)), torch.norm(torch.ones(40000)))
+
+        # BF16 precision check
+        if device == 'cpu':
+            inputValuesFP32 = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
+            inputValuesBF16 = inputValuesFP32.bfloat16()
+            precision_3dps = 0.004
+            for p in [0, 1, 2, 3, 4, inf, -inf]:
+                self.assertEqual(torch.norm(inputValuesFP32, p, dim=0), torch.norm(inputValuesBF16, p, dim=0), precision_3dps)
 
     @skipCUDAIfNoMagma
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -12943,6 +12944,13 @@ class TestTorchDeviceType(TestCase):
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0), 0.03125)
 
+        if device == 'cpu':
+            tensor_fp32 = torch.randn(100, device=device)
+            tensor_bf16 = tensor_fp32.bfloat16()
+            precision_3dps = 0.004
+            self.assertEqual(tensor_fp32.var(0), tensor_bf16.var(0), precision_3dps)
+            self.assertEqual(tensor_fp32.std(0), tensor_bf16.std(0), precision_3dps)
+
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_mul_intertype_scalar(self, device, dtype):
@@ -13084,7 +13092,8 @@ class TestTorchDeviceType(TestCase):
             check_sum_all(torch.tensor([True, False, True], dtype=torch.bool, device=device))
 
     @onlyCPU
-    def test_sum_bfloat16(self, device):
+    @dtypes(torch.bfloat16)
+    def test_sum_precision(self, device, dtype):
         x1 = torch.rand(100, 100)
         res1 = torch.sum(x1, 1)
         x2 = x1.bfloat16()
