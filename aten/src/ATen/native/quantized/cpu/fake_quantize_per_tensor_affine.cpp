@@ -35,7 +35,7 @@ Tensor fake_quantize_per_tensor_affine_cpu(
       zero_point >= quant_min && zero_point <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
-  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto Y = at::empty_like(self, self.options().memory_format(MemoryFormat::Preserve));
   fake_quantize_slice(Y, self, scale, zero_point, quant_min, quant_max);
   return Y;
 }
@@ -81,7 +81,7 @@ Tensor fake_quantize_per_tensor_affine_backward_cpu(
     return X;
   }
 
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dX = at::empty_like(X, X.options().memory_format(MemoryFormat::Preserve));
   fake_quantize_grad_slice(dX, X, dY, scale, zero_point, quant_min, quant_max);
   return dX;
 }

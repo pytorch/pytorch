@@ -153,7 +153,7 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
       op.tensor = op.tensor.to(common_dtype);
     } else {
       op.tensor =
-          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
     }
     op.current_dtype = common_dtype;
   }

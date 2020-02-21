@@ -65,7 +65,7 @@ Tensor isnan(const Tensor& self) {
 Tensor isinf(const Tensor &self) {
   // Integral tensor types are always not inf
   if (isIntegralType(self.scalar_type())) {
-    return at::zeros_like(self, at::kBool, at::MemoryFormat::Preserve);
+    return at::zeros_like(self, at::dtype(at::kBool).memory_format(at::MemoryFormat::Preserve));
   }
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
@@ -75,7 +75,7 @@ Tensor isinf(const Tensor &self) {
 Tensor isfinite(const Tensor& self) {
   // Integral tensor types are finite
   if (!self.is_floating_point()) {
-    return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+    return at::ones_like(self, at::dtype(at::kBool).memory_format(at::MemoryFormat::Preserve));
   }
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
