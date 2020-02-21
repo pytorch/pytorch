@@ -33,6 +33,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
       try {
         // FIXME: This is temporary solution. We should at least refactor
         // ``createStackForSchema`` to avoid throwing an error.
+        // Acquire GIL for py::args and py::kwargs processing.
+        pybind11::gil_scoped_acquire ag;
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
       } catch (std::runtime_error& e) {
