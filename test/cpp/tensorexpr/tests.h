@@ -15,8 +15,16 @@ namespace jit {
   _(ExprLetTest02)              \
   _(ExprVectorAdd01)            \
   _(ExprCompareSelectEQ)        \
+  _(ExprSubstitute01)           \
   _(ExprDynamicShapeAdd)        \
+  _(IRPrinterBasicValueTest)    \
+  _(IRPrinterBasicValueTest02)  \
+  _(IRPrinterLetTest01)         \
+  _(IRPrinterLetTest02)         \
+  _(IRPrinterCastTest)          \
   _(TypeTest01)                 \
+  _(IfThenElse01)               \
+  _(IfThenElse02)               \
 
 #define TH_FORALL_TESTS_CUDA(_) \
 
