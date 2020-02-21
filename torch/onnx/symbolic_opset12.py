@@ -16,9 +16,16 @@ def einsum(g, equation, tensor_list):
 
 @parse_args('s', 'v', 'v')
 def crossentropyloss(g, input, target, weight, reduction, ignore_index):
-    
-    loss = g.op("SoftmaxCrossEntropyLoss", input, target, reduction_s='none')
-    if not sym_help._is_none(weight):
+
+    if sym_help._is_none(weight):
+        if sym_help._maybe_get_const(ignore_index, 'i') == -100:
+            return g.op("SoftmaxCrossEntropyLoss", input, target, reduction_s=reduction)
+
+        loss = g.op("SoftmaxCrossEntropyLoss", input, target, reduction_s='none')
+    else:
+        if sym_help._maybe_get_const(ignore_index, 'i') == -100:
+            return g.op("SoftmaxCrossEntropyLoss", input, target, weight, reduction_s=reduction)
+
         loss = g.op("SoftmaxCrossEntropyLoss", input, target, weight, reduction_s='none')
 
     # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
