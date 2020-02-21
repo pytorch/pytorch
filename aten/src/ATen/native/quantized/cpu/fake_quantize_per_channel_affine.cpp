@@ -56,7 +56,7 @@ Tensor fake_quantize_per_channel_affine_cpu(
       axis >= 0 && axis <= self.dim(),
       "`axis` must be between 0 and number of dimensions of input");
 
-  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto Y = at::empty_like(self, self.options().memory_format(MemoryFormat::Preserve));
   for (int i = 0; i < self.size(axis); i++) {
     auto input_slice = self.slice(axis, i, i + 1);
     auto output_slice = Y.slice(axis, i, i + 1);
@@ -129,7 +129,7 @@ Tensor fake_quantize_per_channel_affine_backward_cpu(
     return X;
   }
 
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dX = at::empty_like(X, X.options().memory_format(MemoryFormat::Preserve));
 
   for (int i = 0; i < X.size(axis); i++) {
     auto X_slice = X.slice(axis, i, i + 1);

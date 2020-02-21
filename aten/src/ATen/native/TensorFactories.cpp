@@ -140,8 +140,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options,
-    optional<MemoryFormat> optional_memory_format) {
+    const TensorOptions& options) {
   if (!names.has_value()) {
     return at::empty(size, options, optional_memory_format);
   }
@@ -149,7 +148,7 @@ Tensor empty(
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options, optional_memory_format);
+  auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -163,13 +162,7 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptio
 
 Tensor& empty_out(
     Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // Preferably, this argument would not be accepted by _out, but the code
-  // generator requires the out and non-out overloads to match exactly
-  TORCH_CHECK(
-      !optional_memory_format.has_value(),
-      "'memory_format' argument is incompatible with 'out' tensor argument");
+    IntArrayRef size) {
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);

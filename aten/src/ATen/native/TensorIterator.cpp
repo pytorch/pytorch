@@ -912,7 +912,7 @@ bool TensorIterator::fast_set_up() {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
+            op.tensor = at::empty(shape_, op.options().memory_format(MemoryFormat::Contiguous));
             op.current_dtype = op.target_dtype;
           }
         }
@@ -924,7 +924,7 @@ bool TensorIterator::fast_set_up() {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+            op.tensor = at::empty(shape_, op.options().memory_format(MemoryFormat::ChannelsLast));
             op.current_dtype = op.target_dtype;
           }
         }
