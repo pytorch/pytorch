@@ -924,6 +924,12 @@
 - func: cummax.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
 
+- func: _cummax_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  variants: function
+  dispatch:
+    CPU: cummax_helper_cpu
+    CUDA: cummax_helper_cuda
+
 - func: cummin(Tensor self, int dim) -> (Tensor values, Tensor indices)
   supports_named_tensor: True
   variants: function, method
@@ -937,6 +943,12 @@
 
 - func: cummin.dimname_out(Tensor self, Dimname dim, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   supports_named_tensor: True
+
+- func: _cummin_helper(Tensor self, Tensor(a!) values, Tensor(b!) indices, int dim) -> ()
+  variants: function
+  dispatch:
+    CPU: cummin_helper_cpu
+    CUDA: cummin_helper_cuda
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   supports_named_tensor: True
@@ -3814,8 +3826,8 @@
   variants: method
   device_guard: False
   dispatch:
-    CPU: legacy::cpu::_th_set_
-    CUDA: legacy::cuda::_th_set_
+    CPU: set_tensor_
+    CUDA: set_tensor_
 
 - func: set_(Tensor(a!) self) -> Tensor(a!)
   variants: method
@@ -3941,7 +3953,7 @@
 - func: scatter_.src(Tensor(a!) self, int dim, Tensor index, Tensor src) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
@@ -3951,7 +3963,7 @@
 - func: scatter_.value(Tensor(a!) self, int dim, Tensor index, Scalar value) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_scatter_
+    CPU: scatter_fill_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
 - func: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
@@ -4370,12 +4382,12 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
-- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda

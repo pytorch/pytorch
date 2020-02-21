@@ -54,7 +54,9 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(InterfaceType)          \
   _(QSchemeType)            \
   _(LayoutType)             \
-  _(ScalarTypeType)
+  _(ScalarTypeType)         \
+  _(AnyListType)            \
+  _(AnyTupleType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -670,6 +672,9 @@ struct CAFFE2_API ListType
       std::vector<TypePtr> contained_types) const override {
     return create(contained_types.at(0));
   }
+
+  bool isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const override;
+
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
@@ -1885,21 +1890,70 @@ private:
 ScalarTypeType() : EnumerationType() {}
 };
 
+// the common supertype of all lists,
+// List[T] <: AnyList for all T
+struct AnyListType;
+using AnyListTypePtr = std::shared_ptr<AnyListType>;
+struct CAFFE2_API AnyListType : public Type {
+  static AnyListTypePtr create() {
+    return AnyListTypePtr(
+        new AnyListType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "list";
+  }
+  static const TypeKind Kind = TypeKind::AnyListType;
+  // global singleton
+  static AnyListTypePtr get();
+private:
+  AnyListType()
+  : Type(TypeKind::AnyListType) {}
+};
+
+// the common supertype of all tuples,
+// Tuple[T...] <: AnyTuple for all T
+struct AnyTupleType;
+using AnyTupleTypePtr = std::shared_ptr<AnyTupleType>;
+struct CAFFE2_API AnyTupleType : public Type {
+  static AnyTupleTypePtr create() {
+    return AnyTupleTypePtr(
+        new AnyTupleType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+
+  std::string str() const override {
+    return "tuple";
+  }
+  static const TypeKind Kind = TypeKind::AnyTupleType;
+;
+  // global singleton
+  static AnyTupleTypePtr get();
+private:
+  AnyTupleType()
+  : Type(TypeKind::AnyTupleType) {}
+};
+
+
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(FloatType::get());
+  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
 }
 
 inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(TensorType::get());
+  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
 }
 
 inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(IntType::get());
+  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
 }
 
 inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->isSubtypeOf(BoolType::get());
+  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
 } // namespace c10
