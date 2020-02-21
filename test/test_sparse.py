@@ -2137,11 +2137,8 @@ class TestSparse(TestCase):
                                / torch.tensor(1., device=self.device).to_sparse())
 
     def test_sparse_to_numpy(self):
-        i = torch.LongTensor([[0, 1, 1],
-                              [2, 0, 2]])
-        v = torch.FloatTensor([3, 4, 5])
-        st = torch.sparse.FloatTensor(i, v, torch.Size([2, 3]))
-        self.assertRaises(TypeError, lambda: st.numpy())
+        t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
+        self.assertRaises(TypeError, lambda: t.numpy())
 
 
 class TestUncoalescedSparse(TestSparse):
