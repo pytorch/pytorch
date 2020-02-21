@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 
 #include <queue>
 #include <unordered_map>
@@ -104,7 +104,7 @@ bool isSimpleMap(Node* node) {
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
-  if (!simple_mappable.find(node)) {
+  if (!node->isMemberOf(simple_mappable)) {
     return false;
   }
   for (Value* input : node->inputs()) {

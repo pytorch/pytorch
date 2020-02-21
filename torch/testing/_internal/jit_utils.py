@@ -170,8 +170,7 @@ class JitTestCase(TestCase):
 
     def emitFunctionHook(self, func):
         # func has invalid names for export, skip the jitter check
-        inline_everything = torch._C._jit_get_inline_everything_mode()
-        if func.name == "<lambda>" or "aten::" in func.name or not inline_everything:
+        if func.name == "<lambda>" or "aten::" in func.name:
             return
         self._compared_saved_loaded(func)
 

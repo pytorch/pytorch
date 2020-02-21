@@ -29,7 +29,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   scalar_t one = ScalarConvert<int64_t, scalar_t>::to(1);
   int inputBlockDim = THCCeilDiv((int)inputsize + BLOCK_SIZE - 1, BLOCK_SIZE);
   aliasMultinomialFilter
-    <<<inputBlockDim, BLOCK_SIZE, 0, THCState_getCurrentStream(state) >>>(
+    <<<inputBlockDim, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream() >>>(
                      THCTensor_(data)(state, _q),
                      THCTensor_(data)(state, probs),
                      THCudaLongTensor_data(state, smaller),
@@ -46,7 +46,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCudaLongTensor_resize1d(state, smaller_short, inputsize);
   THCudaLongTensor_resize1d(state, larger_short, inputsize);
   aliasMultinomialSetup
-    <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+    <<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(
                 THCudaLongTensor_data(state, _J),
                 THCTensor_(data)(state, _q),
                 inputsize,
@@ -56,7 +56,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                 );
   scalar_t q_max = THCTensor_(maxall)(state, _q);
   condDiv<<<
-    inputBlockDim, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+    inputBlockDim, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
                       THCTensor_(data)(state, _q),
                       THCudaLongTensor_data(state, _J),
                       inputsize, q_max
@@ -93,7 +93,7 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
   at::native::uniform_cuda_(out_bernoulli, 0, 1, gen);
 
   multinomialAliasDrawKernel
-    <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+    <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
           size,
           THCudaLongTensor_data(state, self),
           THCudaLongTensor_data(state, _J),

@@ -252,6 +252,10 @@ struct func_wrapper_t {
     return WARP_SHFL_DOWN(arg, offset);
   }
 
+  static __device__ arg_t translate_idx(arg_t acc, int64_t /*idx*/) {
+    return acc;
+  }
+
   func_wrapper_t(const func_t& op) : combine(op) {
   }
 
@@ -293,22 +297,25 @@ struct ReduceOp {
   // cta_buf used for accumulation between blocks during global reduction
   void* cta_buf;
   int* semaphores;
+  int64_t base_idx;
   bool accumulate;
   bool final_output;
   int noutputs;
 
   ReduceOp(ops_t ops, ReduceConfig config, InputCalculator input_calc, OutputCalculator output_calc,
-           const void* src, char* dst0, optional<char*> dst1, void* acc_buf, void* cta_buf, int* semaphores, arg_t ident, int noutputs)
-    : ops(ops)
-    , ident(ident)
-    , config(config)
-    , input_calc(input_calc)
-    , output_calc(output_calc)
-    , src(src)
-    , acc_buf(acc_buf)
-    , cta_buf(cta_buf)
-    , semaphores(semaphores)
-    , noutputs(noutputs) {
+      const void* src, char* dst0, optional<char*> dst1, void* acc_buf, void* cta_buf, int* semaphores,
+      arg_t ident, int noutputs, int64_t base_idx)
+      : ops(ops),
+        ident(ident),
+        config(config),
+        input_calc(input_calc),
+        output_calc(output_calc),
+        src(src),
+        acc_buf(acc_buf),
+        cta_buf(cta_buf),
+        semaphores(semaphores),
+        noutputs(noutputs),
+        base_idx(base_idx){
     dst[0] = dst0;
     if (dst1.has_value()) {
       dst[1] = dst1.value();
@@ -346,6 +353,10 @@ struct ReduceOp {
     if (config.should_global_reduce()) {
       value = global_reduce(value, acc, shared_memory);
     } else if (config.should_store(output_idx)) {
+      if (accumulate) {
+        value = ops.translate_idx(value, base_idx);
+      }
+
       if (acc == nullptr) {
         if (accumulate) {
           value = accumulate_in_output<can_accumulate_in_output>(out, value);
@@ -568,6 +579,10 @@ struct ReduceOp {
         value = block_x_reduce(value, shared_memory);
       }
       if (should_store) {
+        if (accumulate) {
+          value = ops.translate_idx(value, base_idx);
+        }
+
         if (acc == nullptr) {
           if (accumulate) {
             value = accumulate_in_output<can_accumulate_in_output>(out, value);
@@ -642,7 +657,7 @@ struct AccumulationBuffer {
 
 template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
-                              AccumulationBuffer* acc_buf_ptr=nullptr) {
+                              AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
@@ -675,7 +690,12 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   if (!can_use_32bit_indexing) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident, acc_buf_ptr);
+      // Dim 0 is always the reduced dimension
+      AT_ASSERT(sub_iter.strides(0)[0] == 0);
+      int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
+
+      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
+          acc_buf_ptr, sub_iter_base_idx);
     }
     return;
   }
@@ -793,7 +813,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       buffer.get(),
       (int*)semaphores.get(),
       ident,
-      noutputs);
+      noutputs,
+      base_idx);
   reduce.accumulate = iter.should_accumulate();
   reduce.final_output = iter.is_final_output();
 

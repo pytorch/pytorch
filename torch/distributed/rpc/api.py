@@ -467,18 +467,6 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
 
 
 @_require_initialized
-def enable_gil_profiling(flag):
-    r"""
-    Set whether GIL wait times should be enabled or not. This incurs a slight
-    overhead cost. Default is disabled for performance reasons.
-
-    Arguments:
-        flag (bool): True to set metrics profiling, False to disable.
-    """
-    _get_current_rpc_agent().enable_gil_profiling(flag)
-
-
-@_require_initialized
 def rpc_sync(to, func, args=None, kwargs=None):
     r"""
     Make a blocking RPC call to run function ``func`` on worker ``to``. RPC

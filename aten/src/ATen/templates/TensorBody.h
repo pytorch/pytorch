@@ -503,7 +503,7 @@ public:
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
-  const Tensor& base() const;
+  const Tensor& _base() const;
 
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

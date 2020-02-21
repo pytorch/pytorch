@@ -185,6 +185,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`MixtureSameFamily`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.mixture_same_family
+.. autoclass:: MixtureSameFamily
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Multinomial`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

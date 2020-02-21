@@ -180,8 +180,8 @@ using type = typename arg_type_helper<func_t, function_traits<func_t>::arity>::t
 
 }  // namespace detail
 
-template<int nt, int vt, typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(nt)
+template<typename func_t, typename array_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -198,8 +198,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
-  int nv = nt * vt;
-  int idx = nv * blockIdx.x + tid;
+  int idx = block_work_size * blockIdx.x + tid;
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
@@ -210,234 +209,51 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   // fetch data
-  return_t results[vt];
-  arg_t args[vt][nargs];
+  return_t results[thread_work_size];
+  arg_t args[thread_work_size][nargs];
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * nt);
+        args[i][j] = *(args_base[j] + i * num_threads);
       }
     }
   }
 
   // compute
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
       results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
   // store data
   #pragma unroll
-  for (int i = 0; i < vt; i++) {
-    if (idx + nt * i < N) {
-      *(result_base + i * nt) = results[i];
+  for (int i = 0; i < thread_work_size; i++) {
+    if (idx + num_threads * i < N) {
+      *(result_base + i * num_threads) = results[i];
     }
   }
 }
 
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
-template<int nt, int vt, typename func_t, typename array_t>
+template<typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
-  dim3 block(nt);
-  dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<nt, vt, func_t, array_t><<<grid, block, 0, stream>>>(N, f, data);
+  elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
+template<typename func_t, typename array_t, std::enable_if_t<!detail::has_same_arg_types<func_t>::value, int> = 0>
+static void launch_kernel(int64_t N, const func_t& f, array_t data) {}
+
 } // namespace modern
-
-template<typename func_t, int nargs=function_traits<func_t>::arity>
-struct needs_dynamic_casting {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    if (iter.dtype(nargs) != c10::impl::CPPTypeToScalarType<typename traits::template arg<nargs - 1>::type>::value) {
-      return true;
-    }
-    return needs_dynamic_casting<func_t, nargs - 1>::check(iter);
-  }
-};
-
-template<typename func_t>
-struct needs_dynamic_casting<func_t, 0> {
-  static bool check(TensorIterator& iter) {
-    using traits = function_traits<func_t>;
-    return iter.dtype(0) != c10::impl::CPPTypeToScalarType<typename traits::result_type>::value;
-  }
-};
-
-template <typename func_t>
-void gpu_kernel_impl(TensorIterator& iter, const func_t& f) {
-  using traits = function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
-  constexpr int ntensors = traits::arity + 1;
-
-  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == traits::arity + 1);
-
-  at::detail::Array<char*, ntensors> data;
-  for (int i = 0; i < ntensors; i++) {
-    data[i] = (char*)iter.data_ptr(i);
-  }
-
-  at::detail::Array<ScalarType, ntensors> dtypes;
-  for (int i = 0; i < ntensors; i++) {
-    dtypes[i] = iter.tensor(i).scalar_type();
-  }
-
-  int64_t numel = iter.numel();
-  if (iter.is_trivial_1d()) {
-    auto inner_strides = iter.get_inner_strides();
-    at::detail::Array<int, ntensors> strides;
-    for (int i = 0; i < ntensors; i++) {
-      strides[i] = inner_strides[i];
-    }
-
-    if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        void* out = data[0] + strides[0] * idx;
-        arg0_t result = legacy::invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else if (iter.has_contiguous_first_dim()) {
-      modern::launch_kernel<C10_WARP_SIZE * 2, 4>(numel, f, data);
-    } else {
-      legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-        arg0_t* out = (arg0_t*)(data[0] + strides[0] * idx);
-        *out = legacy::invoke(f, &data.data[1], &strides.data[1], idx);
-      });
-    }
-  } else {
-    auto offset_calc = legacy::make_offset_calculator<traits::arity + 1>(iter);
-    if (needs_dynamic_casting<func_t>::check(iter)) {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        void* out = data[0] + offsets[0];
-        arg0_t result = legacy::invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
-        c10::cast_and_store<arg0_t>(dtypes[0], out, result);
-      });
-    } else {
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-        auto offsets = offset_calc.get(idx);
-        arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-        *out = legacy::invoke(f, &data.data[1], &offsets.data[1], 1);
-      });
-    }
-  }
-}
-
-template <typename func_t>
-void gpu_kernel(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
-
-  for (int arg = 0; arg < iter.ntensors(); arg++) {
-    TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
-  }
-
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_kernel(sub_iter, f);
-    }
-    return;
-  }
-
-  gpu_kernel_impl(iter, f);
-}
-
-template <typename func_t>
-void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
-
-  using traits = function_traits<func_t>;
-  static_assert(
-      traits::arity == 2,
-      "gpu_kernel_with_scalars only supports two input arguments");
-
-  if (iter.is_cpu_scalar(1)) {
-    using arg1_t = typename traits::template arg<0>::type;
-    using arg2_t = typename traits::template arg<1>::type;
-    auto a = iter.scalar_value<arg1_t>(1);
-    iter.remove_operand(1);
-    gpu_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
-      return f(a, b);
-    });
-  } else if (iter.is_cpu_scalar(2)) {
-    using arg1_t = typename traits::template arg<0>::type;
-    using arg2_t = typename traits::template arg<1>::type;
-    auto b = iter.scalar_value<arg2_t>(2);
-    iter.remove_operand(2);
-    gpu_kernel(iter, [=]GPU_LAMBDA(arg1_t a) {
-      return f(a, b);
-    });
-  } else {
-    gpu_kernel(iter, f);
-  }
-}
-
-template <typename func_t>
-void gpu_kernel_with_index_impl(TensorIterator& iter, const func_t& f) {
-  using traits = function_traits<func_t>;
-  using arg0_t = typename traits::result_type;
-
-
-  // Note:
-  // `gpu_kernel_with_index` was originally implemented in PR #28175 with support
-  // of having an arbitrary number of tensors as arguments. This support was removed
-  // during the process of refactoring Loops.cuh to support vectorized memory access
-  // in PR #32777 (See also issue #31975). The removal of this support is soly because
-  // at that time, there is no operator using that functionality. If you need this
-  // functionality, feel free to add it back.
-  static_assert(traits::arity == 1, "Functor for gpu_kernel_with_index can only have one argument which is the index");
-
-  TORCH_INTERNAL_ASSERT(iter.ntensors() == 1);
-
-  char* data = (char*)iter.data_ptr(0);
-
-  int64_t numel = iter.numel();
-  if (iter.is_trivial_1d()) {
-    int stride = iter.get_inner_strides()[0];
-    legacy::launch_kernel<launch_size_1d, 1>(numel, [=]GPU_LAMBDA(int idx) {
-      arg0_t* out = (arg0_t*)(data + stride * idx);
-      *out = f(idx);
-    });
-  } else {
-    auto offset_calc = legacy::make_offset_calculator<traits::arity>(iter);
-    legacy::launch_kernel<launch_size_nd, launch_bound2>(numel, [=]GPU_LAMBDA(int idx) {
-      auto offsets = offset_calc.get(idx);
-      arg0_t* out = (arg0_t*)(data + offsets[0]);
-      *out = f(idx);
-    });
-  }
-}
-
-template <typename func_t>
-void gpu_kernel_with_index(TensorIterator& iter, const func_t& f) {
-  ASSERT_HOST_DEVICE_LAMBDA(func_t);
-
-  TORCH_INTERNAL_ASSERT(iter.device(0).is_cuda(), "gpu_kernel_with_index only support cuda tensor.");
-
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  // Split will change index, thus is not supported
-  // The caller should handle the split and pass in different func
-  TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing(), "gpu_kernel_with_index only support 32-bit indexing.");
-
-  gpu_kernel_with_index_impl(iter, f);
-}
 
 }} // namespace at::native

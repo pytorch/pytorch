@@ -6,18 +6,31 @@
 
 namespace torch {
 namespace jit {
-template<typename dtype> // int64_t, bool, double
-void listConstructFunc(int num_inputs, Stack &stack) {
-  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-  IValue vals(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
-  drop(stack, num_inputs);
-  push(stack, std::move(vals));
-}
 
-void tensorListConstructFunc(int num_inputs, Stack& stack);
+void tupleUnpack(Stack& stack);
 
-void tupleUnpackFunc(int num_outputs, Stack& stack);
+void format(Stack& stack, size_t num_inputs);
 
-void formatFunc(int num_inputs, Stack& stack);
+void listUnpack(Stack& stack, size_t num_outputs);
+
+void tupleConstruct(Stack& stack, size_t num_inputs);
+
+void namedTupleConstruct(
+    Stack& stack,
+    at::TupleTypePtr type,
+    size_t num_inputs);
+
+void listConstruct(Stack& stack, at::ListTypePtr list_type, size_t num_inputs);
+
+void dictConstruct(Stack& stack, at::DictTypePtr type, size_t num_inputs);
+
+void createObject(Stack& stack, at::ClassTypePtr type);
+
+void isinstance(
+    Stack& stack,
+    at::ArrayRef<at::TypePtr> types);
+
+void tupleSlice(Stack& stack, size_t begin, size_t end);
+
 } // namespace jit
 } // namespace torch

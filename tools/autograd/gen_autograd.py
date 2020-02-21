@@ -35,9 +35,7 @@ from .utils import YamlLoader, split_name_params
 # docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
 # e.g alias & sparse_coo_tensor_with_dims_and_tensors.
 #
-# A map: function name => two options:
-#      1. name of the argument that all outputs are view of
-#      2. map: output idx => name of the argument that this result is view of
+# A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
@@ -71,7 +69,6 @@ VIEW_FUNCTIONS = {
 # of viewing functions, and is used by the JIT to determine when an operator
 # returns a view of its inputs
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({'chunk', 'split'})
-
 
 def format_return_type(returns):
     if len(returns) == 0:

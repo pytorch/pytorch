@@ -17,7 +17,7 @@ import torch.cuda
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import simple_sparse_reduce_tests, skip_if_rocm
@@ -105,6 +105,7 @@ SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_GPU_EXIT_CODE = 76
 SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
 SKIP_IF_BACKEND_UNAVAILABLE = 78
+SKIP_IF_ROCM_EXIT_CODE = 79
 
 
 def skip_if_no_cuda_distributed(func):
@@ -498,6 +499,7 @@ class _DistTestBase(object):
     @require_backends_available({"gloo", "nccl"})
     @require_world_size(3)
     @require_num_gpus(2)
+    @skip_if_rocm
     def test_backend_group(self):
         self._test_group_override_backend(self._init_group_test)
 
@@ -725,7 +727,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1549,7 +1551,7 @@ class _DistTestBase(object):
     @skip_if_small_worldsize
     @skip_if_no_gpu
     @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
-    @skipIfRocm
+    @skip_if_rocm
     def test_barrier_group_cuda(self):
         group, group_id, rank = self._init_group_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1679,7 +1681,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != "nccl", "Only Nccl backend supports reduce multigpu")
     @skip_if_no_gpu
-    @skipIfRocm
+    @skip_if_rocm
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1867,6 +1869,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skip_if_rocm
     def test_DistributedDataParallel(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1925,7 +1928,6 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
-    @skipIfRocm
     def test_DistributedDataParallel_SyncBatchNorm(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -1945,6 +1947,7 @@ class _DistTestBase(object):
                      "Only Nccl & Gloo backend support DistributedDataParallel")
     @skip_if_no_cuda_distributed
     @skip_if_no_gpu
+    @skip_if_rocm
     def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
         group, group_id, rank = self._init_global_test()
         rank_to_GPU = self._init_multigpu_helper()
@@ -2128,7 +2131,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
             skip_ok = (
                 getattr(fn, "skip_if_no_cuda_distributed", False) or
                 getattr(fn, "skip_if_no_gpu", False) or
-                getattr(fn, "skip_if_small_worldsize", False)
+                getattr(fn, "skip_if_small_worldsize", False) or
+                getattr(fn, "skip_if_rocm", False)
             )
             join_timeout = get_timeout(self.id())
             for rank, process in enumerate(self.processes):
@@ -2151,7 +2155,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     first_process.exitcode == 0 or
                     first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE or
                     first_process.exitcode == SKIP_IF_NO_GPU_EXIT_CODE or
-                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
+                    first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE or
+                    first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE
                 )
 
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
@@ -2162,6 +2167,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
                     )
                 if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
                     raise unittest.SkipTest("worldsize is too small to run group tests")
+                if first_process.exitcode == SKIP_IF_ROCM_EXIT_CODE:
+                    raise unittest.SkipTest("Test skipped for ROCm")
 
             self.assertEqual(first_process.exitcode, 0)
 

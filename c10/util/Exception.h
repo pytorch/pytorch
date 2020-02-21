@@ -245,17 +245,17 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // (unlike CHECK() from glog.)
 //
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_CHECK(cond, ...)                \
+#define TORCH_CHECK_WITH(error_t, cond, ...)  \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    C10_THROW_ERROR(Error,                    \
+    C10_THROW_ERROR(error_t,                  \
         #cond " CHECK FAILED at "             \
         __FILE__                              \
     );                                        \
   }
 #else
-#define TORCH_CHECK(cond, ...)                              \
+#define TORCH_CHECK_WITH(error_t, cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
-    C10_THROW_ERROR(Error,                                  \
+    C10_THROW_ERROR(error_t,                                \
       ::c10::detail::if_empty_then(                         \
         ::c10::str(__VA_ARGS__),                            \
         "Expected " #cond " to be true, but got false.  "   \
@@ -265,6 +265,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
     );                                                      \
   }
 #endif
+#define TORCH_CHECK(cond, ...) TORCH_CHECK_WITH(Error, cond, __VA_ARGS__)
 
 // Debug only version of TORCH_INTERNAL_ASSERT. This macro only checks in debug
 // build, and does nothing in release build.  It is appropriate to use
@@ -276,7 +277,7 @@ inline std::string if_empty_then(std::string x, std::string y) {
   while (false)           \
   TORCH_INTERNAL_ASSERT(__VA_ARGS__)
 #else
-#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) TORCH_INTERNAL_ASSERT(__VA_ARGS__)
+#define TORCH_INTERNAL_ASSERT_DEBUG_ONLY(...) C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__))
 #endif
 
 // TODO: We're going to get a lot of similar looking string literals

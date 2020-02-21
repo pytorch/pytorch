@@ -23,6 +23,7 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
@@ -56,7 +57,8 @@ struct PyObjectHolder;
   _(Object) \
   _(PyObject) \
   _(Uninitialized) \
-  _(Capsule)
+  _(Capsule) \
+  _(RRef) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -243,6 +245,12 @@ struct CAFFE2_API IValue final {
   bool isFuture() const { return Tag::Future == tag; }
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const &;
+
+  // RRef
+  IValue(c10::intrusive_ptr<c10::RRefInterface> v);
+  bool isRRef() const { return Tag::RRef == tag; }
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
 
   // Int
   IValue(int64_t i)

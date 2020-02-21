@@ -982,10 +982,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # Operate on 10 MB tensor which should take some time
-        tensor1 = torch.ByteTensor(10000000).pin_memory()
+        tensor1 = torch.ByteTensor(5).pin_memory()
         tensor2 = tensor1.cuda(non_blocking=True) + 1
-        self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
@@ -2138,6 +2136,15 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
+
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
 
 if __name__ == '__main__':
     run_tests()

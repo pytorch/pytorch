@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
 
+using namespace at::native;
 using namespace at::native::memory;
+
 __managed__ double4 buffer1[1024];
 __managed__ double4 buffer2[1024];
 
@@ -19,6 +22,21 @@ void reset_buffers() {
     buffer2[2].z = -(i + 0.2);
     buffer2[2].w = -(i + 0.3);
   }
+}
+
+TEST(TestLoops, HasSameArgTypes) {
+  // This is a compile-time unit test. If this file compiles without error,
+  // then the test passes and during runtime, we just need to return.
+  using namespace at::native::modern::detail;
+  using func1_t = int (*)(float, float);
+  using func2_t = int (*)(bool, float, float);
+  using func3_t = int (*)(float);
+  using func4_t = int (*)();
+  static_assert(has_same_arg_types<func1_t>::value, "func1_t has the same argument types");
+  static_assert(!has_same_arg_types<func2_t>::value, "func2_t does not have the same argument types");
+  static_assert(has_same_arg_types<func3_t>::value, "func3_t has the same argument types");
+  static_assert(has_same_arg_types<func4_t>::value, "func4_t has the same argument types");
+  return;
 }
 
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
@@ -53,9 +71,9 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 // defined in `ATen/native/cuda/MemoryAccess.cuh`
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
-  using vectorized = policies<64, 4>::vectorized<vec_size>;
+  using vectorized = policies::vectorized<vec_size>;
   auto policy = vectorized();
-  scalar_t buf[vectorized::thread_work_size];
+  scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
   policy.load(accessor, src + 256 * blockIdx.x);
   policy.store(accessor, dst + 256 * blockIdx.x);
