@@ -199,14 +199,6 @@ void RecordFunction::processCallbacks() {
   }
 }
 
-void RecordFunction::setThreadId() {
-  auto threadId = torch::autograd::profiler::getThreadId();
-  TORCH_INTERNAL_ASSERT(
-      threadId != 0,
-      "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
-  threadId_ = threadId;
-}
-
 RecordFunction::~RecordFunction() {
   try {
     end();
@@ -223,16 +215,10 @@ void RecordFunction::end() {
       }
     }
 
-    // In the case that RecordFunction::end is called from a different thread,
-    // thread_local_func will not be this, so assert that we have overridden the
-    // thread id (by ensuring it is nonzero) and thread_local_func is null.
     TORCH_INTERNAL_ASSERT(
-        (thread_local_func_ == this) ||
-            (thread_local_func_ == nullptr && threadId_ != 0),
+        (thread_local_func_ == this),
         name_,
-        ": must be top of stack. If you are calling RecordFunction::end in a"
-        "separate thread, call RecordFunction::setThreadId() in the creating"
-        "thread.");
+        ": must be top of stack.");
     thread_local_func_ = parent_;
     initialized_ = false;
   }
@@ -244,17 +230,17 @@ RecordFunction* RecordFunction::current() {
 
 void RecordFunctionAsync::before(const char* name, int64_t sequence_nr) {
   RecordFunction::before(name, sequence_nr);
-  RecordFunction::setThreadId();
+  setThreadId();
 }
 
 void RecordFunctionAsync::before(std::string name, int64_t sequence_nr) {
   RecordFunction::before(name, sequence_nr);
-  RecordFunction::setThreadId();
+  setThreadId();
 }
 
 void RecordFunctionAsync::before(Node* fn, int64_t sequence_nr) {
   RecordFunction::before(fn, sequence_nr);
-   RecordFunction::setThreadId();
+  setThreadId();
 }
 
 void RecordFunctionAsync::exitScope() {
@@ -279,6 +265,14 @@ void RecordFunctionAsync::end() {
     }
     initialized_ = false;
   }
+}
+
+void RecordFunctionAsync::setThreadId() {
+  auto threadId = torch::autograd::profiler::getThreadId();
+  TORCH_INTERNAL_ASSERT(
+      threadId != 0,
+      "Can only call RecordFunction::setThreadId after RecordFunction::before has been run in this thread.");
+  threadId_ = threadId;
 }
 
 RecordFunctionAsync::~RecordFunctionAsync() {

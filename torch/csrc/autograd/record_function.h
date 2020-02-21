@@ -107,12 +107,6 @@ struct TORCH_API RecordFunction {
 
   virtual void end();
 
-  // Saves the thread_id that this RecordFunction was created with. This is
-  // needed so that we can access Events created by the original thread in a
-  // different thread, since they are thread-local. This should be used to call
-  // RecordFunction::end() in a different thread.
-  void setThreadId();
-
   // Retrieves the thread_id that this RecordFunction was created with. Useful
   // if we need to access Events created by the original thread in a different
   // thread. The threadId_ should only be set (via setThreadId) in cases where
@@ -155,6 +149,11 @@ struct TORCH_API RecordFunctionAsync : public RecordFunction {
   void exitScope();
   // Run the end callbacks with this RecordFunctionAsync.
   void end() override;
+  // Saves the thread_id that this RecordFunctionAsync was created with. This is
+  // needed so that we can access Events created by the original thread in a
+  // different thread, since they are thread-local. This should be used to call
+  // RecordFunctionAsync::end() in a different thread.
+  void setThreadId();
   ~RecordFunctionAsync();
 };
 

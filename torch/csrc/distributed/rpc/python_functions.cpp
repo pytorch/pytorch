@@ -64,7 +64,7 @@ std::shared_ptr<FutureMessage> sendPythonRemoteCall(
     SerializedPyObj serializedPyObj,
     const IValue& rrefId,
     const IValue& forkId,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
   auto pythonRemoteCall = std::make_unique<PythonRemoteCall>(
       std::move(serializedPyObj), rrefId, forkId);
 
@@ -118,7 +118,7 @@ py::object toPyObj(const Message& message) {
 std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -132,7 +132,7 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf,
     const py::args& args,
     const py::kwargs& kwargs) {
   Stack stack;
@@ -162,7 +162,7 @@ std::shared_ptr<FutureMessage> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
   auto pythonCall = std::make_unique<PythonCall>(
       std::vector<char>(pickledPythonUDF.begin(), pickledPythonUDF.end()),
       tensors);
@@ -180,7 +180,7 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+    const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>& rf) {
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));

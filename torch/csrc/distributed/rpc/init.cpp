@@ -286,7 +286,8 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>&
+             rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         return pyRpcBuiltin(dst, opName, rf, args, kwargs);
@@ -297,9 +298,8 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
-      },
+         const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>&
+             rf) { return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf); },
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -362,7 +362,8 @@ If the future completes with an error, an exception is thrown.
       "_invoke_remote_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>&
+             rf,
          const py::args& args,
          const py::kwargs& kwargs) {
         return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
@@ -392,7 +393,8 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+         const std::shared_ptr<torch::autograd::profiler::RecordFunctionAsync>&
+             rf) {
         return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
       py::arg("dst"),
