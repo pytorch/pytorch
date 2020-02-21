@@ -375,7 +375,7 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
   int64_t offset_0 = offsets.data_ptr<int64_t>()[0];
-  int64_t offset_n = offsets.data_ptr<int64_t>()[indices.size(0)-1];
+  int64_t offset_n = offsets.data_ptr<int64_t>()[offsets.size(0)-1];
   TORCH_CHECK(offset_0 == 0, "offsets[0] has to be 0, i.e., the first sequence "
                              "in the mini-batch has to start from position 0. "
                              "However, got ", offsets[0]);
