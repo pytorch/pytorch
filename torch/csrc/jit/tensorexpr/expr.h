@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include "torch/csrc/jit/tensorexpr/ir_mutator.h"
+#include "torch/csrc/jit/tensorexpr/ir_visitor.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
 #include "torch/csrc/jit/tensorexpr/mem_arena.h"
 
@@ -20,6 +22,8 @@ class BaseExprNode : public KernelScopedObject {
   Dtype dtype() const {
     return dtype_;
   }
+  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual Expr accept_mutator(IRMutator* mutator) = 0;
 
  private:
   Dtype dtype_;
@@ -29,6 +33,8 @@ class BaseExprNode : public KernelScopedObject {
 class BaseStmtNode : public KernelScopedObject {
  public:
   BaseStmtNode() {}
+  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual Stmt accept_mutator(IRMutator* mutator) = 0;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -37,6 +43,10 @@ template <class Op, class Base = BaseExprNode>
 class ExprNode : public Base {
  public:
   using ExprNodeBase = ExprNode<Op>;
+  void accept(IRVisitor* visitor) const override {
+    visitor->visit(static_cast<const Op*>(this));
+  }
+  Expr accept_mutator(IRMutator* mutator) override;
   // pass the constructor to the base class
   using Base::Base;
 };
@@ -45,6 +55,10 @@ template <class Op>
 class StmtNode : public BaseStmtNode {
  public:
   using StmtNodeBase = StmtNode<Op>;
+  void accept(IRVisitor* visitor) const override {
+    visitor->visit(static_cast<const Op*>(this));
+  }
+  Stmt accept_mutator(IRMutator* mutator) override;
   StmtNode() {}
 };
 
@@ -66,6 +80,23 @@ class TORCH_API Expr {
 
   bool empty() const {
     return base_expr_node_ == nullptr;
+  }
+
+  void accept(IRVisitor* visitor) const {
+    // TODO: Consider implement this without using recursion. Otherwise,
+    // if the expression tree is degenerate and too long, it could cause a
+    // stack overflow.
+    if (node() == nullptr) {
+      return;
+    }
+    node()->accept(visitor);
+  }
+
+  Expr accept_mutator(IRMutator* mutator) {
+    if (node() == nullptr) {
+      return Expr();
+    }
+    return node()->accept_mutator(mutator);
   }
 
   Expr(int v);
@@ -115,6 +146,20 @@ class Stmt {
     return base_stmt_node_;
   }
 
+  void accept(IRVisitor* visitor) const {
+    if (node() == nullptr) {
+      return;
+    }
+    node()->accept(visitor);
+  }
+
+  Stmt accept_mutator(IRMutator* mutator) {
+    if (node() == nullptr) {
+      return Stmt();
+    }
+    return node()->accept_mutator(mutator);
+  }
+
   bool empty() const {
     return node() == nullptr;
   }
@@ -127,6 +172,18 @@ class Stmt {
  private:
   BaseStmtNode* base_stmt_node_ = nullptr;
 };
+
+template <class Op, class Base>
+Expr ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) {
+  ExprNode* this_mutable = const_cast<ExprNode*>(this);
+  return mutator->mutate(static_cast<Op*>(this_mutable));
+}
+
+template <class Op>
+Stmt StmtNode<Op>::accept_mutator(IRMutator* mutator) {
+  StmtNode* this_mutable = const_cast<StmtNode*>(this);
+  return mutator->mutate(static_cast<Op*>(this_mutable));
+}
 
 inline bool same_node(const Expr& expr1, const Expr& expr2) {
   return expr1.AsNode<BaseExprNode>() == expr2.AsNode<BaseExprNode>();
