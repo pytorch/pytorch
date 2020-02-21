@@ -167,7 +167,6 @@ class _TestTorchMixin(object):
                        'coalesce',
                        'is_coalesced',
                        'is_distributed',
-                       'is_complex',
                        'is_nonzero',
                        'is_same_size',
                        'isclose',
@@ -710,6 +709,17 @@ class _TestTorchMixin(object):
 
         test((10,))
         test((5, 5))
+
+    def test_where_invalid_device(self):
+        if torch.cuda.is_available():
+            for devices in [('cpu', 'cuda', 'cuda'), ('cuda', 'cpu', 'cpu'),
+                            ('cuda', 'cpu', 'cuda'), ('cpu', 'cuda', 'cpu')]:
+                condition = torch.rand(16, device=devices[0])
+                x = torch.rand(16, device=devices[1])
+                y = torch.rand(16, device=devices[2])
+                with self.assertRaisesRegex(RuntimeError,
+                                            "expected condition, x and y to be on the same device"):
+                    torch.where(condition, x, y)
 
     def test_where_bool_tensor(self):
         for d in torch.testing.get_all_device_types():
@@ -1343,6 +1353,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
+            self.assertIs(torch.complex128, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
 
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
@@ -5905,6 +5916,23 @@ class TestTorchDeviceType(TestCase):
         result = torch.diagonal(x, 17)
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
+
+    def test_conv_transposed_backward_agnostic_to_memory_format(self, device):
+        in_channels = 64
+        out_channels = 128
+        scale_factor = 8
+        batch_size = 8
+        length = 16
+
+        conv = torch.nn.ConvTranspose1d(
+            in_channels, out_channels, kernel_size=scale_factor * 2, stride=scale_factor).to(device)
+        layer_norm = torch.nn.LayerNorm(out_channels).to(device)
+
+        input_ = torch.randn(batch_size, in_channels, length).to(device).contiguous()
+        input_ = conv(input_).contiguous()
+        input_ = layer_norm(input_.transpose(1, 2).contiguous()).contiguous()
+        input_.sum().backward()
+
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     @onlyCPU
