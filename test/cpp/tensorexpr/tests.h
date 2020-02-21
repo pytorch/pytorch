@@ -9,7 +9,13 @@
 namespace torch {
 namespace jit {
 #define TH_FORALL_TESTS(_)      \
+  _(ExprBasicValueTest)         \
+  _(ExprBasicValueTest02)       \
+  _(ExprLetTest01)              \
+  _(ExprLetTest02)              \
   _(ExprVectorAdd01)            \
+  _(ExprCompareSelectEQ)        \
+  _(ExprDynamicShapeAdd)        \
   _(TypeTest01)                 \
 
 #define TH_FORALL_TESTS_CUDA(_) \
