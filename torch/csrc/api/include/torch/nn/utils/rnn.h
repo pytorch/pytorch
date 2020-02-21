@@ -37,6 +37,7 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0) {
+  // yf225 TODO: double check logic in this function
   auto max_size = sequences[0].sizes();
   auto trailing_dims = std::vector<int64_t>(max_size.begin() + 1, max_size.end());
 

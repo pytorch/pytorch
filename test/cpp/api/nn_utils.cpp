@@ -9,6 +9,8 @@ using namespace torch::nn;
 struct NNUtilsTest : torch::test::SeedingFixture {};
 
 TEST_F(NNUtilsTest, PadSequence) {
+  // yf225 TODO: double check the tests
+
   auto a = torch::tensor({1, 2, 3});
   auto b = torch::tensor({4, 5});
   auto c = torch::tensor({6});
