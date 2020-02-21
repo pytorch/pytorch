@@ -1973,7 +1973,7 @@ graph(%Ra, %Rb):
 
         trace_graph, _ = torch.jit._get_trace_graph(fn, (x,), _force_outplace=True)
         self.run_pass('dce', trace_graph)
-        ops = [n for n in trace_graph.nodes()]
+        ops = list(trace_graph.nodes())
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -3889,23 +3889,23 @@ graph(%Ra, %Rb):
         slstm(*inputs).sum().backward()
         global fw_graph
         fw_graph = slstm.graph_for(*inputs)
-        nodes = [n for n in fw_graph.nodes()]
+        nodes = list(fw_graph.nodes())
         tested_blocks = False
         for node in nodes:
-            for output in [o for o in node.outputs()]:
+            for output in node.outputs():
                 self.assertTrue(hasattr(output, 'type'))
                 self.assertTrue(output.type() is not None)
-            for input in [i for i in node.inputs()]:
+            for input in node.inputs():
                 self.assertTrue(hasattr(input, 'type'))
                 self.assertTrue(input.type() is not None)
-            for block in [b for b in node.blocks()]:
+            for block in node.blocks():
                 tested_blocks = True
                 self.assertTrue(hasattr(block, 'inputs'))
                 self.assertTrue(hasattr(block, 'outputs'))
-                for output in [o for o in block.outputs()]:
+                for output in block.outputs():
                     self.assertTrue(hasattr(output, 'type'))
                     self.assertTrue(output.type() is not None)
-                for input in [i for i in block.inputs()]:
+                for input in block.inputs():
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
@@ -10013,7 +10013,7 @@ a")
             self.assertEqual(o, v)
 
             with self.assertRaisesRegex(Exception, "object is not iterable"):
-                print([val for val in m])
+                print(list(m))
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -12757,7 +12757,7 @@ a")
         self.assertEqual(torch.jit.script(mod)(torch.tensor(.5)), [])
 
         def bad_type_annotation():
-            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
+            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])  # noqa: C416
             return out
 
         with self.assertRaisesRegex(Exception, "Expected list type annotation"):
