@@ -2,6 +2,8 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
+#include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/transform_replay.h>
 
 namespace torch {
 namespace jit {
@@ -264,7 +266,7 @@ const TensorView* reorder(
   //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
 }
 
-void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
+const TensorView* ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
   /*
    * TODO:
    * Recursive compute_at:
@@ -275,31 +277,26 @@ void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int 
    * Compute at modifies the consumer, not the producer.
    */
 
-  const Fusion* fusion = FusionGuard::getCurFusion();
-  const Expr* expr = fusion->origin(producer);
-  bool direct_relationship = false;
-  for(const Val* out : expr->outputs())
-    if(out->same_as(consumer))
-      direct_relationship = true;
-  
-  if(!direct_relationship)
-    throw std::runtime_error("Compute at is currently only supported on direct producer/consumer relationships.");
+  std::stack<const Val*> dep_chain = DependencyCheck::getDependencyChain(producer, consumer);
 
-  using size_type = decltype(consumer->domain()->size());
+  TORCH_CHECK(!dep_chain.empty());
 
-  bool matching_dims = true;
-  if(consumer->domain()->size() != producer->domain()->size()){
-    size_type producer_iter_dims = 0;
-    for(size_type i = 0; i < producer->domain()->size(); i++)
-      if(!producer->domain()->axis(i)->isReduction())
-        producer_iter_dims++;
-    if(producer_iter_dims != consumer->domain()->size())
-      matching_dims = false;      
+  //Recursively apply replay.
+  const TensorView* ref = consumer;
+  while(!dep_chain.empty()){
+    const Val* val = dep_chain.top(); dep_chain.pop();
+    TORCH_CHECK(val->getValType() == ValType::TensorView);
+    const TensorView* tv = static_cast<const TensorView*>(val);
+    //dep chain can include consumer, but not producer.
+    if(tv->same_as(consumer))
+      continue;
+    ref = TransformReplay::replay(ref, tv, axis);
+    ReplaceAll::instancesOf(tv, ref);
   }
-
-  /*
-   * Need replay function producer/consumer.
-   */
+  //Dep chain doesn't contain consumer, run on consumer manually.
+  if(FusionGuard::getCurFusion()->origin(consumer) != nullptr)
+    return TransformReplay::replay(ref, consumer, axis);
+  return consumer;
 }
 
 } // namespace fuser

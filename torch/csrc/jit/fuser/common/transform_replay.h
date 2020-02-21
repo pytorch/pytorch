@@ -311,7 +311,6 @@ struct TORCH_API TransformReplay : public IterVisitor {
     return tv;
   }
 
- public:
   /*
    * Takes replay_ref and replays its transformations on replay_target
    * Replays from begining of both TensorDomains. could be more efficient to try
@@ -343,7 +342,7 @@ struct TORCH_API TransformReplay : public IterVisitor {
    * that are not marked by the second propagate of the influence vector and
    * push those as well.
    */
-  const TensorView* replay(
+  const TensorView* runReplay(
       const TensorView* replay_ref,
       const TensorView* replay_target,
       int compute_at_axis) {
@@ -394,7 +393,6 @@ struct TORCH_API TransformReplay : public IterVisitor {
     for (decltype(target_root->size()) i = 0; i < target_root->size(); i++)
       if (!root_influence_vector[i])
         compute_at_domain.push_back(target_root->axis(i));
-    std::cout<<4<<std::endl;
     //Return the newly produced view!
     return new TensorView(
         replay_target->tensor(), new TensorDomain(compute_at_domain));
@@ -410,6 +408,16 @@ struct TORCH_API TransformReplay : public IterVisitor {
 
   // compute_at_axis
   int compute_at_axis;
+
+  
+ public:
+  static const TensorView* replay(
+      const TensorView* replay_ref,
+      const TensorView* replay_target,
+      int compute_at_axis) {
+    TransformReplay tr;
+    return tr.runReplay(replay_ref, replay_target, compute_at_axis);
+  }
 };
 
 } // namespace fuser
