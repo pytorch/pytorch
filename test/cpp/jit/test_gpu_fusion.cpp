@@ -610,40 +610,59 @@ void testGPU_FusionDependency(){
   Float* f1 = new Float(1.f);
   auto   f2 = add(f0, f1);
 
-  Float* f3 = new Float(3.f);
-  Float* f4 = new Float(4.f);
-  auto   f5 = add(f3, f4);
+  auto   f3 = add(f2, f2);
 
-  auto   f6 = add(f2, f5);
+  Float* f4 = new Float(4.f);
+  Float* f5 = new Float(5.f);
+  auto   f6 = add(f4, f5);
 
   Float* f7 = new Float(7.f);
   Float* f8 = new Float(8.f);
   auto   f9 = add(f7, f8);
 
-  Float* f10 = new Float(10.f);
-  Float* f11 = new Float(11.f);
-  auto   f12 = add(f10, f11);
+  auto   f10 = add(f6, f9);
 
-  auto   f13 = add(f9, f12);
-
-  auto   f14 = add(f6, f13);
+  auto   f11 = add(f3, f10);
   
- //f14 = ( (f0 + f1) + (f3 + f4) ) + ( (f7 + f8) + (f10 + f11) )
-
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f14));
-  /*
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f6));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f6));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f6));
+  
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f1, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f3, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f6, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f9, f11));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f0, f2));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f2, f3));
   TORCH_CHECK(DependencyCheck::isDependencyOf(f4, f6));
-  TORCH_CHECK(DependencyCheck::isDependencyOf(f5, f6));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f0));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f1));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f2));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f3));
+  TORCH_CHECK(DependencyCheck::isDependencyOf(f8, f10));
+  
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f0));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f1));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f2));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f3));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f4));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f11, f5));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f2, f0));
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f3, f2));
   TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f4));
-  TORCH_CHECK(!DependencyCheck::isDependencyOf(f6, f5));
-  */
+  TORCH_CHECK(!DependencyCheck::isDependencyOf(f10, f8));
+
+  std::stack<const Val*> dep_chain = DependencyCheck::getDependencyChain(f0, f11);
+  TORCH_CHECK(dep_chain.top() == f11); dep_chain.pop();
+  TORCH_CHECK(dep_chain.top() == f3); dep_chain.pop();
+  TORCH_CHECK(dep_chain.top() == f2); dep_chain.pop();
+
+  dep_chain = DependencyCheck::getDependencyChain(f6, f11);
+  TORCH_CHECK(dep_chain.top() == f11); dep_chain.pop();
+  TORCH_CHECK(dep_chain.top() == f10); dep_chain.pop();
+  
+  dep_chain = DependencyCheck::getDependencyChain(f4, f11);
+  TORCH_CHECK(dep_chain.top() == f11); dep_chain.pop();
+  TORCH_CHECK(dep_chain.top() == f10); dep_chain.pop();
+  TORCH_CHECK(dep_chain.top() == f6); dep_chain.pop();
+
+  dep_chain = DependencyCheck::getDependencyChain(f11, f2);
+  TORCH_CHECK(dep_chain.empty());
 }
 
 
