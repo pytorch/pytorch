@@ -11,17 +11,17 @@ using namespace torch::nn;
 
 struct NNUtilsTest : torch::test::SeedingFixture {};
 
-TEST_F(NNUtilsTest, PadSequence) {
-  torch::Tensor pad(const torch::Tensor& tensor, int64_t length) {
-    torch::NoGradGuard no_grad;
-    std::vector<int64_t> tensor_sizes{length - tensor.size(0)};
-    tensor_sizes.insert(
-      tensor_sizes.end(),
-      tensor.sizes().slice(1).begin(),
-      tensor.sizes().slice(1).end());
-    return torch::cat({tensor, torch::zeros(tensor_sizes, tensor.options())});
-  }
+torch::Tensor PadSequence_pad(const torch::Tensor& tensor, int64_t length) {
+  torch::NoGradGuard no_grad;
+  std::vector<int64_t> tensor_sizes{length - tensor.size(0)};
+  tensor_sizes.insert(
+    tensor_sizes.end(),
+    tensor.sizes().slice(1).begin(),
+    tensor.sizes().slice(1).end());
+  return torch::cat({tensor, torch::zeros(tensor_sizes, tensor.options())});
+}
 
+TEST_F(NNUtilsTest, PadSequence) {
   // single dimensional
   auto a = torch::tensor({1, 2, 3});
   auto b = torch::tensor({4, 5});
@@ -70,7 +70,7 @@ TEST_F(NNUtilsTest, PadSequence) {
         std::default_random_engine{});
       std::vector<torch::Tensor> expected_tensors;
       for (const torch::Tensor& seq : sequences) {
-        expected_tensors.emplace_back(pad(seq, maxlen * maxlen));
+        expected_tensors.emplace_back(PadSequence_pad(seq, maxlen * maxlen));
       }
 
       // batch first = true
