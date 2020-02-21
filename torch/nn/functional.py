@@ -12,7 +12,9 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from . import _VF
 from .._jit_internal import boolean_dispatch, List
+from .._overrides import has_torch_function, handle_torch_function
 
+Tensor = torch.Tensor
 
 conv1d = _add_docstr(torch.conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
@@ -335,6 +337,12 @@ def fractional_max_pool2d_with_indices(input, kernel_size, output_size=None,
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                fractional_max_pool2d_with_indices, (input,), input, kernel_size,
+                output_size=output_size, output_ratio=output_ratio,
+                return_indices=return_indices, _random_samples=_random_samples)
     if output_size is None and output_ratio is None:
         raise ValueError("fractional_max_pool2d requires specifying either "
                          "an output_size or an output_ratio")
@@ -353,6 +361,12 @@ def _fractional_max_pool2d(input, kernel_size, output_size=None,
                            output_ratio=None, return_indices=False,
                            _random_samples=None):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], Optional[BroadcastingList2[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                fractional_max_pool2d, (input,), input, kernel_size,
+                output_size=output_size, output_ratio=output_ratio,
+                return_indices=return_indices, _random_samples=_random_samples)
     return fractional_max_pool2d_with_indices(input, kernel_size, output_size,
                                               output_ratio, return_indices,
                                               _random_samples)[0]
@@ -401,6 +415,12 @@ def fractional_max_pool3d_with_indices(input, kernel_size, output_size=None,
     .. _Fractional MaxPooling:
         http://arxiv.org/abs/1412.6071
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                fractional_max_pool3d_with_indices, (input,), input, kernel_size,
+                output_size=output_size, output_ratio=output_ratio,
+                return_indices=return_indices, _random_samples=_random_samples)
     if output_size is None and output_ratio is None:
         raise ValueError("fractional_max_pool3d requires specifying either "
                          "an output_size or an output_ratio")
@@ -420,6 +440,12 @@ def _fractional_max_pool3d(input, kernel_size, output_size=None,
                            output_ratio=None, return_indices=False,
                            _random_samples=None):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], Optional[BroadcastingList3[float]], bool, Optional[Tensor]) -> Tensor  # noqa
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                fractional_max_pool3d, (input,), input, kernel_size,
+                output_size=output_size, output_ratio=output_ratio,
+                return_indices=return_indices, _random_samples=_random_samples)
     return fractional_max_pool3d_with_indices(input, kernel_size, output_size,
                                               output_ratio, return_indices,
                                               _random_samples)[0]
@@ -442,6 +468,12 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool1d_with_indices, (input,), input, kernel_size,
+                stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool1d_with_indices(
@@ -451,6 +483,12 @@ def max_pool1d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], Optional[BroadcastingList1[int]], BroadcastingList1[int], BroadcastingList1[int], bool, bool) -> Tensor  # noqa
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool1d, (input,), input, kernel_size,
+                stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool1d(
@@ -474,6 +512,12 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool2d_with_indices, (input,), input, kernel_size,
+                stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
@@ -482,6 +526,12 @@ def max_pool2d_with_indices(input, kernel_size, stride=None, padding=0, dilation
 def _max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], Optional[BroadcastingList2[int]], BroadcastingList2[int], BroadcastingList2[int], bool, bool) -> Tensor  # noqa
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool2d, (input,), input, kernel_size,
+                stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool2d(
@@ -505,6 +555,12 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxPool3d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool3d_with_indices, (input,), input, kernel_size,
+                stride=stride, padding=padding, dilation=dilation, ceil_mode=ceil_mode,
+                return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch._C._nn.max_pool3d_with_indices(
@@ -514,6 +570,11 @@ def max_pool3d_with_indices(input, kernel_size, stride=None, padding=0,
 def _max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                 ceil_mode=False, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], Optional[BroadcastingList3[int]], BroadcastingList3[int], BroadcastingList3[int], bool, bool) -> Tensor  # noqa
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_pool3d, (input,), input, kernel_size, stride=stride, padding=padding,
+                dilation=dilation, ceil_mode=ceil_mode, return_indices=return_indices)
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.max_pool3d(
@@ -565,6 +626,11 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_unpool1d, (input,), input, indices, kernel_size,
+                stride=stride, padding=padding, output_size=output_size)
     kernel_size = _single(kernel_size)
     if stride is not None:
         _stride = _single(stride)
@@ -588,6 +654,11 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_unpool2d, (input,), input, indices, kernel_size,
+                stride=stride, padding=padding, output_size=output_size)
     kernel_size = _pair(kernel_size)
     if stride is not None:
         _stride = _pair(stride)
@@ -606,6 +677,11 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                max_unpool3d, (input,), input, indices, kernel_size,
+                stride=stride, padding=padding, output_size=output_size)
     kernel_size = _triple(kernel_size)
     if stride is not None:
         _stride = _triple(stride)
@@ -626,6 +702,11 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                lp_pool2d, (input,), input, norm_type, kernel_size, stride=stride,
+                ceil_mode=ceil_mode)
     kw, kh = utils._pair(kernel_size)
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
@@ -643,6 +724,11 @@ def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                lp_pool1d, (input,), input, norm_type, kernel_size, stride=stride,
+                ceil_mode=ceil_mode)
     if stride is not None:
         out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -662,11 +748,21 @@ def adaptive_max_pool1d_with_indices(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool1d_with_indices, (input,), input, output_size,
+                return_indices=return_indices)
     return torch.adaptive_max_pool1d(input, output_size)
 
 
 def _adaptive_max_pool1d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList1[int], bool) -> Tensor
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool1d, (input,), input, output_size,
+                return_indices=return_indices)
     return adaptive_max_pool1d_with_indices(input, output_size)[0]
 
 adaptive_max_pool1d = boolean_dispatch(
@@ -691,12 +787,22 @@ def adaptive_max_pool2d_with_indices(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool2d_with_indices, (input,), input, output_size,
+                return_indices=return_indices)
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
 
 def _adaptive_max_pool2d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList2[int], bool) -> Tensor
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool2d, (input,), input, output_size,
+                return_indices=return_indices)
     return adaptive_max_pool2d_with_indices(input, output_size)[0]
 
 adaptive_max_pool2d = boolean_dispatch(
@@ -721,12 +827,22 @@ def adaptive_max_pool3d_with_indices(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool3d_with_indices, (input,), input, output_size,
+                return_indices=return_indices)
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
 
 def _adaptive_max_pool3d(input, output_size, return_indices=False):
     # type: (Tensor, BroadcastingList3[int], bool) -> Tensor
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_max_pool3d, (input,), input, output_size,
+                return_indices=return_indices)
     return adaptive_max_pool3d_with_indices(input, output_size)[0]
 
 adaptive_max_pool3d = boolean_dispatch(
@@ -764,6 +880,10 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_avg_pool2d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
@@ -780,6 +900,10 @@ def adaptive_avg_pool3d(input, output_size):
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                adaptive_avg_pool3d, (input,), input, output_size)
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
@@ -799,6 +923,10 @@ def dropout(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -813,6 +941,10 @@ def alpha_dropout(input, p=0.5, training=False, inplace=False):
 
     See :class:`~torch.nn.AlphaDropout` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -837,6 +969,10 @@ def dropout2d(input, p=0.5, training=True, inplace=False):
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -863,6 +999,10 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
     """
     # This is 100% the same code as dropout2d. We duplicate this code so that
     # stack traces are not confusing.
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -873,6 +1013,11 @@ def dropout3d(input, p=0.5, training=True, inplace=False):
 
 def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     # type: (Tensor, float, bool, bool) -> Tensor
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                feature_alpha_dropout, (input,), input, p=p, training=training,
+                inplace=inplace)
     if p < 0. or p > 1.:
         raise ValueError("dropout probability has to be between 0 and 1, "
                          "but got {}".format(p))
@@ -908,6 +1053,9 @@ def relu(input, inplace=False):
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(relu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.relu_(input)
     else:
@@ -941,6 +1089,9 @@ def glu(input, dim=-1):
         input (Tensor): input tensor
         dim (int): dimension on which to split the input. Default: -1
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(glu, (input,), input, dim=dim)
     if input.dim() == 0:
         raise RuntimeError("glu does not suppport scalars because halving size must be even")
     return torch._C._nn.glu(input, dim)
@@ -954,6 +1105,11 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                hardtanh, (input,), input, min_val=min_val, max_val=max_val,
+                inplace=inplace)
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -976,6 +1132,9 @@ def relu6(input, inplace=False):
 
     See :class:`~torch.nn.ReLU6` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(relu6, (input,), input, inplace=inplace)
     return hardtanh(input, 0., 6., inplace)
 
 
@@ -986,6 +1145,10 @@ def elu(input, alpha=1., inplace=False):
 
     See :class:`~torch.nn.ELU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(elu, (input,), input, alpha=alpha,
+                                         inplace=inplace)
     if inplace:
         result = torch._C._nn.elu_(input, alpha)
     else:
@@ -1011,6 +1174,9 @@ def selu(input, inplace=False):
 
     See :class:`~torch.nn.SELU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(selu, (input,), input, inplace=inplace)
     if inplace:
         result = torch.selu_(input)
     else:
@@ -1034,6 +1200,10 @@ def celu(input, alpha=1., inplace=False):
 
     See :class:`~torch.nn.CELU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(celu, (input,), input, alpha=alpha,
+                                         inplace=inplace)
     if inplace:
         result = torch.celu_(input, alpha)
     else:
@@ -1057,6 +1227,11 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                leaky_relu, (input,), input, negative_slope=negative_slope,
+                inplace=inplace)
     if inplace:
         result = torch._C._nn.leaky_relu_(input, negative_slope)
     else:
@@ -1081,6 +1256,9 @@ def prelu(input, weight):
 
     See :class:`~torch.nn.PReLU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(prelu, (input,), input, weight)
     return torch.prelu(input, weight)
 
 
@@ -1092,6 +1270,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
 
     See :class:`~torch.nn.RReLU` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                rrelu, (input,), input, lower=lower, upper=upper,
+                training=training, inplace=inplace)
     if inplace:
         result = torch.rrelu_(input, lower, upper, training)
     else:
@@ -1123,6 +1306,9 @@ def gelu(input):
 
     See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(gelu, (input,), input)
     return torch._C._nn.gelu(input)
 
 
@@ -1135,6 +1321,9 @@ def hardshrink(input, lambd=0.5):
 
     See :class:`~torch.nn.Hardshrink` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(hardshrink, (input,), input, lambd=lambd)
     return torch.hardshrink(input, lambd)
 
 
@@ -1145,6 +1334,9 @@ def tanhshrink(input):
 
     See :class:`~torch.nn.Tanhshrink` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(tanhshrink, (input,), input)
     return input - input.tanh()
 
 
@@ -1155,6 +1347,9 @@ def softsign(input):
 
     See :class:`~torch.nn.Softsign` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(softsign, (input,), input)
     return input / (input.abs() + 1)
 
 
@@ -1197,6 +1392,10 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
           If specified, the input tensor is casted to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
     if dtype is None:
@@ -1232,6 +1431,10 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
         Use log_softmax instead (it's faster and has better numerical properties).
 
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
     if dtype is None:
@@ -1282,7 +1485,10 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
     .. _Link 2:
         https://arxiv.org/abs/1611.01144
     """
-
+    if not torch.jit.is_scripting():
+        if type(logits) is not Tensor and has_torch_function((logits,)):
+            return handle_torch_function(
+                gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim)
     if eps != 1e-10:
         warnings.warn("`eps` parameter is deprecated and has no effect.")
 
@@ -1318,6 +1524,10 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
           If specified, the input tensor is casted to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
     if dtype is None:
@@ -1372,6 +1582,10 @@ def linear(input, weight, bias=None):
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
+    tens_ops = (input, weight)
+    if not torch.jit.is_scripting():
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(linear, tens_ops, input, weight, bias=bias)
     if input.dim() == 2 and bias is not None:
         # fused op is marginally faster
         ret = torch.addmm(bias, input, weight.t())
@@ -1568,6 +1782,14 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, weight)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                embedding_bag, tens_ops, input, weight, offsets=offsets, max_norm=max_norm,
+                norm_type=norm_type, scale_grad_by_freq=scale_grad_by_freq, mode=mode,
+                sparse=sparse, per_sample_weights=per_sample_weights,
+                include_last_offset=include_last_offset)
     # Check for backward compatibility.
     # Used to be embedding_bag(weight, input, ...)
     # Now is     embedding_bag(input, weight, ...)
@@ -1677,6 +1899,11 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                batch_norm, (input,), input, running_mean, running_var, weight=weight,
+                bias=bias, training=training, momentum=momentum, eps=eps)
     if training:
         _verify_batch_size(input.size())
 
@@ -1695,6 +1922,12 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                instance_norm, (input,), input, running_mean=running_mean,
+                running_var=running_var, weight=weight, bias=bias,
+                use_input_stats=use_input_stats, momentum=momentum, eps=eps)
     _verify_batch_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
@@ -1718,6 +1951,10 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                group_norm, (input,), input, num_groups, weight=weight, bias=bias, eps=eps)
     _verify_batch_size([
         input.size(0) * input.size(1) // num_groups, num_groups]
         + list(input.size()[2:]))
@@ -1733,6 +1970,10 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1.):
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                local_response_norm, (input,), input, size, alpha=alpha, beta=beta, k=k)
     dim = input.dim()
     if dim < 3:
         raise ValueError('Expected 3D or higher dimensionality \
@@ -1844,6 +2085,12 @@ def nll_loss(input, target, weight=None, size_average=None, ignore_index=-100,
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                nll_loss, tens_ops, input, target, weight=weight, size_average=size_average,
+                ignore_index=ignore_index, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     dim = input.dim()
@@ -1922,6 +2169,12 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                poisson_nll_loss, tens_ops, input, target, log_input=log_input, full=full,
+                size_average=size_average, eps=eps, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
@@ -1970,6 +2223,12 @@ def kl_div(input, target, size_average=None, reduce=None, reduction='mean'):
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                kl_div, tens_ops, input, target, size_average=size_average,
+                reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2035,6 +2294,13 @@ def cross_entropy(input, target, weight=None, size_average=None, ignore_index=-1
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                cross_entropy, tens_ops, input, target, weight=weight,
+                size_average=size_average, ignore_index=ignore_index, reduce=reduce,
+                reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)
@@ -2076,6 +2342,12 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                binary_cross_entropy, tens_ops, input, target, weight=weight,
+                size_average=size_average, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2134,6 +2406,13 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                binary_cross_entropy_with_logits, tens_ops, input, target, weight=weight,
+                size_average=size_average, reduce=reduce, reduction=reduction,
+                pos_weight=pos_weight)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2169,6 +2448,12 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
 
     See :class:`~torch.nn.SmoothL1Loss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                smooth_l1_loss, tens_ops, input, target, size_average=size_average,
+                reduce=reduce, reduction=reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
@@ -2194,6 +2479,12 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                l1_loss, tens_ops, input, target, size_average=size_average, reduce=reduce,
+                reduction=reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
@@ -2219,6 +2510,12 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                mse_loss, tens_ops, input, target, size_average=size_average, reduce=reduce,
+                reduction=reduction)
     if not (target.size() == input.size()):
         warnings.warn("Using a target size ({}) that is different to the input size ({}). "
                       "This will likely lead to incorrect results due to broadcasting. "
@@ -2243,6 +2540,12 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """  # noqa
+    if not torch.jit.is_scripting():
+        tens_ops = (input1, input2, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                margin_ranking_loss, tens_ops, input1, input2, target, margin=margin,
+                size_average=size_average, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2260,6 +2563,12 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=None,
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """  # noqa
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                hinge_embedding_loss, tens_ops, input, target, margin=margin,
+                size_average=size_average, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2273,6 +2582,12 @@ def multilabel_margin_loss(input, target, size_average=None, reduce=None, reduct
 
     See :class:`~torch.nn.MultiLabelMarginLoss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multilabel_margin_loss, tens_ops, input, target, size_average=size_average,
+                reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2286,6 +2601,12 @@ def soft_margin_loss(input, target, size_average=None, reduce=None, reduction='m
 
     See :class:`~torch.nn.SoftMarginLoss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                soft_margin_loss, tens_ops, input, target, size_average=size_average,
+                reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2300,6 +2621,12 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multilabel_soft_margin_loss, tens_ops, input, target, weight=weight,
+                size_average=size_average, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
 
@@ -2329,6 +2656,12 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """  # noqa
+    if not torch.jit.is_scripting():
+        tens_ops = (input1, input2, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                cosine_embedding_loss, tens_ops, input1, input2, target, margin=margin,
+                size_average=size_average, reduce=reduce, reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2344,6 +2677,13 @@ def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=N
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multi_margin_loss, tens_ops, input, target, p=p, margin=margin,
+                weight=weight, size_average=size_average, reduce=reduce,
+                reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -2505,6 +2845,12 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     .. include:: cuda_deterministic_backward.rst
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                interpolate, (input,), input, size=size, scale_factor=scale_factor,
+                mode=mode, align_corners=align_corners,
+                recompute_scale_factor=recompute_scale_factor)
     from .modules.utils import _ntuple
 
     def _check_size_scale_factor(dim):
@@ -2739,6 +3085,12 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         Since then, the default behavior has been changed to ``align_corners = False``,
         in order to bring it in line with the default for :func:`interpolate`.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, grid)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                grid_sample, tens_ops, input, grid, mode=mode, padding_mode=padding_mode,
+                align_corners=align_corners)
     if mode != 'bilinear' and mode != 'nearest':
         raise ValueError("nn.functional.grid_sample(): expected mode to be "
                          "'bilinear' or 'nearest', but got: '{}'".format(mode))
@@ -2818,6 +3170,10 @@ def affine_grid(theta, size, align_corners=None):
         along a unit dimension are condsidered to be at ```0``
         (the center of the input image).
     """
+    if not torch.jit.is_scripting():
+        if type(theta) is not Tensor and has_torch_function((theta,)):
+            return handle_torch_function(
+                affine_grid, (theta,), theta, size, align_corners=align_corners)
     if align_corners is None:
         warnings.warn("Default grid_sample and affine_grid behavior has changed "
                       "to align_corners=False since 1.3.0. Please specify "
@@ -2857,7 +3213,7 @@ def affine_grid(theta, size, align_corners=None):
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def pad(input, pad, mode='constant', value=0):
+def _pad(input, pad, mode='constant', value=0):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
@@ -2914,6 +3270,10 @@ def pad(input, pad, mode='constant', value=0):
         torch.Size([3, 9, 7, 3])
 
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                _pad, (input,), input, pad, mode=mode, value=value)
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
@@ -2954,6 +3314,11 @@ def pad(input, pad, mode='constant', value=0):
                 raise NotImplementedError
         else:
             raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+
+# We define this function as _pad because it takes an argument
+# named pad, which clobbers the recursive reference to the pad
+# function needed for __torch_function__ support
+pad = _pad
 
 # distance
 
@@ -3071,6 +3436,13 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     r"""
     See :class:`~torch.nn.TripletMarginLoss` for details
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (anchor, positive, negative)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                triplet_margin_loss, tens_ops, anchor, positive, negative, margin=margin,
+                p=p, eps=eps, swap=swap, size_average=size_average, reduce=reduce,
+                reduction=reduction)
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
@@ -3099,6 +3471,10 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                normalize, (input,), input, p=p, dim=dim, eps=eps, out=out)
     if out is None:
         denom = input.norm(p, dim, keepdim=True).clamp_min(eps).expand_as(input)
         return input / denom
@@ -3129,7 +3505,11 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
 
     See :class:`torch.nn.Unfold` for details
     """
-
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                unfold, (input,), input, kernel_size, dilation=dilation,
+                padding=padding, stride=stride)
     if input.dim() == 4:
         msg = '{} must be int or 2-tuple for 4D input'
         assert_int_or_pair(kernel_size, 'kernel_size', msg)
@@ -3154,6 +3534,11 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
     See :class:`torch.nn.Fold` for details
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                fold, (input,), input, output_size, kernel_size, dilation=dilation,
+                padding=padding, stride=stride)
     if input.dim() == 3:
         msg = '{} must be int or 2-tuple for 3D input'
         assert_int_or_pair(output_size, 'output_size', msg)
@@ -3268,7 +3653,19 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
           L is the target sequence length, S is the source sequence length.
     """
-
+    if not torch.jit.is_scripting():
+        tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v,
+                    out_proj_weight, out_proj_bias)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                multi_head_attention_forward, tens_ops, query, key, value,
+                embed_dim_to_check, num_heads, in_proj_weight, in_proj_bias,
+                bias_k, bias_v, add_zero_attn, dropout_p, out_proj_weight,
+                out_proj_bias, training=training, key_padding_mask=key_padding_mask,
+                need_weights=need_weights, attn_mask=attn_mask,
+                use_separate_proj_weight=use_separate_proj_weight,
+                q_proj_weight=q_proj_weight, k_proj_weight=k_proj_weight,
+                v_proj_weight=v_proj_weight, static_k=static_k, static_v=static_v)
     tgt_len, bsz, embed_dim = query.size()
     assert embed_dim == embed_dim_to_check
     assert key.size() == value.size()
