@@ -4,6 +4,19 @@ from typing import Callable, NamedTuple
 import enum
 import logging
 import os
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+import sys
+>>>>>>> e13cee7da0... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
+=======
+>>>>>>> 56d6cd92d3... 1. Removed unused import
+import enum
+
+from typing import Callable, List, NamedTuple
+>>>>>>> 1. Removed unused import
 
 from torch.distributed import rpc
 from torch.distributed.optim import DistributedOptimizer
@@ -427,6 +440,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
     def test_forward_ddp_outside(self):
         self._do_test(DdpMode.OUTSIDE, Trainer.do_forward_without_grad)
 
+<<<<<<< HEAD
     def test_forward_ddp_inside(self):
         self._do_test(DdpMode.INSIDE, Trainer.do_forward_without_grad)
 
@@ -438,6 +452,71 @@ class TestDdpWithRpc(MultiProcessTestCase):
 
     def test_training_ddp_inside(self):
         self._do_test(DdpMode.INSIDE, Trainer.do_mini_batch)
+=======
+    def spawn_trainers(
+        self, func: Callable[[nn.Module], None], ddp_mode: DdpMode
+    ):
+        for rank in range(self.NUM_TRAINERS):
+            process = multiprocessing.Process(
+                target=self._trainer,
+                name=self.TRAINER_NAME_TEMPLATE.format(rank),
+                args=(self.remote_em_rref, rank, func, ddp_mode),
+            )
+            process.start()
+            self.processes.append(process)
+
+<<<<<<< HEAD
+<<<<<<< HEAD
+    @staticmethod
+    def run_one_forward(model: nn.Module):
+        n = 2
+        features = FeatureSet(
+            sparse_features=torch.LongTensor(
+                [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
+            ),
+            dense_features=torch.randn((n, D_DENSE)),
+        )
+        gLogger.info(f"Forward pass on {model(features)}")
+
+    def test_forward_without_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.NONE)
+
+    def test_forward_with_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.OUTSIDE)
+=======
+    def test_no_ddp(self):
+        def run_one_forward(model: nn.Module):
+            n = 2
+            features = FeatureSet(
+                sparse_features=torch.LongTensor(
+                    [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
+                ),
+                dense_features=torch.randn((n, D_DENSE)),
+            )
+            gLogger.info(f"Forward pass on {model(features)}")
+
+        self.spawn_trainers(run_one_forward, DdpMode.NONE)
+>>>>>>> e13cee7da0... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
+=======
+
+    @staticmethod
+    def run_one_forward(model: nn.Module):
+        n = 2
+        features = FeatureSet(
+            sparse_features=torch.LongTensor(
+                [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
+            ),
+            dense_features=torch.randn((n, D_DENSE)),
+        )
+        gLogger.info(f"Forward pass on {model(features)}")
+
+    def test_forward_without_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.NONE)
+
+    def test_forward_with_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.OUTSIDE)
+>>>>>>> 56d6cd92d3... 1. Removed unused import
+>>>>>>> 1. Removed unused import
 
 
 if __name__ == "__main__":
