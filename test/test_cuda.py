@@ -5,6 +5,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+import gc
 from contextlib import contextmanager
 import threading
 if sys.version_info[0] == 3:
@@ -274,6 +275,7 @@ class TestCuda(TestCase):
         assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
+        gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
@@ -2136,6 +2138,15 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
+
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
 
 if __name__ == '__main__':
     run_tests()
