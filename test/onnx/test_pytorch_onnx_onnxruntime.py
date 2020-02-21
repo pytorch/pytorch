@@ -2626,7 +2626,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5, requires_grad=True)
         y = torch.randn(3, 5)
-        self.run_test(MSELossNone(), input=(x,y))
+        self.run_test(MSELossNone(), input=(x, y))
 
         class MSELossSum(torch.nn.Module):
             def forward(self, input, target):
@@ -2635,7 +2635,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5, requires_grad=True)
         y = torch.randn(3, 5)
-        self.run_test(MSELossSum(), input=(x,y))
+        self.run_test(MSELossSum(), input=(x, y))
 
         class MSELossMean(torch.nn.Module):
             def forward(self, input, target):
@@ -2644,7 +2644,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5, requires_grad=True)
         y = torch.randn(3, 5)
-        self.run_test(MSELossMean(), input=(x,y))
+        self.run_test(MSELossMean(), input=(x, y))
 
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
