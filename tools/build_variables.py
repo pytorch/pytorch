@@ -177,6 +177,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/common/mutator.cpp",
     "torch/csrc/jit/fuser/common/tensor.cpp",
     "torch/csrc/jit/fuser/common/tensor_meta.cpp",
+    "torch/csrc/jit/fuser/common/transform_replay.cpp",
     "torch/csrc/jit/fuser/common/type.cpp",
     "torch/csrc/jit/fuser/common/utils.cpp",
     "torch/csrc/jit/fuser/cpu/asmjit_codegen.cpp",
