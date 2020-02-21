@@ -274,12 +274,32 @@ void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Sca
   );
 }
 
-  void atomic_add(auto *self_data_ptr, auto *src_data_ptr) {
-    auto old = *self_data_ptr;
-    while(old == *self_data_ptr) {
-      *self_data_ptr += *src_data_ptr;
+  // template <typename T>
+  // void atomic_add(T& arg, const T *src_data_ptr) {
+  //   // std::atomic<T> shared(self_data_ptr);
+  //   std::atomic<T> self_data_ptr(arg);
+      
+  //   T expected;
+  //   T old = self_data_ptr.load();
+  //   do {
+  //     // expected = old + *src_data_ptr;
+  //   } while(!self_data_ptr.compare_exchange_weak(old, old + *src_data_ptr));
+  //   // auto old = *self_data_ptr;
+  //   // while(old == *self_data_ptr) {
+  //   //   *self_data_ptr += *src_data_ptr;
+  //   // }
+  // }
+
+  template <typename T>
+  void atomic_add(T& s, T val)
+{
+  std::atomic<T*> shared(s);
+    // T oldValue = *shared.load();
+    while (!shared.compare_exchange_weak(s, s + val))
+    {
     }
-  }
+    // return oldValue;
+}
   
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (index.numel() == 0) {
@@ -307,10 +327,12 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        atomic_add(self_data + idx_dim * self_dim_stride, src_data + i * src_dim_stride);
+        atomic_add(self_data[idx_dim * self_dim_stride], src_data[i * src_dim_stride]);
+        // atomic_add(self_data[idx_dim * self_dim_stride], src_data + i * src_dim_stride);
+                //self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
       }
     },
-      /*serial_exec=*/true);
+      /*serial_exec=*/false);
 }
 
 } // anonymous namespace
