@@ -2495,6 +2495,12 @@ class _TestTorchMixin(object):
         self.assertEqual(b.numel(), 3 * 100 * 100)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_numpy_non_writeable(self):
+        arr = np.zeros(5)
+        arr.flags['WRITEABLE'] = False
+        self.assertRaises(TypeError, lambda: torch.from_numpy(arr))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_empty_storage_view(self):
         # we should be able to "modify" slices of a 0-element
         # array without an error being raised due to

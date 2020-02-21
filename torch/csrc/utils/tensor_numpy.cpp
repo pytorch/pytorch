@@ -129,8 +129,15 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   if (!PyArray_Check(obj)) {
     throw TypeError("expected np.ndarray (got %s)", Py_TYPE(obj)->tp_name);
   }
-
   auto array = (PyArrayObject*)obj;
+
+  if (!PyArray_ISWRITEABLE(array)) {
+    throw TypeError(
+      "The given Numpy array is not writeable, and PyTorch does "
+      "not support non-writeable tensors. Copy the array or make it "
+      "writeable.");
+  }
+
   int ndim = PyArray_NDIM(array);
   auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
   auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));
