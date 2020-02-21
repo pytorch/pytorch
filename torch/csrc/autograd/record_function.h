@@ -42,7 +42,7 @@ struct TORCH_API StringView {
 
 struct TORCH_API RecordFunction {
   // Default constructor is used with before function called afterwards
-  RecordFunction() {}
+  RecordFunction() = default;
 
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
@@ -52,9 +52,9 @@ struct TORCH_API RecordFunction {
 
   // before function initializes RecordFunction members and calls
   // start callbacks
-  void before(const char* name, int64_t sequence_nr = -1);
-  void before(std::string name, int64_t sequence_nr = -1);
-  void before(Node* fn, int64_t sequence_nr = -1);
+  virtual void before(const char* name, int64_t sequence_nr = -1);
+  virtual void before(std::string name, int64_t sequence_nr = -1);
+  virtual void before(Node* fn, int64_t sequence_nr = -1);
 
   template<typename F>
   void before(
@@ -105,16 +105,7 @@ struct TORCH_API RecordFunction {
     run_sampled_ = run_sampled;
   }
 
-  void end();
-
-  // runEndCallbacks invokes all pushed end callbacks with this RecordFunction.
-  void runEndCallbacks();
-
-  // resetThreadLocal func resets the thread_local pointer to the current
-  // RecordFunction to be the parent RecordFunction. This is used to manage
-  // nested scopes such as those that are created by the
-  // profiler.record_function context manager.
-  void resetThreadLocalFunc();
+  virtual void end();
 
   // Saves the thread_id that this RecordFunction was created with. This is
   // needed so that we can access Events created by the original thread in a
@@ -130,7 +121,7 @@ struct TORCH_API RecordFunction {
     return threadId_;
   }
 
- private:
+ protected:
   void processCallbacks();
 
   Node* fn_ = nullptr;
@@ -147,6 +138,27 @@ struct TORCH_API RecordFunction {
   // cannot be invoked from a separate thread.
   uint16_t threadId_ = 0;
 };
+
+struct TORCH_API RecordFunctionAsync : public RecordFunction {
+  // Default constructor should be used in conjunction with
+  // RecordFunctionAsync::before.
+  RecordFunctionAsync() = default;
+  // Override run ::before to run starting callbacks, and set the thread_id on
+  // this RecordFunctionAsync so we can properly record this function in the
+  // profiler.
+  void before(const char* name, int64_t sequence_nr = -1) override;
+  void before(std::string name, int64_t sequence_nr = -1) override;
+  void before(Node* fn, int64_t sequence_nr = -1) override;
+  // Reset the currently active RecordFunction to be the parent. Needed to
+  // ensure that scopes created with the record_function decorator work with
+  // RecordFunctionAsync.
+  void exitScope();
+  // Run the end callbacks with this RecordFunctionAsync.
+  void end() override;
+  ~RecordFunctionAsync();
+};
+
+
 
 TORCH_API bool hasCallbacks();
 TORCH_API bool needsInputs();

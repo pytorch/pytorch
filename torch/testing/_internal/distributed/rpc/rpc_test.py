@@ -646,27 +646,23 @@ class RpcTest(RpcAgentTestFixture):
         # only run profiler on rank 1.
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
-                # Nested scopes in the autograd profiler previously had issues
-                # with RPC, so use a nested scope here to ensure the issue is
-                # resolved.
-                with torch.autograd.profiler.record_function("foo"):
-                    if rpc_exec_mode == RPCExecMode.SYNC:
-                        rpc.rpc_sync("worker{}".format(dst), func, args=args)
-                    elif rpc_exec_mode == RPCExecMode.ASYNC:
-                        fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
-                        fut.wait()
-                    else:
-                        self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
-                        rref = rpc.remote("worker{}".format(dst), func, args=args)
-                        rref.to_here()
-                        # We need to wait for the instance to be created on
-                        # the owner, and get back a positive confirmation.
-                        # Calling to_here does not ensure that we have finished
-                        # processing the Owner's confirmation of this RRef. To do
-                        # this, we wait until the current RRef context doesn't have
-                        # any pending users, which indicates that the confirmation
-                        # was processed on this worker.
-                        wait_until_pending_users_flushed()
+                if rpc_exec_mode == RPCExecMode.SYNC:
+                    rpc.rpc_sync("worker{}".format(dst), func, args=args)
+                elif rpc_exec_mode == RPCExecMode.ASYNC:
+                    fut = rpc.rpc_async("worker{}".format(dst), func, args=args)
+                    fut.wait()
+                else:
+                    self.assertTrue(rpc_exec_mode == RPCExecMode.REMOTE)
+                    rref = rpc.remote("worker{}".format(dst), func, args=args)
+                    rref.to_here()
+                    # We need to wait for the instance to be created on
+                    # the owner, and get back a positive confirmation.
+                    # Calling to_here does not ensure that we have finished
+                    # processing the Owner's confirmation of this RRef. To do
+                    # this, we wait until the current RRef context doesn't have
+                    # any pending users, which indicates that the confirmation
+                    # was processed on this worker.
+                    wait_until_pending_users_flushed()
 
             events = prof.function_events
             rpc_event = [
@@ -839,10 +835,14 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
+        local_ret = one_arg(torch.ones(2, 2))
         ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
+        self.assertEqual(ret, local_ret)
         rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(rref.to_here(), local_ret)
+        # create rref to itself
+        local_rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(local_rref.to_here(), local_ret)
 
     @dist_init
     def test_torchscript_function_exception(self):
@@ -1714,3 +1714,38 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+        self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
+
+
+@unittest.skipIf(
+    sys.version_info < (3, 0),
+    "Pytorch distributed rpc package " "does not support python2",
+)
+class RpcJitTest(RpcAgentTestFixture):
+    @dist_init
+    def test_rref_as_arg(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_tensor_to_here(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_var.to_here()
+
+        res = rref_tensor_to_here(rref_var)
+        self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_rref_is_owner(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.script
+        def rref_tensor_is_owner(rref_var):
+            # type: (RRef[Tensor]) -> bool
+            return rref_var.is_owner()
+
+        res = rref_tensor_is_owner(rref_var)
+        self.assertEqual(res, False)

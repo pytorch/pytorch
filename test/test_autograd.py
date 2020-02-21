@@ -12,6 +12,7 @@ from itertools import product
 from operator import mul
 from functools import reduce
 import torch
+import threading
 
 # TODO: remove this global setting
 # Autograd tests use double as the default dtype
@@ -2591,6 +2592,10 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.cpu_interval.end
 
+    def verify_function_recorded(self, function_events, function_name, count=1):
+        name_events = [event for event in function_events if function_name in event.name][0]
+        self.assertEqual(name_events.count, count)
+
     def test_record_function_callbacks(self):
         x = torch.randn(10, 10)
         with profile() as p:
@@ -2600,9 +2605,54 @@ class TestAutograd(TestCase):
             # ensure that we run destructor for RecordFunction, which invokes
             # end callbacks
             del rf
-        function_events = p.function_events
-        foo_event = [event for event in function_events if "foo" in event.name][0]
-        self.assertEqual(foo_event.count, 1)
+
+        self.verify_function_recorded(p.function_events, "foo")
+
+    def test_record_function_async(self):
+        def end_record_function(rf):
+            rf.end()
+
+        x = torch.randn(10, 10)
+        with profile() as p:
+            rf = torch.autograd._RecordFunctionAsync()
+            torch.autograd._run_before_callbacks(rf, "foo")
+            y = x * 2 + 4
+            # Exit RecordFunctionAsync scope.
+            rf.exit_scope()
+            # Verify that we can end() the RecordFunctionAsnc from a separate 
+            # thread and ensure it shows up in the profile.
+            t = threading.Thread(target=end_record_function, args=(rf,))
+            t.start()
+            t.join()
+
+        self.verify_function_recorded(p.function_events, "foo")
+
+    def test_record_function_async_with_scopes(self):
+        x = torch.randn(10, 10)
+        with profile() as p:
+            with record_function("outer"):
+                y = x * 2 + 4
+                with record_function("inner"):
+                    rf = torch.autograd._RecordFunctionAsync()
+                    torch.autograd._run_before_callbacks(rf, "foo")
+                    # Exit RecordFunctionAsync scope
+                    rf.exit_scope()
+                    rf.end()
+
+        events = p.function_events
+
+        start_order = [
+            "profiler::_record_function_enter",
+            "outer",
+            "mul",
+            "add",
+            "profiler::_record_function_enter",
+            "inner",
+            "foo",
+            "profiler::_record_function_exit",
+            "profiler::_record_function_exit",
+        ]
+        self.verify_expected_order(start_order, events)
 
     def test_profiler_aggregation_fake(self):
         events = EventList()
@@ -2729,6 +2779,11 @@ class TestAutograd(TestCase):
             with tempfile.NamedTemporaryFile() as trace_file:
                 prof.export_chrome_trace(trace_file.name)
 
+    def verify_expected_order(self, order, function_events):
+        self.assertEqual(len(order), len(function_events))
+        for event, expected_name in zip(function_events, order):
+            self.assertEqual(event.name, expected_name)
+
     def test_record_function(self):
         x = torch.randn(10, 10)
 
@@ -2757,9 +2812,7 @@ class TestAutograd(TestCase):
             'profiler::_record_function_exit',
             'div',
         ]
-        self.assertEqual(len(events), len(start_order))
-        for info, expected_name in zip(events, start_order):
-            self.assertEqual(info.name, expected_name)
+        self.verify_expected_order(start_order, events)
 
         def count_events_before(before, target):
             matches = [e for e in events if e.name == before]
@@ -3516,11 +3569,10 @@ for shape in [(1,), ()]:
         # The 3 elements are for view_as, first output of unbind and second output of unbind
         run_test(grad_mode=True, requires_grad=False, is_view=True,
                  should_raise_tuple=(None, None, None))
-        # TODO: Second should_raise should not be None below, third one should not raise an internal assert
+        inp_change_err = "Output {} of UnbindBackward is a view and is being modified inplace."
         run_test(grad_mode=True, requires_grad=True, is_view=True,
-                 should_raise_tuple=(None, None, "diff_view_meta->output_nr_ == 0 INTERNAL ASSERT FAILED"))
-        # TODO: views require gradients when created in no_grad mode but their grad_fn is not populated
-        leaf_grad_err = "a leaf Variable that requires grad has been used in an in-place operation."
+                 should_raise_tuple=(None, inp_change_err.format("0"), inp_change_err.format("1")))
+        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
         run_test(grad_mode=False, requires_grad=True, is_view=True,
                  should_raise_tuple=(leaf_grad_err, leaf_grad_err, leaf_grad_err))
         run_test(grad_mode=False, requires_grad=False, is_view=True,
@@ -3545,6 +3597,8 @@ for shape in [(1,), ()]:
             def forward(ctx, a, b, make_view):
                 if make_view:
                     a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
                 return a
 
             @staticmethod
@@ -3557,6 +3611,8 @@ for shape in [(1,), ()]:
             def forward(ctx, a, b, make_view):
                 if make_view:
                     a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
                 return a, a + b
 
             @staticmethod
@@ -3568,12 +3624,17 @@ for shape in [(1,), ()]:
                     ga_nz[0] = True
                 return ga + gab, gab, None
 
+        err_msg_two_outputs = "Output 0 of IdTwoOutputBackward is a view and is being modified inplace."
+        err_msg_two_outputs += " This view is the output of a function that returns multiple views."
+
         class ViewOfTemp(Function):
             @staticmethod
             def forward(ctx, a, make_view):
                 ctx.save_for_backward(a)
                 if make_view:
                     a = a.narrow(0, 0, 2)
+                else:
+                    a = a.clone()
                 b = a.clone()
                 return b.select(0, 0)
 
@@ -3588,6 +3649,9 @@ for shape in [(1,), ()]:
         for fn_id in ["one_output", "two_output", "view_of_temp"]:
             for inplace in [True, False]:
                 for make_view in [True, False]:
+                    # Used for special casing the tests below
+                    output_is_a_view = (make_view or fn_id == "view_of_temp")
+
                     def fn(a, b):
                         # never modify a, b inplace for gracheck
                         a = a.clone()
@@ -3616,30 +3680,44 @@ for shape in [(1,), ()]:
                     a = torch.ones(2, requires_grad=True)
                     b = torch.ones(2, requires_grad=True)
 
-                    # Are the computed gradients correct ?
-                    if fn_id == "view_of_temp" and inplace:
-                        # TODO: This should compute the right gradients
-                        with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
-                            gradcheck(fn, (a, b))
+
+                    if fn_id == "two_output" and inplace and output_is_a_view:
+                        with self.assertRaisesRegex(RuntimeError, err_msg_two_outputs):
+                            fn(a, b)
                     else:
-                        gradcheck(fn, (a, b))
+                        # Are the computed gradients correct ?
+                        if inplace and output_is_a_view:
+                            with warnings.catch_warnings(record=True) as w:
+                                if fn_id == "view_of_temp":
+                                    # This will be fixed after the deprecation cycle and the warning becomes
+                                    # an error.
+                                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0"):
+                                        gradcheck(fn, (a, b))
+                                else:
+                                    # This works but the custom backward is not called (or called with partial)
+                                    # gradients as tested below
+                                    gradcheck(fn, (a, b))
+                            self.assertTrue(len(w) > 0)
+                        else:
+                            gradcheck(fn, (a, b))
 
-                    # Was the custom backward called properly
-                    bw_called[0] = 0
-                    ga_nz[0] = True  # For the case where the backward is not called
-                    fn(a, b).backward()
+                        # Was the custom backward called properly
+                        bw_called[0] = 0
+                        ga_nz[0] = True  # For the case where the backward is called
+                        with warnings.catch_warnings(record=True) as w:
+                            fn(a, b).backward()
 
-                    expected_called = 1
-                    expected_ga_nz = True
-                    if fn_id in ["one_output", "view_of_temp"] and inplace:
-                        # TODO: The custom backward is not called in this case
-                        expected_called = 0
-                    if fn_id == "two_output" and inplace:
-                        # TODO: The backward only sees part of the gradient as the other part
-                        # is computed with a AsStridedBackward
-                        expected_ga_nz = False
-                    self.assertTrue(bw_called[0] == expected_called)
-                    self.assertTrue(ga_nz[0] == expected_ga_nz)
+                        expected_called = 1
+                        expected_ga_nz = True
+                        expected_warning = False
+
+                        if output_is_a_view and inplace:
+                            expected_called = 0
+                            expected_warning = True
+
+                        self.assertTrue(bw_called[0] == expected_called)
+                        self.assertTrue(ga_nz[0] == expected_ga_nz)
+                        self.assertTrue((len(w) == 1) == expected_warning)
 
     def test_autograd_complex_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -3678,17 +3756,10 @@ for shape in [(1,), ()]:
         out.sum().backward()
         self.assertTrue(bw_called[0] == 1)
 
-        bw_called[0] = 0
         out = ComplexView.apply(a.clone(), idx)
-        out += 1
-        out.sum().backward()
-        # TODO: The custom backward is not called in this case
-        self.assertTrue(bw_called[0] == 0)
-
-        out = ComplexView.apply(a, idx)
-        out += 1
-        with self.assertRaisesRegex(RuntimeError, "leaf variable has been moved into the graph interior"):
-            out.sum().backward()
+        with warnings.catch_warnings(record=True) as w:
+            out += 1
+        self.assertEqual(len(w), 1)
 
     def test_autograd_inplace_views_python(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -3850,6 +3921,23 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]), allow_inf=True)
 
+    def test_custom_function_error(self):
+        class BadFw(Function):
+            @staticmethod
+            def backward(ctx, foo):
+                return foo
+
+        class BadBw(Function):
+            @staticmethod
+            def forward(ctx, foo):
+                return foo.clone()
+
+        inp = torch.rand(1, requires_grad=True)
+        with self.assertRaisesRegex(NotImplementedError, "must implement the forward"):
+            BadFw.apply(inp)
+
+        with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
+            BadBw.apply(inp).sum().backward()
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

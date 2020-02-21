@@ -59,6 +59,19 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
     .def(py::init<>());
 
+  py::class_<
+      RecordFunctionAsync,
+      std::shared_ptr<RecordFunctionAsync>,
+      RecordFunction>(m, "_RecordFunctionAsync")
+      .def(py::init<>())
+      .def(
+          "before",
+          [](RecordFunctionAsync& recordFunctionAsync, const std::string name) {
+            recordFunctionAsync.before(std::move(name));
+          })
+      .def("exit_scope", &RecordFunctionAsync::exitScope)
+      .def("end", &RecordFunctionAsync::end);
+
   Py_RETURN_TRUE;
 }
 
