@@ -19,7 +19,7 @@ struct q8gemm_dq_context {
 };
 
 static void compute_q8gemm_dq(
-    const struct q8gemm_dq_context* context,
+    struct q8gemm_dq_context* context,
     size_t group_index,
     size_t pixel_index,
     size_t mr_block_start,
