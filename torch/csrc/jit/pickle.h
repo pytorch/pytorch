@@ -68,7 +68,7 @@ TORCH_API IValue pickle_load(const std::vector<char>& data);
 /// See `torch::pickle` for details.
 TORCH_API IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
-    ClassResolver class_resolver,
+    TypeResolver type_resolver,
     const std::vector<at::Tensor>* tensor_table);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
@@ -80,7 +80,7 @@ TORCH_API IValue unpickle(
 TORCH_API IValue unpickle(
     const char* data,
     size_t size,
-    ClassResolver class_resolver = nullptr,
+    TypeResolver type_resolver = nullptr,
     const std::vector<at::Tensor>* tensor_table = nullptr);
 
 } // namespace jit

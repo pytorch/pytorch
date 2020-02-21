@@ -539,9 +539,9 @@ void Unpickler::readGlobal(
         class_name,
         "'");
   } else {
-    AT_ASSERT(class_resolver_);
+    AT_ASSERT(type_resolver_);
     at::StrongTypePtr type =
-        class_resolver_(c10::QualifiedName(module_name, class_name));
+        type_resolver_(c10::QualifiedName(module_name, class_name));
     globals_.emplace_back([this, type] {
       auto val = stack_.back();
       stack_.pop_back();
