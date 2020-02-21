@@ -31,7 +31,6 @@
 namespace at {
 namespace native {
 
-// Using anonymous namespace as these functions' scope is limited to this file and we do not want to pollute at::native namespace
 namespace {
   enum class TypePromotionStrategy {
     None,  // No implicit dtype promotion
