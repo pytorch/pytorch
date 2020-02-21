@@ -3079,7 +3079,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-def normalize(input, p=2, dim=1, eps=1e-12, out=None):
+def normalize(input, p=2, dim=1, eps=1e-6, out=None):
     # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 
@@ -3095,7 +3095,7 @@ def normalize(input, p=2, dim=1, eps=1e-12, out=None):
         input: input tensor of any shape
         p (float): the exponent value in the norm formulation. Default: 2
         dim (int): the dimension to reduce. Default: 1
-        eps (float): small value to avoid division by zero. Default: 1e-12
+        eps (float): small value to avoid division by zero. Default: 1e-6
         out (Tensor, optional): the output tensor. If :attr:`out` is used, this
                                 operation won't be differentiable.
     """
