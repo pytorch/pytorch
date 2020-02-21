@@ -16,19 +16,19 @@ TEST_F(NNUtilsTest, PadSequence) {
   auto expected = torch::tensor({{4, 5, 0}, {1, 2, 3}, {6, 0, 0}});
 
   std::vector<torch::Tensor> input = {b, a, c};
-  auto padded = utils::pad_sequence(input, true);
+  auto padded = utils::rnn::pad_sequence(input, true);
   ASSERT_TRUE(padded.allclose(expected));
 
-  padded = utils::pad_sequence(input);
+  padded = utils::rnn::pad_sequence(input);
   ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
 
   expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
-  padded = utils::pad_sequence(input, true, 1);
+  padded = utils::rnn::pad_sequence(input, true, 1);
   ASSERT_TRUE(padded.allclose(expected));
 
   input = {a, b, c};
   expected = torch::tensor({{1, 2, 3}, {4, 5, 0}, {6, 0, 0}});
-  padded = utils::pad_sequence(input, true);
+  padded = utils::rnn::pad_sequence(input, true);
   ASSERT_TRUE(padded.allclose(expected));
 }
 
