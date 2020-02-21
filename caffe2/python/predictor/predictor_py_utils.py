@@ -143,6 +143,14 @@ def AddNet(meta_net_def, net_name, net_def):
     meta_net_def.nets.add(key=net_name, value=net_def)
 
 
+def SetBlobsOrder(meta_net_def, blobs_order):
+    for blob in blobs_order:
+        meta_net_def.blobsOrder.append(blob)
+
+def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
+    for blob in pre_load_blobs:
+        meta_net_def.preLoadBlobs.append(blob)
+
 def GetArgumentByName(net_def, arg_name):
     for arg in net_def.arg:
         if arg.name == arg_name:
