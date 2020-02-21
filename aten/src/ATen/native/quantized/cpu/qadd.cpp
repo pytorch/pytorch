@@ -200,10 +200,11 @@ Tensor qnnpack_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif
     auto qc = at::_empty_affine_quantized(
         qa.sizes(),
-        at::device(kCPU).dtype(qa.scalar_type()),
+        at::device(kCPU)
+           .dtype(qa.scalar_type())
+           .memory_format(qa.suggest_memory_format()),
         scale,
-        zero_point,
-        qa.suggest_memory_format());
+        zero_point);
     return _add_out<ReLUFused>(qc, qa, qb);
   }
 };
