@@ -331,7 +331,7 @@ def _check_dill_version(pickle_module):
                 pickle_module.__version__
             ))
 
-def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=False):
+def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True):
     """Saves an object to a disk file.
 
     See also: :ref:`recommend-saving-models`
