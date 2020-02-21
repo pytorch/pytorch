@@ -75,7 +75,7 @@ bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
   if (elements >= max_elem) {
     return false;
   } else if (elements == 0) {
-    return 0;
+    return true;
   }
 
   int64_t offset = 0;
