@@ -47,7 +47,7 @@ inline Tensor pad_sequence(
     [](const Tensor& a, const Tensor& b) {
       return a.size(0) < b.size(0);
     }
-  ).size(0);
+  )->size(0);
 
   std::vector<int64_t> out_dims;
   if (batch_first) {
