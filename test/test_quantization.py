@@ -536,6 +536,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
 
     def test_quantized_rnn(self):
         for qengine in ("qnnpack", "fbgemm"):
+            print("qengine:")
+            print(qengine)
             d_in, d_hid = 2, 2
 
             with override_quantized_engine(qengine):
