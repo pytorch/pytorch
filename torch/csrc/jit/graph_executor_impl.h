@@ -32,7 +32,9 @@ namespace jit {
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
 void runOptimization(std::shared_ptr<Graph>& graph);
-void runNondiffOptimization(std::shared_ptr<Graph>& graph);
+void runNondiffOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
 bool getAutodiffSubgraphInlining();
 
