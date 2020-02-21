@@ -296,8 +296,8 @@ class MinMaxObserver(_ObserverBase):
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
                                              reduce_range=reduce_range)
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        self.register_buffer('min_val', torch.tensor([]))
+        self.register_buffer('max_val', torch.tensor([]))
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -440,8 +440,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
         self.ch_axis = ch_axis
-        self.min_vals = torch.tensor([])
-        self.max_vals = torch.tensor([])
+        self.register_buffer('min_vals', torch.tensor([]))
+        self.register_buffer('max_vals', torch.tensor([]))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -591,8 +591,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        self.register_buffer('min_val', torch.tensor([]))
+        self.register_buffer('max_val', torch.tensor([]))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
