@@ -310,10 +310,9 @@ void qclamp_kernel(
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qclamp", [&]() {
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
-        qx.q_zero_point(),
-        qx.suggest_memory_format());
+        qx.q_zero_point());
     using Vec = Vec256<scalar_t>;
     auto iter = TensorIterator::unary_op(qy, qx);
     auto min = min_scalar.to<float>();
@@ -362,10 +361,9 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
 
     qy = at::_empty_affine_quantized(
         qx.sizes(),
-        at::device(kCPU).dtype(SCALAR_TYPE),
+        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
         output_scale,
-        output_zero_point,
-        qx.suggest_memory_format());
+        output_zero_point);
     auto iter = TensorIterator::unary_op(qy, qx);
 
     using Vec = Vec256<scalar_t>;
