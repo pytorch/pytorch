@@ -7,7 +7,36 @@ namespace nn {
 namespace utils {
 namespace rnn {
 
-inline Tensor pad_sequence(std::vector<Tensor>& sequences, bool batch_first=false, float padding_value=0) {
+/// Pad a list of variable length Tensors with ``padding_value``
+///
+/// ``pad_sequence`` stacks a list of Tensors along a new dimension,
+/// and pads them to equal length. For example, if the input is list of
+/// sequences with size ``L x *`` and if batch_first is false, and ``T x B x *``
+/// otherwise.
+///
+/// `B` is batch size. It is equal to the number of elements in ``sequences``.
+/// `T` is length of the longest sequence.
+/// `L` is length of the sequence.
+/// `*` is any number of trailing dimensions, including none.
+///
+/// Note:
+///     This function returns a Tensor of size ``T x B x *`` or ``B x T x *``
+///     where `T` is the length of the longest sequence. This function assumes
+///     trailing dimensions and type of all the Tensors in sequences are same.
+///
+/// Arguments:
+///     sequences (torch::ArrayRef<Tensor>): list of variable length sequences.
+///     batch_first (bool, optional): output will be in ``B x T x *`` if true, or in
+///         ``T x B x *`` otherwise
+///     padding_value (double, optional): value for padded elements. Default: 0.
+///
+/// Returns:
+///     Tensor of size ``T x B x *`` if `batch_first` is ``false``.
+///     Tensor of size ``B x T x *`` otherwise
+inline Tensor pad_sequence(
+    ArrayRef<Tensor> sequences,
+    bool batch_first = false,
+    double padding_value = 0) {
   auto max_size = sequences[0].sizes();
   auto trailing_dims = std::vector<int64_t>(max_size.begin() + 1, max_size.end());
 
