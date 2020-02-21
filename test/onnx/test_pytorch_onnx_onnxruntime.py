@@ -607,6 +607,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Unsqueeze(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(8)
+    def test_expand(self):
+        class Expand(torch.nn.Module):
+            def forward(self, x):
+                return x.expand((5, -1, 2, 3, 1))
+
+        x = torch.randn(3, 2, 1, 1)
+        self.run_test(Expand(), x)
+
     def test_maxpool_default_stride(self):
         class MaxPoolModel(torch.nn.Module):
             def forward(self, x):

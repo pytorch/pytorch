@@ -304,6 +304,7 @@ def t(g, self):
 def expand(g, self, size, implicit):
     size = sym_help._maybe_get_const(size, 'is')
     if not sym_help._is_value(size):
+        size = [1 if d == -1 else d for d in size]
         size = g.op("Constant", value_t=torch.LongTensor(size))
     return g.op("Expand", self, size)
 
