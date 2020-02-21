@@ -22,16 +22,17 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     reduction_vals = ['none', 'mean', 'sum']
     reduction = reduction_vals[reduction]
 
-    if weight.node().mustBeNone():
-        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction)
-    else:
-        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
-
     # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
-    if sym_help._maybe_get_const(ignore_index, 'i') == -100:
-        return nllloss
+    if sym_help._maybe_get_const(ignore_index, 'i') != -100:
+        if weight.node().mustBeNone():
+            return g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction)
+        else:
+            return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
 
-    # if ignore_index
+    # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
+    nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none')
+
+    from symbolic_opset9 import zeros_like, ones_like, eq, where, index_select
     zeros = zeros_like(g, nllloss)
     ignored_mask = eq(g, target, ignore_index)
     nllloss = where(g, ignored_mask, zeros, nllloss)
@@ -55,11 +56,8 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     ones = ones_like(g, target)
     denominator = where(g, ignored_mask, zeros, ones)
     if not sym_help._is_none(weight):
-        # take(weight, target)
-        weight_flattened = g.op('Reshape', weight, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
-        weight = index_select(g, weight_flattened, 0, target)
-        weight = reshape_as(g, weight, target)
-
+        # take(weight, target) on 1D tensor weight
+        weight = index_select(g, weight, 0, target)
         denominator = g.op("Mul", denominator, weight)
 
     # denominator is the number of elements if weights are not provided,
