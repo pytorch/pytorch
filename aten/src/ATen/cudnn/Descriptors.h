@@ -197,7 +197,6 @@ struct TORCH_CUDA_API DropoutDescriptor
 
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
-  // NB: it takes a Type so that we can generate a Variable if necessary.
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
