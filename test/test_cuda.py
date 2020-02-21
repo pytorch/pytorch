@@ -2137,5 +2137,14 @@ t2.start()
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
 
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
+
 if __name__ == '__main__':
     run_tests()
