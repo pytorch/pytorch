@@ -337,21 +337,23 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   // are missing from the self argument while the tracer assumes that they should be populated with the
   // default values (eg. float for scalar type). By explicitly copying over the tensor options here we fully
   // specify all tensor options and thus record the proper trace
-  return self.to(self.options().device(device), non_blocking, copy, optional_memory_format);
+  return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   AutoNoGIL no_gil;
-  return self.to(self.options(), non_blocking, copy, optional_memory_format);
+  return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
 static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
   return self.to(dtype, non_blocking, copy, optional_memory_format);
 }
 
 static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
+  // TODO: Make this call the TensorOptions version, maybe?
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
 }
 
