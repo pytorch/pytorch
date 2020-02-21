@@ -339,8 +339,8 @@ class MinMaxObserver(_ObserverBase):
         local_state = ['min_val', 'max_val']
         for name in local_state:
             key = prefix + name
-            val = state_dict[key]
             if key in state_dict:
+                val = state_dict[key]
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
@@ -501,8 +501,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
-            val = state_dict[key]
             if key in state_dict:
+                val = state_dict[key]
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
@@ -839,8 +839,8 @@ class HistogramObserver(_ObserverBase):
         local_state = ['min_val', 'max_val']
         for name in local_state:
             key = prefix + name
-            val = state_dict[key]
             if key in state_dict:
+                val = state_dict[key]
                 setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
