@@ -55,6 +55,7 @@ using OptNameList = c10::optional<std::vector<std::string>>;
   _(QSchemeType)            \
   _(LayoutType)             \
   _(ScalarTypeType)         \
+  _(MemoryFormatType)       \
   _(AnyListType)            \
   _(AnyTupleType)
 
@@ -1842,52 +1843,71 @@ struct CAFFE2_API InterfaceType : public NamedType {
 
 template <TypeKind K>
 struct EnumerationType : public Type {
-static const TypeKind Kind = K;
+  static const TypeKind Kind = K;
 
-bool operator==(const Type& rhs) const override {
-  return rhs.kind() == kind();
-}
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
 
 protected:
-EnumerationType() : Type(Kind) {}
+  EnumerationType() : Type(Kind) {}
 };
 
 struct LayoutType;
 using LayoutTypePtr = std::shared_ptr<LayoutType>;
-// This type represents a Generator
+// This type represents a Layout
 struct CAFFE2_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
-static LayoutTypePtr create() {
-return LayoutTypePtr(
-    new LayoutType()); // NOLINT(modernize-make-shared)
-}
-std::string str() const override {
-return "Layout";
-}
-static const TypeKind Kind = TypeKind::LayoutType;
-// global singleton
-static LayoutTypePtr get();
+  static LayoutTypePtr create() {
+  return LayoutTypePtr(
+      new LayoutType()); // NOLINT(modernize-make-shared)
+  }
+  std::string str() const override {
+    return "Layout";
+  }
+  static const TypeKind Kind = TypeKind::LayoutType;
+  // global singleton
+  static LayoutTypePtr get();
 
 private:
-LayoutType() : EnumerationType() {}
+  LayoutType() : EnumerationType() {}
 };
 
 struct ScalarTypeType;
 using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
-// This type represents a Generator
+// This type represents a ScalarType
 struct CAFFE2_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
-static ScalarTypeTypePtr create() {
-return ScalarTypeTypePtr(
-    new ScalarTypeType()); // NOLINT(modernize-make-shared)
-}
-std::string str() const override {
-return "ScalarType";
-}
-static const TypeKind Kind = TypeKind::ScalarTypeType;
-// global singleton
-static ScalarTypeTypePtr get();
+  static ScalarTypeTypePtr create() {
+  return ScalarTypeTypePtr(
+      new ScalarTypeType()); // NOLINT(modernize-make-shared)
+  }
+  std::string str() const override {
+    return "ScalarType";
+  }
+  static const TypeKind Kind = TypeKind::ScalarTypeType;
+  // global singleton
+  static ScalarTypeTypePtr get();
 
 private:
-ScalarTypeType() : EnumerationType() {}
+  ScalarTypeType() : EnumerationType() {}
+};
+
+struct MemoryFormatType;
+using MemoryFormatTypePtr = std::shared_ptr<MemoryFormatType>;
+// This type represents a MemoryFormat
+struct CAFFE2_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
+  static MemoryFormatTypePtr create() {
+    return MemoryFormatTypePtr(
+        new MemoryFormatType()); // NOLINT(modernize-make-shared)
+  }
+  std::string str() const override {
+    return "MemoryFormat";
+  }
+  static const TypeKind Kind = TypeKind::MemoryFormatType;
+  // global singleton
+  static MemoryFormatTypePtr get();
+
+private:
+  MemoryFormatType() : EnumerationType() {}
 };
 
 // the common supertype of all lists,
