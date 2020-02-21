@@ -314,7 +314,8 @@ StrongTypePtr::StrongTypePtr(
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
   if (type_->cast<ClassType>()) {
-    TORCH_INTERNAL_ASSERT(cu_);
+    TORCH_INTERNAL_ASSERT(
+        cu_, "class type's owning compilation unit is nullptr");
   }
 }
 

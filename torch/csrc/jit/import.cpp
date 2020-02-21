@@ -56,7 +56,7 @@ void postSetStateValidate(const IValue& v) {
 
 IValue readArchiveAndTensors(
     const std::string& archive_name,
-    c10::optional<ClassResolver> class_resolver,
+    c10::optional<TypeResolver> type_resolver,
     c10::optional<ObjLoader> obj_loader,
     c10::optional<at::Device> device,
     PyTorchStreamReader& stream_reader) {
@@ -87,7 +87,7 @@ IValue readArchiveAndTensors(
 
   Unpickler unpickler(
       reader,
-      class_resolver ? std::move(*class_resolver) : nullptr,
+      type_resolver ? std::move(*type_resolver) : nullptr,
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
       device);
@@ -134,7 +134,7 @@ class ScriptModuleDeserializer final {
 };
 
 IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
-  auto class_resolver = [&](const c10::QualifiedName& qn) {
+  auto type_resolver = [&](const c10::QualifiedName& qn) {
     auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
     return c10::StrongTypePtr(compilation_unit_, std::move(cls));
   };
@@ -174,7 +174,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   };
 
   return readArchiveAndTensors(
-      archive_name, class_resolver, obj_loader, device_, *reader_.get());
+      archive_name, type_resolver, obj_loader, device_, *reader_.get());
 }
 
 script::Module ScriptModuleDeserializer::deserialize(
