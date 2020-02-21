@@ -387,10 +387,10 @@ static auto registry = torch::RegisterOperators()
     // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
     //      and remove the backend VariableTensorId kernel here, only leaving the catch-all kernel.
     .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::VariableTensorId)
-    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>()
+    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
   .op(torch::RegisterOperators::options()
     .schema("aten::retain_grad(Tensor(a!) self) -> ()")
-    .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>()
+    .catchAllKernel<decltype(VariableType::retain_grad), &VariableType::retain_grad>())
   ;
 
 }  // namespace
