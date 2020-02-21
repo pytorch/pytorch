@@ -367,8 +367,8 @@ class Depthwise3x3ConvGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
   Depthwise3x3ConvGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : cudnn_wrapper_(&context_),
-        ConvPoolOpBase<CUDAContext>(operator_def, ws),
+      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+        cudnn_wrapper_(&context_),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
