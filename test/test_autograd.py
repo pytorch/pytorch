@@ -3886,6 +3886,18 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
             BadBw.apply(inp).sum().backward()
 
+    def test_leaky_relu_inplace_with_neg_slope(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+            b = torch.nn.functional.leaky_relu_(a.clone(), -2)
+            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+                b.backward(torch.ones(2, device=device))
+
+            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+            b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
+            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+                b.backward(torch.ones(2, device=device))
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
