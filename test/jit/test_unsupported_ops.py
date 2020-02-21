@@ -42,21 +42,6 @@ class TestUnsupportedOps(JitTestCase):
             with self.assertRaisesRegex(Exception, "Keyword argument requires_grad unknown"):
                 torch.jit.script(func)
 
-    def test_tensor_options_behavior_mismatch(self):
-        # Any schema declaration which contains a non-optional (ScalarType dtype, Layout layout, Device device)
-        # tuple is implicitly made to be optional for pytorch eager code. This makes the schema incorrect for JIT / C++ api.
-
-        # Complete issue and set of ops is https://github.com/pytorch/pytorch/issues/30763
-        # only testing one here because they should be fixed all at once
-        # ezyang: But actually, I handled all of the _like overloads first
-        # because they're special
-
-        with self.assertRaisesRegex(Exception, "Argument layout not provided."):
-            def foo():
-                return torch.sparse_coo_tensor((2, 2), dtype=torch.double)
-            foo()
-            print(torch.jit.script(foo).graph)
-
     def test_ops_bound_in_functional(self):
         ops_bound_in_functional = "lu_unpack", "unique", "lu"
 

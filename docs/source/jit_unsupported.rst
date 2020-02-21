@@ -73,19 +73,6 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.zeros`
   * :func:`torch.zeros_like`
 
-The following functions require `dtype`, `layout`, `device` as parameters in TorchScript,
-but these parameters are optional in Python.
-
-  * :func:`torch.empty_like`
-  * :func:`torch.full_like`
-  * :func:`torch.ones_like`
-  * :func:`torch.rand_like`
-  * :func:`torch.randint`
-  * :func:`torch.randn_like`
-  * :func:`torch.zeros_like`
-  * :func:`torch.sparse_coo_tensor`
-  * :meth:`~torch.Tensor.to`
-
 
 PyTorch Unsupported Modules and Classes
 ------------------------------------------
