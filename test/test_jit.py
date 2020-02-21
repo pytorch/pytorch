@@ -4210,13 +4210,6 @@ class TestScript(JitTestCase):
         lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
 
         with torch.jit._disable_emit_hooks():
-            # TODO: Fix jitter issue, an node is inserted as an uninitialzed
-            # PackedSequence and never used
-            #     unsorted_indices: Optional[Tensor]=None) -> __torch__.torch.nn.utils.rnn.PackedSequence:
-            #     _10 = __torch__.torch.nn.utils.rnn.invert_permutation
-            # +   _11 = uninitialized(__torch__.torch.nn.utils.rnn.PackedSequence)
-            #     if torch.__is__(unsorted_indices, None):
-            #     unsorted_indices1 = _10(sorted_indices, )
             self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_class_attribute(self):
@@ -10782,7 +10775,8 @@ a")
                 x[seq_lens[b]:, b, :] = 0
 
         eager_seq, eager_lengths = pack_padded_pad_packed_script(x, seq_lens)
-        scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
+        with torch.jit._disable_emit_hooks():
+            scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
         script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
         self.assertEqual(eager_seq, script_seq)
         self.assertEqual(eager_lengths, script_lengths)
