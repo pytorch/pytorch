@@ -64,6 +64,7 @@ struct RegisteredClassRecord {
   std::string qualClassName;
   std::string classTypeidName_intrusive_ptr;
   std::string classTypeidName_tagged_capsule;
+  at::ClassTypePtr classTypePtr;
 
   // Store registered methods. This maps the method name
   // (e.g. "forward", "__getstate__") to the qualified

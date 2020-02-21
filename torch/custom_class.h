@@ -42,7 +42,6 @@ class class_ {
 
   std::string className;
   std::string qualClassName;
-  // ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
   const std::string topModule = "__torch__.torch";
@@ -51,16 +50,21 @@ class class_ {
   class_(std::string className_) : className(std::move(className_)) {
     qualClassName = topModule + "." + parentModule + "." + className;
 
-    TORCH_CHECK(!registeredClasses().count(className),
+    TORCH_CHECK(!registeredClasses().count(qualClassName),
                 "C++ class ", className, " has already been "
                 "registered!");
 
-    registeredClasses()[className] = detail::RegisteredClassRecord{
+    auto classTypePtr =
+        at::ClassType::create(c10::QualifiedName(qualClassName), std::weak_ptr<at::CompilationUnit>());
+    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
+
+    registeredClasses()[qualClassName] = detail::RegisteredClassRecord{
         qualClassName,
         typeid(c10::intrusive_ptr<CurClass>).name(),
-        typeid(c10::tagged_capsule<CurClass>).name()
+        typeid(c10::tagged_capsule<CurClass>).name(),
+        classTypePtr
       };
-    invokeClassRegistrationCallbacks(registeredClasses()[className]);
+    invokeClassRegistrationCallbacks(registeredClasses()[qualClassName]);
   }
 
   template <typename... Types>
@@ -129,10 +133,10 @@ class class_ {
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
 
-    TORCH_INTERNAL_ASSERT(registeredClasses().count(className));
-    auto &class_record = registeredClasses()[className];
+    TORCH_INTERNAL_ASSERT(registeredClasses().count(qualClassName));
+    auto &class_record = registeredClasses()[qualClassName];
     TORCH_CHECK(!class_record.registeredMethods.count(name),
-                "Method ", name, " on class ", className,
+                "Method ", name, " on class ", qualClassName,
                 " has already been defined!");
     class_record.registeredMethods[name] = qualFuncName;
     invokeMethodRegistrationCallbacks(class_record, name);
@@ -146,6 +150,8 @@ using MethodRegistrationCallback = std::function<void(const detail::RegisteredCl
 
 TORCH_API void registerClassRegistrationCallback(ClassRegistrationCallback cb);
 TORCH_API void registerMethodRegistrationCallback(MethodRegistrationCallback cb);
+
+TORCH_API at::TypePtr getCustomClass(const std::string& name);
 
 } // namespace jit
 

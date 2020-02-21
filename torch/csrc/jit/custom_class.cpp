@@ -17,16 +17,8 @@ bool isCustomClass(const c10::IValue& v) {
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
 }
 
-at::TypePtr getCustomClass(const std::string& name) {
-  return classCU()->get_type(name);
-}
-
 namespace {
 
-std::unordered_map<const detail::RegisteredClassRecord*, ClassTypePtr> &registeredClassTypes() {
-  static std::unordered_map<const detail::RegisteredClassRecord*, ClassTypePtr> table;
-  return table;
-}
 
 std::set<ClassTypePtr> &getstateSetstateValidated() {
   static std::set<ClassTypePtr> s;
@@ -34,9 +26,7 @@ std::set<ClassTypePtr> &getstateSetstateValidated() {
 }
 
 void classCallback(const detail::RegisteredClassRecord& clazz) {
-  auto classTypePtr =
-      ClassType::create(c10::QualifiedName(clazz.qualClassName), classCU());
-  classTypePtr->addAttribute("capsule", CapsuleType::get());
+  auto &classTypePtr = clazz.classTypePtr;
 
   c10::getCustomClassTypeMap().insert({clazz.classTypeidName_intrusive_ptr,
                             c10::StrongTypePtr(classCU(), classTypePtr)});
@@ -44,8 +34,7 @@ void classCallback(const detail::RegisteredClassRecord& clazz) {
                             c10::StrongTypePtr(classCU(), classTypePtr)});
 
   classCU()->register_type(classTypePtr);
-  TORCH_INTERNAL_ASSERT(!registeredClassTypes().count(&clazz));
-  registeredClassTypes()[&clazz] = classTypePtr;
+  classTypePtr->unsafe_set_compilation_unit(classCU());
 }
 
 void methodCallback(const detail::RegisteredClassRecord& clazz, const std::string& method_name) {
@@ -82,8 +71,7 @@ void methodCallback(const detail::RegisteredClassRecord& clazz, const std::strin
   graph->registerOutput(res);
 
   auto method = classCU()->create_function(qualClassName + "." + method_name, graph);
-  TORCH_INTERNAL_ASSERT(registeredClassTypes().count(&clazz));
-  ClassTypePtr classTypePtr = registeredClassTypes().at(&clazz);
+  auto &classTypePtr = clazz.classTypePtr;
   classTypePtr->addMethod(method);
 
   if (auto getstate_method = classTypePtr->getMethod("__getstate__")) {

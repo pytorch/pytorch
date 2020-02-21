@@ -7,8 +7,6 @@
 namespace torch {
 namespace jit {
 
-TORCH_API at::TypePtr getCustomClass(const std::string& name);
-
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
 TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();

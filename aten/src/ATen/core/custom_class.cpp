@@ -48,6 +48,13 @@ void invokeMethodRegistrationCallbacks(const detail::RegisteredClassRecord& clas
   }
 }
 
+at::TypePtr getCustomClass(const std::string& name) {
+  if (registeredClasses().count(name)) {
+    return registeredClasses().at(name).classTypePtr;
+  }
+  return nullptr;
+}
+
 
 } // namespace jit
 } // namespace torch
