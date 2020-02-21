@@ -156,10 +156,11 @@ void cpu_scatter_gather_base_kernel(
   );
 }
 
-  void atomic_add(auto * self_data, int64_t self_data_offset,
-                  auto * src_data, int64_t src_data_offset) {
-
-    
+  void atomic_add(auto *self_data_ptr, auto *src_data_ptr) {
+    auto old = *self_data_ptr;
+    while(old == *self_data_ptr) {
+      *self_data_ptr += *src_data_ptr;
+    }
   }
 
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
@@ -187,8 +188,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
           "index ", idx_dim,
           " is out of bounds for dimension ", dim,
           " with size ", self_dim_size);
-        atomic_add(self_data, idx_dim * self_dim_stride, src_data, i * src_dim_stride);
-        self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+        atomic_add(self_data + idx_dim * self_dim_stride, src_data + i * src_dim_stride);
       }
     }, /*serial_exec=*/true
   );
