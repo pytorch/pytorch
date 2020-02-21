@@ -256,7 +256,6 @@ class LBFGS(Optimizer):
             views.append(view)
         return torch.cat(views, 0)
 
-    @torch.no_grad()
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
@@ -269,7 +268,6 @@ class LBFGS(Optimizer):
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
-    @torch.no_grad()
     def _set_param(self, params_data):
             for p, pdata in zip(self._params, params_data):
                 p.copy_(pdata)
@@ -281,6 +279,7 @@ class LBFGS(Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
+    @torch.no_grad()
     def step(self, closure):
         """Performs a single optimization step.
 
