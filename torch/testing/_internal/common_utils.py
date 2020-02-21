@@ -11,6 +11,7 @@ import platform
 import re
 import gc
 import types
+from functools import partial
 import inspect
 import io
 import argparse
@@ -1185,9 +1186,17 @@ def find_free_port():
     sock.close()
     return sockname[1]
 
+# Errors that we can get in c10d initialization for which we should retry tests for.
+ADDRESS_IN_USE = "Address already in use"
+CONNECT_TIMEOUT = "connect() timed out."
 
-def retry_on_address_already_in_use_error(func):
-    """Reruns a test if it sees "Address already in use" error."""
+def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
+    """Reruns a test if the test returns a RuntimeError and the exception
+    matches exactly with one of the strings in connect_errors."""
+    # This if block is executed when using this function as a decorator with arguments.
+    if func is None:
+        return partial(retry_on_connect_failures, connect_errors=connect_errors)
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         tries_remaining = 10
@@ -1195,7 +1204,7 @@ def retry_on_address_already_in_use_error(func):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) == "Address already in use":
+                if str(error) in connect_errors:
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise

@@ -505,6 +505,37 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
 
+    """Tests the correctness of the mul and mul_relu op."""
+    def test_qmul_broadcast(self):
+        mul_relu = torch.ops.quantized.mul_relu
+        mul = torch.ops.quantized.mul
+        mul_out = torch.ops.quantized.mul_out
+        mul_relu_out = torch.ops.quantized.mul_relu_out
+
+        # A = torch.arange(-25, 25, dtype=torch.float)
+        # B = torch.arange(-25, 25, dtype=torch.float)
+        A = torch.randn(8, 1, 6, 1)
+        B = torch.randn(7, 1, 5)
+        scale_A = 3.0
+        zero_point_A = 7
+        scale_B = 5.0
+        zero_point_B = 127
+
+        scale_C = 0.5
+        zero_point_C = 5
+
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                       dtype=torch.quint8)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
+                                       dtype=torch.quint8)
+
+        # mul ground truth
+        C = (qA.dequantize() * qB.dequantize()).numpy()
+        qC = _quantize(C, scale_C, zero_point_C)
+        qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized multiplication failed.")
+
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
