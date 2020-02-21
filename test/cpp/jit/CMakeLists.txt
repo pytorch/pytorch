@@ -27,6 +27,8 @@ elseif (USE_ROCM)
 
   target_link_libraries(test_jit PRIVATE caffe2_gpu)
 
+  target_link_libraries(test_jit PRIVATE torch_cpu)
+
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()
 
