@@ -169,6 +169,9 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyBool_Check(obj)) {
     return ScalarType::Bool;
   }
+  if (PyComplex_Check(obj)) {
+    return ScalarType::ComplexDouble;
+  }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
     return var.scalar_type();

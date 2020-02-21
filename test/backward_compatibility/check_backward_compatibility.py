@@ -49,6 +49,8 @@ white_list = [
     ('prim::Print', datetime.date(2020, 3, 1)),
     ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
     ('prim::Constant', datetime.date(2020, 3, 1)),
+    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('_aten::format', datetime.date(2020, 3, 1)),
     # _like default change, see https://github.com/pytorch/pytorch/issues/33580
     ('aten::randn_like', datetime.date(2020, 3, 15)),
     ('aten::full_like', datetime.date(2020, 3, 15)),
