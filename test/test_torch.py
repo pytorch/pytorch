@@ -3280,6 +3280,8 @@ class _TestTorchMixin(object):
 
             out = np.broadcast_to(np.random.random((1, 4)),
                                   initial_shape)
+            # Note: only writeable Numpy arrays can be converted to tensors
+            out.setflags(write=True)
 
             assert not (out.flags.c_contiguous or out.flags.f_contiguous)
 
