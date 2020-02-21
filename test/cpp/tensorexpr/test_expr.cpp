@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/tensorexpr/buffer.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
+#include "torch/csrc/jit/tensorexpr/ir_printer.h"
 
 #include <cmath>
 #include <sstream>
@@ -140,6 +141,25 @@ void testExprCompareSelectEQ() {
   assertAllEqual(c_buffer, 1);
 }
 
+void testExprSubstitute01() {
+  KernelScope kernel_scope;
+  Expr x = Variable::make("x", kFloat32);
+  Expr y = Variable::make("y", kFloat32);
+  Expr e = (x - 1.0f) * (x + y + 2.0f);
+
+  Expr z = Variable::make("z", kFloat32);
+  Expr e2 = Substitute(&e, {{x, z + 1.0f}});
+  Expr e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
+  std::ostringstream oss;
+  oss << e2;
+  std::string e2_str = oss.str();
+
+  oss.str("");
+  oss << e2_ref;
+  std::string e2_ref_str = oss.str();
+  ASSERT_EQ(e2_str, e2_ref_str);
+}
+
 void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
@@ -158,6 +178,30 @@ void testExprDynamicShapeAdd() {
   testWithSize(1);
   testWithSize(16);
   testWithSize(37);
+}
+
+void testIfThenElse01() {
+  KernelScope kernel_scope;
+  Expr v = ifThenElse(Expr(1), Expr(1.0f), Expr(2.0f));
+
+  std::ostringstream oss;
+  oss << v;
+  ASSERT_EQ(oss.str(), "IfThenElse(1, 1, 2)");
+
+  SimpleIRExprEval eval(v);
+  ASSERT_EQ(eval.value<float>(), 1.0f);
+}
+
+void testIfThenElse02() {
+  KernelScope kernel_scope;
+  Expr v = ifThenElse(Expr(0), Expr(1.0f), Expr(2.0f));
+
+  std::ostringstream oss;
+  oss << v;
+  ASSERT_EQ(oss.str(), "IfThenElse(0, 1, 2)");
+
+  SimpleIRExprEval eval(v);
+  ASSERT_EQ(eval.value<float>(), 2.0f);
 }
 
 } // namespace jit
