@@ -157,7 +157,7 @@ std::vector<int64_t> ProfilingRecord::mergeSymbolicShapes(
         if (*symbol == new_sizes[i]) {
           new_symbols.push_back(new_sizes[i]);
         } else {
-          int64_t new_sym = getNewSymbol();
+          int64_t new_sym = toSymbol(new_sizes[i]);
           new_symbols.push_back(new_sym);
         }
       } else if (symbols2dims_.count(symbol.value()) == 0) {
@@ -199,11 +199,11 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
         auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
         if (first) {
           // a bit ugly
-          auto symbols = fmap(t.toTensor().sizes(), [this](size_t dim) {
-            return this->toSymbol(dim);
-          });
-          GRAPH_DEBUG("pttp = ", *pttp);
-          pttp = pttp->withSymbolicShapes(c10::VaryingShape{symbols});
+          // auto symbols = fmap(t.toTensor().sizes(), [this](size_t dim) {
+          //   return this->toSymbol(dim);
+          // });
+          // GRAPH_DEBUG("pttp = ", *pttp);
+          // pttp = pttp->withSymbolicShapes(c10::VaryingShape{symbols});
           first = false;
           pno->setType(pttp);
         } else {

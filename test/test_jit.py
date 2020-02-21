@@ -4055,21 +4055,52 @@ class TestScript(JitTestCase):
             # j (c, b, b)
             # j (c, a, b)
 
-            # case 2 not possible
+            # case 2 not possible (*, a) + (y, a) = (x, a)
 
             # case 3
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(777)
+            # j (c, b, a)
+            # j (c, a, b)
+            # j (c, b, a)
+
+            # case 3.b
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # a2 = torch.ones(7, 6)
+            # b2 = torch.ones(7, 1)
+            # c = torch.ones(777)
+            # j (c, b, a)
+            # j (c, b2, a2)
+            # j (c, b, a)
+
+
+            # case 4
             a = torch.ones(7, 1)
             b = torch.ones(7, 5)
             c = torch.ones(5)
-            j (b, a, c)
-            j (b, a, c)
-            j (a, b, )
+            c2 = torch.ones(777)
+            j (c, b, a)
+            j (c2, b, a)
+            j (c, b, a)
 
-            a = torch.ones(7)
-            b = torch.ones(8)
-            j(a, a)
-            j(a, a)
-            j(a, a)
+            # case 5 impossible (*, a) + (*, a) = (x, a)
+
+            #case 6
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(5)
+            # c2 = torch.ones(777)
+            # j (c, b, a)
+            # j (c2, b, a)
+            # j (c, b, a)
+
+            # a = torch.ones(7)
+            # b = torch.ones(8)
+            # j(a, a)
+            # j(a, a)
+            # j(a, a)
 
             #b = torch.ones(1)
 
