@@ -206,6 +206,19 @@ Tensor add(Scalar self, const Tensor& other, Scalar alpha) {
   return native::add(wrapped_scalar_tensor(self), other, alpha);
 }
 
+Scalar add(Scalar self, Scalar other, Scalar alpha) {
+  if (self.isComplex() || other.isComplex() || alpha.isComplex()) {
+    return self.to<std::complex<double> >() + alpha.to<std::complex<double> >() * other.to<std::complex<double> >();
+  } else if (self.isFloatingPoint() || other.isFloatingPoint() || alpha.isFloatingPoint()) {
+    return self.to<double>() + alpha.to<double>() * other.to<double>();
+  } else if (self.isIntegral(/*includeBool=*/false) || other.isIntegral(/*includeBool=*/false) ||
+             alpha.isIntegral(/*includeBool=*/false)) {
+    return self.to<int64_t>() + alpha.to<int64_t>() * other.to<int64_t>();
+  } else {
+    return self.to<bool>() + alpha.to<bool>() * other.to<bool>();
+  }
+}
+
 Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
   return native::add_(self, wrapped_scalar_tensor(other), alpha);
 }
@@ -218,6 +231,18 @@ Tensor div(const Tensor& self, Scalar other) {
 
 Tensor div(Scalar self, const Tensor& other) {
   return wrapped_scalar_tensor(self).div(other); // redispatch!
+}
+
+Scalar div(Scalar self, Scalar other) {
+  if (self.isComplex() || other.isComplex()) {
+    return self.to<std::complex<double> >() / other.to<std::complex<double> >();
+  } else if (self.isFloatingPoint() || other.isFloatingPoint()) {
+    return self.to<double>() / other.to<double>();
+  } else if (self.isIntegral(/*includeBool=*/false) || other.isIntegral(/*includeBool=*/false)) {
+    return self.to<int64_t>() / other.to<int64_t>();
+  } else {
+    return self.to<bool>() / other.to<bool>();
+  }
 }
 
 // WARNING: This function, with a sparse self, is currently only
@@ -236,6 +261,18 @@ Tensor mul(Scalar self, const Tensor& other) {
   return native::mul(other, self);
 }
 
+Scalar mul(Scalar self, Scalar other) {
+  if (self.isComplex() || other.isComplex()) {
+    return self.to<std::complex<double> >() * other.to<std::complex<double> >();
+  } else if (self.isFloatingPoint() || other.isFloatingPoint()) {
+    return self.to<double>() * other.to<double>();
+  } else if (self.isIntegral(/*includeBool=*/false) || other.isIntegral(/*includeBool=*/false)) {
+    return self.to<int64_t>() * other.to<int64_t>();
+  } else {
+    return self.to<bool>() * other.to<bool>();
+  }
+}
+
 Tensor& mul_(Tensor& self, Scalar other) {
   return native::mul_(self, wrapped_scalar_tensor(other));
 }
@@ -246,6 +283,22 @@ Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
 
 Tensor sub(Scalar self, const Tensor& other, Scalar alpha) {
   return native::sub(wrapped_scalar_tensor(self), other, alpha);
+}
+
+Scalar sub(Scalar self, Scalar other, Scalar alpha) {
+  TORCH_CHECK(!self.isBoolean() || !other.isBoolean() || !alpha.isBoolean(),
+              "Subtraction, the `-` operator, with only bool scalars is not supported. "
+              "Use the `^` or `logical_xor()` operator instead.");
+  TORCH_CHECK(!self.isBoolean() && !other.isBoolean() && !alpha.isBoolean(),
+              "Subtraction, the `-` operator, with a bool scalar is not supported. "
+              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+  if (self.isComplex() || other.isComplex() || alpha.isComplex()) {
+    return self.to<std::complex<double> >() - alpha.to<std::complex<double> >() * other.to<std::complex<double> >();
+  } else if (self.isFloatingPoint() || other.isFloatingPoint() || alpha.isFloatingPoint()) {
+    return self.to<double>() - alpha.to<double>() * other.to<double>();
+  } else {
+    return self.to<int64_t>() - alpha.to<int64_t>() * other.to<int64_t>();
+  }
 }
 
 Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
@@ -352,6 +405,10 @@ Tensor& __ior__(Tensor& self, Scalar other) {
 
 Tensor rsub(Scalar self, const Tensor& other, Scalar alpha) {
   return native::rsub(wrapped_scalar_tensor(self), other, alpha);
+}
+
+Scalar rsub(Scalar self, Scalar other, Scalar alpha) {
+  return native::rsub(other, self, alpha);
 }
 
 Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
