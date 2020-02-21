@@ -7,6 +7,9 @@
 #include <c10/macros/Macros.h>
 #include <curand_kernel.h>
 
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
+
 #include <THC/THCGeneral.h>
 
 namespace at{
@@ -17,6 +20,77 @@ namespace {
 // philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
 // for all members of float4 to be consumed UNROLL has to be 4. Don't change!
 const int UNROLL = 4;
+
+template <
+          typename scalar_t,
+          typename accscalar_t,
+          typename IndexType,
+          int ADims,
+          int VEC>
+#if __CUDA_ARCH__ >= 350
+C10_LAUNCH_BOUNDS_2(256, 8)
+#elif defined (__HIP_PLATFORM_HCC__)
+C10_LAUNCH_BOUNDS_2(256, 4)
+#endif
+__global__ void
+fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
+                            at::cuda::detail::TensorInfo<scalar_t, IndexType> b,
+                            at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
+                            IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
+                           ) {
+  typedef typename std::aligned_storage<VEC*sizeof(scalar_t), VEC*alignof(scalar_t)>::type LoadT;
+  typedef typename std::aligned_storage<VEC*sizeof(uint8_t), VEC*alignof(uint8_t)>::type MaskLoadT;
+
+  accscalar_t pinv = accscalar_t(1)/p;
+  IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
+  curandStatePhilox4_32_10_t state;
+  curand_init(
+      seeds.first,
+      idx,
+      seeds.second,
+      &state);
+
+  // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
+  for (IndexType linearIndex = idx * VEC;
+      linearIndex < totalElements;
+      linearIndex += gridDim.x * blockDim.x * VEC) {
+    // keep UNROLL * VEC values so we can both unroll & vectorize if we so choose
+    scalar_t src[VEC];
+    // We'll use this to actually cause vectorized loads later
+    LoadT *value = reinterpret_cast<LoadT*>(&src);
+
+    //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
+    // Note: need a new set of random values per 4 elements -- we'll handle UNROLL * VEC elements in this thread, so need UNROLL * VEC / 4
+    // sets of rand.
+    float4 rand = curand_uniform4(&state);
+
+    rand.x = rand.x < p;
+    rand.y = rand.y < p;
+    rand.z = rand.z < p;
+    rand.w = rand.w < p;
+
+    const IndexType aOffset =
+      cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(linearIndex, a); //  + ii*blockDim.x*gridDim.x*ii, a);
+    // Single vectorized load
+    *value = *reinterpret_cast<LoadT*>(&a.data[aOffset]);
+
+    scalar_t r[VEC];
+    uint8_t mask[VEC];
+
+    #pragma unroll
+    for (int ii = 0; ii < VEC; ii++) {
+      r[ii] = src[ii]*(&rand.x)[ii]*pinv;
+      mask[ii] = (uint8_t)(&rand.x)[ii];
+    }
+    const IndexType bOffset =
+      cuda::detail::IndexToOffset<scalar_t, IndexType, 1>::get(linearIndex, b);
+    // Vectorized writes for both mask & result
+    *(reinterpret_cast<LoadT*>(&b.data[bOffset])) = *reinterpret_cast<LoadT*>(&r[0]);
+    *(reinterpret_cast<MaskLoadT*>(&c.data[bOffset])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
+
+    __syncthreads();
+  }
+}
 
 template <
           typename scalar_t,
@@ -80,10 +154,49 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 
 template<typename scalar_t, typename accscalar_t>
 void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
-   at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, uint8_t>(ret, src, mask, [scale]__device__(scalar_t& ret_val, const scalar_t& src_val, const uint8_t mask_val){
-       ret_val = (float)mask_val * src_val * scale;
-  });
+   auto iter = at::TensorIterator();
+   iter.add_output(ret);
+   iter.add_input(src);
+   iter.add_input(mask);
+
+   iter.build();
+
+   at::native::gpu_kernel(
+       iter,
+       [=]GPU_LAMBDA(const scalar_t src_val, const uint8_t mask_val, accscalar_t scale_val) -> scalar_t {
+          return (float)mask_val * src_val * scale_val;
+       });
 }
+
+int get_alignment(uint64_t addr) {
+  if (addr % 16 == 0) return 16;
+  if (addr %  8 == 0) return  8;
+  if (addr %  4 == 0) return  4;
+  if (addr %  2 == 0) return  2;
+  return 1;
+}
+
+template <typename scalar_t>
+int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
+  int vec_size = 4;
+  // get the vector size
+  if (!self.is_contiguous() || !ret.is_contiguous() || !mask.is_contiguous()) {
+    vec_size = 1;
+  } else {
+    vec_size = std::min(vec_size, (get_alignment((uint64_t)self.data_ptr()) / (int)sizeof(scalar_t)));
+    vec_size = std::min(vec_size, get_alignment((uint64_t)ret.data_ptr()) / (int)sizeof(scalar_t));
+    vec_size = std::min(vec_size, get_alignment((uint64_t)mask.data_ptr()) / (int)sizeof(uint8_t));
+  }
+
+  // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
+  bool can_vectorize = true;
+  do {
+    can_vectorize = self.numel() % vec_size == 0 && ret.numel() % vec_size == 0 && mask.numel() % vec_size == 0;
+    if (!can_vectorize) vec_size /= 2;
+  } while (vec_size > 1 && !can_vectorize);
+  return can_vectorize ? vec_size : 1;
+}
+
 } //anonymous namespace
 
 std::tuple<Tensor,Tensor>
@@ -117,12 +230,29 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
       self_info.collapseDims();
       ret_info.collapseDims();
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
-      switch (self_info.dims) {
-        case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-            break;
-        default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+
+      int vec_size = get_vector_size<scalar_t>(self, ret, mask);
+
+      if (vec_size > 1) {
+        switch (vec_size) {
+         case 8:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 8><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+         case 4:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+         case 2:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+        }
+      } else {
+        switch (self_info.dims) {
+          case 1:
+              fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              break;
+          default:
+              fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+        }
       }
    });
   } else {
@@ -135,12 +265,29 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
       self_info.collapseDims();
       ret_info.collapseDims();
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
-      switch (self_info.dims) {
-        case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-            break;
-        default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+
+      int vec_size = get_vector_size<scalar_t>(self, ret, mask);
+
+      if (vec_size > 1) {
+        switch (vec_size) {
+         case 8:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 8><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+         case 4:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+         case 2:
+          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 2><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+          break;
+        }
+      } else {
+        switch (self_info.dims) {
+          case 1:
+              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+              break;
+          default:
+              fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
+        }
       }
    });
   }
