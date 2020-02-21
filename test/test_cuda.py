@@ -5,6 +5,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+import gc
 from contextlib import contextmanager
 import threading
 if sys.version_info[0] == 3:
@@ -274,6 +275,7 @@ class TestCuda(TestCase):
         assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
+        gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
