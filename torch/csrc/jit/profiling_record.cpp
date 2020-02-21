@@ -79,7 +79,7 @@ static void unprofileBlock(Block* start_block) {
 
 int64_t ProfilingRecord::toSymbol(size_t val) {
   if (dims2symbols_.count(val) == 0 /*|| val == 1*/) {
-    int64_t new_sym = -dims2symbols_.size() - 1;
+    int64_t new_sym = getNewSymbol();
     dims2symbols_[val] = new_sym;
     return new_sym;
   }
@@ -141,6 +141,42 @@ at::IntArrayRef sizes) { std::vector<c10::optional<int64_t>> new_symbols; for
 }
 */
 
+std::vector<int64_t> ProfilingRecord::mergeSymbolicShapes(
+    at::IntArrayRef new_sizes,
+    c10::VaryingShape sym_shapes) {
+  std::vector<int64_t> new_symbols;
+  if (new_sizes.size() == sym_shapes.size()) {
+    for (size_t i = 0; i < new_sizes.size(); i++) {
+      auto symbol = sym_shapes[i];
+      if (!symbol.has_value()) {
+        TORCH_INTERNAL_ASSERT("should always have some symbol");
+      } else {
+        // refactor into bind
+        // TORCH_INTERNAL_ASSERT(*symbol < 0);
+        if (symbols2dims_.count(symbol.value()) == 0) {
+          symbols2dims_[symbol.value()] = new_sizes[i];
+          new_symbols.push_back(*symbol);
+        } else {
+          if (symbols2dims_[symbol.value()] == new_sizes[i]) {
+            new_symbols.push_back(*symbol);
+          } else {
+            auto& symbol_subsets = split_symbols_[symbol.value()];
+            if (symbol_subsets.count(new_sizes[i])) {
+              new_symbols.push_back(symbol_subsets[new_sizes[i]]);
+            } else {
+              int64_t new_sym = getNewSymbol();
+              symbol_subsets.insert({new_sizes[i], new_sym});
+              new_symbols.push_back(new_sym);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return new_symbols;
+}
+
 void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
 
   auto pn = createProfileNode(nullptr, {i});
@@ -154,9 +190,9 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
     if (t.isTensor()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
       if (t.toTensor().defined()) {
+        auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
         if (first) {
           // a bit ugly
-          auto pttp = tensorTypeInCurrentExecutionContext(t.toTensor());
           auto symbols = fmap(t.toTensor().sizes(), [this](size_t dim) {
             return this->toSymbol(dim);
           });
@@ -166,7 +202,12 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
           pno->setType(pttp);
         } else {
           auto type = pno->type()->cast<TensorType>();
-          auto pttp = type->merge(t.toTensor(), symbols2dims_);
+          auto sym_shapes = type->sizes();
+          auto new_sym_shapes =
+              this->mergeSymbolicShapes(t.toTensor().sizes(), sym_shapes);
+          pttp = type->merge(pttp)->withSymbolicShapes(
+              c10::VaryingShape{new_sym_shapes});
+          // auto pttp = type->merge(t.toTensor(), symbols2dims_);
           pno->setType(pttp);
         }
 
@@ -243,6 +284,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     }
     raw_pr->symbols2dims_.clear();
     raw_pr->dims2symbols_.clear();
+    raw_pr->split_symbols_.clear();
     if (raw_pr->profiling_count_ > 0)
     {
         raw_pr->profiling_count_--;

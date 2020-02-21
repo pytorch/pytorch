@@ -866,6 +866,35 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
+  std::vector<c10::optional<int64_t>> bindSymbolicShapes(
+      ActiveFrame& af,
+      at::IntArrayRef new_sizes,
+      const c10::VaryingShape& sym_shapes) {
+    std::vector<c10::optional<int64_t>> new_symbols;
+    if (new_sizes.size() == sym_shapes.size()) {
+      for (size_t i = 0; i < new_sizes.size(); i++) {
+        auto symbol = sym_shapes[i];
+        if (!symbol.has_value()) {
+          TORCH_INTERNAL_ASSERT("shouldn't be dynamic");
+          new_symbols.push_back(c10::nullopt);
+        } else {
+          // refactor into bind
+          // TORCH_INTERNAL_ASSERT(*symbol < 0);
+          if (af.symbols2dims.count(symbol.value()) == 0) {
+            af.symbols2dims[*symbol] = new_sizes[i];
+            new_symbols.push_back(*symbol);
+          } else {
+            new_symbols.push_back(
+                (af.symbols2dims[symbol.value()] == new_sizes[i])
+                    ? symbol
+                    : c10::nullopt);
+          }
+        }
+      }
+    }
+    return new_symbols;
+  }
+
   bool runImpl(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
@@ -1077,9 +1106,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case GUARD: {
             auto t = stack.back().toTensor();
+            auto pttp = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
             auto expected_type = expected->cast<TensorType>();
-            auto bound_type = expected_type->merge(t, af.symbols2dims);
+            auto bound_symbols =
+                bindSymbolicShapes(af, t.sizes(), expected_type->sizes());
+            auto bound_type =
+                pttp->withSymbolicShapes(c10::VaryingShape{bound_symbols});
+            // auto bound_type = expected_type->merge(t, af.symbols2dims);
             push(stack, *expected_type == *bound_type);
             ++af.pc;
           } break;

@@ -32,7 +32,17 @@ struct ProfilingRecord {
   // figure out concurrency and data races
   std::map<int64_t, size_t> symbols2dims_;
   std::map<int64_t, c10::optional<size_t>> static_sizes_;
+  std::map<int64_t, std::map<size_t, int64_t>> split_symbols_;
+  size_t num_symbols = 0;
 
+  int64_t getNewSymbol() {
+    num_symbols++;
+    return -num_symbols;
+  }
+
+  std::vector<int64_t> mergeSymbolicShapes(
+      at::IntArrayRef sizes,
+      c10::VaryingShape sym_shapes);
   void convertToStaticShapes(Block* b);
   void updateStaticSizes(int64_t key, size_t dim);
   int64_t toSymbol(size_t val);

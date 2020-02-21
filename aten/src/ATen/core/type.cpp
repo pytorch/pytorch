@@ -584,8 +584,8 @@ TensorTypePtr TensorType::merge(
         // refactor into bind
         // TORCH_INTERNAL_ASSERT(*symbol < 0);
         if (symbols2dims.count(symbol.value()) == 0) {
-          symbols2dims[symbol.value()] = new_sizes[i];
-          new_symbols.push_back(symbol);
+          symbols2dims[*symbol] = new_sizes[i];
+          new_symbols.push_back(*symbol);
         } else {
           new_symbols.push_back(
               (symbols2dims[symbol.value()] == new_sizes[i]) ? symbol
