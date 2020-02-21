@@ -37,36 +37,35 @@ inline Tensor pad_sequence(
     ArrayRef<Tensor> sequences,
     bool batch_first = false,
     double padding_value = 0) {
-  // yf225 TODO: double check logic in this function
+  // assuming trailing dimensions and type of all the Tensors
+  // in sequences are same and fetching those from sequences[0]
   auto max_size = sequences[0].sizes();
-  auto trailing_dims = std::vector<int64_t>(max_size.begin() + 1, max_size.end());
-
-  auto max_len = (*std::max_element(
+  auto trailing_dims = max_size.slice(1);
+  auto max_len = std::max_element(
     sequences.begin(),
     sequences.end(),
-    [](Tensor& a, Tensor& b) {return a.sizes()[0] < b.sizes()[0];}
-  )).sizes()[0];
+    [](const Tensor& a, const Tensor& b) {
+      return a.size(0) < b.size(0);
+    }
+  ).size(0);
 
   std::vector<int64_t> out_dims;
-  out_dims.reserve(sequences.size() + max_len + trailing_dims.size());
-
   if (batch_first) {
-    out_dims.insert(out_dims.end(), sequences.size());
-    out_dims.insert(out_dims.end(), max_len);
+    out_dims = {sequences.size(), max_len};
   } else {
-    out_dims.insert(out_dims.end(), max_len);
-    out_dims.insert(out_dims.end(), sequences.size());
+    out_dims = {max_len, sequences.size()};
   }
-
   out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
 
-  auto out_tensor = torch::full(out_dims, padding_value, sequences[0].dtype());
-  for(int i = 0; i < sequences.size(); i++) {
-    int length = sequences[i].sizes()[0];
+  auto out_tensor = torch::full({out_dims}, padding_value, sequences[0].options());
+  for (size_t i = 0; i < sequences.size(); i++) {
+    auto tensor = sequences[i];
+    int64_t length = tensor.size(0);
+    // use index notation to prevent duplicate references to the tensor
     if (batch_first) {
-      out_tensor.select(0, i).narrow(0, 0, length).copy_(sequences[i]);
+      out_tensor.select(0, i).narrow(0, 0, length).copy_(tensor);
     } else {
-      out_tensor.select(1, i).narrow(0, 0, length).copy_(sequences[i]);
+      out_tensor.narrow(0, 0, length).select(1, i).copy_(tensor);
     }
   }
   return out_tensor;
