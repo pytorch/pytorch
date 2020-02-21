@@ -10,6 +10,10 @@
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 
+// fuser and IR parser
+#include "torch/csrc/jit/irparser.h"
+#include <torch/csrc/jit/fuser/cuda/parser.h>
+
 #include <iostream>
 
 // Tests go in torch::jit
@@ -600,6 +604,35 @@ void testGPU_FusionComputeAt2(){
   std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
   std::cout<<"Produced domain should be something along the lines of:";
   std::cout<<"[I0o, I0i{2}, I1, R0, I2]"<<std::endl;
+}
+
+void testGPU_FusionParser() {
+  auto g = std::make_shared<Graph>();
+  const auto graph0_string = R"IR(
+    graph(%0 : Float(2, 3, 4),
+          %1 : Float(2, 3, 4)):
+      %c0 : Float(2, 3, 4) = aten::mul(%0, %1)
+      %d0 : Float(2, 3, 4) = aten::mul(%c0, %0)
+      return (%d0))IR";
+  torch::jit::script::parseIR(graph0_string, g.get());
+
+  // strides are not yet supported in the irparser.
+  for (auto val : g->block()->inputs()) {
+    if (val->isCompleteTensor())
+      val->setType(val->type()->cast<TensorType>()->contiguous());
+  }
+  for (auto node : g->block()->nodes()) {
+    for (auto val : node->outputs()) {
+      if (val->isCompleteTensor())
+        val->setType(val->type()->cast<TensorType>()->contiguous());
+    }
+  }
+
+  Fusion fusion;
+  fuser::cuda::parseJitIR(g, fusion);
+
+  FusionGuard fg(&fusion);
+  TORCH_CHECK(fusion.exprs().size()==2);
 }
 
 void testGPU_FusionDependency(){

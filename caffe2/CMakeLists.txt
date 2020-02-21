@@ -432,7 +432,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/memory_dag.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/quantization.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/fuse_linear.cpp
-<<<<<<< HEAD
     ${TORCH_SRC_DIR}/csrc/jit/passes/freeze_module.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/interface.cpp
@@ -442,7 +441,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/ir_emitter.cpp
-=======
     ${TORCH_SRC_DIR}/csrc/jit/print_handler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/arith.cpp
@@ -461,7 +459,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
->>>>>>> hacked CUDA add fusion
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/exit_transforms.cpp
@@ -587,6 +584,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (USE_CUDA)
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -612,7 +610,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
 =======
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
+<<<<<<< HEAD
 >>>>>>> Removes (most) old code, updates README
+=======
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
+>>>>>>> Parser implemented that lowers JIT IR to codegen IR
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp

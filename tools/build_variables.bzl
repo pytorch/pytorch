@@ -306,6 +306,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/serialize/output-archive.cpp",
 =======
     "torch/csrc/jit/fuser/cuda/interface.cpp",
+    "torch/csrc/jit/fuser/cuda/parser.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/fuser/cuda/cs_ir/IR.cpp",
