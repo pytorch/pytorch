@@ -421,14 +421,10 @@ Tensor& block_diag_out(Tensor& result, TensorList tensors) {
     if (ndims == 2) {
       dim0 = tensor.size(0);
       dim1 = tensor.size(1);
-
-      TORCH_CHECK(dim0 > 0, "2-D must have size(0) > 0")
-      TORCH_CHECK(dim1 > 0, "2-D must have size(1) > 0")
       tensors_2D[tensor_idx] = tensor;
     } else if (ndims == 1) {
       // Switching dim 0 to dim 1 is intentional
       dim1 = tensor.size(0);
-      TORCH_CHECK(dim1 > 0, "1-D must have size(0) > 0")
       tensors_2D[tensor_idx] = tensor.expand({dim0, dim1});
     } else {
       tensors_2D[tensor_idx] = tensor.expand({dim0, dim1});
