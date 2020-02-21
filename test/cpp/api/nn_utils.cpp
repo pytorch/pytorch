@@ -4,9 +4,83 @@
 
 #include <test/cpp/api/support.h>
 
+#include <algorithm>
+#include <random>
+
 using namespace torch::nn;
 
 struct NNUtilsTest : torch::test::SeedingFixture {};
+
+torch::Tensor PadSequence_pad(const torch::Tensor& tensor, int64_t length) {
+  torch::NoGradGuard no_grad;
+  std::vector<int64_t> tensor_sizes{length - tensor.size(0)};
+  tensor_sizes.insert(
+    tensor_sizes.end(),
+    tensor.sizes().slice(1).begin(),
+    tensor.sizes().slice(1).end());
+  return torch::cat({tensor, torch::zeros(tensor_sizes, tensor.options())});
+}
+
+TEST_F(NNUtilsTest, PadSequence) {
+  // single dimensional
+  auto a = torch::tensor({1, 2, 3});
+  auto b = torch::tensor({4, 5});
+  auto c = torch::tensor({6});
+
+  torch::Tensor expected, padded;
+
+  // batch_first = true
+  expected = torch::tensor({{4, 5, 0}, {1, 2, 3}, {6, 0, 0}});
+  padded = utils::rnn::pad_sequence({b, a, c}, true);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  // batch_first = false
+  padded = utils::rnn::pad_sequence({b, a, c});
+  ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
+
+  // pad with non-zero value
+  expected = torch::tensor({{4, 5, 1}, {1, 2, 3}, {6, 1, 1}});
+  padded = utils::rnn::pad_sequence({b, a, c}, true, 1);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  // Test pad sorted sequence
+  expected = torch::tensor({{1, 2, 3}, {4, 5, 0}, {6, 0, 0}});
+  padded = utils::rnn::pad_sequence({a, b, c}, true);
+  ASSERT_TRUE(padded.allclose(expected));
+
+  // more dimensions
+  int64_t maxlen = 9;
+  for (int64_t num_dim : std::vector<int64_t>{0, 1, 2, 3}) {
+    std::vector<torch::Tensor> sequences;
+    std::vector<int64_t> trailing_dims(num_dim, 4);
+    for (int64_t i = 1; i < maxlen + 1; i++) {
+      int64_t seq_len = i * i;
+      std::vector<int64_t> tensor_sizes{seq_len, 5};
+      tensor_sizes.insert(
+        tensor_sizes.end(),
+        trailing_dims.begin(),
+        trailing_dims.end());
+      sequences.emplace_back(torch::rand(tensor_sizes));
+    }
+    std::shuffle(
+      std::begin(sequences),
+      std::end(sequences),
+      std::default_random_engine{});
+    std::vector<torch::Tensor> expected_tensors;
+    for (const torch::Tensor& seq : sequences) {
+      expected_tensors.emplace_back(PadSequence_pad(seq, maxlen * maxlen));
+    }
+
+    // batch first = true
+    auto expected = torch::stack(expected_tensors);
+    auto padded = utils::rnn::pad_sequence(sequences, true);
+    ASSERT_TRUE(padded.allclose(expected));
+
+    // batch first = false
+    padded = utils::rnn::pad_sequence(sequences);
+    ASSERT_TRUE(padded.allclose(expected.transpose(0, 1)));
+  }
+}
 
 TEST_F(NNUtilsTest, ClipGradNorm) {
   auto l = Linear(10, 10);
