@@ -66,7 +66,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def(py::init<>())
       .def(
           "before",
-          [](RecordFunctionAsync& recordFunctionAsync, const std::string name) {
+          [](RecordFunctionAsync& recordFunctionAsync, std::string name) {
             recordFunctionAsync.before(std::move(name));
           })
       .def("exit_scope", &RecordFunctionAsync::exitScope)
