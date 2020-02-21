@@ -11673,6 +11673,7 @@ class TestTorchDeviceType(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
         def fn(torchfn, *args):
