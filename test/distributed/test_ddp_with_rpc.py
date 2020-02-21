@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 import enum
 
 from typing import Callable, List, NamedTuple
@@ -265,18 +264,23 @@ class TestDdpWithRpc(TestCase):
             process.start()
             self.processes.append(process)
 
-    def test_no_ddp(self):
-        def run_one_forward(model: nn.Module):
-            n = 2
-            features = FeatureSet(
-                sparse_features=torch.LongTensor(
-                    [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
-                ),
-                dense_features=torch.randn((n, D_DENSE)),
-            )
-            gLogger.info(f"Forward pass on {model(features)}")
 
-        self.spawn_trainers(run_one_forward, DdpMode.NONE)
+    @staticmethod
+    def run_one_forward(model: nn.Module):
+        n = 2
+        features = FeatureSet(
+            sparse_features=torch.LongTensor(
+                [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
+            ),
+            dense_features=torch.randn((n, D_DENSE)),
+        )
+        gLogger.info(f"Forward pass on {model(features)}")
+
+    def test_forward_without_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.NONE)
+
+    def test_forward_with_ddp(self):
+        self.spawn_trainers(self.run_one_forward, DdpMode.OUTSIDE)
 
 
 if __name__ == "__main__":
