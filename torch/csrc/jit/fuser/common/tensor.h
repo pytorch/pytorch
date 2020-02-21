@@ -193,7 +193,7 @@ struct TORCH_API Tensor : public Val {
 };
 
 struct TensorView;
-void ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis);
+TORCH_API const TensorView* ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis);
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -232,11 +232,11 @@ struct TORCH_API TensorView : public Val {
 
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
   int getComputeAtAxis() const noexcept { return compute_at_axis_; }
-  void computeAt(const TensorView* tv, int axis) {
-    ComputeAt_impl(this, tv, axis);
+  const TensorView* computeAt(const TensorView* tv, int axis) {
+    const TensorView* compute_tv = ComputeAt_impl(tv, this, axis);
     compute_at_view_ = tv;
     compute_at_axis_ = axis;
-    
+    return compute_tv;
   }
 
 private:

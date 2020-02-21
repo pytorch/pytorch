@@ -534,8 +534,11 @@ void testGPU_FusionComputeAt(){
 
   const TensorDomain *td = new TensorDomain(dom);
   const TensorView *tv = new TensorView(new Tensor(DataType::Float, td));
-  const TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
-  const BinaryOp* add_node = new BinaryOp(BinaryOpType::Add, tv2, tv, new Float(1.0));
+  TensorView *tv2 = new TensorView(new Tensor(DataType::Float, td));
+  TensorView *tv3 = new TensorView(new Tensor(DataType::Float, td));
+  const BinaryOp* add_node = new BinaryOp(BinaryOpType::Add, tv2, tv3, new Float(1.0));
+
+  const BinaryOp* add_node2 = new BinaryOp(BinaryOpType::Add, tv, tv2, new Float(1.0));
   //[I0, I1, R0, I2]
   tv = split(tv, 0, 4);
   //[I0o, I0i{4}, I1, R0, I2]
@@ -550,13 +553,14 @@ void testGPU_FusionComputeAt(){
   });
   //[R0, I0i{4}*I1, I0o, I2i, I2o{2}]
   
-  TransformReplay TR;
-  const TensorView* replayed = TR.replay(tv, tv2, 2);
-
-  //When replayed tv2 should be: [I1, I0i*I0o, R0, I2]
-  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
-  std::cout<<"Produced domain should be something along the lines of:";
-  std::cout<<"[R0, I0i{4}*I1, I0o, I2]"<<std::endl;
+  const TensorView* replayed = tv3->computeAt(tv, 2);
+  
+  //When replayed tv2 should be: [I1, I0i*I0o, R0, I2], tv3 doesn't actually get produced and is an input, therefore it shouldn't be modified
+  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << " and " << tv3 << "\n with \'compute_at(2)\' produces: " <<std::endl;
+  for(const Val* val : fusion.vals())
+    if(val->getValType() == ValType::TensorView)
+      std::cout<<val<<std::endl;
+  
 }
 
 void testGPU_FusionComputeAt2(){
