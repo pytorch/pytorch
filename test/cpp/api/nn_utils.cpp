@@ -12,7 +12,7 @@ using namespace torch::nn;
 struct NNUtilsTest : torch::test::SeedingFixture {};
 
 TEST_F(NNUtilsTest, PadSequence) {
-  Tensor pad(const Tensor& tensor, int64_t length) {
+  torch::Tensor pad(const torch::Tensor& tensor, int64_t length) {
     torch::NoGradGuard no_grad;
     std::vector<int64_t> tensor_sizes{length - tensor.size(0)};
     tensor_sizes.insert(
