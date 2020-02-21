@@ -427,7 +427,27 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
           auto futureResponse = cb_->operator()(message);
           if (futureResponse->completed()) {
             if (!futureResponse->hasError()) {
-              send(work.from_, std::move(*futureResponse).moveValue());
+              // Hack: Check for device type here since throwing an exception in
+              // the send() below is not handled by enqueueRecv yet. Should be
+              // fixed as part of
+              // https://github.com/pytorch/pytorch/issues/25516.
+              const auto& respMessage = futureResponse->wait();
+              std::string errorMsg;
+              for (const auto& tensor : respMessage.tensors()) {
+                if (!tensor.device().is_cpu()) {
+                  errorMsg = c10::str(
+                      "ProcessGroup RPC backend only supports",
+                      " CPU tensors, please move your tensors to CPU before sending ",
+                      "them over RPC");
+                  break;
+                }
+              }
+
+              if (errorMsg.empty()) {
+                send(work.from_, std::move(*futureResponse).moveValue());
+              } else {
+                send(work.from_, createExceptionResponse(message, errorMsg));
+              }
             } else {
               send(
                   work.from_,
