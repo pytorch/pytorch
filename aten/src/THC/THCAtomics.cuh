@@ -138,7 +138,14 @@ static inline  __device__ void gpuAtomicAdd(at::Half *address, at::Half val) {
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
-static inline  __device__  void atomicAdd(double *address, double val) {
+static inline __device__ void atomicAdd(double* address, double val)
+#if defined(__clang__) && defined(__CUDA__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wgcc-compat"
+    __attribute__((enable_if(true, "")))
+#pragma GCC diagnostic pop
+#endif
+{
   unsigned long long int* address_as_ull = (unsigned long long int*)address;
   unsigned long long int old = *address_as_ull;
   unsigned long long int assumed;
