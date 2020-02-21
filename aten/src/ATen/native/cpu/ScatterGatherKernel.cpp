@@ -274,6 +274,13 @@ void scatter_fill_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, Sca
   );
 }
 
+  void atomic_add(auto *self_data_ptr, auto *src_data_ptr) {
+    auto old = *self_data_ptr;
+    while(old == *self_data_ptr) {
+      *self_data_ptr += *src_data_ptr;
+    }
+  }
+  
 void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (index.numel() == 0) {
     return;
@@ -300,7 +307,7 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+        atomic_add(self_data + idx_dim * self_dim_stride, src_data + i * src_dim_stride);
       }
     },
       /*serial_exec=*/true);
