@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
 #include <torch/csrc/jit/fuser/common/type.h>
+#include <queue>
 #include <deque>
 #include <iostream>
 
@@ -10,6 +11,10 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+
+/*
+ * Base IterVisitor calls
+ */ 
 
 std::vector<const Statement*> IterVisitor::next(
     const Statement* const statement) {
@@ -36,18 +41,7 @@ void IterVisitor::handle(const Statement* const stmt) {
 }
 
 void IterVisitor::handle(const Expr* const expr) {
-<<<<<<< HEAD
   expr->dispatch(this);
-=======
-   switch (*(expr->getExprType())) {
-    case ExprType::UnaryOp:
-      return handle(static_cast<const UnaryOp*>(expr));
-    case ExprType::BinaryOp:
-      return handle(static_cast<const BinaryOp*>(expr));
-    default:
-      throw std::runtime_error("Unknown ExprType in handle(Expr).");
-    }
->>>>>>> Create BinaryOp and UnaryOp Exprs.
 }
 
 void IterVisitor::handle(const Val* const val) {
@@ -81,7 +75,7 @@ void IterVisitor::traverse(
     std::vector<const Val*> from) {
   std::set<const Statement*> visited;
   std::deque<const Statement*> to_visit;
-
+  
   if (FusionGuard::getCurFusion() != fusion)
     throw std::runtime_error("fusion is not active.");
   std::queue<const Val*> outputs_to_visit;
@@ -89,15 +83,23 @@ void IterVisitor::traverse(
     outputs_to_visit.emplace(entry);
 
   while (!outputs_to_visit.empty()) {
+
+    if(stopCondition())
+      break;
+
     to_visit.push_front(outputs_to_visit.front());
     outputs_to_visit.pop();
-
     while (!to_visit.empty()) {
+
+      if(stopCondition())
+        break;
+
       const Statement* stmt = to_visit.front();
       std::vector<const Statement*> inps = next(stmt);
       for (auto it = inps.rbegin(); it != inps.rend(); it++){
         const Statement* inp = *it;
         if (visited.find(inp) == visited.end()) {
+          toVisitCallback(inp);
           to_visit.emplace_front(inp);
         }
       }
@@ -142,18 +144,64 @@ void IterVisitor::traverse(
   traverse(fusion, outputs_to_visit);
 }
 
-
+//Debug function 
+std::ostream& operator<<(std::ostream& os, std::stack<const Val*> vals) {
+  os<<"<";
+  while(!vals.empty()){
+    os<<vals.top();
+    vals.pop();
+    if(!vals.empty())
+      os<<", ";
+  }
+  return os<<">";
+}
 
 void DependencyCheck::handle(const Val* val){
-  IterVisitor::handle(val);
+  //Debug dependency chain
+  //std::cout << "Handle val: " << val << " deps: " << dep_chain << std::endl;
   if(val->same_as(dependency_))
     is_dependency = true;
+}
+
+void DependencyCheck::handle(const Expr* expr){
+  //We want to update the dependency chain, but we want to make sure
+  //that the top value on the chain is an output of this expr
+  
+  for(decltype(expr->nOutputs()) i = 0; i < expr->nOutputs(); i++){
+    TORCH_CHECK(expr->hasOutput(dep_chain.top()));
+    dep_chain.pop();
+  }
+}
+
+void DependencyCheck::toVisitCallback(const Statement* stmt){
+  //If an expression push outputs of expr to dependency chain.
+  if(stmt->isExpr()){
+    const Expr* expr = static_cast<const Expr*>(stmt);
+    for(auto out : expr->outputs()){
+      dep_chain.push(static_cast<const Val*>(out));
+    }
+  }
 }
 
 bool DependencyCheck::check(){
   is_dependency = false;
   IterVisitor::traverse(FusionGuard::getCurFusion(), {of_});
   return is_dependency;
+}
+
+std::stack<const Val*> DependencyCheck::getDependencyChain(const Val* dependency, const Val* of) {
+  DependencyCheck dp(dependency, of);
+  dp.check();
+
+  //Return the reversed stack, we start from output and go to the input, including of, but not dependency
+  std::stack<const Val*> dep_copy = dp.dep_chain;
+  std::stack<const Val*> reversed_clean;
+
+  while(!dep_copy.empty()){
+    const Val* next = dep_copy.top(); dep_copy.pop();
+      reversed_clean.push(next);
+  }
+  return reversed_clean;
 }
 
 } // namespace fuser

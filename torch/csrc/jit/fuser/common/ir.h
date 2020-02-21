@@ -219,7 +219,6 @@ struct TORCH_API IRInputOutput {
   }
 
   void addInput(const Val* input) {
-    
     inputs_.push_back(input);
   }
   void addOutput(const Val* output) {
