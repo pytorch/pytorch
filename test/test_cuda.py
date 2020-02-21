@@ -2146,5 +2146,9 @@ t2.start()
         self.assertEqual(val, 1)
         self.assertEqual(idx, x.shape[0] - 1)
 
+    def test_to_numpy(self):
+        self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
+
 if __name__ == '__main__':
     run_tests()

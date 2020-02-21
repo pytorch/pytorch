@@ -74,11 +74,13 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+  // std::cout << "tensor_numpy.cpp: tensor_to_numpy" << std::endl;
   if (tensor.device().type() != DeviceType::CPU) {
-      throw TypeError(
-        "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.", tensor.device().type());
+    throw TypeError(
+      "can't convert non-cpu device type tensor to numpy. Use Tensor.cpu() to "
+      "copy the tensor to host memory first.");
   }
+  std::cout << "tensor_numpy.cpp A" << std::endl;
   if (tensor.layout() != Layout::Strided) {
       throw TypeError(
         "can't convert %s layout tensor to numpy."
