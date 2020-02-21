@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <THCUNN/THCUNN.h>
 #include <THCUNN/common.h>
 #include <TH/THHalf.h>
@@ -128,7 +130,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
     if (size_average) {
       if (nframe == 0) {
         // Mean reduction on empty tensors produces NaN
-        *output = ::nan("");
+        *output = std::numeric_limits<double>::quiet_NaN();
       }
       if (*total_weight != 0) {
         *output = ScalarConvert<Acctype, Dtype>::to(outputAcc / total_weightAcc);
