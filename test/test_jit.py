@@ -4014,6 +4014,39 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_inlined_graph(self):
+        """
+        Check that the `inlined_graph` property correctly returns an inlined
+        graph, both through function calls and method calls.
+        """
+        @torch.jit.script
+        def foo(x):
+            return torch.add(x, x)
+
+        class MyNestedMod(torch.nn.Module):
+            def __init__(self):
+                super(MyNestedMod, self).__init__()
+
+            def forward(self, x):
+                return torch.sub(x, x)
+
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.nested = MyNestedMod()
+
+            def forward(self, x):
+                x = self.nested(x)  # sub
+                x = foo(x)  # add
+                return torch.mul(x, x)
+
+        m = torch.jit.script(MyMod())
+        FileCheck().check("aten::sub") \
+            .check("aten::add") \
+            .check("aten::mul") \
+            .run(m.inlined_graph)
+
     def test_oneline_func(self):
         def fn(x): return x  # noqa: E704
 
@@ -10813,30 +10846,32 @@ a")
             bar()
 
     def test_tuples(self):
-        def foo(i):
-            a = (i + 4, i * 2)
-            c = a
-            # some nonsense with if-statements and loops to check
-            # that tuple lowering doesn't fail
-            if True:
-                c = (i * 9, i + 1)
-            t0, t1 = c
-            while False:
-                t0, t1 = c
-                c = (t1, t0)
-            x = (1,)
-            y = 1,
-            return t0, x, y
-
-        v = torch.rand(10, 3)
-        self.checkScript(foo, (v,))
-
-        with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
-            @torch.jit.script
-            def mixtypes(x):
-                a = (x, x)
+        # TODO: jitter issue.
+        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+            def foo(i):
+                a = (i + 4, i * 2)
+                c = a
+                # some nonsense with if-statements and loops to check
+                # that tuple lowering doesn't fail
                 if True:
-                    a = 4
+                    c = (i * 9, i + 1)
+                t0, t1 = c
+                while False:
+                    t0, t1 = c
+                    c = (t1, t0)
+                x = (1,)
+                y = 1,
+                return t0, x, y
+
+            v = torch.rand(10, 3)
+            self.checkScript(foo, (v,))
+
+            with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
+                @torch.jit.script
+                def mixtypes(x):
+                    a = (x, x)
+                    if True:
+                        a = 4
 
     def test_if_tuple_sizes(self):
         with self.assertRaisesRegex(RuntimeError, "Type mismatch"):

@@ -16,7 +16,8 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     bool is_miopen_acceptable = (input.scalar_type() == at::kFloat) &&
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
-                                (dropout_state == 0.0);
+                                (dropout_state == 0.0) &&
+                                (at::globalContext().userEnabledCuDNN());
     return is_miopen_acceptable;
 }
 
