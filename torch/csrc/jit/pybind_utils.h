@@ -324,7 +324,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
 
 inline Stack toTraceableStack(const py::tuple& inputs) {
   auto info = toTypeInferredIValue(inputs);
-  AT_CHECK(
+  TORCH_CHECK(
       isTraceableType(info.type()),
       "Type '",
       info.type()->python_str(),
