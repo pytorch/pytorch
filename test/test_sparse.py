@@ -1884,14 +1884,14 @@ class TestSparse(TestCase):
 
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
-        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
+        all_sparse_dtypes = torch.testing.get_all_dtypes()
         do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.is_available():
             do_test_dtypes(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
-        all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes()]
+        all_sparse_dtypes = torch.testing.get_all_dtypes()
         do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
             do_test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
