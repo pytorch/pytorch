@@ -7,6 +7,7 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
+#include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
@@ -384,6 +385,7 @@ inline IValue toIValue(
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
     case TypeKind::ScalarTypeType:
+    case TypeKind::MemoryFormatType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
         return static_cast<int64_t>(dtype->scalar_type);
@@ -395,6 +397,10 @@ inline IValue toIValue(
       if (THPLayout_Check(obj.ptr())) {
         auto layout = reinterpret_cast<THPLayout*>(obj.ptr());
         return static_cast<int8_t>(layout->layout);
+      }
+      if (THPMemoryFormat_Check(obj.ptr())) {
+        auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
+        return static_cast<int8_t>(memory_format->memory_format);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::NoneType:
