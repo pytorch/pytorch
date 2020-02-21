@@ -148,6 +148,9 @@ public:
   Vec256<float> expm1() const {
     return Vec256<float>(Sleef_expm1f8_u10(values));
   }
+  Vec256<float> fmod(const Vec256<float>& q) const {
+    return Vec256<float>(Sleef_fmodf8(values, q));
+  }
   Vec256<float> log() const {
     return Vec256<float>(Sleef_logf8_u10(values));
   }

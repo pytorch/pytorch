@@ -303,6 +303,18 @@ public:
   Vec256<T> frac() const {
     return *this - this->trunc();
   }
+  template <
+    typename U = T,
+    typename std::enable_if_t<std::is_floating_point<U>::value, int> = 0>
+  Vec256<T> fmod(const Vec256<T>& q) const {
+    // U is for SFINAE purposes only. Make sure it is not changed.
+    static_assert(std::is_same<U, T>::value, "U must be T");
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::fmod(values[i], q[i]);
+    }
+    return ret;
+  }
   Vec256<T> log() const {
     return map(std::log);
   }
