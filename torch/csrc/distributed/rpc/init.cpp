@@ -381,9 +381,9 @@ If the future completes with an error, an exception is thrown.
                                   .getSchema();
         auto stack = torch::jit::createStackForSchema(
             functionSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(
+        auto rrefPtr = remoteTorchscript(
             dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(userRRefPtr);
+        return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
 
