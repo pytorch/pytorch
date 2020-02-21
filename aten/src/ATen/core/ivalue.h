@@ -656,13 +656,10 @@ private:
 struct StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
+      std::shared_ptr<Type> type);
+
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+  std::shared_ptr<Type> type_;
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();

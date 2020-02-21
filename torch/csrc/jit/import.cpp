@@ -145,12 +145,12 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
   auto obj_loader = [&](at::StrongTypePtr type, IValue input) {
     auto cls = type.type_->expect<at::ClassType>();
     size_t n = cls->numAttributes();
-    if (checkHasValidSetGetState(type.type_)) {
+    if (checkHasValidSetGetState(cls)) {
       auto obj = c10::ivalue::Object::create(type, n);
       // XXX: Do not optimize __setstate__, so that we don't try to
       // specialize the class before it is initialized.
       setGraphExecutorOptimize(false);
-      Function* set_state = type.type_->getMethod("__setstate__");
+      Function* set_state = cls->getMethod("__setstate__");
       // since we are in the middle of unpickling we might still have lists and
       // dicts that do not have accurate tags (e.g. they report they are
       // List[Any]). But we need to run __setstate__ which will check the input
