@@ -1743,6 +1743,10 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
+  void unsafe_set_compilation_unit(std::weak_ptr<CompilationUnit> cu) {
+    compilation_unit_ = std::move(cu);
+  }
+
   // generate a refined version of this class.
   // It has the same name but the slot Types are subtypes of
   // the original slots. It is only valid to refine a class type in a context

@@ -60,10 +60,24 @@ Func wrap_func(Func f) {
   return f;
 }
 
+struct RegisteredClassRecord {
+  std::string qualClassName;
+  std::string classTypeidName_intrusive_ptr;
+  std::string classTypeidName_tagged_capsule;
+  at::ClassTypePtr classTypePtr;
+
+  // Store registered methods. This maps the method name
+  // (e.g. "forward", "__getstate__") to the qualified
+  // name for the registered op.
+  std::unordered_map<std::string, std::string> registeredMethods;
+};
+
 } // namespace detail
 
 TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
-TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
+TORCH_API std::unordered_map<std::string, detail::RegisteredClassRecord>& registeredClasses();
+TORCH_API void invokeClassRegistrationCallbacks(const detail::RegisteredClassRecord& class_record);
+TORCH_API void invokeMethodRegistrationCallbacks(const detail::RegisteredClassRecord& class_record, const std::string& method_name);
 
 } // namespace jit
 } // namespace torch

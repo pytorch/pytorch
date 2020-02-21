@@ -1,32 +1,60 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/custom_class.h>
+#include <torch/custom_class.h>
 
 #include <atomic>
 
 namespace torch {
 namespace jit {
 
-#ifndef C10_MOBILE
-
-namespace {
-
-at::TypePtr noOpGetter(const std::string& /*unused*/) {
-  return nullptr;
+std::vector<c10::RegisterOperators>& registeredOps() {
+  static std::vector<c10::RegisterOperators> ops;
+  return ops;
 }
 
-std::atomic<GetCustomClassFnType> custom_class_fn{noOpGetter};
+std::unordered_map<std::string, detail::RegisteredClassRecord>& registeredClasses() {
+  static std::unordered_map<std::string, detail::RegisteredClassRecord> registry;
+  return registry;
+}
 
+namespace {
+  std::vector<ClassRegistrationCallback> &class_callbacks() {
+    static std::vector<ClassRegistrationCallback> cbs;
+    return cbs;
+  }
+
+  std::vector<MethodRegistrationCallback> &method_callbacks() {
+    static std::vector<MethodRegistrationCallback> cbs;
+    return cbs;
+  }
 }  // namespace
 
-void setGetCustomClassFn(GetCustomClassFnType fn) {
-  custom_class_fn.store(fn);
+void registerClassRegistrationCallback(ClassRegistrationCallback cb) {
+  class_callbacks().emplace_back(std::move(cb));
+}
+
+void registerMethodRegistrationCallback(MethodRegistrationCallback cb) {
+  method_callbacks().emplace_back(std::move(cb));
+}
+
+void invokeClassRegistrationCallbacks(const detail::RegisteredClassRecord& class_record) {
+  for (auto & cb : class_callbacks()) {
+    cb(class_record);
+  }
+}
+
+void invokeMethodRegistrationCallbacks(const detail::RegisteredClassRecord& class_record, const std::string& method_name) {
+  for (auto & cb : method_callbacks()) {
+    cb(class_record, method_name);
+  }
 }
 
 at::TypePtr getCustomClass(const std::string& name) {
-  return custom_class_fn.load()(name);
+  if (registeredClasses().count(name)) {
+    return registeredClasses().at(name).classTypePtr;
+  }
+  return nullptr;
 }
 
-#endif  // C10_MOBILE
 
 } // namespace jit
 } // namespace torch
