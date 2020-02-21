@@ -190,9 +190,11 @@ libtorch_sources = [
     "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
 ]
 
 libtorch_cuda_sources = [
