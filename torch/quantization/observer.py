@@ -339,8 +339,9 @@ class MinMaxObserver(_ObserverBase):
         local_state = ['min_val', 'max_val']
         for name in local_state:
             key = prefix + name
+            val = state_dict[key]
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -488,18 +489,21 @@ class PerChannelMinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
+
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(PerChannelMinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'min_vals'] = self.min_vals
         destination[prefix + 'max_vals'] = self.max_vals
+
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
         local_state = ['min_vals', 'max_vals']
         for name in local_state:
             key = prefix + name
+            val = state_dict[key]
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -835,8 +839,9 @@ class HistogramObserver(_ObserverBase):
         local_state = ['min_val', 'max_val']
         for name in local_state:
             key = prefix + name
+            val = state_dict[key]
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
