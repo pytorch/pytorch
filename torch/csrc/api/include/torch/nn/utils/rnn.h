@@ -51,9 +51,9 @@ inline Tensor pad_sequence(
 
   std::vector<int64_t> out_dims;
   if (batch_first) {
-    out_dims = {sequences.size(), max_len};
+    out_dims = {(int64_t)sequences.size(), max_len};
   } else {
-    out_dims = {max_len, sequences.size()};
+    out_dims = {max_len, (int64_t)sequences.size()};
   }
   out_dims.insert(out_dims.end(), trailing_dims.begin(), trailing_dims.end());
 
