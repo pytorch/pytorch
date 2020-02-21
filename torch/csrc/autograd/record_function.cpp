@@ -275,6 +275,8 @@ void RecordFunctionAsync::setThreadId() {
   threadId_ = threadId;
 }
 
+// toggle initialized so that RecordFunction destructor does not attempt to
+// reinvoke callbacks.
 RecordFunctionAsync::~RecordFunctionAsync() {
   initialized_ = false;
 }
