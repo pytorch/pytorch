@@ -10,7 +10,7 @@ import random
 import sys
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests
+    do_test_empty_full, load_tests, TEST_NUMPY
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
 from torch.autograd.gradcheck import gradcheck
@@ -2136,6 +2136,7 @@ class TestSparse(TestCase):
                                lambda: torch.tensor(1., device=self.device).to_sparse()
                                / torch.tensor(1., device=self.device).to_sparse())
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_sparse_to_numpy(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
