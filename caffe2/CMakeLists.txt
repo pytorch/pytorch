@@ -456,7 +456,10 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
 
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
