@@ -49,7 +49,7 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
       TensorNode* tensor_node = const_cast<TensorNode*>(to_process_.front());
       to_process_.pop();
       current_consumer_ = tensor_node;
-      tensor_node->function().body().accept(this);
+      tensor_node->function()->body().accept(this);
     }
 
     // Topologically sorted all the tensors in encountered_
@@ -120,7 +120,7 @@ ScheduleNode::ScheduleNode(const std::vector<Tensor>& tensors)
   std::vector<const TensorNode*> sorted_tensors =
       dependency_tracker_->GetTopologicallySorted();
   for (const TensorNode* tensor_node : sorted_tensors) {
-    const Function& func = tensor_node->function();
+    Function* func = tensor_node->function();
     if (current_func == nullptr) {
       current_func = root_node_->NewFirstChild();
     } else {
@@ -128,9 +128,9 @@ ScheduleNode::ScheduleNode(const std::vector<Tensor>& tensors)
     }
     // TODO: handles the scalar case where ndims == 0
     TensorExprNode* expr_node = current_func;
-    for (int i = 0; i < func.ndim(); i++) {
+    for (int i = 0; i < func->ndim(); i++) {
       expr_node = expr_node->NewFirstChild();
-      LoopAxis* loop_axis = this->NewAxis(func.arg(i), Range(0, func.dim(i)));
+      LoopAxis* loop_axis = this->NewAxis(func->arg(i), Range(0, func->dim(i)));
       expr_node->set_loop_axis(loop_axis);
     }
     expr_node = expr_node->NewFirstChild();
@@ -396,18 +396,18 @@ class Flattener : public IRMutator {
  private:
   Expr mutate(const FunctionCall* v) override {
     Buffer buffer(
-        v->tensor().function().func_var(),
-        v->tensor().function().body().dtype(),
-        v->tensor().function().dims());
+        v->tensor().function()->func_var(),
+        v->tensor().function()->body().dtype(),
+        v->tensor().function()->dims());
     return buffer(v->params());
   }
 };
 
 class FunctionInliner : public IRMutator {
  public:
-  FunctionInliner(const std::vector<Function>& funcs) : funcs_(funcs) {
-    for (const auto& func : funcs) {
-      func_var_set_.insert(func.func_var().node());
+  FunctionInliner(const std::vector<Function*>& funcs) : funcs_(funcs) {
+    for (Function* func : funcs) {
+      func_var_set_.insert(func->func_var().node());
     }
   }
 
@@ -415,11 +415,11 @@ class FunctionInliner : public IRMutator {
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   Expr mutate(const FunctionCall* v) override {
-    const Function& func = v->tensor().function();
-    if (func_var_set_.count(func.func_var().node()) > 0) {
+    Function* func = v->tensor().function();
+    if (func_var_set_.count(func->func_var().node()) > 0) {
       // Insert the caller/callee pair into the mapping.
-      for (int i = 0; i < func.ndim(); i++) {
-        const Variable* func_callee_arg = func.arg(i).AsNode<Variable>();
+      for (int i = 0; i < func->ndim(); i++) {
+        const Variable* func_callee_arg = func->arg(i).AsNode<Variable>();
         const Expr& func_caller_param = v->param(i);
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter != inline_mapping_.end()) {
@@ -430,12 +430,12 @@ class FunctionInliner : public IRMutator {
       }
 
       // Call the actual replacement.
-      Expr body = func.body();
+      Expr body = func->body();
       Expr result = body.accept_mutator(this);
 
       // Remove the caller/callee relationship.
-      for (int i = 0; i < func.ndim(); i++) {
-        const Variable* func_callee_arg = func.arg(i).AsNode<Variable>();
+      for (int i = 0; i < func->ndim(); i++) {
+        const Variable* func_callee_arg = func->arg(i).AsNode<Variable>();
         auto iter = inline_mapping_.find(func_callee_arg);
         if (iter == inline_mapping_.end()) {
           throw std::runtime_error(
@@ -471,13 +471,13 @@ class FunctionInliner : public IRMutator {
   }
 
   std::unordered_map<const Variable*, Expr> inline_mapping_;
-  std::vector<Function> funcs_;
+  std::vector<Function*> funcs_;
   std::unordered_set<const Variable*> func_var_set_;
 };
 
 static Stmt InjectInlines(
     const Stmt& stmt,
-    const std::vector<Function>& inlined_funcs) {
+    const std::vector<Function*>& inlined_funcs) {
   FunctionInliner inliner(inlined_funcs);
   Stmt stmt_old = stmt;
   Stmt stmt_new = stmt_old.accept_mutator(&inliner);
@@ -535,9 +535,9 @@ Stmt ScheduleNode::Lower() {
     return core_stmt;
   }
 
-  std::unordered_set<const FunctionNode*> inlined_func_set;
+  std::unordered_set<Function*> inlined_func_set;
   for (size_t i = 0; i < inlined_functions_.size(); i++) {
-    inlined_func_set.insert(inlined_functions_[i].node());
+    inlined_func_set.insert(inlined_functions_[i]);
   }
   std::unordered_set<const TensorNode*> output_tensors_set;
   for (size_t i = 0; i < output_tensors_.size(); i++) {
@@ -547,7 +547,7 @@ Stmt ScheduleNode::Lower() {
   std::vector<Stmt> frees;
   for (size_t i = 0; i < internal_tensors_.size(); i++) {
     const Tensor& tensor = internal_tensors_[i];
-    if (inlined_func_set.count(tensor.function().node()) > 0) {
+    if (inlined_func_set.count(tensor.function()) > 0) {
       // No need to allocation memory for intermediate tensors.
       continue;
     }

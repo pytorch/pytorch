@@ -51,8 +51,8 @@ class CodeGen::BufferArg {
   BufferArg(const Buffer& buffer)
       : var_(buffer.data()), dtype_(buffer.dtype()) {}
   BufferArg(const Tensor& tensor)
-      : var_(tensor.function().func_var()),
-        dtype_(tensor.function().body().dtype()) {}
+      : var_(tensor.function()->func_var()),
+        dtype_(tensor.function()->body().dtype()) {}
   BufferArg(const Function& func)
       : var_(func.func_var()), dtype_(func.body().dtype()) {}
   BufferArg(const Var& var) : var_(var), dtype_(var.dtype()), isVar_(true) {}

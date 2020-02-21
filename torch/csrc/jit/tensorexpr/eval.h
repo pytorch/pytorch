@@ -211,33 +211,37 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     return Value(result_v);
   }
 
-  template <typename T>
+  template <typename T, typename R>
   Value compare_select_op(
       const Value& lhs,
       const Value& rhs,
+      const Value& retval1,
+      const Value& retval2,
       CompareSelectOperation cmp_op) {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
-    std::vector<int> result_v(lhs_v.size());
+    std::vector<R> ret_val1_v = retval1.as_vec<R>();
+    std::vector<R> ret_val2_v = retval2.as_vec<R>();
+    std::vector<R> result_v(lhs_v.size());
     for (size_t i = 0; i < lhs_v.size(); i++) {
       switch (cmp_op) {
         case CompareSelectOperation::kEQ:
-          result_v[i] = (lhs_v[i] == rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] == rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kNE:
           result_v[i] = (lhs_v[i] != rhs_v[i]) ? 1 : 0;
           break;
         case CompareSelectOperation::kGT:
-          result_v[i] = (lhs_v[i] > rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] != rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kGE:
-          result_v[i] = (lhs_v[i] >= rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] > rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kLT:
-          result_v[i] = (lhs_v[i] < rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] < rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kLE:
-          result_v[i] = (lhs_v[i] <= rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] <= rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         default:
           // TODO: change to a proper error report
@@ -271,11 +275,20 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Value lhs_v = value_;
     v->rhs().accept(this);
     Value rhs_v = value_;
+    v->ret_val1().accept(this);
+    Value ret_val1_v = value_;
+    v->ret_val2().accept(this);
+    Value ret_val2_v = value_;
+
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
+    CHECK_EQ(ret_val1_v.dtype(), ret_val2_v.dtype());
     if (lhs_v.dtype().scalar_type() == kFloat32) {
-      value_ = compare_select_op<float>(lhs_v, rhs_v, cmp_op);
+      value_ = compare_select_op<float, int>(
+          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op);
+
     } else if (lhs_v.dtype().scalar_type() == kInt32) {
-      value_ = compare_select_op<int>(lhs_v, rhs_v, cmp_op);
+      value_ = compare_select_op<int, int>(
+          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op);
     } else {
       LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
     }

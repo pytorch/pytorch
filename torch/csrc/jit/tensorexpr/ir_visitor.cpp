@@ -44,6 +44,8 @@ void IRVisitor::visit(const Min* v) {
 void IRVisitor::visit(const CompareSelect* v) {
   v->lhs().accept(this);
   v->rhs().accept(this);
+  v->ret_val1().accept(this);
+  v->ret_val2().accept(this);
 }
 
 void IRVisitor::visit(const IntImm* v) {}

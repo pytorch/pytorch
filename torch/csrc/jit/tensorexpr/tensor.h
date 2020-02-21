@@ -61,38 +61,38 @@ class TORCH_API TensorOperationNode : public KernelScopedObject {
 class TensorNode : public TensorOperationNode {
  public:
   int ndim() const {
-    return function_.ndim();
+    return function_->ndim();
   }
   const Expr& dim(int index) const {
-    return function_.dim(index);
+    return function_->dim(index);
   }
   const std::vector<Expr>& dims() const {
-    return function_.dims();
+    return function_->dims();
   }
-  const Function& function() const {
+  Function* function() const {
     return function_;
   }
   int output_index() const {
     return output_index_;
   }
   const Var& buffer_var() const {
-    return function_.func_var();
+    return function_->func_var();
   }
   const Var& arg(int index) const {
-    return function_.arg(index);
+    return function_->arg(index);
   }
   const std::vector<Var>& args() const {
-    return function_.args();
+    return function_->args();
   }
   Dtype dtype() const {
-    return function_.body().dtype();
+    return function_->body().dtype();
   }
 
  private:
   friend class Tensor;
-  TensorNode(const Function& function, int output_index)
+  TensorNode(Function* function, int output_index)
       : function_(function), output_index_(output_index) {}
-  Function function_;
+  Function* function_;
   int output_index_;
 };
 
@@ -162,7 +162,7 @@ class TORCH_API TensorOperation {
 
 class Tensor : public TensorOperation {
  public:
-  Tensor(const Function& function, int output_index)
+  Tensor(Function* function, int output_index)
       : TensorOperation(new TensorNode(function, output_index)) {}
 
   explicit Tensor(TensorNode* tensor_node) : TensorOperation(tensor_node) {}
@@ -176,7 +176,7 @@ class Tensor : public TensorOperation {
   const std::vector<Expr>& dims() const {
     return node()->dims();
   }
-  const Function& function() const {
+  Function* function() const {
     return node()->function();
   }
   const Var& arg(int index) const {
@@ -280,11 +280,11 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   std::string func_name() const {
-    return tensor_.function().func_var().name_hint();
+    return tensor_.function()->func_var().name_hint();
   }
 
   FunctionCall(const Tensor& tensor, const std::vector<Expr>& params)
-      : BaseClass(tensor.function().body().dtype(), kFunctionCall, params),
+      : BaseClass(tensor.function()->body().dtype(), kFunctionCall, params),
         tensor_(tensor) {}
   Tensor tensor_;
 };

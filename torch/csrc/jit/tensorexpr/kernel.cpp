@@ -88,6 +88,11 @@ Expr TensorExprKernel::constant(const torch::jit::Value* v) {
       return FloatImm::make(val.toDouble());
     } else if (val.isInt()) {
       return IntImm::make(val.toInt());
+    } else if (val.isNone()) {
+      // This is just a placeholder so we don't throw.  None-handling
+      // is operator-specific and should be handled properly in
+      // the operator-specific lowering code.
+      return IntImm::make(0);
     } else {
       LOG(FATAL) << "Unhandled constant datatype";
     }
@@ -388,9 +393,33 @@ Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::clamp: {
+      bool no_min = false;
+      bool no_max = false;
+      if (v->node()->input(1)->node()->kind() == prim::Constant) {
+          const auto val = toIValue(v->node()->input(1)).value();
+          if (val.isNone()) {
+            no_min = true;
+          }
+      }
+
+      if (v->node()->input(2)->node()->kind() == prim::Constant) {
+          const auto val = toIValue(v->node()->input(2)).value();
+          if (val.isNone()) {
+            no_max = true;
+          }
+      }
+
       return ComputeThreeOperand(
-          "aten_max", v, [](const Expr& in, const Expr& min, const Expr& max) {
-            return Max::make(Min::make(in, max, false), min, false);
+          "aten_clamp", v, [no_min, no_max](const Expr& in, const Expr& min, const Expr& max) {
+            if (no_min && no_max) {
+              return in;
+            } else if (no_min) {
+              return Min::make(in, max, false);
+            } else if (no_max) {
+              return Max::make(in, min, false);
+            } else {
+              return Max::make(Min::make(in, max, false), min, false);
+            }
           });
     } break;
 
@@ -722,7 +751,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       // Flatten the index for GPU kernels.
       // TODO: move this to fusing axis when it is ready.
       Tensor new_out = Compute(
-          tensor.function().func_var().name_hint() + "_flat",
+          tensor.function()->func_var().name_hint() + "_flat",
           {total_count},
           [tensor](const Var& index) -> Expr {
             std::vector<Expr> dims;

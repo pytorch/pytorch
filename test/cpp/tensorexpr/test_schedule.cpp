@@ -25,8 +25,8 @@ void testExprSimple01() {
       Compute("f", {{16, "X"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
-  Var x = tensor.function().arg(0);
-  Var y = tensor.function().arg(1);
+  Var x = tensor.function()->arg(0);
+  Var y = tensor.function()->arg(1);
   Schedule sch = Schedule::make({tensor});
   Var x_outer;
   Var x_inner;
@@ -47,8 +47,8 @@ void testExprLower01() {
       Compute("f", {{16, "x"}, {5, "y"}}, [](const Var& x, const Var& y) {
         return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
-  Var x = tensor.function().arg(0);
-  Var y = tensor.function().arg(1);
+  Var x = tensor.function()->arg(0);
+  Var y = tensor.function()->arg(1);
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
   std::ostringstream oss;
@@ -63,8 +63,8 @@ void testExprSimple02() {
     return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
   Tensor tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
-  Var x = tensor.function().arg(0);
-  Var y = tensor.function().arg(1);
+  Var x = tensor.function()->arg(0);
+  Var y = tensor.function()->arg(1);
   Schedule sch = Schedule::make({tensor});
   Var x_outer;
   Var x_inner;
@@ -136,8 +136,8 @@ void testExprSplitWithMask01() {
       Compute("f", {{M, "m"}, {N, "n"}}, [&](const Expr& m, const Expr& n) {
         return a_buf(m, n) + b_buf(m, n) + 1.0f;
       });
-  Var m = tensor.function().arg(0);
-  Var n = tensor.function().arg(1);
+  Var m = tensor.function()->arg(0);
+  Var n = tensor.function()->arg(1);
   Var n_outer;
   Var n_inner;
 

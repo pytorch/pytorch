@@ -801,7 +801,7 @@ void testLLVMSimpleMath01() {
       "f", {{N, "i"}}, [](const Var& i) { return cast<float>(i * i + 1); });
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
-  Buffer f_buf(tensor.function().func_var(), kFloat32, {N});
+  Buffer f_buf(tensor.function()->func_var(), kFloat32, {N});
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -824,7 +824,7 @@ void testLLVMComputeMul() {
     return Load::make(a, i, 1) * Load::make(b, i, 1);
   });
 
-  Buffer c_buf(c.function().func_var(), kFloat32, {N});
+  Buffer c_buf(c.function()->func_var(), kFloat32, {N});
   Schedule sch = Schedule::make({c});
   Stmt s = sch.Lower();
 
@@ -850,7 +850,7 @@ void testLLVMBroadcastAdd() {
         return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
       });
 
-  Buffer c_buf(c.function().func_var(), kFloat32, {M, N});
+  Buffer c_buf(c.function()->func_var(), kFloat32, {M, N});
   Schedule sch = Schedule::make({c});
   Stmt s = sch.Lower();
 

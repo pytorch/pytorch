@@ -27,9 +27,9 @@ class Range {
   Expr stop_;
 };
 
-class FunctionNode : public KernelScopedObject {
+class Function : public KernelScopedObject {
  public:
-  FunctionNode(
+  Function(
       const std::string& func_name,
       const std::vector<Expr>& dims,
       const std::vector<Var>& args,
@@ -68,52 +68,6 @@ class FunctionNode : public KernelScopedObject {
   std::vector<Expr> dims_;
   std::vector<Var> args_;
   Expr body_;
-};
-
-class Function {
- public:
-  Function() {}
-  Function(
-      const std::string& func_name,
-      const std::vector<Expr>& dims,
-      const std::vector<Var>& args,
-      const Expr& body)
-      : function_node_(new FunctionNode(func_name, dims, args, body)) {}
-  int ndim() const {
-    return node()->ndim();
-  }
-  const Expr& dim(int index) const {
-    return node()->dim(index);
-  }
-  const std::vector<Expr>& dims() const {
-    return node()->dims();
-  }
-  const Var& arg(int index) const {
-    return node()->arg(index);
-  }
-  const std::vector<Var>& args() const {
-    return node()->args();
-  }
-  const Expr& body() const {
-    return node()->body();
-  }
-  const Var& func_var() const {
-    return node()->func_var();
-  }
-
-  Stmt ElementStmt() {
-    return node()->ElementStmt();
-  }
-
-  const FunctionNode* node() const {
-    return function_node_;
-  }
-  FunctionNode* node() {
-    return function_node_;
-  }
-
- private:
-  FunctionNode* function_node_ = nullptr;
 };
 
 } // namespace tensorexpr

@@ -72,12 +72,18 @@ Expr IRMutator::mutate(const Min* v) {
 Expr IRMutator::mutate(const CompareSelect* v) {
   Expr lhs = v->lhs();
   Expr rhs = v->rhs();
+  Expr retval1 = v->ret_val1();
+  Expr retval2 = v->ret_val2();
   Expr lhs_new = lhs.accept_mutator(this);
   Expr rhs_new = rhs.accept_mutator(this);
-  if (same_node(lhs, lhs_new) && same_node(rhs, rhs_new)) {
+  Expr retval1_new = retval1.accept_mutator(this);
+  Expr retval2_new = retval2.accept_mutator(this);
+  if (same_node(lhs, lhs_new) && same_node(rhs, rhs_new) &&
+      same_node(retval1, retval1_new) && same_node(retval2, retval2_new)) {
     return Expr(v);
   }
-  return CompareSelect::make(lhs_new, rhs_new, v->compare_select_op());
+  return CompareSelect::make(
+      lhs_new, rhs_new, retval1_new, retval2_new, v->compare_select_op());
 }
 
 Expr IRMutator::mutate(const IntImm* v) {

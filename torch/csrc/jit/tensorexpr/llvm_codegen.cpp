@@ -338,11 +338,14 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
   auto lhs = this->value_;
   v->rhs().accept(this);
   auto rhs = this->value_;
+  v->ret_val1().accept(this);
+  auto retval1 = this->value_;
+  v->ret_val2().accept(this);
+  auto retval2 = this->value_;
+
   auto type_used = v->lhs().dtype();
 
   llvm::Value* cmp_;
-  llvm::Value* false_int_ = llvm::ConstantInt::getSigned(int32Ty_, 0);
-  llvm::Value* true_int_ = llvm::ConstantInt::getSigned(int32Ty_, 1);
   CompareSelectOperation cmp_op_ = v->compare_select_op();
 
   if (type_used == kInt32) {
@@ -395,7 +398,7 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
     }
   }
 
-  value_ = irb_.CreateSelect(cmp_, true_int_, false_int_);
+  value_ = irb_.CreateSelect(cmp_, retval1, retval2);
   return;
 }
 
@@ -850,6 +853,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   } break;
       BINARY_MATH_CASE(kRemainder, "remainderf", floatTy_)
       BINARY_MATH_CASE(kAtan2, "atan2f", floatTy_)
+      BINARY_MATH_CASE(kPow, "powf", floatTy_)
 #undef BINARY_MATH_CASE
 
     default: {

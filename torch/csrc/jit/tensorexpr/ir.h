@@ -167,38 +167,6 @@ class Min : public BinaryOpNode<Min> {
   }
 };
 
-class CompareSelect : public ExprNode<CompareSelect> {
- public:
-  CompareSelectOperation compare_select_op() const {
-    return compare_op_;
-  }
-  const Expr& lhs() const {
-    return this->lhs_;
-  }
-  const Expr& rhs() const {
-    return this->rhs_;
-  }
-
-  static Expr make(const Expr& lhs, const Expr& rhs) = delete;
-
-  static Expr make(
-      const Expr& lhs,
-      const Expr& rhs,
-      CompareSelectOperation cmp_op) {
-    return Expr(new CompareSelect(lhs, rhs, cmp_op));
-  }
-
- private:
-  Expr lhs_;
-  Expr rhs_;
-  CompareSelectOperation compare_op_;
-  CompareSelect(const Expr& lhs, const Expr& rhs, CompareSelectOperation cmp_op)
-      : ExprNodeBase(ToDtype<int>()),
-        lhs_(lhs),
-        rhs_(rhs),
-        compare_op_(cmp_op) {}
-};
-
 // Encode an integer immediate value.
 class IntImm : public ExprNode<IntImm> {
  public:
@@ -731,6 +699,64 @@ class CallNode : public ExprNode<Op, BaseCallNode> {
  public:
   using BaseClass = ExprNode<Op, BaseCallNode>;
   using BaseClass::BaseClass;
+};
+
+class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
+ public:
+  CompareSelectOperation compare_select_op() const {
+    return compare_op_;
+  }
+  const Expr& lhs() const {
+    return this->lhs_;
+  }
+  const Expr& rhs() const {
+    return this->rhs_;
+  }
+  const Expr& ret_val1() const {
+    return this->ret_val1_;
+  }
+  const Expr& ret_val2() const {
+    return this->ret_val2_;
+  }
+
+  static Expr make(
+      const Expr& lhs,
+      const Expr& rhs,
+      CompareSelectOperation cmp_op) {
+    CHECK_EQ(lhs.dtype(), rhs.dtype());
+    return Expr(
+        new CompareSelect(lhs, rhs, IntImm::make(1), IntImm::make(0), cmp_op));
+  }
+
+  static Expr make(
+      const Expr& lhs,
+      const Expr& rhs,
+      const Expr& ret_val1,
+      const Expr& ret_val2,
+      CompareSelectOperation cmp_op) {
+    CHECK_EQ(lhs.dtype(), rhs.dtype());
+    CHECK_EQ(ret_val1.dtype(), ret_val2.dtype());
+    return Expr(new CompareSelect(lhs, rhs, ret_val1, ret_val2, cmp_op));
+  }
+
+ private:
+  Expr lhs_;
+  Expr rhs_;
+  Expr ret_val1_;
+  Expr ret_val2_;
+  CompareSelectOperation compare_op_;
+  CompareSelect(
+      const Expr& lhs,
+      const Expr& rhs,
+      const Expr& ret_val1,
+      const Expr& ret_val2,
+      CompareSelectOperation cmp_op)
+      : ExprNodeBase(ToDtype<int>()),
+        lhs_(lhs),
+        rhs_(rhs),
+        ret_val1_(ret_val1),
+        ret_val2_(ret_val2),
+        compare_op_(cmp_op) {}
 };
 
 enum IntrinsicsOp {
