@@ -120,7 +120,7 @@
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: grad
 
-- name: add.Scalar2(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
+- name: add.ScalarTensor(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
   other: maybe_multiply(grad, alpha)
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
@@ -310,7 +310,7 @@
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad / other
 
-- name: div.Scalar2(Scalar self, Tensor other) -> Tensor
+- name: div.ScalarTensor(Scalar self, Tensor other) -> Tensor
   other: -grad * self / (other * other)
 
 - name: dot(Tensor self, Tensor tensor) -> Tensor
@@ -611,7 +611,7 @@
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad * other
 
-- name: mul.Scalar2(Scalar self, Tensor other) -> Tensor
+- name: mul.ScalarTensor(Scalar self, Tensor other) -> Tensor
   other: grad * self
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
@@ -842,7 +842,7 @@
 - name: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: grad
 
-- name: sub.Scalar2(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
+- name: sub.ScalarTensor(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
   other: -grad * alpha
 
 - name: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -852,7 +852,7 @@
 - name: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: -grad * alpha
 
-- name: rsub.Scalar2(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
+- name: rsub.ScalarTensor(Scalar self, Tensor other, Scalar alpha=1) -> Tensor
   other: grad
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
