@@ -403,7 +403,6 @@ Tensor& block_diag_out(Tensor& result, TensorList tensors) {
 
   int64_t result_dim0 = 0;
   int64_t result_dim1 = 0;
-  ScalarType scalar_type = tensors[0].scalar_type();
   std::vector<Tensor> tensors_2D(tensors.size());
 
   // Sum the dimensions of the tensors, check tensor sizes,
@@ -412,7 +411,6 @@ Tensor& block_diag_out(Tensor& result, TensorList tensors) {
   for (size_t tensor_idx = 0; tensor_idx < tensors.size(); tensor_idx++) {
     Tensor tensor = tensors[tensor_idx];
     int64_t ndims = tensor.dim();
-    TORCH_CHECK(scalar_type == tensor.scalar_type(), "tensors must all have the same scalar type");
     TORCH_CHECK(ndims <= 2, "tensors must have 2 or fewer dimensions");
 
     int64_t dim0 = 1;
