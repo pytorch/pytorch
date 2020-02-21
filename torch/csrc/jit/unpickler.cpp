@@ -550,9 +550,9 @@ void Unpickler::readGlobal(
         class_name,
         "'");
   } else {
-    AT_ASSERT(class_resolver_);
+    AT_ASSERT(type_resolver_);
     at::StrongTypePtr type =
-        class_resolver_(c10::QualifiedName(module_name, class_name));
+        type_resolver_(c10::QualifiedName(module_name, class_name));
     globals_.emplace_back([this, type] {
       auto val = stack_.back();
       stack_.pop_back();
@@ -585,14 +585,13 @@ void Unpickler::rebuildTensor(bool quantized) {
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
         case at::kPerChannelAffine: {
-          std::vector<double> scales = convertList<double>(qparams.at(1));
-          std::vector<int64_t> zero_points =
-              convertList<int64_t>(qparams.at(2));
+          const auto& scales = qparams.at(1).toTensor();
+          const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
           result = at::_empty_per_channel_affine_quantized(
               {0},
-              at::tensor(scales),
-              at::tensor(zero_points),
+              scales,
+              zero_points,
               axis,
               storage_tensor.options());
         } break;
@@ -646,8 +645,8 @@ void Unpickler::rebuildRRef() {
     c10::intrusive_ptr<distributed::rpc::RRef> rref;
     TORCH_INTERNAL_ASSERT(
         type_resolver_ != nullptr, "type_resolver_ is nullptr.");
-    TypePtr rrefType = type_resolver_(typeStr);
-    rref = ctx.getOrCreateRRef(rrefForkData, rrefType);
+    at::StrongTypePtr type = type_resolver_(c10::QualifiedName(typeStr));
+    rref = ctx.getOrCreateRRef(rrefForkData, type.type_);
     ctx.notifyOwnerAndParentOfFork(
         rrefForkData.forkId_, rrefForkData.parent_, rref);
     stack_.emplace_back(

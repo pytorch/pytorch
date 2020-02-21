@@ -23,9 +23,8 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
   auto value = jit::unpickle(
       payload,
       payload_size,
-      nullptr, /* class_resover */
-      &message.tensors(),
-      *RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   return value.toTuple()->elements();
 }
 

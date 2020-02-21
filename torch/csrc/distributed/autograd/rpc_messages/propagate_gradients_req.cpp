@@ -51,9 +51,8 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   IValue tuple = jit::unpickle(
       payload,
       payload_size,
-      nullptr, /* class_resover */
-      &message.tensors(),
-      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.

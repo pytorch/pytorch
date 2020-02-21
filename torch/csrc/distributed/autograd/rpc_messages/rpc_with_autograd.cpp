@@ -120,9 +120,8 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
   IValue tuple = jit::unpickle(
       autogradPayLoadBegin,
       autogradPayLoadSize,
-      nullptr, /* class_resover */
-      &tensorTable,
-      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &tensorTable);
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Gather all the fields.

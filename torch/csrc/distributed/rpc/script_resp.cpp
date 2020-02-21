@@ -36,9 +36,8 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto value = jit::unpickle(
       payload,
       payload_size,
-      nullptr, /* class_resover */
-      &message.tensors(),
-      *RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   return std::make_unique<ScriptResp>(std::move(value));
 }
 

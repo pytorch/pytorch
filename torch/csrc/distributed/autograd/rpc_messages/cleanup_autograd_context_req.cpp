@@ -32,9 +32,8 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   IValue ivalue_context_id = jit::unpickle(
       payload,
       payload_size,
-      nullptr, /* class_resover */
-      &message.tensors(),
-      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver());
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
 
   // convert ivalue to int and construct request
   int64_t context_id = ivalue_context_id.toInt();
