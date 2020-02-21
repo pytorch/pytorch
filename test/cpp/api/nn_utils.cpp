@@ -27,7 +27,7 @@ TEST_F(NNUtilsTest, PadSequence) {
   auto b = torch::tensor({4, 5});
   auto c = torch::tensor({6});
 
-  Tensor expected, padded;
+  torch::Tensor expected, padded;
 
   // batch_first = true
   expected = torch::tensor({{4, 5, 0}, {1, 2, 3}, {6, 0, 0}});
