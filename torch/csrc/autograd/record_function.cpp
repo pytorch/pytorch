@@ -281,6 +281,8 @@ void RecordFunctionAsync::end() {
   }
 }
 
+// toggle initialized so that RecordFunction destructor does not attempt to
+// reinvoke callbacks.
 RecordFunctionAsync::~RecordFunctionAsync() {
   initialized_ = false;
 }
