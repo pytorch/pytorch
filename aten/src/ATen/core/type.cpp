@@ -550,11 +550,6 @@ TensorTypePtr TensorType::merge(TensorTypePtr other) const {
   return TensorType::create(scalar_type, dev, sz, srs, conts, gr, undef);
 }
 
-// static size_t bind(std::map<int64_t, size_t>& symbols2dims, int64_t symbol,
-// val size_t) {
-
-// }
-
 bool TensorType::operator==(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
@@ -565,43 +560,6 @@ bool TensorType::operator==(const c10::Type& rhs) const {
       strides() == rt->strides() && contiguity() == rt->contiguity() &&
       device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
       undefined() == rt->undefined();
-}
-
-TensorTypePtr TensorType::merge(
-    const at::Tensor& t,
-    std::map<int64_t, size_t>& symbols2dims) const {
-  auto scalar_type = merge_primitive(scalarType(), {t.scalar_type()});
-  auto dev = merge_primitive(device(), {t.device()});
-  auto new_sizes = t.sizes();
-  std::vector<c10::optional<int64_t>> new_symbols;
-
-  if (new_sizes.size() == sizes().size()) {
-    for (size_t i = 0; i < new_sizes.size(); i++) {
-      auto symbol = sizes()[i];
-      if (!symbol.has_value()) {
-        new_symbols.push_back(c10::nullopt);
-      } else {
-        // refactor into bind
-        // TORCH_INTERNAL_ASSERT(*symbol < 0);
-        if (symbols2dims.count(symbol.value()) == 0) {
-          symbols2dims[*symbol] = new_sizes[i];
-          new_symbols.push_back(*symbol);
-        } else {
-          new_symbols.push_back(
-              (symbols2dims[symbol.value()] == new_sizes[i]) ? symbol
-                                                             : c10::nullopt);
-        }
-      }
-    }
-  }
-
-  auto contNstrides = contiguityStrideIndices(new_sizes, t.strides());
-  auto conts = contiguity().merge(VaryingStrides(std::get<0>(contNstrides)));
-  auto srs = strides().merge(VaryingStrides(std::get<1>(contNstrides)));
-  auto gr = merge_primitive(requiresGrad(), {t.requires_grad()});
-  auto undef = merge_primitive(undefined(), {false});
-  return TensorType::create(
-      scalar_type, dev, VaryingShape{new_symbols}, srs, conts, gr, undef);
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {

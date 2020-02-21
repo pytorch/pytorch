@@ -4032,8 +4032,8 @@ class TestScript(JitTestCase):
         with enable_profiling_mode():
             torch._C._jit_set_num_profiled_runs(2)
 
-            def simple_add(a, b):
-                return a + b
+            def simple_add(c, a, b):
+                return c + 7, a + b
 
             def sym_shape(a, b, c):
                 t1 = a + b
@@ -4047,19 +4047,23 @@ class TestScript(JitTestCase):
             # b = torch.ones(7, 5, 1)
             # c = torch.ones(7, 5, 4)
 
+            # case1
             # a = torch.ones(7, 1)
             # b = torch.ones(7, 5)
-            # c = torch.ones(7, 6)
-            # j (a, b)
-            # j (b, b)
-            # j (a, b)
+            # c = torch.ones(777)
+            # j (c, a, b)
+            # j (c, b, b)
+            # j (c, a, b)
 
+            # case 2 not possible
+
+            # case 3
             a = torch.ones(7, 1)
             b = torch.ones(7, 5)
-            c = torch.ones(7, 6)
-            j (a, b)
-            j (c, a)
-            j (a, b)
+            c = torch.ones(5)
+            j (b, a, c)
+            j (b, a, c)
+            j (a, b, )
 
             a = torch.ones(7)
             b = torch.ones(8)

@@ -148,26 +148,32 @@ std::vector<int64_t> ProfilingRecord::mergeSymbolicShapes(
   if (new_sizes.size() == sym_shapes.size()) {
     for (size_t i = 0; i < new_sizes.size(); i++) {
       auto symbol = sym_shapes[i];
-      if (!symbol.has_value()) {
-        TORCH_INTERNAL_ASSERT("should always have some symbol");
+      TORCH_INTERNAL_ASSERT(
+          symbol.has_value(), "should always have some symbol");
+
+      // refactor into bind
+      // TORCH_INTERNAL_ASSERT(*symbol < 0);
+      if (*symbol >= 0) {
+        if (*symbol == new_sizes[i]) {
+          new_symbols.push_back(new_sizes[i]);
+        } else {
+          int64_t new_sym = getNewSymbol();
+          new_symbols.push_back(new_sym);
+        }
+      } else if (symbols2dims_.count(symbol.value()) == 0) {
+        symbols2dims_[symbol.value()] = new_sizes[i];
+        new_symbols.push_back(*symbol);
       } else {
-        // refactor into bind
-        // TORCH_INTERNAL_ASSERT(*symbol < 0);
-        if (symbols2dims_.count(symbol.value()) == 0) {
-          symbols2dims_[symbol.value()] = new_sizes[i];
+        if (symbols2dims_[symbol.value()] == new_sizes[i]) {
           new_symbols.push_back(*symbol);
         } else {
-          if (symbols2dims_[symbol.value()] == new_sizes[i]) {
-            new_symbols.push_back(*symbol);
+          auto& symbol_subsets = split_symbols_[symbol.value()];
+          if (symbol_subsets.count(new_sizes[i])) {
+            new_symbols.push_back(symbol_subsets[new_sizes[i]]);
           } else {
-            auto& symbol_subsets = split_symbols_[symbol.value()];
-            if (symbol_subsets.count(new_sizes[i])) {
-              new_symbols.push_back(symbol_subsets[new_sizes[i]]);
-            } else {
-              int64_t new_sym = getNewSymbol();
-              symbol_subsets.insert({new_sizes[i], new_sym});
-              new_symbols.push_back(new_sym);
-            }
+            int64_t new_sym = getNewSymbol();
+            symbol_subsets.insert({new_sizes[i], new_sym});
+            new_symbols.push_back(new_sym);
           }
         }
       }
@@ -243,16 +249,16 @@ void ProfilingRecord::instrumentBlock(Block *block) {
   }
 }
 
-void ProfilingRecord::updateStaticSizes(int64_t symbol, size_t dim) {
-  if (static_sizes_.count(symbol) == 0) {
-    static_sizes_.insert({symbol, c10::optional<size_t>{dim}});
-  } else {
-    auto prev_size = static_sizes_[symbol];
-    if (prev_size.has_value() && *prev_size != dim) {
-      static_sizes_[symbol] = c10::nullopt;
-    }
-  }
-}
+// void ProfilingRecord::updateStaticSizes(int64_t symbol, size_t dim) {
+//   if (static_sizes_.count(symbol) == 0) {
+//     static_sizes_.insert({symbol, c10::optional<size_t>{dim}});
+//   } else {
+//     auto prev_size = static_sizes_[symbol];
+//     if (prev_size.has_value() && *prev_size != dim) {
+//       static_sizes_[symbol] = c10::nullopt;
+//     }
+//   }
+// }
 
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
@@ -275,13 +281,13 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
   std::function<void(Stack&)> counter = [raw_pr](Stack&) {
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
 
-    for (auto e : raw_pr->dims2symbols_) {
-      raw_pr->updateStaticSizes(e.second, e.first);
-    }
-    //
-    for (auto e : raw_pr->symbols2dims_) {
-      raw_pr->updateStaticSizes(e.first, e.second);
-    }
+    // for (auto e : raw_pr->dims2symbols_) {
+    //   raw_pr->updateStaticSizes(e.second, e.first);
+    // }
+    // //
+    // for (auto e : raw_pr->symbols2dims_) {
+    //   raw_pr->updateStaticSizes(e.first, e.second);
+    // }
     raw_pr->symbols2dims_.clear();
     raw_pr->dims2symbols_.clear();
     raw_pr->split_symbols_.clear();
