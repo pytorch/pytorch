@@ -193,7 +193,6 @@ struct TORCH_API Tensor : public Val {
 };
 
 struct TensorView;
-TORCH_API TensorView* ComputeAt_impl(TensorView*, TensorView*, int);
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -233,10 +232,12 @@ struct TORCH_API TensorView : public Val {
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
 
   int getComputeAtAxis() const noexcept { return compute_at_axis_; }
+  
+  TensorView* computeAt(TensorView* consumer, int axis);
 
-friend TensorView* split(TensorView*, int axis, int factor);
-friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
-friend TensorView* merge(TensorView*, int axis);
+  friend TensorView* split(TensorView*, int axis, int factor);
+  friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
+  friend TensorView* merge(TensorView*, int axis);
 
 protected:
   void setDomain(TensorDomain* td){domain_ = td;}
@@ -388,8 +389,6 @@ struct TORCH_API Reorder : public Expr {
 TORCH_API TensorView* split(TensorView*, int axis, int factor);
 TORCH_API TensorView* merge(TensorView*, int axis);
 TORCH_API TensorView* reorder(TensorView*, std::unordered_map<int, int>);
-TORCH_API TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis);
-
 
 } // namespace fuser
 } // namespace jit
