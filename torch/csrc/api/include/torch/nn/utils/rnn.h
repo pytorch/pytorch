@@ -332,7 +332,7 @@ inline Tensor pad_sequence(
 /// Returns:
 ///     a `PackedSequence` object
 inline PackedSequence pack_sequence(ArrayRef<Tensor> sequences, bool enforce_sorted = true) {
-  Tensor lengths = torch::empty({sequences.size()}, kInt64);
+  Tensor lengths = torch::empty({(int64_t)sequences.size()}, kInt64);
   for (int64_t i = 0; i < sequences.size(); i++) {
     lengths[i] = sequences[i].size(0);
   }
