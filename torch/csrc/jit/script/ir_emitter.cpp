@@ -2724,16 +2724,24 @@ struct to_ir {
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes) {
     auto graphPtr = method.graph();
-LOG(ERROR) << "111";
+
+    // TODO: This is a temporary apporoach to enable calling user fucntion
+    // through RPC in TorchScript,
+    // Ideadlly, function value in JIT IR is first-class citizen and
+    // The RPC C++ entry API can take c10::Function directly.
+
     // Get user function qualified name as an IR Value.
-    std::shared_ptr<FunctionValue> user_func_function_sugared_value =
+    std::shared_ptr<FunctionValue> user_func_sugared_value =
         std::dynamic_pointer_cast<FunctionValue>(user_func);
-    auto& functionPtrs = user_func_function_sugared_value->functions();
-    TORCH_INTERNAL_ASSERT(functionPtrs.size() == 1, "User-provided functions size is 1.")
+    auto& functionPtrs = user_func_sugared_value->functions();
+    TORCH_INTERNAL_ASSERT(
+        functionPtrs.size() == 1,
+        "User-provided functions size should be 1. Now it's", functionPtrs.size())
     Function* functionPtr = functionPtrs.at(0);
     const auto& qual_name = functionPtr->qualname();
     IValue userFunctionQualNameIValue(qual_name.qualifiedName());
-    Value* userFunctionQualNameValue = graphPtr->insertConstant(userFunctionQualNameIValue, loc);
+    Value* userFunctionQualNameValue =
+        graphPtr->insertConstant(userFunctionQualNameIValue, loc);
 
     // Insert a jit::Operator, prim::rpc_async.
     Node* rpc_async_node = graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))

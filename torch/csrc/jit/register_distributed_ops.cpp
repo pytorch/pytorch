@@ -87,8 +87,6 @@ RegisterOperators reg_rpc_ops({
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
-             LOG(ERROR) << "argsTupleIValue: " << argsTupleIValue;
-             LOG(ERROR) << "kwargsDictIValue: " << kwargsDictIValue;
 
              // Get FunctionSchema for qualifiedName.
              auto qualifiedName = c10::QualifiedName(qualifiedNameIValue.toStringRef());
@@ -152,16 +150,16 @@ RegisterOperators reg_rpc_ops({
          aliasAnalysisSpecialCase())});
 
 auto reg_distributed_ops =
-   torch::RegisterOperators()
-       .op("aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
-           torch::RegisterOperators::options()
-               .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-               .catchAllKernel([](int64_t context_id) {
-                 const auto& autogradContext =
-                     dist_autograd::DistAutogradContainer::getInstance()
-                         .retrieveContext(context_id);
-                 return autogradContext->getGradients();
-               }));
+    torch::RegisterOperators()
+        .op("aten::get_gradients(int context_id) -> Dict(Tensor, Tensor)",
+            torch::RegisterOperators::options()
+                .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
+                .catchAllKernel([](int64_t context_id) {
+                  const auto& autogradContext =
+                      dist_autograd::DistAutogradContainer::getInstance()
+                          .retrieveContext(context_id);
+                  return autogradContext->getGradients();
+                }));
 
 } // namespace
 } // namespace jit
