@@ -35,7 +35,6 @@ class Adadelta(Optimizer):
         defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay)
         super(Adadelta, self).__init__(params, defaults)
 
-    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -47,33 +46,34 @@ class Adadelta(Optimizer):
         if closure is not None:
             loss = closure()
 
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('Adadelta does not support sparse gradients')
-                state = self.state[p]
+        with torch.no_grad():
+            for group in self.param_groups:
+                for p in group['params']:
+                    if p.grad is None:
+                        continue
+                    grad = p.grad
+                    if grad.is_sparse:
+                        raise RuntimeError('Adadelta does not support sparse gradients')
+                    state = self.state[p]
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    # State initialization
+                    if len(state) == 0:
+                        state['step'] = 0
+                        state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                        state['acc_delta'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                square_avg, acc_delta = state['square_avg'], state['acc_delta']
-                rho, eps = group['rho'], group['eps']
+                    square_avg, acc_delta = state['square_avg'], state['acc_delta']
+                    rho, eps = group['rho'], group['eps']
 
-                state['step'] += 1
+                    state['step'] += 1
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p)
+                    if group['weight_decay'] != 0:
+                        grad = grad.add(group['weight_decay'], p)
 
-                square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
-                std = square_avg.add(eps).sqrt_()
-                delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-                p.add_(-group['lr'], delta)
-                acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
+                    square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
+                    std = square_avg.add(eps).sqrt_()
+                    delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+                    p.add_(-group['lr'], delta)
+                    acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
 
         return loss
