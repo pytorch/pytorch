@@ -116,8 +116,10 @@ class PackedSequence {
     if (data.is_same(data_)) {
       return *this;
     } else {
-      Tensor sorted_indices = sorted_indices_.to(options.device(data.device()));
-      Tensor unsorted_indices = unsorted_indices_.to(options.device(data.device()));
+      Tensor sorted_indices = sorted_indices_.defined() ?
+        sorted_indices_.to(options.device(data.device())) : Tensor();
+      Tensor unsorted_indices = unsorted_indices_.defined() ?
+        unsorted_indices_.to(options.device(data.device())) : Tensor();
       return PackedSequence(data, batch_sizes_, sorted_indices, unsorted_indices);
     }
   }
