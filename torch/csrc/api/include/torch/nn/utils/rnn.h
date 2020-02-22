@@ -116,10 +116,11 @@ class PackedSequence {
     if (data.is_same(data_)) {
       return *this;
     } else {
+      // Does not forward device or dtype args, device is set from data.device()
       Tensor sorted_indices = sorted_indices_.defined() ?
-        sorted_indices_.to(options.device(data.device())) : Tensor();
+        sorted_indices_.to(options.device(data.device()).dtype(sorted_indices_.dtype())) : Tensor();
       Tensor unsorted_indices = unsorted_indices_.defined() ?
-        unsorted_indices_.to(options.device(data.device())) : Tensor();
+        unsorted_indices_.to(options.device(data.device()).dtype(unsorted_indices_.dtype())) : Tensor();
       return PackedSequence(data, batch_sizes_, sorted_indices, unsorted_indices);
     }
   }
