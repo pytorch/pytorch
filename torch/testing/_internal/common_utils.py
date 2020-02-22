@@ -99,6 +99,7 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -107,6 +108,7 @@ if args.ge_config == 'legacy':
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
