@@ -255,26 +255,27 @@ TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis){
    */
 
   std::stack<Val*> dep_chain = DependencyCheck::getDependencyChain(producer, consumer);
-
-  TORCH_CHECK(!dep_chain.empty());
-
+  //forward apply to uses of producer.
   //Recursively apply replay.
   TensorView* ref = consumer;
+  //dep_chain = deps <- consumer (doesn't have producer)
+  //We want to apply:
+  //  replay(consumer, dep)
+  //  replay(dep, producer)
   while(!dep_chain.empty()){
     Val* val = dep_chain.top(); dep_chain.pop();
     TORCH_CHECK(val->getValType() == ValType::TensorView);
     TensorView* tv = static_cast<TensorView*>(val);
-    //dep chain can include consumer, but not producer.
     if(tv->same_as(consumer))
       continue;
-    ref = TransformReplay::replay(ref, tv, axis);
-    //ReplaceAll::instancesOf(tv, ref);
-    throw std::runtime_error("not implemented.");
+    TransformReplay::replay(ref, tv, axis);
+    ref = tv; //replay is in-place
   }
-  //Dep chain doesn't contain consumer, run on consumer manually.
-  if(FusionGuard::getCurFusion()->origin(consumer) != nullptr)
-    return TransformReplay::replay(ref, consumer, axis);
-  return consumer;
+
+  if(FusionGuard::getCurFusion()->origin(producer) == nullptr)
+    return producer;
+  //Dep chain doesn't contain producer, run on producer manually.
+  return TransformReplay::replay(ref, producer, axis);
 }
 
 } // namespace fuser

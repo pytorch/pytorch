@@ -555,16 +555,10 @@ void testGPU_FusionComputeAt(){
     {3, 4}
   });
   //[R0, I0i{4}*I1, I0o, I2i, I2o{2}]
-  
-  //TensorView* replayed = computeAt(tv, tv3, 2);
-  
-  //When replayed tv2 should be: [I1, I0i*I0o, R0, I2], tv3 doesn't actually get produced and is an input, therefore it shouldn't be modified
-  //std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << " and " << tv3 << "\n with \'compute_at(2)\' produces: " <<std::endl;
-  /*
-  for(Val* val : fusion.vals())
-    if(val->getValType() == ValType::TensorView)
-      std::cout<<val<<std::endl;
-  */
+  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << " and " << tv3 << "\n with \'compute_at(2)\' produces: " <<std::endl;
+  TensorView* replayed = computeAt(tv, tv3, 2);
+  //When replayed tv2 should be: [R0, I0i{4}*I1, I0o, I2], tv3 is an input, therefore it shouldn't be modified
+  std::cout<<tv2<<std::endl<<tv3<<std::endl;
 }
 
 //TODO: Fix test!
@@ -602,17 +596,18 @@ void testGPU_FusionComputeAt2(){
     {4, 1},
     {5, 2},
     {2, 3}
-
+    //{0, 4} //doesn't need to be specified
+    //{1, 5} //doesn't need to be specified
   });
   //[I0o, I0i{2}, I1, R0, I2o, I2i{4}]
 
-  //TransformReplay TR;
-  //TensorView* replayed = TR.replay(tv, tv2, 2);
+  TransformReplay TR;
+  TensorView* replayed = TR.replay(tv, tv2, 2);
   //Replay should produce [I0o, I0i{2}, I1, R0, I2]
 
-  //std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
-  //std::cout<<"Produced domain should be something along the lines of:";
-  //std::cout<<"[I0o, I0i{2}, I1, R0, I2]"<<std::endl;
+  std::cout<<"Replaying: "<<td << "\n -> " << tv <<"\n on " << tv2 << "\n with \'compute_at(2)\' produces: "<< replayed <<std::endl;
+  std::cout<<"Produced domain should be something along the lines of:";
+  std::cout<<"[I0o, I0i{2}, I1, R0, I2]"<<std::endl;
 }
 
 void testGPU_FusionParser() {
