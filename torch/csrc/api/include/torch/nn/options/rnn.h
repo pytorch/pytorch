@@ -30,6 +30,12 @@ struct TORCH_API RNNOptionsBase {
   /// features)`. If false (default), the expected layout is `(sequence, batch,
   /// features)`.
   TORCH_ARG(bool, batch_first) = false;
+  // If true, and bidirectionality is enabled, the RNN will not concatenate both
+  // forward and backward hidden states for each layer output, instead forward
+  // and backward states will be processed independently and then concatenated
+  // at the final output of the network. If false then both forward and
+  // backward states will be concatenated after each layer.
+  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = false;
 };
 
 } // namespace detail
@@ -62,6 +68,12 @@ struct TORCH_API RNNOptions {
   /// features)`. If false (default), the expected layout is `(sequence, batch,
   /// features)`.
   TORCH_ARG(bool, batch_first) = false;
+  // If true, and bidirectionality is enabled, the RNN will not concatenate both
+  // forward and backward hidden states for each layer output, instead forward
+  // and backward states will be processed independently and then concatenated
+  // at the final output of the network. If false then both forward and
+  // backward states will be concatenated after each layer.
+  TORCH_ARG(bool, cat_layer_fwd_bwd_states) = false;
   /// The activation to use after linear operations.
   TORCH_ARG(RNNActivation, activation) = RNNActivation::ReLU;
 };

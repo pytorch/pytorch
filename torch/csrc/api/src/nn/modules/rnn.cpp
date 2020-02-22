@@ -35,6 +35,13 @@ RNNImplBase<Derived>::RNNImplBase(
 template <typename Derived>
 void RNNImplBase<Derived>::reset() {
   const auto num_directions = options.bidirectional() ? 2 : 1;
+  // If bidirectional mode and type 2 RNN is enabled, then the input
+  // size to any hidden layer should be 2 * hidden_size
+  const auto hidden_switch = (options.bidirectional() &&
+                              !options.cat_layer_fwd_bwd_states());
+  const auto bidirectional_size = options.hidden_size() * num_directions;
+  const auto actual_hidden_size = (hidden_switch ? bidirectional_size :
+                                   options.hidden_size());
 
   w_ih.resize(options.layers() * num_directions);
   w_hh.resize(options.layers() * num_directions);
@@ -46,7 +53,7 @@ void RNNImplBase<Derived>::reset() {
   for (int64_t layer = 0; layer < options.layers(); ++layer) {
     for (auto direction = 0; direction < num_directions; direction++) {
       const auto layer_input_size = layer == 0 ? options.input_size() :
-        options.hidden_size() * num_directions;
+        actual_hidden_size;
       const auto suffix = direction == 1 ? "_reverse" : "";
       const auto layer_idx = (layer * num_directions) + direction;
       w_ih[layer_idx] = this->register_parameter(
@@ -218,7 +225,8 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
               .with_bias(options_.with_bias())
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())
-              .batch_first(options_.batch_first()),
+              .batch_first(options_.batch_first())
+              .cat_layer_fwd_bwd_states(options_.cat_layer_fwd_bwd_states()),
           static_cast<CuDNNMode>(options_.activation())),
       options(options_) {}
 
@@ -281,6 +289,7 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
       options.dropout(),
       this->is_training(),
       options.bidirectional(),
+      options.cat_layer_fwd_bwd_states(),
       options.batch_first());
   return {output, torch::stack({hidden_state, cell_state})};
 }
