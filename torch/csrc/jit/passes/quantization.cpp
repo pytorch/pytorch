@@ -137,7 +137,6 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
     "adaptive_avg_pool2d",
     "max_pool2d",
     "flatten",
-    "size",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
@@ -480,12 +479,29 @@ graph(%input, %weight, %bias, %4):
      %first_output = aten::matmul(%input, %weight_t)
      %second_output = aten::add_(%first_output, %bias, %4)
      return (%second_output) )");
+  const PatternInfo add_module_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b):
+     %one = prim::Constant[value=1]()
+     %first_output = aten::add_(%a, %b, %one)
+     %second_module = match::module[name="ReLU"](%self)
+     %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+     return (%second_output) )");
+
+  const PatternInfo add_functional_relu = PatternInfo::parse_from_str(R"(
+graph(%self, %a, %b, %inplace):
+     %one = prim::Constant[value=1]()
+     %first_output = aten::add_(%a, %b, %one)
+     %relu = prim::Constant[name="relu"]()
+     %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+     return (%second_output) )");
 
 
   const std::vector<std::reference_wrapper<const PatternInfo>> skip_patterns = {
     conv_functional_relu,
     conv_relu,
-    matmul_add
+    matmul_add,
+    add_module_relu,
+    add_functional_relu,
   };
 };
 
