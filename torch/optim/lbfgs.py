@@ -269,8 +269,8 @@ class LBFGS(Optimizer):
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
     def _set_param(self, params_data):
-            for p, pdata in zip(self._params, params_data):
-                p.copy_(pdata)
+        for p, pdata in zip(self._params, params_data):
+            p.copy_(pdata)
 
     def _directional_evaluate(self, closure, x, t, d):
         self._add_grad(t, d)
