@@ -243,25 +243,25 @@ TensorView* reorder(
   return tv;
 }
 
-TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis){
+TensorView* TensorView::computeAt(TensorView* consumer, int axis){
   /*
    * TODO:
    * Recursive compute_at:
-   * Recurse backward from consumer, to producer, make sure there's a dependency chain there.
-   * After recursing, recurse again, and call ComputeAt for all tensors between producer and consumer.
+   * Recurse backward from consumer, to this, make sure there's a dependency chain there.
+   * After recursing, recurse again, and call ComputeAt for all tensors between this and consumer.
    * 
-   * Assert direct consumer/producer relationship.
-   * Compute at modifies the consumer, not the producer.
+   * Assert direct consumer/this relationship.
+   * Compute at modifies the consumer, not the this.
    */
 
-  std::stack<Val*> dep_chain = DependencyCheck::getDependencyChain(producer, consumer);
-  //forward apply to uses of producer.
+  std::stack<Val*> dep_chain = DependencyCheck::getDependencyChain(this, consumer);
+  //forward apply to uses of this.
   //Recursively apply replay.
   TensorView* ref = consumer;
-  //dep_chain = deps <- consumer (doesn't have producer)
+  //dep_chain = deps <- consumer (doesn't have this)
   //We want to apply:
   //  replay(consumer, dep)
-  //  replay(dep, producer)
+  //  replay(dep, this)
   while(!dep_chain.empty()){
     Val* val = dep_chain.top(); dep_chain.pop();
     TORCH_CHECK(val->getValType() == ValType::TensorView);
@@ -272,10 +272,11 @@ TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis){
     ref = tv; //replay is in-place
   }
 
-  if(FusionGuard::getCurFusion()->origin(producer) == nullptr)
-    return producer;
-  //Dep chain doesn't contain producer, run on producer manually.
-  return TransformReplay::replay(ref, producer, axis);
+  if(FusionGuard::getCurFusion()->origin(this) == nullptr)
+    return this;
+    
+  //Dep chain doesn't contain this, run on this manually.
+  return TransformReplay::replay(ref, this, axis);
 }
 
 } // namespace fuser
