@@ -137,7 +137,6 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
     "adaptive_avg_pool2d",
     "max_pool2d",
     "flatten",
-    "size",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
