@@ -10031,7 +10031,7 @@ class TestNNDeviceType(NNTestCase):
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
-            needed_prec = dtype2prec_DONTUSE[dtype] * 3
+            needed_prec = dtype2prec_DONTUSE[dtype] * 2
         else:
             needed_prec = backward_prec
 
