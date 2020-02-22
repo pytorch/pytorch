@@ -101,10 +101,14 @@ bool is_nonzero(const Tensor& self) {
   } else if (localScalar.isBoolean()) {
     return localScalar.to<bool>();
   }
-  AT_ERROR("expected non-Tensor backed scalar");
+  AT_ERROR("expected non-Tensor backend scalar");
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
+              "expected condition, x and y to be on the same device, but condition is on ",
+              condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
+              " respectively");
   if (condition.scalar_type() != ScalarType::Byte && condition.scalar_type() != ScalarType::Bool) {
     AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType ",
                   toString(condition.scalar_type()));
