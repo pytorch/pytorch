@@ -304,22 +304,13 @@ TEST_F(PackedSequenceTest, To) {
     assert_is_same_packed_sequence(a, a.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
 
     if (torch::cuda::is_available()) {
-      std::vector<torch::Device> cuda_devices;
-      cuda_devices.emplace_back(torch::Device(torch::kCUDA));
-      if (torch::cuda::device_count() == 1) {
-        cuda_devices.emplace_back(torch::Device(torch::kCUDA, 0));
-      } else {
-        cuda_devices.emplace_back(torch::Device(torch::kCUDA, 1));
-      }
-      for (auto cuda : cuda_devices) {
-        auto b = a.cuda(cuda);
-        assert_is_same_packed_sequence(b, b.to(cuda));
-        assert_is_same_packed_sequence(b, b.cuda());
-        assert_is_same_packed_sequence(a, b.to(torch::kCPU));
-        assert_is_same_packed_sequence(b, a.to(cuda));
-        assert_is_same_packed_sequence(a, b.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
-        assert_is_same_packed_sequence(b, b.to(torch::kInt32));
-      }
+      auto b = a.cuda();
+      assert_is_same_packed_sequence(b, b.to(torch::kCUDA));
+      assert_is_same_packed_sequence(b, b.cuda());
+      assert_is_same_packed_sequence(a, b.to(torch::kCPU));
+      assert_is_same_packed_sequence(b, a.to(torch::kCUDA));
+      assert_is_same_packed_sequence(a, b.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
+      assert_is_same_packed_sequence(b, b.to(torch::kInt32));
     }
   }
 }

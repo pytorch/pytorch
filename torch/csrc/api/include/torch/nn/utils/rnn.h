@@ -124,8 +124,8 @@ class PackedSequence {
     }
   }
 
-  PackedSequence cuda(Device device = kCUDA) const {
-    return to(device);
+  PackedSequence cuda() const {
+    return to(kCUDA);
   }
 
   PackedSequence cpu() const {
