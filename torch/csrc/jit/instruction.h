@@ -35,6 +35,7 @@ namespace jit {
   _(CALL, "F") /* call function X */                                        \
   _(GUARD, "T") /* check a guard against type_table, true if passes */      \
   _(FAIL_GUARD, "T") /* fail a guard, patch back to GUARD */                \
+  _(PROFILE, "F") /* fail a guard, patch back to GUARD */                   \
   _(TAIL_CALL, "F") /* replace current frame with function F */             \
   _(INTERFACE_CALL, "CI") /* call method X on the first argument (of N) */  \
   _(GET_ATTR, "S") /* get attribute from slot X in an Object */             \

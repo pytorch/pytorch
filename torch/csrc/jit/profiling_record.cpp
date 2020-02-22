@@ -189,8 +189,10 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
   auto pno = pn->addOutput();
   bool first = true;
   pno->setType(TensorType::get());
-  std::function<void(Stack &)> shape_profiler = [this, pno,
-                                                 first](Stack &stack) mutable {
+  std::function<void(Stack&)> shape_profiler = [this, pno, first](
+                                                   Stack& stack) mutable {
+    int64_t frame_id;
+    pop(stack, frame_id);
     IValue t;
     pop(stack, t);
     if (t.isTensor()) {
@@ -223,7 +225,6 @@ void ProfilingRecord::insertShapeProfile(Node *n, Value *i) {
     }
     // passing t through
     push(stack, t);
-
   };
 
   pn->setCallback(shape_profiler);
@@ -278,7 +279,9 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       pr->insertShapeProfile(new_g->return_node(), i);
     }
   }
-  std::function<void(Stack&)> counter = [raw_pr](Stack&) {
+  std::function<void(Stack&)> counter = [raw_pr](Stack& stack) {
+    int64_t frame_id;
+    pop(stack, frame_id);
     std::lock_guard<std::mutex> lock(raw_pr->mutex_);
 
     // for (auto e : raw_pr->dims2symbols_) {
@@ -293,7 +296,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     raw_pr->split_symbols_.clear();
     if (raw_pr->profiling_count_ > 0)
     {
-        raw_pr->profiling_count_--;
+      raw_pr->profiling_count_--;
     }
   };
 
