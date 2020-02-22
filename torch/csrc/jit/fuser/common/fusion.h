@@ -67,13 +67,13 @@ struct TORCH_API FusionGuard {
 
 struct ExprSort : public IterVisitor{
 
-  std::vector<const Expr*> exprs;
+  std::vector<Expr*> exprs;
 
-  void handle(const Expr* const expr) override {
+  void handle(Expr* expr) override {
     exprs.push_back(expr);
   }
 
-  static std::vector<const Expr*> getExprs(const Fusion* const fusion, bool from_outputs_only, bool breadth_first){
+  static std::vector<Expr*> getExprs(const Fusion* const fusion, bool from_outputs_only, bool breadth_first){
     ExprSort es;
     es.traverse(fusion, from_outputs_only, breadth_first);
     return es.exprs;
@@ -123,7 +123,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * Break dependency chains associated with Expr, remove references to expr
    * delete expr.
    */
-  void removeExpr(const Expr* expr) {
+  void removeExpr(Expr* expr) {
     if (!inFusion(expr))
       throw std::runtime_error(
           "Cannot remove expr as it is not registered with this fusion.");
@@ -152,7 +152,7 @@ struct TORCH_API Fusion : public IRInputOutput {
   /*
    * Completely remove val from the fusion, break all dependencies associated with it.
    */
-  void removeVal(const Val* val) {
+  void removeVal(Val* val) {
     
     if (!inFusion(val))
       throw std::runtime_error(
@@ -160,21 +160,21 @@ struct TORCH_API Fusion : public IRInputOutput {
       // If we hit this error too frequently, we could lighten the restrictions so that removing something
       // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
 
-    for(const Val* inp : inputs())
+    for(Val* inp : inputs())
       if(val->same_as(inp))
         throw std::runtime_error(
           "Cannot remove val as it is an input of the fusion.");
 
-    for(const Val* out : outputs())
+    for(Val* out : outputs())
       if(val->same_as(out))
         throw std::runtime_error(
           "Cannot remove val as it is an output of the fusion.");
 
-    const Expr* orig = origin(val);
+    Expr* orig = origin(val);
     if(orig != nullptr)
       removeExpr(origin(val));
 
-    for(const Expr* use : uses(val))
+    for(Expr* use : uses(val))
       removeExpr(use);
 
     val_set_.erase(val);
@@ -183,14 +183,14 @@ struct TORCH_API Fusion : public IRInputOutput {
 
 
   // Functions for adding inputs and outputs
-  void addInput(const Val* input) {
+  void addInput(Val* const input) {
     if (!inFusion(input))
       throw std::runtime_error(
           "Cannot register input as it does not belong to this fusion.");
     IRInputOutput::addInput(input);
   }
 
-  void addOutput(const Val* output) {
+  void addOutput(Val* const output) {
     if (!inFusion(output))
       throw std::runtime_error(
           "Cannot register output as it does not belong to this fusion.");
@@ -198,15 +198,15 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   // Functions for querying / enumerating IR objets
-  bool inFusion(const Statement* stmt) {
+  bool inFusion(Statement* stmt) {
     bool infusion = stmt->fusion() == this;
 
     if (stmt->isExpr())
       infusion &=
-          expr_set_.find(static_cast<const Expr*>(stmt)) != expr_set_.end();
+          expr_set_.find(static_cast<Expr*>(stmt)) != expr_set_.end();
     if (stmt->isVal())
       infusion &=
-          val_set_.find(static_cast<const Val*>(stmt)) != val_set_.end();
+          val_set_.find(static_cast<Val*>(stmt)) != val_set_.end();
 
     return infusion;
   }
@@ -221,7 +221,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * TODO: Add more tests.
    * TODO: Implement breadth_first
    */
-  std::vector<const Expr*> exprs(
+  std::vector<Expr*> exprs(
       bool from_outputs_only = false,
       bool breadth_first = false) const {
     
@@ -236,7 +236,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * Simple Registration methods. These methods do 2 things:
    * Register the Statment/Val/Expr
    */
-  StmtNameType registerVal(const Val* val) {
+  StmtNameType registerVal(Val* val) {
     if (val->fusion()) {
       TORCH_CHECK(val->fusion() == this);
       if (inFusion(val)) {
@@ -252,7 +252,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * of Vals. We add expr to our general expr_set_, we add use tracking for
    * inputs and origin tracking for outputs.
    */
-  StmtNameType registerExpr(const Expr* expr) {
+  StmtNameType registerExpr(Expr* expr) {
     if (expr->fusion()) {
       TORCH_CHECK(expr->fusion() == this);
       if (inFusion(expr)) {
@@ -260,7 +260,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       }
     }
 
-    for (const Val* input : expr->inputs()) {
+    for (Val* input : expr->inputs()) {
       registerVal(input);
       if (uses_.find(input) == uses_.end()) {
         uses_[input] = {expr};
@@ -269,7 +269,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       }
     }
 
-    for (const Val* output : expr->outputs()) {
+    for (Val* output : expr->outputs()) {
       registerVal(output);
       auto it = origin_.find(output);
       if (it != origin_.end()) {
@@ -283,41 +283,41 @@ struct TORCH_API Fusion : public IRInputOutput {
     return getExprName();
   }
 
-  StmtNameType registerStatement(const Statement* stmt) {
+  StmtNameType registerStatement(Statement* stmt) {
     if (inFusion(stmt))
       return stmt->name();
 
     if (stmt->isVal()) {
-      return registerVal(static_cast<const Val*>(stmt));
+      return registerVal(static_cast<Val*>(stmt));
     } else if (stmt->isExpr()) {
-      return registerExpr(static_cast<const Expr*>(stmt));
+      return registerExpr(static_cast<Expr*>(stmt));
     }
 
     throw std::runtime_error("Could not register statement.");
     return UNINITIALIZED_STMTNAMETYPE;
   }
 
-  bool used(const Val* val) {
+  bool used(Val* val) {
     return (uses_.find(val) != uses_.end()) &&
         (uses_.find(val)->second.size() > 0);
   }
 
-  const std::set<const Val*>& vals() const noexcept {
+  const std::set<Val*>& vals() const noexcept {
     return val_set_;
   }
 
-  const std::set<const Expr*>& unordered_exprs() const noexcept {
+  const std::set<Expr*>& unordered_exprs() const noexcept {
     return expr_set_;
   }
 
-  const std::set<const Expr*>& uses(const Val* val) const {
+  const std::set<Expr*>& uses(Val* val) const {
     if(uses_.find(val) != uses_.end())
       return uses_.find(val)->second;
-    return std::move(std::set<const Expr*>());
+    return std::move(std::set<Expr*>());
   }
 
-  const Expr* origin(const Val* val) const {
-    const auto it = origin_.find(val);
+  Expr* origin(Val* val) const {
+    auto it = origin_.find(val);
 
     if (it == origin_.end())
       return nullptr;
@@ -325,9 +325,15 @@ struct TORCH_API Fusion : public IRInputOutput {
     return it->second;
   }
 
+  const Expr* origin(const Val* val) const {
+    auto it = origin_.find(const_cast<Val*>(val));
+    if( it == origin_.end())
+      return nullptr;
+    return it->second;  
+  }
  private:
-  std::set<const Val*> val_set_;
-  std::set<const Expr*> expr_set_;
+  std::set<Val*> val_set_;
+  std::set<Expr*> expr_set_;
 
   StmtNameType val_name_counter_ = 0;
   StmtNameType expr_name_counter_ = 0;
@@ -340,8 +346,8 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
-  std::unordered_map<const Val*, const Expr*> origin_;
-  std::unordered_map<const Val*, std::set<const Expr*>> uses_;
+  std::unordered_map<Val*, Expr*> origin_;
+  std::unordered_map<Val*, std::set<Expr*>> uses_;
 };
 
 } // namespace fuser

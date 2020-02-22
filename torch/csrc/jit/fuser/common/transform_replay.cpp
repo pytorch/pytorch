@@ -38,18 +38,18 @@ std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
 /*
  * Functions to backward propagate influence from split/merge/reorder
  */
-void TransformReplay::compute_influence(const Split* expr) {
+void TransformReplay::compute_influence(Split* expr) {
   int axis = expr->axis();
   influence[axis] = influence[axis] | influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 }
 
-void TransformReplay::compute_influence(const Merge* expr) {
+void TransformReplay::compute_influence(Merge* expr) {
   int axis = expr->axis();
   influence.insert(influence.begin() + axis + 1, influence[axis]);
 }
 
-void TransformReplay::compute_influence(const Reorder* expr) {
+void TransformReplay::compute_influence(Reorder* expr) {
   const std::vector<int>& pos2axis = expr->pos2axis();
 
   std::vector<bool> reorder_influence(influence.size(), false);
@@ -63,17 +63,17 @@ void TransformReplay::compute_influence(const Reorder* expr) {
 }
 
 // Backward influence propagate dispatch
-void TransformReplay::compute_influence(const Expr* expr) {
+void TransformReplay::compute_influence(Expr* expr) {
   TORCH_CHECK(expr->isExpr());
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
-      compute_influence(static_cast<const Split*>(expr));
+      compute_influence(static_cast<Split*>(expr));
       break;
     case (ExprType::Merge):
-      compute_influence(static_cast<const Merge*>(expr));
+      compute_influence(static_cast<Merge*>(expr));
       break;
     case (ExprType::Reorder):
-      compute_influence(static_cast<const Reorder*>(expr));
+      compute_influence(static_cast<Reorder*>(expr));
       break;
     default:
       throw std::runtime_error(
@@ -82,7 +82,7 @@ void TransformReplay::compute_influence(const Expr* expr) {
 }
 
 // Entry for backward influence propagation on td following record
-void TransformReplay::compute_influence(const TensorDomain* td) {
+void TransformReplay::compute_influence(TensorDomain* td) {
   influence = std::vector<bool>(td->size(), false);
   for (int i = 0; i < compute_at_axis; i++)
     influence[i] = true;
@@ -94,18 +94,18 @@ void TransformReplay::compute_influence(const TensorDomain* td) {
 
 // Trace back the history of td, record the Expr's that made this td (split,
 // merge, reorder)
-const TensorDomain* TransformReplay::get_root(
-    const TensorDomain* td,
+TensorDomain* TransformReplay::get_root(
+    TensorDomain* td,
     bool create_record) {
   if (create_record)
-    record = std::vector<const Expr*>();
+    record = std::vector<Expr*>();
 
-  const TensorDomain* root = td; // backward running td
+  TensorDomain* root = td; // backward running td
   Fusion* fusion = FusionGuard::getCurFusion();
 
   // Get my origin
-  const Expr* orig = fusion->origin(root);
-  std::set<const Expr*> visited_exprs;
+  Expr* orig = fusion->origin(root);
+  std::set<Expr*> visited_exprs;
 
   // If I'm not back to the original td
   while (orig != nullptr) {
@@ -114,10 +114,10 @@ const TensorDomain* TransformReplay::get_root(
           "TransformReplay::get_root is not traversing a correct history.");
 
     visited_exprs.emplace(orig);
-    const TensorDomain* previous_td = nullptr;
+    TensorDomain* previous_td = nullptr;
     // Check inputs of this operation, make sure there isn't more than one TD
     // I can only record operations that only take this TD as an input.
-    for (const Val* inp : orig->inputs())
+    for (Val* inp : orig->inputs())
       if (inp->getValType() == ValType::TensorDomain) {
         if (previous_td != nullptr)
           throw std::runtime_error(
@@ -128,7 +128,7 @@ const TensorDomain* TransformReplay::get_root(
           record.push_back(orig);
 
         // Traverse back
-        root = static_cast<const TensorDomain*>(inp);
+        root = static_cast<TensorDomain*>(inp);
         orig = fusion->origin(root);
       }
   }
@@ -143,9 +143,9 @@ const TensorDomain* TransformReplay::get_root(
  * "record" based on influence axes. Will also update influence and propagate
  * it forward.
  */
-const TensorView* TransformReplay::replay(
-    const Split* expr,
-    const TensorView* tv) {
+TensorView* TransformReplay::replay(
+    Split* expr,
+    TensorView* tv) {
   int axis = expr->axis();
   // Forward prop influence
   influence.insert(influence.begin() + axis + 1, influence[axis]);
@@ -156,9 +156,9 @@ const TensorView* TransformReplay::replay(
   return tv;
 }
 
-const TensorView* TransformReplay::replay(
-    const Merge* expr,
-    const TensorView* tv) {
+TensorView* TransformReplay::replay(
+    Merge* expr,
+    TensorView* tv) {
   int axis = expr->axis();
   // Forward prop influence
   influence[axis] = influence[axis] || influence[axis + 1];
@@ -168,9 +168,9 @@ const TensorView* TransformReplay::replay(
   return tv;
 }
 
-const TensorView* TransformReplay::replay(
-    const Reorder* expr,
-    const TensorView* tv) {
+TensorView* TransformReplay::replay(
+    Reorder* expr,
+    TensorView* tv) {
   // axis2pos[old_pos] = new_pos is sent to reorder, Reorder holds
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   std::unordered_map<int, int> axis2pos;
@@ -187,31 +187,31 @@ const TensorView* TransformReplay::replay(
     reordered_influence[new_pos] = influence[old_pos];
   }
   // Replay reorder
-  const TensorView* reordered_view = reorder(tv, axis2pos);
+  TensorView* reordered_view = reorder(tv, axis2pos);
   influence = reordered_influence;
   return reordered_view;
 }
 
 // Dispatch for replay functions
-const TensorView* TransformReplay::replay(
-    const Expr* expr,
-    const TensorView* tv) {
+TensorView* TransformReplay::replay(
+    Expr* expr,
+    TensorView* tv) {
   TORCH_CHECK(expr->isExpr());
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
-      return replay(static_cast<const Split*>(expr), tv);
+      return replay(static_cast<Split*>(expr), tv);
     case (ExprType::Merge):
-      return replay(static_cast<const Merge*>(expr), tv);
+      return replay(static_cast<Merge*>(expr), tv);
     case (ExprType::Reorder):
-      return replay(static_cast<const Reorder*>(expr), tv);
+      return replay(static_cast<Reorder*>(expr), tv);
     default:
       throw std::runtime_error("Could not detect expr type in replay.");
   }
 }
 
 // Entry point for replay on a TensorView, will relpay all ops from "replay"
-const TensorView* TransformReplay::replay(const TensorView* target) {
-  const TensorView* tv = target;
+TensorView* TransformReplay::replay(TensorView* target) {
+  TensorView* tv = target;
   for (auto it = record.begin(); it < record.end(); ++it) {
     tv = replay(*it, tv);
   }
@@ -242,16 +242,16 @@ const TensorView* TransformReplay::replay(const TensorView* target) {
  * that are not marked by the second propagate of the influence vector and
  * push those as well.
  */
-const TensorView* TransformReplay::runReplay(
-    const TensorView* replay_ref,
-    const TensorView* replay_target,
+TensorView* TransformReplay::runReplay(
+    TensorView* replay_ref,
+    TensorView* replay_target,
     int compute_at_axis) {
   /* STEP 1 */
   // Trace back to the root TensorDomain's of ref and target
-  const TensorDomain* target_root = get_root(replay_target->domain());
+  TensorDomain* target_root = get_root(replay_target->domain());
   // As we trace the ref, record the operations to go from replay_ref ->
   // ref_root, save in "record"
-  const TensorDomain* ref_root = get_root(replay_ref->domain(), true);
+  TensorDomain* ref_root = get_root(replay_ref->domain(), true);
   // Domain sizes must match at root for replay!
   TORCH_CHECK(target_root->size() == ref_root->size());
   this->compute_at_axis = compute_at_axis;
@@ -269,7 +269,7 @@ const TensorView* TransformReplay::runReplay(
   // Replay operations while forward propagating influence. The resulting
   // influence can be different, than just the compute_at axis depending on
   // the combination of merge/split/reorder nodes
-  const TensorView* full_replay =
+  TensorView* full_replay =
       replay(new TensorView(replay_target->tensor(), replay_target->domain()));
 
   /* STEP 4 */
@@ -278,7 +278,7 @@ const TensorView* TransformReplay::runReplay(
   // push all axes from replay that were influenced, then push all root axes
   // that were not influenced. This is the correct resulting tensor.
 
-  std::vector<const IterDomain*> compute_at_domain;
+  std::vector<IterDomain*> compute_at_domain;
   auto dom_size = full_replay->domain()->size();
   for (decltype(dom_size) i = 0; i < dom_size; i++) {
     if (influence[i])
@@ -293,8 +293,8 @@ const TensorView* TransformReplay::runReplay(
     if (!root_influence_vector[i])
       compute_at_domain.push_back(target_root->axis(i));
   // Return the newly produced view!
-  return new TensorView(
-      replay_target->tensor(), new TensorDomain(compute_at_domain));
+  throw std::runtime_error("BROKEN!");
+  //replay_target->setDomain(new TensorDomain(compute_at_domain));
 }
 
 } // namespace fuser

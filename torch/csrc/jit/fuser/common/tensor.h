@@ -58,7 +58,7 @@ struct TORCH_API IterDomain : public Val {
   IterDomain() = delete;
 
   IterDomain(
-      const Int* _size,
+      Int* _size,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false)
       : Val(ValType::IterDomain, DataType::Int),
@@ -67,18 +67,18 @@ struct TORCH_API IterDomain : public Val {
         is_reduction_domain_(_reduction_domain) {}
 
   IterDomain(
-      const Val* int_size,
+      Val* int_size,
       ParallelType _parallel_method = ParallelType::Serial,
       bool _reduction_domain = false)
       : Val(ValType::IterDomain, DataType::Int),
-        size_(static_cast<const Int*>(int_size)),
+        size_(static_cast<Int*>(int_size)),
         parallel_method_(_parallel_method),
         is_reduction_domain_(_reduction_domain) {
     assert(int_size->isVal());
     assert(int_size->getDataType() == DataType::Int);
   }
 
-  bool same_as(const IterDomain* other) const {
+  bool same_as(const IterDomain* const other) const {
     return(
          isReduction() == other->isReduction()
       && parallel_method() == other->parallel_method()
@@ -92,7 +92,7 @@ struct TORCH_API IterDomain : public Val {
   ParallelType parallel_method() const noexcept {
     return parallel_method_;
   }
-  const Int* size() const noexcept {
+  Int* size() const noexcept {
     return size_;
   }
 
@@ -103,9 +103,9 @@ struct TORCH_API IterDomain : public Val {
   IterDomain& operator=(IterDomain&& other) = delete;
 
  private:
-  const Int* size_;
-  const ParallelType parallel_method_;
-  const bool is_reduction_domain_;
+  Int* const size_;
+  ParallelType parallel_method_;
+  bool is_reduction_domain_;
 };
 
 struct TORCH_API TensorDomain : public Val {
@@ -117,14 +117,14 @@ struct TORCH_API TensorDomain : public Val {
   TensorDomain(TensorDomain&& other) = delete;
   TensorDomain& operator=(TensorDomain&& other) = delete;
 
-  TensorDomain(std::vector<const IterDomain*> domain_)
+  TensorDomain(std::vector<IterDomain*> domain_)
       : Val(ValType::TensorDomain), domain(domain_) {}
 
-  std::vector<const IterDomain*>::size_type size() const {
+  std::vector<IterDomain*>::size_type size() const {
     return domain.size();
   }
 
-  bool same_as(const TensorDomain* other) const {
+  bool same_as(const TensorDomain* const other) const {
     if(size() != other->size())
       return false;
 
@@ -137,7 +137,7 @@ struct TORCH_API TensorDomain : public Val {
   }
 
   //i here is int, as we want to accept negative value and ::size_type can be a uint.
-  const IterDomain* axis(int i) const {
+  IterDomain* axis(int i) const {
     if(i < 0)
       i+=size();
     assert(i >= 0 && i < size());
@@ -146,7 +146,7 @@ struct TORCH_API TensorDomain : public Val {
 
 
  private:
-  const std::vector<const IterDomain*> domain;
+  std::vector<IterDomain*> domain;
 };
 
 struct TORCH_API Tensor : public Val {
@@ -154,7 +154,7 @@ struct TORCH_API Tensor : public Val {
 
   Tensor() = delete;
 
-  Tensor(DataType dt, const TensorDomain* _td = nullptr)
+  Tensor(DataType dt, TensorDomain* _td = nullptr)
       : Val(ValType::Tensor, dt), contiguity_(c10::nullopt), domain_(_td) {}
 
   Tensor(const Tensor& other) = delete;
@@ -173,8 +173,8 @@ struct TORCH_API Tensor : public Val {
 
   const c10::optional<TensorContiguity>& getContiguityInfo() const;
 
-  static const Tensor* MakeDummyTensor(int ndims) {
-    std::vector<const IterDomain*> sizes;
+  static Tensor* MakeDummyTensor(int ndims) {
+    std::vector<IterDomain*> sizes;
     for (int i = 0; i < ndims; i++) {
       sizes.push_back(new IterDomain(new Int()));
     }
@@ -183,17 +183,17 @@ struct TORCH_API Tensor : public Val {
     return new Tensor(DataType::Float, td);
   }
 
-  const TensorDomain* domain() const noexcept { return domain_; }
+  TensorDomain* domain() const noexcept { return domain_; }
 
   private:
 
   // Implementation details:
   const c10::optional<TensorContiguity> contiguity_;
-  const TensorDomain* domain_;
+  TensorDomain* domain_;
 };
 
 struct TensorView;
-TORCH_API const TensorView* ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis);
+TORCH_API TensorView* ComputeAt_impl(TensorView* consumer, TensorView* producer, int axis);
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -204,26 +204,26 @@ struct TORCH_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(const Tensor* _tensor, const TensorDomain* _domain)
+  TensorView(Tensor* _tensor)
       : Val(ValType::TensorView)
       , tensor_(_tensor)
-      , domain_(_domain)
       , compute_at_view_(nullptr)
       , compute_at_axis_(-1) {
+        copyDomain(_tensor->domain());
       }
 
-  TensorView(const Tensor* _tensor)
+  TensorView(Tensor* _tensor, TensorDomain* _domain)
       : Val(ValType::TensorView)
       , tensor_(_tensor)
-      , domain_(_tensor->domain())
       , compute_at_view_(nullptr)
       , compute_at_axis_(-1) {
+        copyDomain(_domain);
       }
 
-  const Tensor* tensor() const noexcept { return tensor_; }
-  const TensorDomain* domain() const noexcept { return domain_; }
+  Tensor* tensor() const noexcept { return tensor_; }
+  TensorDomain* domain() const noexcept { return domain_; }
 
-  bool same_as(const TensorView* other) const{
+  bool same_as(const TensorView* const other) const{
     return(
          tensor()->same_as(other->tensor())
       && domain()->same_as(other->domain())
@@ -231,19 +231,29 @@ struct TORCH_API TensorView : public Val {
   }
 
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
-  int getComputeAtAxis() const noexcept { return compute_at_axis_; }
-  const TensorView* computeAt(const TensorView* tv, int axis) {
-    const TensorView* compute_tv = ComputeAt_impl(tv, this, axis);
-    compute_at_view_ = tv;
-    compute_at_axis_ = axis;
-    return compute_tv;
-  }
 
+  int getComputeAtAxis() const noexcept { return compute_at_axis_; }
+
+friend TensorView* split(TensorView*, int axis, int factor);
+friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
+friend TensorView* merge(TensorView*, int axis);
+friend TensorView* ComputeAt(const TensorView* consumer, TensorView* producer, int axis);
+
+protected:
+  void setDomain(TensorDomain* td){domain_ = td;}
+  
 private:
-  const Tensor* tensor_;
-  const TensorDomain* domain_;
-  const TensorView* compute_at_view_;
+  Tensor* const tensor_;
+  TensorDomain* domain_;
+  TensorView* compute_at_view_;
   int compute_at_axis_;
+
+  void copyDomain(const TensorDomain* td){
+    std::vector<IterDomain*> idv;
+    for(decltype(td->size()) i = 0; i <td->size(); i++)
+      idv.push_back(td->axis(i));
+    setDomain(new TensorDomain(idv));
+  }
 
 };
 
@@ -254,25 +264,25 @@ private:
 struct TORCH_API Split : public Expr {
   ~Split() = default;
   Split(
-      const TensorDomain* _out,
-      const TensorDomain* _in,
+      TensorDomain* _out,
+      TensorDomain* _in,
       int _axis,
-      const Int* _factor);
+      Int* _factor);
 
-  const TensorDomain* out() const noexcept {
+  TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorDomain* in() const noexcept {
+  TensorDomain* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
     return axis_;
   }
-  const Int* factor() const noexcept {
+  Int* factor() const noexcept {
     return factor_;
   }
 
-  bool same_as(const Split* other) const{
+  bool same_as(const Split* const other) const{
     return(
          out()->same_as(other->out())
       && in()->same_as(other->in())
@@ -288,10 +298,10 @@ struct TORCH_API Split : public Expr {
   Split& operator=(Split&& other) = delete;
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
+  TensorDomain* const out_;
+  TensorDomain* const in_;
   const int axis_;
-  const Int* factor_;
+  Int* const factor_;
 };
 
 /*
@@ -302,7 +312,7 @@ struct TORCH_API Split : public Expr {
  */
 struct TORCH_API Merge : public Expr {
   ~Merge() = default;
-  Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis);
+  Merge(TensorDomain* _out, TensorDomain* _in, int _axis);
 
   Merge(const Merge& other) = delete;
   Merge& operator=(const Merge& other) = delete;
@@ -310,17 +320,17 @@ struct TORCH_API Merge : public Expr {
   Merge(Merge&& other) = delete;
   Merge& operator=(Merge&& other) = delete;
 
-  const TensorDomain* out() const noexcept {
+  TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorDomain* in() const noexcept {
+  TensorDomain* in() const noexcept {
     return in_;
   }
   int axis() const noexcept {
     return axis_;
   }
 
-  bool same_as(const Merge* other) const{
+  bool same_as(const Merge* const other) const{
     return(
          out()->same_as(other->out())
       && in()->same_as(other->in())
@@ -329,9 +339,9 @@ struct TORCH_API Merge : public Expr {
   }
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
-  const int axis_;
+  TensorDomain* const out_;
+  TensorDomain* const in_;
+  int axis_;
 };
 
 /*
@@ -341,8 +351,8 @@ struct TORCH_API Merge : public Expr {
 struct TORCH_API Reorder : public Expr {
   ~Reorder() = default;
   Reorder(
-      const TensorDomain* _out,
-      const TensorDomain* _in,
+      TensorDomain* _out,
+      TensorDomain* _in,
       std::vector<int> _pos2axis);
 
   Reorder(const Reorder& other) = delete;
@@ -351,10 +361,10 @@ struct TORCH_API Reorder : public Expr {
   Reorder(Reorder&& other) = delete;
   Reorder& operator=(Reorder&& other) = delete;
 
-  const TensorDomain* out() const noexcept {
+  TensorDomain* out() const noexcept {
     return out_;
   }
-  const TensorDomain* in() const noexcept {
+  TensorDomain* in() const noexcept {
     return in_;
   }
   //Returns map pos2axis[new_position] = old_position
@@ -362,7 +372,7 @@ struct TORCH_API Reorder : public Expr {
     return pos2axis_;
   }
 
-  bool same_as(const Merge* other) const{
+  bool same_as(const Merge* const other) const{
     //Implicitly in and out matching means pos2axis matches
     return(
          out()->same_as(other->out())
@@ -371,19 +381,16 @@ struct TORCH_API Reorder : public Expr {
   }
 
  private:
-  const TensorDomain* out_;
-  const TensorDomain* in_;
+  TensorDomain* const out_;
+  TensorDomain* const in_;
   const std::vector<int> pos2axis_;
 };
 
-TORCH_API const TensorView* split(const TensorView*, int axis, int factor);
-TORCH_API const TensorView* split(const Tensor*, int axis, int factor);
+TORCH_API TensorView* split(TensorView*, int axis, int factor);
+TORCH_API TensorView* merge(TensorView*, int axis);
+TORCH_API TensorView* reorder(TensorView*, std::unordered_map<int, int>);
+TORCH_API TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis);
 
-TORCH_API const TensorView* merge(const TensorView*, int axis);
-TORCH_API const TensorView* merge(const Tensor*, int axis);
-
-TORCH_API const TensorView* reorder(const TensorView*, std::unordered_map<int, int>);
-TORCH_API const TensorView* reorder(const Tensor*, std::unordered_map<int, int>);
 
 } // namespace fuser
 } // namespace jit

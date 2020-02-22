@@ -11,11 +11,13 @@ namespace fuser {
 
 namespace {
 
+static bool print_inline = false;
+
 template<typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
   os << "(";
   for (auto i = data.begin(); i != data.end(); i++) {
-    os << (*i);
+    os << (*i); 
     os << " ";
   }
   return os << ")";
@@ -68,15 +70,15 @@ std::ostream& operator<<(std::ostream& os, const Val* const val) {
 std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
   switch (*(expr->getExprType())) {
     case ExprType::UnaryOp:
-      return os << static_cast<const UnaryOp*>(expr);
+      return os << static_cast<const UnaryOp* const>(expr);
     case ExprType::BinaryOp:
-      return os << static_cast<const BinaryOp*>(expr);
+      return os << static_cast<const BinaryOp* const>(expr);
     case ExprType::Split:
-      return os << static_cast<const Split*>(expr);
+      return os << static_cast<const Split* const>(expr);
     case ExprType::Merge:
-      return os << static_cast<const Merge*>(expr);
+      return os << static_cast<const Merge* const>(expr);
     case ExprType::Reorder:
-      return os << static_cast<const Reorder*>(expr);
+      return os << static_cast<const Reorder* const>(expr);
   }
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
@@ -115,7 +117,10 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id)
     default:
       os << id->parallel_method();
   }
-  return os << "{" << id->size() << "}";
+  print_inline = true;
+  os << "{" << id->size() << "}";
+  print_inline = false;
+  return os;
 }
 
 std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
@@ -136,36 +141,46 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {
-  os << "%f";
+  if(print_inline && FusionGuard::getCurFusion()->origin(f) != nullptr){
+    return os<<"( "<< FusionGuard::getCurFusion()->origin(f) << " )";
+  }
+  
   if (f->isSymbolic()) {
-    return os << f->name();
+    return os << "%f" << f->name();
   } else {
-    return os << f->name() << "{" << *(f->value()) << "}";
+    return os << *(f->value()) << "f";
   }
 }
 
 std::ostream& operator<<(std::ostream& os, const Int* const i) {
-  os << "%i";
+  if(print_inline && FusionGuard::getCurFusion()->origin(i) != nullptr){
+    return os<<"( "<< FusionGuard::getCurFusion()->origin(i) << " )";
+  }
+  
   if (i->isSymbolic()) {
-    return os << i->name();
+    return os << "%i" << i->name();
   } else {
-    return os << i->name() << "{" << *(i->value()) << "}";
+    return os << *(i->value()) ;
   }
 }
 
 std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
+  if(!print_inline)
+    os << uop->out() << " = ";
   if(auto inline_uop = inline_op_str(uop->type())) {
-    return os << uop->out() << " = " << inline_uop.value() << uop->in();
+    return os << inline_uop.value() << uop->in();
   } else {
-    return os << uop->out() << " = " << uop->type() << "(" << uop->in() << ")";
+    return os << uop->type() << "(" << uop->in() << ")";
   }
 }
 
 std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
+  if(!print_inline)
+    os << bop->out() << " = ";
   if(auto inline_bop = inline_op_str(bop->type())) {
-    return os << bop->out() << " = " << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
+    return os << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
   } else {
-    return os << bop->out() << " = " << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
+    return os << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
   }
 }
 
