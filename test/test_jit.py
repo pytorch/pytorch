@@ -1508,7 +1508,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
@@ -1547,7 +1547,7 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
@@ -1571,14 +1571,21 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.sub(x)
                 return x
 
-        m = torch.jit.script(TestModule())
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
 
-        m = wrap_cpp_module(torch._C._jit_pass_fold_convbn(m._c))
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        x = torch.rand(1, 1, 10, 10)
+        self.assertEqual(eager(x), scripted(x))
 
     def test_foldbn_shared_classtype(self):
         class TestModule(torch.nn.Module):
