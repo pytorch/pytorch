@@ -32,7 +32,8 @@ OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) + 8);
+      X.set_dims(
+          X.dims().size() - 1, X.dims(X.dims().size() - 1) + 2 * sizeof(float));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
       return out;
@@ -45,7 +46,11 @@ matrix, and then scaling each element to an 8-bit number between 0 and
 (bias) are stored alongside the data. More precisely, each row contains
 int8 elements for each quantized element, and the last 8 bytes
 of each row in the output matrix are a float storing the scale
-followed by another float containing the scale.)
+followed by another float containing the scale.
+For N-dimensional input tensor, the first N-1 dimensions are interpreted as
+rows and the last dimension is interpreted as a column. For example, an
+input tensor with dimension 5x2x4 is interpreted as 10 rows and 4 columns.
+)
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
@@ -66,7 +71,9 @@ OPERATOR_SCHEMA(FloatToFused8BitRowwiseQuantizedHalfScaleBias)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) + 4);
+      X.set_dims(
+          X.dims().size() - 1,
+          X.dims(X.dims().size() - 1) + 2 * sizeof(at::Half));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
       return out;
@@ -100,7 +107,8 @@ OPERATOR_SCHEMA(HalfFloatToFused8BitRowwiseQuantized)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) + 8);
+      X.set_dims(
+          X.dims().size() - 1, X.dims(X.dims().size() - 1) + 2 * sizeof(float));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
       return out;
@@ -134,7 +142,9 @@ OPERATOR_SCHEMA(HalfFloatToFused8BitRowwiseQuantizedHalfScaleBias)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) + 4);
+      X.set_dims(
+          X.dims().size() - 1,
+          X.dims(X.dims().size() - 1) + 2 * sizeof(at::Half));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_UINT8);
       return out;
@@ -168,7 +178,8 @@ OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToFloat)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) - 8);
+      X.set_dims(
+          X.dims().size() - 1, X.dims(X.dims().size() - 1) - 2 * sizeof(float));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_FLOAT);
       return out;
@@ -206,7 +217,9 @@ OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedHalfScaleBiasToFloat)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) - 4);
+      X.set_dims(
+          X.dims().size() - 1,
+          X.dims(X.dims().size() - 1) - 2 * sizeof(at::Half));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_FLOAT);
       return out;
@@ -244,7 +257,8 @@ OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedToHalfFloat)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) - 8);
+      X.set_dims(
+          X.dims().size() - 1, X.dims(X.dims().size() - 1) - 2 * sizeof(float));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_FLOAT16);
       return out;
@@ -282,7 +296,9 @@ OPERATOR_SCHEMA(Fused8BitRowwiseQuantizedHalfScaleBiasToHalfFloat)
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out;
       TensorShape X = in[0];
-      X.set_dims(1, X.dims(1) - 4);
+      X.set_dims(
+          X.dims().size() - 1,
+          X.dims(X.dims().size() - 1) - 2 * sizeof(at::Half));
       out.push_back(std::move(X));
       out[0].set_data_type(TensorProto_DataType_FLOAT);
       return out;
