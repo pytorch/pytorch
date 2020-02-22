@@ -310,7 +310,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(worker_names, expected_worker_names)
 
         worker_ids = {worker_info.id for worker_info in worker_infos}
-        expected_worker_ids = {rank for rank in range(self.world_size)}
+        expected_worker_ids = set(range(self.world_size))
         self.assertEqual(worker_ids, expected_worker_ids)
 
     @dist_init
@@ -835,10 +835,14 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
+        local_ret = one_arg(torch.ones(2, 2))
         ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
+        self.assertEqual(ret, local_ret)
         rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(rref.to_here(), local_ret)
+        # create rref to itself
+        local_rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+        self.assertEqual(local_rref.to_here(), local_ret)
 
     @dist_init
     def test_torchscript_function_exception(self):
