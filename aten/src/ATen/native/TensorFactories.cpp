@@ -544,7 +544,6 @@ Tensor randint_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, nullptr);
-  return native::randint(high, self.sizes(), nullptr, options);
 }
 
 Tensor randint_like(
