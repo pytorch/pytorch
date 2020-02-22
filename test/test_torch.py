@@ -13893,6 +13893,16 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.min(), 0)
         self.assertEqual(t.max(), ub - 1)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                  torch.float, torch.double, torch.half)
+    # torch.bfloat16 not supported
+    def test_min_max(self, device, dtype):
+        size = 2000
+        t = torch.empty(size, dtype=dtype, device=device)
+        t.min()
+        t.max()
+
     @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)
     def test_cat(self, device, dtype):
