@@ -35,7 +35,7 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_format_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/rng_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_rng_test.cpp)
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu

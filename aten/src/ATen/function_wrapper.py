@@ -84,11 +84,11 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals});
+${return_type} ${type_wrapper_name}(${type_method_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
@@ -96,41 +96,43 @@ ${return_type} ${api_name}(${type_method_formals}) {
 """)
 
 NATIVE_DISPATCH_DEFINITION_BACKEND = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
     ${named_guard_declaration}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${native_actuals});
 }
 """)
 
+# A schema registration specifies alias analysis for an operator, but doesn't
+# actually provide an implementation.  Although our registration API allows you
+# to specify all of this information at a function registration site, it's
+# better to do it once at a schema registration so that we don't have to
+# repeat ourselves everywhere else.
+SCHEMA_REGISTRATION = CodeTemplate("""\
+.op(torch::RegisterOperators::options()
+  .schema("${schema_string}")
+  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+""")
+
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<${return_type} (${formals_types}), &TypeDefault::${api_name}>()
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyCatchAllKernel<decltype(TypeDefault::${type_wrapper_name}), &TypeDefault::${type_wrapper_name}>())
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formals_types}), &${Type}::${api_name}>(DispatchKey::${Backend}TensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyKernel<decltype(${Type}::${type_wrapper_name}), &${Type}::${type_wrapper_name}>(DispatchKey::${Backend}TensorId))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .catchAllKernel<${return_type} (${formals_types})>(&TypeDefault::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-""")
-DEFAULT_SCHEMA_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .catchAllKernel(&TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formals_types})>(DispatchKey::${Backend}TensorId, &${Type}::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .kernel(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
@@ -178,7 +180,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the time you get to the implementation.
 STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${native_type_method_dispatch}(${native_arguments});
+${return_call} TypeDefault::${type_wrapper_name}(${native_arguments});
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
 at::AutoNonVariableTypeMode _var_guard(true);
@@ -191,7 +193,7 @@ switch(dispatchKeyToBackend(c10::impl::dispatchTypeId(${key_set},
 """)
 STATIC_DISPATCH_FUNCTION_SWITCH_STATEMENT = CodeTemplate("""\
 case Backend::${backend}:
-    ${return_call} ${backend}Type::${api_name}(${native_arguments});
+    ${return_call} ${backend}Type::${type_wrapper_name}(${native_arguments});
     break;
 """)
 
@@ -246,7 +248,7 @@ scalar_types = [
     ('BFloat16', 'BFloat16', 'BFloat16AccrealNotDefined', True),
 ]
 
-static_dispatch_backends = ['CPU', 'QuantizedCPU', 'SparseCPU']
+static_dispatch_backends = ['CPU', 'QuantizedCPU']
 
 
 class NYIError(Exception):
@@ -487,6 +489,11 @@ NNBuffer = TypedDict('NNBuffer', {
 FunctionOption = TypedDict('FunctionOption', {
     'actuals': List[str],
     'api_name': str,
+    # Like api_name, but it is the name of the internal
+    # CPUType/CUDAType/TypeDefault function that wraps
+    # the actual native call.  This name is NOT user
+    # visible and is mangled with the overload name
+    'type_wrapper_name': str,
     'arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
@@ -1215,11 +1222,10 @@ def create_generic(top_env, declarations):
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
-            if option['manual_kernel_registration']:
-                op_registrations.append(OpRegistration(
-                    operator_name=OPERATOR_NAME.substitute(option),
-                    registration_code=DEFAULT_SCHEMA_REGISTRATION.substitute(option)))
-            else:
+            op_registrations.append(OpRegistration(
+                operator_name=OPERATOR_NAME.substitute(option),
+                registration_code=SCHEMA_REGISTRATION.substitute(option)))
+            if not option['manual_kernel_registration']:
                 if option['use_c10_dispatcher'] == 'full':
                     op_registrations.append(OpRegistration(
                         operator_name=OPERATOR_NAME.substitute(option),
@@ -1351,6 +1357,8 @@ def create_derived(backend_type_env, declarations):
         return [get_argument(env, argument, option)
                 for argument in arguments]
 
+    # TODO: Delete this per https://github.com/pytorch/pytorch/issues/33094
+    # after all TH uses are ported
     def handle_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
