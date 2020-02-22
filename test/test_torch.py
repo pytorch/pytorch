@@ -14012,7 +14012,7 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.empty(size, dtype=dtype, device=device)
         t.random_()
-        if dtype != torch.bfloat16:
+        if dtype != torch.bfloat16 and dtype != torch.half:
             self.assertTrue(0 <= t.min() < alpha * to_inc)
             self.assertTrue((to_inc - alpha * to_inc) < t.max() <= to_inc)
 
