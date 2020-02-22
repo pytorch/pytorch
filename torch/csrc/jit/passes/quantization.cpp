@@ -109,21 +109,16 @@ std::string getFuncName(Value* func_value) {
 bool isFunctionNode(Node* n,
                     const std::vector<std::string>& call_funcs,
                     const std::vector<std::string>& aten_funcs) {
-  std::vector<Symbol> all_funcs;
-  std::transform(
-      call_funcs.begin(),
-      call_funcs.end(),
-      std::back_inserter(all_funcs),
-      [](const std::string& s) { return Symbol::aten(s); });
+  std::vector<Symbol> aten_func_symbols;
   std::transform(
       aten_funcs.begin(),
       aten_funcs.end(),
-      std::back_inserter(all_funcs),
+      std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
 
   bool is_quantizable =
-      std::find(all_funcs.begin(), all_funcs.end(), n->kind()) !=
-      all_funcs.end();
+      std::find(aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+      aten_func_symbols.end();
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
