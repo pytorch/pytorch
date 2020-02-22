@@ -6,6 +6,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+static std::unordered_map<UnaryOpType, std::string> unary_op_type_inline_op_string_map; //Defined in type.cpp
+
 struct Fusion;
 
 struct Statement;

@@ -22,7 +22,7 @@ namespace fuser {
 
 // When we create a Val or EXPR we immediately register them with the active
 // fusion.
-Val::Val(const ValType _vtype, const DataType _dtype)
+Val::Val(ValType _vtype, DataType _dtype)
     : vtype_{_vtype}, dtype_{_dtype} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion != nullptr) {
@@ -33,19 +33,19 @@ Val::Val(const ValType _vtype, const DataType _dtype)
   }
 }
 
-const Expr* Val::getOrigin() {
+Expr* Val::getOrigin() {
   FusionGuard fg(fusion_);
   return (fusion_->origin(this));
 }
 
-Expr::Expr(const ExprType _type) : type_{_type} {
+Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     throw std::runtime_error("No fusion group found when creating an Expr.");
   this->fusion_ = fusion;
 }
 
-UnaryOp::UnaryOp(const UnaryOpType _type, const Val* _out, const Val* _in)
+UnaryOp::UnaryOp(UnaryOpType _type, Val* _out, Val* _in)
     : Expr(ExprType::UnaryOp), unary_op_type_{_type}, out_{_out}, in_{_in} {
   addOutput(_out);
   addInput(_in);
@@ -53,10 +53,10 @@ UnaryOp::UnaryOp(const UnaryOpType _type, const Val* _out, const Val* _in)
 }
 
 BinaryOp::BinaryOp(
-    const BinaryOpType _type,
-    const Val* _out,
-    const Val* _lhs,
-    const Val* _rhs)
+    BinaryOpType _type,
+    Val* _out,
+    Val* _lhs,
+    Val* _rhs)
     : Expr(ExprType::BinaryOp),
       binary_op_type_{_type},
       out_{_out},
@@ -87,42 +87,42 @@ T* ptr(T* obj) {
  * the IR itself.
  * This dispatch is paired with a class that implements the functions:
  * template <typenname node_type>
- * int handler(const node_type* node)
+ * int handler(node_type* node)
  *
  * handler should call:
- * (statement* node_to_dispatch)->dispatch()
+ * dispatch(this, node_to_dispatch)
  *
  * It could also implement:
  * int handler(Statement* stmt){
- *   stmt->dispatch(this);
+ *   dispatch(this, stmt);
  * }
  *
  * And therefore dispatch should never call:
- * ptr(mutator)->handle(static_cast<const Statement*>(this));
+ * ptr(mutator)->handle(static_cast<Statement*>(this));
  */
 
 template <typename T>
-void Val::dispatch(T handler) const {
-  switch (*getValType()) {
+void Val::dispatch(T handler, Val* val) {
+  switch (*(val->getValType())) {
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<const TensorDomain*>(this));
+      ptr(handler)->handle(static_cast<TensorDomain*>(val));
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<const TensorView*>(this));
+      ptr(handler)->handle(static_cast<TensorView*>(val));
       return;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<const IterDomain*>(this));
+      ptr(handler)->handle(static_cast<IterDomain*>(val));
       return;
     case ValType::Tensor:
-      ptr(handler)->handle(static_cast<const Tensor*>(this));
+      ptr(handler)->handle(static_cast<Tensor*>(val));
       return;
     case ValType::Scalar:
-      switch (*getDataType()) {
+      switch (*(val->getDataType())) {
         case DataType::Float:
-          ptr(handler)->handle(static_cast<const Float*>(this));
+          ptr(handler)->handle(static_cast<Float*>(val));
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<const Int*>(this));
+          ptr(handler)->handle(static_cast<Int*>(val));
           return;
         default:
           break;
@@ -134,22 +134,22 @@ void Val::dispatch(T handler) const {
 }
 
 template <typename T>
-void Expr::dispatch(T handler) const {
-  switch (*getExprType()) {
+void Expr::dispatch(T handler, Expr* expr) {
+  switch (*(expr->getExprType())) {
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<const UnaryOp*>(this));
+      ptr(handler)->handle(static_cast<UnaryOp*>(expr));
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<const BinaryOp*>(this));
+      ptr(handler)->handle(static_cast<BinaryOp*>(expr));
       return;
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<const Split*>(this));
+      ptr(handler)->handle(static_cast<Split*>(expr));
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<const Merge*>(this));
+      ptr(handler)->handle(static_cast<Merge*>(expr));
       return;
     case ExprType::Reorder:
-      ptr(handler)->handle(static_cast<const Reorder*>(this));
+      ptr(handler)->handle(static_cast<Reorder*>(expr));
       return;
     default:
       throw std::runtime_error("Unknown exprtype in dispatch!");
@@ -157,11 +157,11 @@ void Expr::dispatch(T handler) const {
 }
 
 template <typename T>
-void Statement::dispatch(T handler) const {
-  if (isVal()) {
-    ptr(handler)->handle(static_cast<const Val*>(this));
-  } else if (isExpr()) {
-    ptr(handler)->handle(static_cast<const Expr*>(this));
+void Statement::dispatch(T handler, Statement* stmt) {
+  if (stmt->isVal()) {
+    ptr(handler)->handle(static_cast<Val*>(stmt));
+  } else if (stmt->isExpr()) {
+    ptr(handler)->handle(static_cast<Expr*>(stmt));
   } else
     throw std::runtime_error("Unknown stmttype in dispatch!");
 }
@@ -170,36 +170,36 @@ void Statement::dispatch(T handler) const {
  * Generic dispatch for any handler that modifies the IR. This could be a
  * transformation on loop structures, or parallelizing a loop. This dispatch is
  * paired with a class that implements the functions template <typenname
- * node_type> const Statement* mutate(const node_type* node) mutate should call
+ * node_type> Statement* mutate(node_type* node) mutate should call
  * (statement* node_to_dispatch)->dispatch_mutator() It could also implement
- * const Statement* mutate(Statement* stmt){
+ * Statement* mutate(Statement* stmt){
  *   stmt->dispatch_mutator(this);
  * }
  * And therefore dispatch_mutator should never call:
- *   ptr(mutator)->mutate(static_cast<const Statement*>(this));
+ *   ptr(mutator)->mutate(static_cast<Statement*>(this));
  */
 template <typename T>
-const Statement* Val::dispatch_mutator(T mutator) const {
-  switch (*getValType()) {
+Statement* Val::dispatch_mutator(T mutator, Val* val) {
+  switch (*(val->getValType())) {
     case ValType::Tensor:
-      return ptr(mutator)->mutate(static_cast<const Tensor*>(this));
+      return ptr(mutator)->mutate(static_cast<Tensor*>(val));
 
     case ValType::TensorDomain:
-      return ptr(mutator)->mutate(static_cast<const TensorDomain*>(this));
+      return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
 
     case ValType::TensorView:
-      return ptr(mutator)->mutate(static_cast<const TensorView*>(this));
+      return ptr(mutator)->mutate(static_cast<TensorView*>(val));
 
     case ValType::IterDomain:
-      return ptr(mutator)->mutate(static_cast<const IterDomain*>(this));
+      return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
 
     case ValType::Scalar:
-      switch (*getDataType()) {
+      switch (*(val->getDataType())) {
         case DataType::Float:
-          return ptr(mutator)->mutate(static_cast<const Float*>(this));
+          return ptr(mutator)->mutate(static_cast<Float*>(val));
 
         case DataType::Int:
-          return ptr(mutator)->mutate(static_cast<const Int*>(this));
+          return ptr(mutator)->mutate(static_cast<Int*>(val));
 
         default:
           break;
@@ -211,30 +211,30 @@ const Statement* Val::dispatch_mutator(T mutator) const {
 }
 
 template <typename T>
-const Statement* Expr::dispatch_mutator(T mutator) const {
-  switch (*getExprType()) {
+Statement* Expr::dispatch_mutator(T mutator, Expr* expr) {
+  switch (*(expr->getExprType())) {
     case ExprType::UnaryOp:
-      return ptr(mutator)->mutate(static_cast<const UnaryOp*>(this));
+      return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
-      return ptr(mutator)->mutate(static_cast<const BinaryOp*>(this));
+      return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
     case ExprType::Split:
-      return ptr(mutator)->mutate(static_cast<const Split*>(this));
+      return ptr(mutator)->mutate(static_cast<Split*>(expr));
     case ExprType::Merge:
-      return ptr(mutator)->mutate(static_cast<const Merge*>(this));
+      return ptr(mutator)->mutate(static_cast<Merge*>(expr));
     case ExprType::Reorder:
-      return ptr(mutator)->mutate(static_cast<const Reorder*>(this));
+      return ptr(mutator)->mutate(static_cast<Reorder*>(expr));
     default:
       throw std::runtime_error("Unknown exprtype in dispatch_mutator!");
   }
 }
 
 template <typename T>
-const Statement* Statement::dispatch_mutator(T mutator) const {
-  if (isVal()) {
-    return ptr(mutator)->mutate(static_cast<const Val*>(this));
+Statement* Statement::dispatch_mutator(T mutator, Statement* stmt) {
+  if (stmt->isVal()) {
+    return ptr(mutator)->mutate(static_cast<Val*>(stmt));
   }
-  if (isExpr()) {
-    return ptr(mutator)->mutate(static_cast<const Expr*>(this));
+  if (stmt->isExpr()) {
+    return ptr(mutator)->mutate(static_cast<Expr*>(stmt));
   }
   throw std::runtime_error("Unknown stmttype in dispatch_mutator!");
 }
@@ -244,19 +244,19 @@ const Statement* Statement::dispatch_mutator(T mutator) const {
  * Actual visitors/mutators should inhereit from these classes and call ->dispatch(this)
  * to avoid needing an explicit instantiation.
  */
-template void Statement::dispatch(IterVisitor) const;
-template void Statement::dispatch(IterVisitor*) const;
-template void Val::dispatch(IterVisitor) const;
-template void Val::dispatch(IterVisitor*) const;
-template void Expr::dispatch(IterVisitor) const;
-template void Expr::dispatch(IterVisitor*) const;
+template void Statement::dispatch(IterVisitor, Statement*);
+template void Statement::dispatch(IterVisitor*, Statement*);
+template void Val::dispatch(IterVisitor, Val*);
+template void Val::dispatch(IterVisitor*, Val*);
+template void Expr::dispatch(IterVisitor, Expr*);
+template void Expr::dispatch(IterVisitor*, Expr*);
 
-template const Statement* Statement::dispatch_mutator(BaseMutator) const;
-template const Statement* Statement::dispatch_mutator(BaseMutator*) const;
-template const Statement* Val::dispatch_mutator(BaseMutator) const;
-template const Statement* Val::dispatch_mutator(BaseMutator*) const;
-template const Statement* Expr::dispatch_mutator(BaseMutator) const;
-template const Statement* Expr::dispatch_mutator(BaseMutator*) const;
+template Statement* Statement::dispatch_mutator(BaseMutator, Statement*);
+template Statement* Statement::dispatch_mutator(BaseMutator*, Statement*);
+template Statement* Val::dispatch_mutator(BaseMutator, Val*);
+template Statement* Val::dispatch_mutator(BaseMutator*, Val*);
+template Statement* Expr::dispatch_mutator(BaseMutator, Expr*);
+template Statement* Expr::dispatch_mutator(BaseMutator*, Expr*);
 
 /*
  * Val member definitions

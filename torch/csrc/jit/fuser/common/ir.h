@@ -1,4 +1,4 @@
- #pragma once
+#pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Optional.h>
@@ -62,9 +62,9 @@ namespace fuser {
  * Right now adding a Val is quite involved. Val's can be defined in ir.h or in their own header file.
  * Val's classes must be uppercase. The following is what is currently needed for Val definitions:
  * 1) Definition inheriting from Val
- *     - Members must be at minimum private, often they should be const and private.
+ *     - Members must be private or protected
  *     - Accessor functions for members
- *     - Must cal Val constructor, Val constructor registers with fusion
+ *     - Must call Val constructor, Val constructor registers with fusion
  * 2) Statement::dispatch and Statement::dispatch_mutator in ir.cpp must be updated
  * 3) Virtual handle functions must be added to iter_visitor.h/.cpp
  * 4) Mutator fucntions must be added to mutator.h/.cpp
@@ -92,7 +92,7 @@ namespace fuser {
  * Right now adding an Expr is quite involved. Expr's can be defined in ir.h or in their own header file.
  * Expr's classes must be uppercase. The following is what is currently needed for Expr definitions:
  * 1) Definition inheriting from Expr.
- *    - Members must at minimum be private/protected, and often const if they must never be changed
+ *    - Members must be private or protected
  *    - Accessor functions for members
  *    - Constructors need to register with the Fusion after inputs/outputs are defined
  *    - Implementation of bool same_as(...)
@@ -128,10 +128,10 @@ struct TORCH_API Statement {
 
   //dispatch is used to take a handler, and call 
   template <typename T>
-  void dispatch(T handler) const;
+  static void dispatch(T handler, Statement*);
 
   template <typename T>
-  const Statement* dispatch_mutator(T mutator) const;
+  static Statement* dispatch_mutator(T mutator, Statement*);
 
   virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
   virtual c10::optional<DataType> getDataType() const noexcept { return c10::nullopt; }
@@ -143,7 +143,7 @@ struct TORCH_API Statement {
   Fusion* fusion() const noexcept { return fusion_; }
   StmtNameType name() const noexcept { return name_; }
 
-  virtual bool same_as(const Statement* other) const {
+  virtual bool same_as(const Statement* const other) const {
     return this == other;
   }
 
@@ -165,7 +165,7 @@ public:
   virtual ~Val() = 0;
 
   Val() = delete;
-  Val(const ValType _vtype, const DataType _dtype = DataType::Null);
+  Val(ValType _vtype, DataType _dtype = DataType::Null);
 
   //TODO: Values are unique and not copyable
   Val(const Val& other) = delete;
@@ -183,17 +183,17 @@ public:
 
   bool isScalar(){ return vtype_ == ValType::Scalar; }
 
-  const Expr* getOrigin();
+  Expr* getOrigin();
 
   //TODO: We want to make this more sophisticated. A value being the same as another
   //value should be evaluated based on the DAG that created it, and that DAGs leaf nodes
-  bool same_as(const Val* other) const { return this == other;}
+  bool same_as(const Val* const other) const { return this == other;}
 
   template <typename T>
-  void dispatch(T handler) const;
+  static void dispatch(T handler, Val*);
 
   template <typename T>
-  const Statement* dispatch_mutator(T mutator) const;
+  static Statement* dispatch_mutator(T mutator, Val*);
 
 protected:
   const ValType vtype_;
@@ -208,46 +208,46 @@ protected:
 struct TORCH_API IRInputOutput {
   virtual ~IRInputOutput() = 0;
 
-  const std::deque<const Val*>& inputs() const noexcept { return inputs_; }
-  const std::deque<const Val*>& outputs() const noexcept{ return outputs_; }
+  const std::deque<Val*>& inputs() const noexcept { return inputs_; }
+  const std::deque<Val*>& outputs() const noexcept{ return outputs_; }
 
-  const Val* input(const std::deque<const Val*>::size_type idx) const {
+  Val* input(std::deque<Val*>::size_type idx) const {
     return inputs_[idx];
   }
-  const Val* output(const std::deque<const Val*>::size_type idx) const {
+  Val* output(std::deque<Val*>::size_type idx) const {
     return outputs_[idx];
   }
 
-  void addInput(const Val* input) {
+  void addInput(Val* input) {
     inputs_.push_back(input);
   }
-  void addOutput(const Val* output) {
+  void addOutput(Val* output) {
     outputs_.push_back(output);
   }
 
-  bool hasInput(const Val* input) const {
+  bool hasInput(const Val* const input) const {
     for(auto val : inputs_)
       if(val == input)
         return true;
     return false;
   }
 
-  bool hasOutput(const Val* output) const {
+  bool hasOutput(const Val* const output) const {
     for(auto val : outputs_)
       if(val == output)
         return true;
     return false;
   }
 
-  void addInputAt(const std::deque<const Val*>::size_type pos, const Val* input) {
+  void addInputAt(std::deque<Val*>::size_type pos, Val* input) {
     inputs_.insert(inputs_.begin() + pos, input);
   }
 
-  void addOutputAt(const std::deque<const Val*>::size_type pos, Val* output) {
+  void addOutputAt(std::deque<Val*>::size_type pos, Val* output) {
     outputs_.insert(outputs_.begin() + pos, output);
   }
 
-  void removeOutput(const Val* val){
+  void removeOutput(Val* val){
     auto it = outputs_.begin();
     for(; it != outputs_.end(); ++it){
       if((*it) == val)
@@ -257,12 +257,12 @@ struct TORCH_API IRInputOutput {
     outputs_.erase(it);    
   }
 
-  std::deque<const Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
-  std::deque<const Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
+  std::deque<Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
+  std::deque<Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
 
 protected:
-  std::deque<const Val*> inputs_;
-  std::deque<const Val*> outputs_;
+  std::deque<Val*> inputs_;
+  std::deque<Val*> outputs_;
 
 };
 
@@ -275,7 +275,7 @@ struct TORCH_API Float : public Val {
   , maybe_value_{c10::nullopt} { }
 
   Float(
-    const float _value)
+    float _value)
   : Val(ValType::Scalar, DataType::Float)
   , maybe_value_{_value} { }
 
@@ -289,14 +289,14 @@ struct TORCH_API Float : public Val {
   bool isConst() const { return maybe_value_.has_value(); }
   c10::optional<float> value() const noexcept { return maybe_value_; }
 
-  virtual bool same_as(const Float* other) const {
+  virtual bool same_as(const Float* const other) const {
     if(isConst() && other->isConst())
       return *value() == *(other->value());
     return this == other;
   }
 
 private:
-  c10::optional<float> maybe_value_;
+  const c10::optional<float> maybe_value_;
 };
 
 struct TORCH_API Int : public Val {
@@ -307,7 +307,7 @@ struct TORCH_API Int : public Val {
   , maybe_value_{c10::nullopt} { }
 
   Int(
-    const int _value)
+    int _value)
   : Val(ValType::Scalar, DataType::Int)
   , maybe_value_{_value} { }
 
@@ -321,14 +321,14 @@ struct TORCH_API Int : public Val {
   bool isConst() const { return maybe_value_.has_value(); }
   c10::optional<int> value() const noexcept { return maybe_value_; }
 
-  virtual bool same_as(const Int* other) const {
+  virtual bool same_as(const Int* const other) const {
     if(isConst() && other->isConst())
       return *value() == *(other->value());
     return this == other;
   }
 
 private:
-  c10::optional<int> maybe_value_;
+  const c10::optional<int> maybe_value_;
 };
 
 /*
@@ -349,7 +349,7 @@ struct TORCH_API Expr : public Statement, IRInputOutput {
 public:
   virtual ~Expr() = 0;
   Expr() = delete;
-  Expr(const ExprType _type);
+  Expr(ExprType _type);
 
   Expr(const Expr& other) = delete;
   Expr& operator=(const Expr& other) = delete;
@@ -360,7 +360,7 @@ public:
   c10::optional<ExprType> getExprType() const noexcept override { return type_; }
   ExprType type() const noexcept { return type_; }
 
-  virtual bool same_as(const Expr* other) const {
+  virtual bool same_as(const Expr* const other) const {
     if(getExprType() != other->getExprType())
       return false;
     if(inputs().size() != other->inputs().size()
@@ -374,10 +374,10 @@ public:
   }
 
   template <typename T>
-  void dispatch(T handler) const;
+  static void dispatch(T handler, Expr*);
 
   template <typename T>
-  const Statement* dispatch_mutator(T mutator) const;
+  static Statement* dispatch_mutator(T mutator, Expr*);
 
 private:
   ExprType type_;
@@ -387,9 +387,9 @@ private:
 struct TORCH_API UnaryOp : public Expr {
   ~UnaryOp() = default;
   UnaryOp(
-	const UnaryOpType _type
-  , const Val* _out
-  , const Val* _in);
+	UnaryOpType _type
+  , Val* _out
+  , Val* _in);
 
   UnaryOp(const UnaryOp& other) = delete;
   UnaryOp& operator=(const UnaryOp& other) = delete;
@@ -397,12 +397,12 @@ struct TORCH_API UnaryOp : public Expr {
   UnaryOp(UnaryOp&& other) = delete;
   UnaryOp& operator=(UnaryOp&& other) = delete;
 
-  const Val* out() const noexcept { return out_; }
-  const Val* in()  const noexcept { return in_; }
+  Val* out() const noexcept { return out_; }
+  Val* in()  const noexcept { return in_; }
   
   UnaryOpType type() const noexcept { return unary_op_type_; }
 
-  bool same_as(const UnaryOp* other) const {
+  bool same_as(const UnaryOp* const other) const {
     if(this->type() != other->type())
       return false;
     return static_cast<const Expr*>(this)->same_as(other);
@@ -410,18 +410,18 @@ struct TORCH_API UnaryOp : public Expr {
 
 private:
   const UnaryOpType unary_op_type_;
-  const Val* out_;
-  const Val* in_;
+  Val* const out_;
+  Val* const in_;
 };
 
 // TODO: comment
 struct TORCH_API BinaryOp : public Expr {
   ~BinaryOp() = default;
   BinaryOp(
-	const BinaryOpType _type
-  , const Val* _out
-  , const Val* _lhs
-  , const Val* _rhs);
+	BinaryOpType _type
+  , Val* _out
+  , Val* _lhs
+  , Val* _rhs);
 
   BinaryOp(const BinaryOp& other) = delete;
   BinaryOp& operator=(const BinaryOp& other) = delete;
@@ -429,9 +429,9 @@ struct TORCH_API BinaryOp : public Expr {
   BinaryOp(BinaryOp&& other) = delete;
   BinaryOp& operator=(BinaryOp&& other) = delete;
 
-  const Val* out() const noexcept { return out_; }
-  const Val* lhs() const noexcept { return lhs_; }
-  const Val* rhs() const noexcept { return rhs_; }
+  Val* out() const noexcept { return out_; }
+  Val* lhs() const noexcept { return lhs_; }
+  Val* rhs() const noexcept { return rhs_; }
   
   BinaryOpType type() const noexcept { return binary_op_type_; }
 
@@ -443,9 +443,9 @@ struct TORCH_API BinaryOp : public Expr {
 
 private:
   const BinaryOpType binary_op_type_;
-  const Val* out_;
-  const Val* lhs_;
-  const Val* rhs_;
+  Val* const out_;
+  Val* const lhs_;
+  Val* const rhs_;
 };
 
 }}} //torch::jit::fuser

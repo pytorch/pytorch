@@ -5,29 +5,29 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-const Statement* BaseMutator::mutate(
-    const Statement* const statement) {
-  return statement->dispatch_mutator(this);
+ Statement* BaseMutator::mutate(
+     Statement*  statement) {
+  return Statement::dispatch_mutator(this, statement);
 }
-const Statement* BaseMutator::mutate(const Val* const val) {
-  return val->dispatch_mutator(this);
-}
-
-const Statement* BaseMutator::mutate(const Expr* const expr) {
-  return expr->dispatch_mutator(this);
+ Statement* BaseMutator::mutate( Val*  val) {
+  return Val::dispatch_mutator(this, val);
 }
 
-const Statement* BaseMutator::mutate(const Float* const f) {
+ Statement* BaseMutator::mutate( Expr*  expr) {
+  return Expr::dispatch_mutator(this, expr);
+}
+
+ Statement* BaseMutator::mutate( Float*  f) {
   return f;
 }
 
-const Statement* BaseMutator::mutate(const Int* const i) {
+ Statement* BaseMutator::mutate( Int*  i) {
   return i;
 }
 
-const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
-  const Val* out = static_cast<const Val*>( mutate(uop->out()) );
-  const Val* in = static_cast<const Val*>( mutate(uop->in()) );
+ Statement* BaseMutator::mutate( UnaryOp*  uop) {
+   Val* out = static_cast<Val*>( mutate(uop->out()) );
+   Val* in = static_cast<Val*>( mutate(uop->in()) );
 
   if 
   (
@@ -40,10 +40,10 @@ const Statement* BaseMutator::mutate(const UnaryOp* const uop) {
   return uop;
 }
 
-const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
-  const Val* out = static_cast<const Val*>( mutate(bop->out()) );
-  const Val* lhs = static_cast<const Val*>( mutate(bop->lhs()) );
-  const Val* rhs = static_cast<const Val*>( mutate(bop->rhs()) );
+ Statement* BaseMutator::mutate( BinaryOp*  bop) {
+   Val* out = static_cast< Val*>( mutate(bop->out()) );
+   Val* lhs = static_cast< Val*>( mutate(bop->lhs()) );
+   Val* rhs = static_cast< Val*>( mutate(bop->rhs()) );
   if
   (
     !(
@@ -57,7 +57,7 @@ const Statement* BaseMutator::mutate(const BinaryOp* const bop) {
 }
 
 void BaseMutator::mutate(Fusion* fusion) {
-  std::vector<const Expr*> orig_exprs = fusion->exprs();
+  std::vector< Expr*> orig_exprs = fusion->exprs();
 
   /*
    * We go through all the exprs, in topologically sorted order. We call mutate on them
@@ -69,7 +69,7 @@ void BaseMutator::mutate(Fusion* fusion) {
    * to manually track what expressions stayed constant or were changed.
    */
 
-  for(const Statement* stmt : orig_exprs)
+  for( Statement* stmt : orig_exprs)
     mutate(stmt);
 
 }
@@ -78,12 +78,12 @@ void BaseMutator::mutate(Fusion* fusion) {
  * TODO: Test the below mutator functions
  */
 
-const Statement* BaseMutator::mutate(const TensorDomain* const td) {
+ Statement* BaseMutator::mutate( TensorDomain*  td) {
   
-  std::vector<const IterDomain*> dom;
+  std::vector< IterDomain*> dom;
   bool mutated = false;
   for(decltype(td->size()) i = 0; i<td->size(); i++){
-    const IterDomain* id = static_cast<const IterDomain*>(mutate(td->axis(i)));
+     IterDomain* id = static_cast< IterDomain*>(mutate(td->axis(i)));
     if(!id->same_as(td->axis(i))){
       mutated = true;
     }
@@ -95,9 +95,9 @@ const Statement* BaseMutator::mutate(const TensorDomain* const td) {
   
 }
 
-const Statement* BaseMutator::mutate(const TensorView* const tv) {
-  const Tensor* t = static_cast<const Tensor*>(mutate(tv->tensor()));
-  const TensorDomain* td = static_cast<const TensorDomain*>( mutate(tv->domain()));
+ Statement* BaseMutator::mutate( TensorView*  tv) {
+   Tensor* t = static_cast< Tensor*>(mutate(tv->tensor()));
+   TensorDomain* td = static_cast< TensorDomain*>( mutate(tv->domain()));
 
   if(!(  tv->tensor()->same_as(t)
       && tv->domain()->same_as(td)))
@@ -105,21 +105,21 @@ const Statement* BaseMutator::mutate(const TensorView* const tv) {
  return tv;
 }
 
-const Statement* BaseMutator::mutate(const IterDomain* const id) {
-  const Int* s = static_cast<const Int*>(mutate(id->size()));
+ Statement* BaseMutator::mutate( IterDomain*  id) {
+   Int* s = static_cast< Int*>(mutate(id->size()));
   if(!s->same_as(id->size()))
     return new IterDomain(s, id->parallel_method(), id->isReduction());
   return id;
 }
 
-const Statement* BaseMutator::mutate(const Tensor* const t) {
+ Statement* BaseMutator::mutate( Tensor*  t) {
   return t; //I believe tensor should never be mutated.
 }
 
-const Statement* BaseMutator::mutate(const Split* const s) {
-  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(s->out()));
-  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(s->in()));
-  const Int* fact = static_cast<const Int*>(mutate(s->factor()));
+ Statement* BaseMutator::mutate( Split*  s) {
+   TensorDomain* o = static_cast< TensorDomain*>(mutate(s->out()));
+   TensorDomain* i = static_cast< TensorDomain*>(mutate(s->in()));
+   Int* fact = static_cast< Int*>(mutate(s->factor()));
 
   if(!(
        o->same_as(s->out())
@@ -130,9 +130,9 @@ const Statement* BaseMutator::mutate(const Split* const s) {
   return s;
 }
 
-const Statement* BaseMutator::mutate(const Merge* const m) {
-  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(m->out()));
-  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(m->in()));
+ Statement* BaseMutator::mutate( Merge*  m) {
+   TensorDomain* o = static_cast< TensorDomain*>(mutate(m->out()));
+   TensorDomain* i = static_cast< TensorDomain*>(mutate(m->in()));
 
   if(!(
        o->same_as(m->out())
@@ -142,9 +142,9 @@ const Statement* BaseMutator::mutate(const Merge* const m) {
   return m;
 }
 
-const Statement* BaseMutator::mutate(const Reorder* const ro) {
-  const TensorDomain* o = static_cast<const TensorDomain*>(mutate(ro->out()));
-  const TensorDomain* i = static_cast<const TensorDomain*>(mutate(ro->in()));
+ Statement* BaseMutator::mutate( Reorder*  ro) {
+   TensorDomain* o = static_cast< TensorDomain*>(mutate(ro->out()));
+   TensorDomain* i = static_cast< TensorDomain*>(mutate(ro->in()));
 
   if(!(
        o->same_as(ro->out())
@@ -154,28 +154,28 @@ const Statement* BaseMutator::mutate(const Reorder* const ro) {
   return ro;
 }
 
-const Statement* ReplaceAll::mutate(const Val* const val){
+ Statement* ReplaceAll::mutate( Val*  val){
   if(val->same_as(instance_))
     return with_;
   return val;
 }
 
-void ReplaceAll::instancesOf(const Val* const instance, const Val* const with){
+void ReplaceAll::instancesOf( Val*  instance,  Val*  with){
 
-  std::set<const Expr*> exprs_containing_val;
+  std::set< Expr*> exprs_containing_val;
 
   Fusion *fusion = FusionGuard::getCurFusion();
-  const Expr* orig = fusion->origin(instance);
+   Expr* orig = fusion->origin(instance);
   if(orig != nullptr)
     exprs_containing_val.emplace(orig);
 
-  const std::set<const Expr*> exprs = fusion->uses(instance);
-  for(const Expr* expr : exprs)
+   std::set< Expr*> exprs = fusion->uses(instance);
+  for( Expr* expr : exprs)
     exprs_containing_val.emplace(expr);
 
   ReplaceAll ra(instance, with);
 
-  for(const Expr* expr : exprs_containing_val)
+  for( Expr* expr : exprs_containing_val)
     static_cast<BaseMutator*>(&ra)->mutate(expr);
 
   fusion->removeVal(instance);

@@ -122,30 +122,30 @@ struct TORCH_API TransformReplay : public IterVisitor {
   /*
    * Functions to backward propagate influence from split/merge/reorder
    */
-  void compute_influence(const Split* expr);
-  void compute_influence(const Merge* expr);
-  void compute_influence(const Reorder* expr);
+  void compute_influence( Split* expr);
+  void compute_influence( Merge* expr);
+  void compute_influence( Reorder* expr);
 
   // Backward influence propagate dispatch
-  void compute_influence(const Expr* expr);
+  void compute_influence( Expr* expr);
 
   // Entry for backward influence propagation on td following record
-  void compute_influence(const TensorDomain* td);
+  void compute_influence( TensorDomain* td);
 
   /*
    * Replay functions, takes a TensorView and steps through the operations in
    * "record" based on influence axes. Will also update influence and propagate
    * it forward.
    */
-  const TensorView* replay(const Split* expr, const TensorView* tv);
-  const TensorView* replay(const Merge* expr, const TensorView* tv);
-  const TensorView* replay(const Reorder* expr, const TensorView* tv);
+   TensorView* replay( Split* expr,  TensorView* tv);
+   TensorView* replay( Merge* expr,  TensorView* tv);
+   TensorView* replay( Reorder* expr,  TensorView* tv);
 
   // Dispatch for replay functions
-  const TensorView* replay(const Expr* expr, const TensorView* tv);
+   TensorView* replay( Expr* expr,  TensorView* tv);
 
   // Entry point for replay on a TensorView, will relpay all ops from "replay"
-  const TensorView* replay(const TensorView* target);
+   TensorView* replay( TensorView* target);
 
   /*
    * Takes replay_ref and replays its transformations on replay_target
@@ -154,19 +154,19 @@ struct TORCH_API TransformReplay : public IterVisitor {
    * this work for now.
    *
    */
-  const TensorView* runReplay(
-      const TensorView* replay_ref,
-      const TensorView* replay_target,
+   TensorView* runReplay(
+       TensorView* replay_ref,
+       TensorView* replay_target,
       int compute_at_axis);
 
   // Trace back the history of td, record the Expr's that made this td (split,
   // merge, reorder)
-  const TensorDomain* get_root(
-      const TensorDomain* td,
+   TensorDomain* get_root(
+       TensorDomain* td,
       bool create_record = false);
 
   // Forward record from root, to replay_ref/ref_root
-  std::vector<const Expr*> record;
+  std::vector< Expr*> record;
 
   // Running influence vector
   std::vector<bool> influence;
@@ -175,14 +175,14 @@ struct TORCH_API TransformReplay : public IterVisitor {
   int compute_at_axis;
 
  public:
-  static const TensorDomain* getRoot(const TensorDomain* td) {
+  static  TensorDomain* getRoot( TensorDomain* td) {
     TransformReplay tr;
     return tr.get_root(td);
   }
 
-  static const TensorView* replay(
-      const TensorView* replay_ref,
-      const TensorView* replay_target,
+  static  TensorView* replay(
+       TensorView* replay_ref,
+       TensorView* replay_target,
       int compute_at_axis) {
     TransformReplay tr;
     return tr.runReplay(replay_ref, replay_target, compute_at_axis);

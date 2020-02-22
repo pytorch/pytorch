@@ -53,10 +53,10 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
  */
 
 Split::Split(
-    const TensorDomain* _out,
-    const TensorDomain* _in,
+    TensorDomain* _out,
+    TensorDomain* _in,
     int _axis,
-    const Int* _factor)
+    Int* _factor)
     : Expr(ExprType::Split),
       out_{_out},
       in_{_in},
@@ -67,7 +67,7 @@ Split::Split(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-Merge::Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis)
+Merge::Merge(TensorDomain* _out, TensorDomain* _in, int _axis)
     : Expr(ExprType::Merge), out_{_out}, in_{_in}, axis_{_axis} {
   addOutput(_out);
   addInput(_in);
@@ -75,8 +75,8 @@ Merge::Merge(const TensorDomain* _out, const TensorDomain* _in, int _axis)
 }
 
 Reorder::Reorder(
-    const TensorDomain* _out,
-    const TensorDomain* _in,
+    TensorDomain* _out,
+    TensorDomain* _in,
     std::vector<int> _pos2axis)
     : Expr(ExprType::Reorder), out_{_out}, in_{_in}, pos2axis_{_pos2axis} {
   addOutput(_out);
@@ -84,12 +84,14 @@ Reorder::Reorder(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-const TensorView* split(const TensorView* tv, int axis, int factor) {
+
+
+TensorView* split(TensorView* tv, int axis, int factor) {
   
-  const TensorDomain* td = tv->domain();
+  TensorDomain* td = tv->domain();
   if(axis<0) axis+=tv->domain()->size();
   assert(axis >= 0 && axis < td->size());
-  const IterDomain* id = td->axis(axis);
+  IterDomain* id = td->axis(axis);
 
   if (id->parallel_method() != ParallelType::Serial)
     throw std::runtime_error(
@@ -99,55 +101,54 @@ const TensorView* split(const TensorView* tv, int axis, int factor) {
     if (axis < tv->getComputeAtAxis())
         throw std::runtime_error("Cannot split axis within compute at range.");
 
-  std::vector<const IterDomain*> new_domain;
+  std::vector<IterDomain*> new_domain;
 
-  const Int* fact = new Int(factor);
-  const Int* one = new Int(1);
+  Int* fact = new Int(factor);
+  Int* one = new Int(1);
   
   for (decltype(td->size()) i = 0; i < td->size(); i++) {
     if (i != axis)
       new_domain.push_back(td->axis(i));
     else {
       // outer loop size
-      const Val* vo = add(div(sub(id->size(), one), fact), one);
+      Val* vo = add(div(sub(id->size(), one), fact), one);
 
-      const Int* so = static_cast<const Int*>(vo);
+      Int* so = static_cast<Int*>(vo);
 
       // outer loop IterDomain
-      const IterDomain* ido = new IterDomain(so, id->parallel_method(), id->isReduction());
+      IterDomain* ido = new IterDomain(so, id->parallel_method(), id->isReduction());
       new_domain.push_back(ido);
 
       // inner loop IterDomain
-      const IterDomain* idi = new IterDomain(fact, id->parallel_method(), id->isReduction());
+      IterDomain* idi = new IterDomain(fact, id->parallel_method(), id->isReduction());
       new_domain.push_back(idi);
     }
   }
-  const TensorDomain* split_td = new TensorDomain(new_domain);
-  const TensorView* split_view = new TensorView(tv->tensor(), split_td);
-  const Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
-  ReplaceAll::instancesOf(tv, split_view);
-  return split_view;
+  TensorDomain* split_td = new TensorDomain(new_domain);
+  Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
+  tv->setDomain(split_td);
+  return tv;
 }
 
-const TensorView* merge(const TensorView* tv, int axis) {
-  const TensorDomain* td = tv->domain();
+TensorView* merge(TensorView* tv, int axis) {
+  TensorDomain* td = tv->domain();
   assert(axis >= 0 && axis + 1 < td->size());
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
         throw std::runtime_error("Cannot split axis within compute at range.");
 
-  const IterDomain* first = tv->domain()->axis(axis);
-  const IterDomain* second = tv->domain()->axis(axis+1);
+  IterDomain* first = tv->domain()->axis(axis);
+  IterDomain* second = tv->domain()->axis(axis+1);
 
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
 
-  const Val* merged_id_size = mul(first->size(), second->size());
-  const IterDomain* merged_id =
-      new IterDomain(static_cast<const Int*>(merged_id_size), first->parallel_method(), first->isReduction());
+  Val* merged_id_size = mul(first->size(), second->size());
+  IterDomain* merged_id =
+      new IterDomain(static_cast<Int*>(merged_id_size), first->parallel_method(), first->isReduction());
 
-  std::vector<const IterDomain*> new_domain;
+  std::vector<IterDomain*> new_domain;
   for (decltype(td->size()) i = 0; i < td->size(); i++) {
     if (i < axis || i > axis + 1)
       new_domain.push_back(td->axis(i));
@@ -155,21 +156,20 @@ const TensorView* merge(const TensorView* tv, int axis) {
       new_domain.push_back(merged_id);
     }
   }
-  const TensorDomain* merged_td = new TensorDomain(new_domain);
-  const TensorView* merged_view = new TensorView(tv->tensor(), merged_td);
-  const Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
-  ReplaceAll::instancesOf(tv, merged_view);
-  return merged_view;
+  TensorDomain* merged_td = new TensorDomain(new_domain);
+  Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
+  tv->setDomain(merged_td);
+  return tv;
 }
 
 /*
  * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of the iter
  * axes.
  */ 
-const TensorView* reorder(
-    const TensorView* tv,
+TensorView* reorder(
+    TensorView* tv,
     std::unordered_map<int, int> axis2pos) {
-  const TensorDomain* td = tv->domain();
+  TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.
   std::vector<int> pos2axis(ndims, -1);
@@ -232,41 +232,18 @@ const TensorView* reorder(
     }
   }
 
-  std::vector<const IterDomain*> reordered_domain;
+  std::vector<IterDomain*> reordered_domain;
 
   for (int i = 0; i < pos2axis.size(); i++) {
     reordered_domain.push_back(td->axis(pos2axis[i]));
   }
-  const TensorDomain* reordered_td = new TensorDomain(reordered_domain);
-  const TensorView* reordered_view = new TensorView(tv->tensor(), reordered_td);
-  const Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
-  ReplaceAll::instancesOf(tv, reordered_view);
-  return reordered_view;
+  TensorDomain* reordered_td = new TensorDomain(reordered_domain);
+  Reorder* merge_node = new Reorder(reordered_td, td, pos2axis);
+  tv->setDomain(reordered_td);
+  return tv;
 }
 
-/*
- * TODO: How do we coordinate the uses of tensor and the tensorview used here,
- * Do we only support these operations on tensorview? Do we replace all
- * instances of tensor with the tensorview created here?
- */
-const TensorView* split(const Tensor* tensor, int axis, int factor) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling split.");
-  //return split(new TensorView(tensor, tensor->domain()), axis, factor);
-}
-
-const TensorView* merge(const Tensor* tensor, int axis) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling merge.");
-  //return merge(new TensorView(tensor, tensor->domain()), axis);
-}
-
-const TensorView* reorder(
-    const Tensor* tensor,
-    std::unordered_map<int, int> axis2pos) {
-  throw std::runtime_error("For now tensors must be converted to tensor views before calling reorder.");
-  //return reorder(new TensorView(tensor, tensor->domain()), axis2pos);
-}
-
-const TensorView* ComputeAt_impl(const TensorView* consumer, const TensorView* producer, int axis){
+TensorView* computeAt(TensorView* consumer, TensorView* producer, int axis){
   /*
    * TODO:
    * Recursive compute_at:
@@ -277,21 +254,22 @@ const TensorView* ComputeAt_impl(const TensorView* consumer, const TensorView* p
    * Compute at modifies the consumer, not the producer.
    */
 
-  std::stack<const Val*> dep_chain = DependencyCheck::getDependencyChain(producer, consumer);
+  std::stack<Val*> dep_chain = DependencyCheck::getDependencyChain(producer, consumer);
 
   TORCH_CHECK(!dep_chain.empty());
 
   //Recursively apply replay.
-  const TensorView* ref = consumer;
+  TensorView* ref = consumer;
   while(!dep_chain.empty()){
-    const Val* val = dep_chain.top(); dep_chain.pop();
+    Val* val = dep_chain.top(); dep_chain.pop();
     TORCH_CHECK(val->getValType() == ValType::TensorView);
-    const TensorView* tv = static_cast<const TensorView*>(val);
+    TensorView* tv = static_cast<TensorView*>(val);
     //dep chain can include consumer, but not producer.
     if(tv->same_as(consumer))
       continue;
     ref = TransformReplay::replay(ref, tv, axis);
-    ReplaceAll::instancesOf(tv, ref);
+    //ReplaceAll::instancesOf(tv, ref);
+    throw std::runtime_error("not implemented.");
   }
   //Dep chain doesn't contain consumer, run on consumer manually.
   if(FusionGuard::getCurFusion()->origin(consumer) != nullptr)
