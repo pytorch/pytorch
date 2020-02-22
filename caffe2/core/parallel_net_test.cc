@@ -92,6 +92,9 @@ int RunNetAndGetDuration(const string& net_def_str, const string& type) {
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));
   CAFFE_ENFORCE(net.get() != nullptr);
+  // Run once to kick in potential initialization (can be slower)
+  CAFFE_ENFORCE(net->Run());
+  // Now run and time it
   auto start_time = std::chrono::system_clock::now();
   CAFFE_ENFORCE(net->Run());
   // Inspect the time - it should be around 200 milliseconds, since sleep3 can

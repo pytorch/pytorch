@@ -46,7 +46,7 @@ THCStorage* THCStorage_(new)(THCState *state)
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
       caffe2::TypeMeta::Make<scalar_t>(),
       0,
-      state->cudaDeviceAllocator,
+      c10::cuda::CUDACachingAllocator::get(),
       true).release();
   return storage;
 }
@@ -56,7 +56,7 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
       caffe2::TypeMeta::Make<scalar_t>(),
       size,
-      state->cudaDeviceAllocator,
+      c10::cuda::CUDACachingAllocator::get(),
       true).release();
   return storage;
 }
