@@ -544,7 +544,6 @@ Tensor randint_like(
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, nullptr);
-  return native::randint(high, self.sizes(), nullptr, options);
 }
 
 Tensor randint_like(
@@ -677,7 +676,10 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
+
+  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
+
   check_args(row, col, options);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -722,7 +724,10 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
+
+  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
+
   check_args(row, col, options);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

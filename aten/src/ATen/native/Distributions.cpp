@@ -6,6 +6,7 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/math_compat.h>
+#include <c10/util/Optional.h>
 
 #include <ATen/Utils.h>
 #include <ATen/CPUGenerator.h>
@@ -13,8 +14,9 @@
 #include <ATen/native/Distributions.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/UnaryOps.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/DistributionTemplates.h>
+#include <ATen/NamedTensorUtils.h>
 
 #include <type_traits>
 #include <functional>
@@ -119,6 +121,9 @@ DEFINE_DISPATCH(multinomial_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(normal_stub);
+DEFINE_DISPATCH(random_stub);
+DEFINE_DISPATCH(random_from_to_stub);
+DEFINE_DISPATCH(random_full_64_bits_range_stub);
 
 Tensor bernoulli(const Tensor& self, Generator* gen) {
   return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT).bernoulli_(self, gen);
@@ -261,6 +266,35 @@ Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
   Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
   normal_out_cpu(ret, mean, std, gen);
   return ret;
+}
+
+template<typename RNG>
+struct RandomStub {
+  void operator()(TensorIterator& iter, RNG* gen) {
+    random_stub(iter.device_type(), iter, gen);
+  }
+};
+
+Tensor& random_(Tensor& self, Generator* gen) {
+  return at::native::templates::random_impl<RandomStub, Generator>(self, gen);
+}
+
+template<typename RNG>
+struct RandomFromToStub {
+  void operator()(TensorIterator& iter, uint64_t range, int64_t from, RNG* gen) {
+    random_from_to_stub(iter.device_type(), iter, range, from, gen);
+  }
+  void operator()(TensorIterator& iter, RNG* gen) {
+    random_full_64_bits_range_stub(iter.device_type(), iter, gen);
+  }
+};
+
+Tensor& random_(Tensor& self, int64_t from, optional<int64_t> to, Generator* gen) {
+  return at::native::templates::random_from_to_impl<RandomFromToStub, Generator>(self, from, to, gen);
+}
+
+Tensor& random_(Tensor& self, int64_t to, Generator* gen) {
+  return random_(self, 0, to, gen);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {

@@ -289,13 +289,13 @@ class _DistTestBase(object):
         return (group, group_id, rank)
 
     def _init_full_group_test(self, **kwargs):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.new_group(**kwargs)
         rank = dist.get_rank()
         return (group, group_id, rank)
 
     def _init_global_test(self):
-        group = [i for i in range(0, dist.get_world_size())]
+        group = list(range(0, dist.get_world_size()))
         group_id = dist.group.WORLD
         rank = dist.get_rank()
         return (group, group_id, rank)

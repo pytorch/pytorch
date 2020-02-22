@@ -23,7 +23,7 @@ def load_tags_for_projects(workflow_config):
 
 
 def check_version(job, tags, expected_version):
-    valid_versions = [v for v in tags[job].split(",")]
+    valid_versions = tags[job].split(",")
     if expected_version not in valid_versions:
         raise RuntimeError(
             "We configured {} to use Docker version {}; but this "
