@@ -10,15 +10,15 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 
 // For debug:
-/**/
+/*
 #include <torch/csrc/jit/fuser/common/iriostream.h>
-/**/
+*/
 namespace torch {
 namespace jit {
 namespace fuser {
 
 // For debug:
-/**/
+/*
 std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
   os << "<";
   for (int i = 0; i < vec.size(); i++) {
@@ -33,7 +33,19 @@ std::ostream& operator<<(std::ostream& os, std::vector<bool> vec) {
   }
   return os;
 }
-/**/
+
+std::ostream& operator<<(std::ostream& os, std::vector<int> vec) {
+  os << "<";
+  for (int i = 0; i < vec.size(); i++) {
+    os << vec[i];
+    if (i == vec.size() - 1)
+      os << ">";
+    else
+      os << ",";
+  }
+  return os;
+}
+*/
 
 /*
  * Functions to backward propagate influence from split/merge/reorder
@@ -94,9 +106,7 @@ void TransformReplay::compute_influence(TensorDomain* td) {
 
 // Trace back the history of td, record the Expr's that made this td (split,
 // merge, reorder)
-TensorDomain* TransformReplay::get_root(
-    TensorDomain* td,
-    bool create_record) {
+TensorDomain* TransformReplay::get_root(TensorDomain* td, bool create_record) {
   if (create_record)
     record = std::vector<Expr*>();
 
@@ -143,59 +153,132 @@ TensorDomain* TransformReplay::get_root(
  * "record" based on influence axes. Will also update influence and propagate
  * it forward.
  */
-TensorView* TransformReplay::replay(
-    Split* expr,
-    TensorView* tv) {
+TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
   int axis = expr->axis();
   // Forward prop influence
-  influence.insert(influence.begin() + axis + 1, influence[axis]);
-  // Replay split
-  TORCH_CHECK(expr->factor()->isConst());
-  return split(tv, expr->axis(), *(expr->factor()->value()));
+  if (influence[axis]) {
+    // Make sure split axis is real.
+    int real_axis = axis_map[expr->axis()];
+    TORCH_CHECK(real_axis != -1);
+    // Replay split
+    split(tv, real_axis, *(expr->factor()->value()));
+    // Inserted a real axis, push everything in axis_map over to the right
+    // after this inserted axis
+    for (int i = 0; i < axis_map.size(); i++)
+      if (axis_map[i] > real_axis)
+        axis_map[i] = axis_map[i] + 1;
 
+    axis_map.insert(
+        axis_map.begin() + expr->axis() + 1,
+        real_axis + 1); // insert axis at position axis.
+  } else {
+    // Fake it
+    axis_map.insert(axis_map.begin() + expr->axis() + 1, -1);
+    for (decltype(axis_map.size()) i = expr->axis() + 1; i < axis_map.size();
+         i++)
+      if (axis_map[i] != -1)
+        axis_map[i]++;
+  }
+
+  influence.insert(influence.begin() + axis + 1, influence[axis]);
   return tv;
 }
 
-TensorView* TransformReplay::replay(
-    Merge* expr,
-    TensorView* tv) {
+TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
   int axis = expr->axis();
+
+  if (influence[axis] || influence[axis + 1]) {
+    // Make sure both merge axes are real.
+    TORCH_CHECK(axis_map[axis] != -1 && axis_map[axis + 1] != -1);
+    // Replay merge
+    merge(tv, axis_map[axis]);
+  } else {
+    // If we aren't applying the merge, we won't change any following axis
+    // Doesn't matter which axis we propagate for the merge in the axis_map
+  }
+  axis_map.erase(axis_map.begin() + expr->axis() + 1);
+
+  for (decltype(axis_map.size()) i = expr->axis() + 1; i < axis_map.size(); i++)
+    if (axis_map[i] != -1)
+      axis_map[i]--;
+
   // Forward prop influence
   influence[axis] = influence[axis] || influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
-  // Replay merge
-  return merge(tv, axis);
+
   return tv;
 }
 
-TensorView* TransformReplay::replay(
-    Reorder* expr,
-    TensorView* tv) {
+TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   // axis2pos[old_pos] = new_pos is sent to reorder, Reorder holds
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   std::unordered_map<int, int> axis2pos;
   const std::vector<int>& pos2axis = expr->pos2axis();
 
+  std::vector<int> reordered_axis_map(axis_map.size(), -1);
   std::vector<bool> reordered_influence(pos2axis.size(), false);
 
+  // We have
+  // axis_map[old_fake_pos] -> old_real_pos
+  // pos2axis[new_fake_pos] -> old_fake_pos
+  // f2r[new_fake_pos] -> new_real_pos
+  //
+  // We want:
+  // axis2pos[old_real_pos] -> new_real_pos
+  // axis_map[new_fake_pos] -> new_real_pos
+
+  std::vector<std::pair<int, int>> needed_real_reorder;
+  for (int i = 0; i < pos2axis.size(); i++) {
+    int new_fake_axis = i;
+    int old_fake_axis = pos2axis[i];
+    int old_real_axis = axis_map[old_fake_axis];
+    bool is_real_axis = old_real_axis != -1;
+    // If a real axis
+    if (is_real_axis)
+      if (influence[old_fake_axis]) {
+        needed_real_reorder.push_back({old_real_axis, new_fake_axis});
+      }
+  }
+
+  // Sort needed_real_reorder by new_fake_axis.
+  std::sort(
+      needed_real_reorder.begin(),
+      needed_real_reorder.end(),
+      [](std::pair<int, int> a, std::pair<int, int> b) -> bool {
+        return a.second < b.second;
+      });
+
+  // axis2pos[old_real_axis] -> new_real_axis
+  int axis = 0;
+  for (auto entry : needed_real_reorder) {
+    axis2pos[entry.first] = axis++;
+  }
+
+  for (int i = 0; i < tv->domain()->size(); i++) {
+    if (axis2pos.find(i) == axis2pos.end())
+      axis2pos[i] = axis++;
+  }
+
+  // replay reorder
+  reorder(tv, axis2pos);
+
+  // Fake transform:
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
     int new_pos = i;
     int old_pos = pos2axis[i];
-    // Map to replay reorder
-    axis2pos.emplace(std::pair<int, int>{old_pos, new_pos});
     // Forward prop influence
     reordered_influence[new_pos] = influence[old_pos];
+    if (axis_map[old_pos] != -1)
+      reordered_axis_map[new_pos] = axis2pos[axis_map[old_pos]];
   }
-  // Replay reorder
-  TensorView* reordered_view = reorder(tv, axis2pos);
   influence = reordered_influence;
-  return reordered_view;
+  axis_map = reordered_axis_map;
+
+  return tv;
 }
 
 // Dispatch for replay functions
-TensorView* TransformReplay::replay(
-    Expr* expr,
-    TensorView* tv) {
+TensorView* TransformReplay::replay(Expr* expr, TensorView* tv) {
   TORCH_CHECK(expr->isExpr());
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
@@ -233,14 +316,15 @@ TensorView* TransformReplay::replay(TensorView* target) {
  * modified to produce the axes below compute_at_axis.
  *
  * 3) We take the ordered list of split/merge/reorder and the influence vector
- * on the inputs and we apply all split/merge/reorder operations on the
- * replay_target. We also forward propagate the influence vector again, as
- * this time it could be different than originally marked.
+ * on the inputs and we apply split/merge/reorder operations on the
+ * replay_target. We also forward propagate the influence vector again (as this
+ * time it could be different than originally marked), a map from "fake axes"
+ * (refrence axes corresponding to the full replay) to real axes (axes produced
+ * by running the selected split/merge/reorder operations). Reorder replay's can
+ * actually be partial and non-equivelent to the original, as some axes may
+ * never have been produced based on split, and we don't want to reorder axes
+ * outside of compute_at_axis.
  *
- * 4) We take all axes produced by the forward replay that are marked as
- * influenced and push them into a new domain. We then take all original axes
- * that are not marked by the second propagate of the influence vector and
- * push those as well.
  */
 TensorView* TransformReplay::runReplay(
     TensorView* replay_ref,
@@ -267,34 +351,27 @@ TensorView* TransformReplay::runReplay(
 
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
-  // influence can be different, than just the compute_at axis depending on
-  // the combination of merge/split/reorder nodes
-  TensorView* full_replay =
-      replay(new TensorView(replay_target->tensor(), replay_target->domain()));
+  // influence can be different in forward propagation, than in backward
+  // propagation depending on the combination of merge/split/reorder nodes
+  // There are multiple things we have to track here. We need to track
+  // the propagation of axes for all operations, though we only want to
+  // actually execute those based on influence. If we didn't track all
+  // axes, we wouldn't know what axis split/merge/reorder are referencing
+  // as they're relative to the "full" replay that produced the reference.
+  auto init_size = replay_target->domain()->size();
+  for (decltype(init_size) i = 0; i < init_size; i++)
+    axis_map.push_back(i);
 
-  /* STEP 4 */
-  // We've replayed all operations from ref on target. However, based on
-  // influence, some of these are unlikely needed. Create a new TensorDomain,
-  // push all axes from replay that were influenced, then push all root axes
-  // that were not influenced. This is the correct resulting tensor.
+  return replay(replay_target);
+}
 
-  std::vector<IterDomain*> compute_at_domain;
-  auto dom_size = full_replay->domain()->size();
-  for (decltype(dom_size) i = 0; i < dom_size; i++) {
-    if (influence[i])
-      compute_at_domain.push_back(full_replay->domain()->axis(i));
-  }
-
-  // Something could have gone wrong in backward/forward influence
-  // propagation.
-  TORCH_CHECK(target_root->size() == root_influence_vector.size());
-
-  for (decltype(target_root->size()) i = 0; i < target_root->size(); i++)
-    if (!root_influence_vector[i])
-      compute_at_domain.push_back(target_root->axis(i));
-  // Return the newly produced view!
-  throw std::runtime_error("BROKEN!");
-  //replay_target->setDomain(new TensorDomain(compute_at_domain));
+TensorView* TransformReplay::replay(
+    TensorView* replay_ref,
+    TensorView* replay_target,
+    int compute_at_axis) {
+  TransformReplay tr;
+  tr.runReplay(replay_ref, replay_target, compute_at_axis);
+  return replay_target;
 }
 
 } // namespace fuser

@@ -193,7 +193,7 @@ struct TORCH_API Tensor : public Val {
 };
 
 struct TensorView;
-TORCH_API TensorView* ComputeAt_impl(TensorView* consumer, TensorView* producer, int axis);
+TORCH_API TensorView* ComputeAt_impl(TensorView*, TensorView*, int);
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -237,7 +237,6 @@ struct TORCH_API TensorView : public Val {
 friend TensorView* split(TensorView*, int axis, int factor);
 friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
 friend TensorView* merge(TensorView*, int axis);
-friend TensorView* ComputeAt(const TensorView* consumer, TensorView* producer, int axis);
 
 protected:
   void setDomain(TensorDomain* td){domain_ = td;}
