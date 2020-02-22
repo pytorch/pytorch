@@ -252,6 +252,17 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::inflate(Tensor a, Tensor b) -> Tensor",
+         [](Stack& stack) {
+           at::Tensor a;
+           at::Tensor b;
+           pop(stack, a, b);
+           auto c = a.add(torch::zeros_like(b), 0);
+           push(stack, c);
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
          [](Stack& stack) {
            AT_ERROR("Should be replaced by prim::BailOut");
@@ -941,8 +952,7 @@ RegisterOperators reg(
            }
            else if (!a.defined()) {
              stack.emplace_back(b);
-           }
-           else if (!b.defined()) {
+           } else if (!b.defined()) {
              stack.emplace_back(a);
            } else {
              stack.emplace_back(a + b);

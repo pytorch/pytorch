@@ -36,9 +36,9 @@ ScheduleNode::~ScheduleNode() {
 class ScheduleNode::DependencyTracker : public IRVisitor {
  public:
   virtual ~DependencyTracker() = default;
-  DependencyTracker(const std::vector<Tensor>& output_tensors) {
+  DependencyTracker(const std::vector<Tensor*>& output_tensors) {
     for (size_t i = 0; i < output_tensors.size(); i++) {
-      const TensorNode* node = output_tensors[i].node();
+      const Tensor* node = output_tensors[i];
       to_process_.push(node);
       encountered_.insert(node);
       given_tensors_.insert(node);
@@ -46,7 +46,7 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
 
     // Extract all the consumer-producer relationship.
     while (!to_process_.empty()) {
-      TensorNode* tensor_node = const_cast<TensorNode*>(to_process_.front());
+      Tensor* tensor_node = const_cast<Tensor*>(to_process_.front());
       to_process_.pop();
       current_consumer_ = tensor_node;
       tensor_node->function()->body().accept(this);
@@ -58,23 +58,23 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
     }
   }
 
-  std::vector<const TensorNode*> GetTopologicallySorted() const {
+  std::vector<const Tensor*> GetTopologicallySorted() const {
     return topologically_sorted_;
   }
 
-  bool is_internal(const TensorNode* tensor_node) const {
+  bool is_internal(const Tensor* tensor_node) const {
     return (given_tensors_.count(tensor_node) == 0);
   }
 
  private:
   void visit(const FunctionCall* v) override {
-    const TensorNode* producer = v->tensor().node();
+    const Tensor* producer = v->tensor();
     add_producer_consumer_pair(current_consumer_, producer);
   }
 
   void add_producer_consumer_pair(
-      const TensorNode* consumer,
-      const TensorNode* producer) {
+      const Tensor* consumer,
+      const Tensor* producer) {
     producers_[consumer].insert(producer);
     consumers_[producer].insert(consumer);
     if (encountered_.count(producer) == 0) {
@@ -84,11 +84,11 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
   }
 
   // topoligically sort the sub tensors under the current node
-  void sort_tensor_node(const TensorNode* tensor_node) {
+  void sort_tensor_node(const Tensor* tensor_node) {
     encountered_.erase(tensor_node);
     auto iter = producers_.find(tensor_node);
     if (iter != producers_.end()) {
-      for (const TensorNode* producer_node : iter->second) {
+      for (const Tensor* producer_node : iter->second) {
         if (encountered_.count(producer_node) != 0) {
           sort_tensor_node(producer_node);
         }
@@ -97,29 +97,29 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
     topologically_sorted_.push_back(tensor_node);
   }
 
-  std::unordered_map<const TensorNode*, std::unordered_set<const TensorNode*>>
+  std::unordered_map<const Tensor*, std::unordered_set<const Tensor*>>
       producers_;
-  std::unordered_map<const TensorNode*, std::unordered_set<const TensorNode*>>
+  std::unordered_map<const Tensor*, std::unordered_set<const Tensor*>>
       consumers_;
 
   // the tensors given in the constructors. They are either the input or the
   // output of the entire schedule.
-  std::unordered_set<const TensorNode*> given_tensors_;
+  std::unordered_set<const Tensor*> given_tensors_;
 
-  const TensorNode* current_consumer_ = nullptr;
-  std::unordered_set<const TensorNode*> encountered_;
-  std::queue<const TensorNode*> to_process_;
-  std::vector<const TensorNode*> topologically_sorted_;
+  const Tensor* current_consumer_ = nullptr;
+  std::unordered_set<const Tensor*> encountered_;
+  std::queue<const Tensor*> to_process_;
+  std::vector<const Tensor*> topologically_sorted_;
 };
 
-ScheduleNode::ScheduleNode(const std::vector<Tensor>& tensors)
+ScheduleNode::ScheduleNode(const std::vector<Tensor*>& tensors)
     : output_tensors_(tensors) {
   dependency_tracker_.reset(new DependencyTracker(tensors));
   root_node_ = this->NewTensorExprNode();
   TensorExprNode* current_func = nullptr;
-  std::vector<const TensorNode*> sorted_tensors =
+  std::vector<const Tensor*> sorted_tensors =
       dependency_tracker_->GetTopologicallySorted();
-  for (const TensorNode* tensor_node : sorted_tensors) {
+  for (const Tensor* tensor_node : sorted_tensors) {
     Function* func = tensor_node->function();
     if (current_func == nullptr) {
       current_func = root_node_->NewFirstChild();
@@ -138,11 +138,11 @@ ScheduleNode::ScheduleNode(const std::vector<Tensor>& tensors)
     expr_node->set_tensor_expr_op(tensor_expr_op);
 
     // attach the node to the user provided tensors.
-    TensorNode* tensor_mutable = const_cast<TensorNode*>(tensor_node);
+    Tensor* tensor_mutable = const_cast<Tensor*>(tensor_node);
     tensor_mutable->expr_node_ = expr_node;
 
     if (dependency_tracker_->is_internal(tensor_node)) {
-      internal_tensors_.push_back(Tensor(const_cast<TensorNode*>(tensor_node)));
+      internal_tensors_.push_back(const_cast<Tensor*>(tensor_node));
     }
   }
 }
@@ -396,9 +396,9 @@ class Flattener : public IRMutator {
  private:
   Expr mutate(const FunctionCall* v) override {
     Buffer buffer(
-        v->tensor().function()->func_var(),
-        v->tensor().function()->body().dtype(),
-        v->tensor().function()->dims());
+        v->tensor()->function()->func_var(),
+        v->tensor()->function()->body().dtype(),
+        v->tensor()->function()->dims());
     return buffer(v->params());
   }
 };
@@ -415,7 +415,7 @@ class FunctionInliner : public IRMutator {
   // For the target function, insert the caller/callee pair into the replacement
   // mapping.
   Expr mutate(const FunctionCall* v) override {
-    Function* func = v->tensor().function();
+    Function* func = v->tensor()->function();
     if (func_var_set_.count(func->func_var().node()) > 0) {
       // Insert the caller/callee pair into the mapping.
       for (int i = 0; i < func->ndim(); i++) {
@@ -539,26 +539,26 @@ Stmt ScheduleNode::Lower() {
   for (size_t i = 0; i < inlined_functions_.size(); i++) {
     inlined_func_set.insert(inlined_functions_[i]);
   }
-  std::unordered_set<const TensorNode*> output_tensors_set;
+  std::unordered_set<const Tensor*> output_tensors_set;
   for (size_t i = 0; i < output_tensors_.size(); i++) {
-    output_tensors_set.insert(output_tensors_[i].node());
+    output_tensors_set.insert(output_tensors_[i]);
   }
   std::vector<Stmt> allocs;
   std::vector<Stmt> frees;
   for (size_t i = 0; i < internal_tensors_.size(); i++) {
-    const Tensor& tensor = internal_tensors_[i];
-    if (inlined_func_set.count(tensor.function()) > 0) {
+    Tensor* tensor = internal_tensors_[i];
+    if (inlined_func_set.count(tensor->function()) > 0) {
       // No need to allocation memory for intermediate tensors.
       continue;
     }
-    if (output_tensors_set.count(tensor.node()) > 0) {
+    if (output_tensors_set.count(tensor) > 0) {
       // No need to allocate memory if the tensors are given as input/output.
       continue;
     }
     Stmt alloc =
-        Allocate::make(tensor.buffer_var(), tensor.dtype(), tensor.dims());
+        Allocate::make(tensor->function()->func_var(), tensor->function()->body().dtype(), tensor->function()->dims());
     allocs.push_back(alloc);
-    Stmt free = Free::make(tensor.buffer_var());
+    Stmt free = Free::make(tensor->function()->func_var());
     frees.push_back(free);
   }
   std::reverse(frees.begin(), frees.end());

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir.h>
 
 #include <list>
+#include <map>
 #include <vector>
 
 namespace torch {
@@ -27,6 +28,17 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
+  std::map<size_t, int64_t> dims2symbols_;
+  // figure out concurrency and data races
+  std::map<int64_t, size_t> symbols2dims_;
+  std::map<int64_t, c10::optional<size_t>> static_sizes_;
+
+  void convertToStaticShapes(Block* b);
+  void updateStaticSizes(int64_t key, size_t dim);
+  int64_t toSymbol(size_t val);
+  // size_t toDimension(int64_t symbol, size_t);
+  // std::vector<c10::optional<int64_t>> mergeSymbolicShapes(VaryingShape& vs,
+  // at::IntArrayRef sizes)
   bool ready() const {
     return profiling_count_ == 0;
   }

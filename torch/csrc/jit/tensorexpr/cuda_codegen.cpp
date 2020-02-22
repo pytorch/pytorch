@@ -1,5 +1,8 @@
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
 
+#include "ATen/CUDAGenerator.h"
+#include "c10/cuda/CUDAFunctions.h"
+#include "torch/csrc/jit/tensorexpr/cuda_random.h"
 #include "torch/csrc/jit/tensorexpr/execution_counter.h"
 
 #define DEBUG_PRINT 0
@@ -137,6 +140,9 @@ void CudaPrinter::visit(const Intrinsics* v) {
     case IntrinsicsOp::kExp:
       func_name = "expf";
       break;
+    case IntrinsicsOp::kRand:
+      os() << "Uint32ToFloat(" << rand_func_ << "())";
+      return;
     default:
       IRPrinter::visit(v);
       return;
@@ -302,11 +308,38 @@ class PrioritizeLoad : public IRMutator {
   MemoryLoadStack load_stack_;
 };
 
+class HasRand : public IRVisitor {
+ public:
+  HasRand(const Stmt& stmt) : stmt_(stmt) {
+    stmt_.accept(this);
+  }
+
+  bool has_rand() const {
+    return has_rand_;
+  }
+
+ private:
+  virtual void visit(const Intrinsics* v) {
+    if (v->op_type() == IntrinsicsOp::kRand) {
+      has_rand_ = true;
+    } else {
+      IRVisitor::visit(v);
+    }
+  }
+  Stmt stmt_;
+  bool has_rand_ = false;
+};
+
 void CudaCodeGen::Initialize() {
-  printer_.reset(new CudaPrinter(&oss_));
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
+  HasRand has_rand_func(stmt());
+  has_random_ = has_rand_func.has_rand();
+  printer_.reset(new CudaPrinter(&oss_, has_random_));
+  if (has_random_) {
+    os() << philox_random_string << std::endl;
+  }
   os() << "extern \"C\" __global__" << std::endl << "void f(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (int i = 0; i < buffer_args.size(); i++) {
@@ -319,9 +352,29 @@ void CudaCodeGen::Initialize() {
     os() << dtype.ToCppString() << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
+  Var rand_seed;
+  Var rand_offset;
+  if (has_random_) {
+    // TODO: switch to kUint64 when it is available.
+    rand_seed = Var("rand_seed", kInt32);
+    rand_offset = Var("rand_offset", kInt32);
+    std::string uint64_str = "unsigned long long";
+    os() << ", " << uint64_str << " " << rand_seed << ", " << uint64_str << " "
+         << rand_offset;
+  }
   os() << ") {";
-
   os() << std::endl;
+
+  if (has_random_) {
+    Var idx{"idx", kInt32};
+    os() << "int " << idx << " = blockIdx.x*blockDim.x + threadIdx.x;"
+         << std::endl;
+    Var rand_func = printer_->rand_func();
+    os() << "Philox " << rand_func << "(" << rand_seed << ", " << idx << ", "
+         << rand_offset << ");" << std::endl;
+    os() << std::endl;
+  }
+
   Stmt stmt_v = stmt();
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
@@ -384,8 +437,14 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   // Bind the buffer addresses into arguments
   auto const& buffer_args = this->buffer_args();
+  int ptr_count = buffer_args.size();
+  if (has_random_) {
+    ptr_count += 2;
+  }
   std::vector<void*> args_data(buffer_args.size());
-  std::vector<void*> ptr_to_args(buffer_args.size());
+  std::vector<void*> ptr_to_args(ptr_count);
+  uint64_t rand_seed = uint64_t(-1);
+  uint64_t rand_offset = uint64_t(-1);
   for (int i = 0; i < buffer_args.size(); i++) {
     auto const& bufferArg = buffer_args[i];
     if (bufferArg.isVar()) {
@@ -401,6 +460,21 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
       args_data[i] = args[i].data();
       ptr_to_args[i] = &args_data[i];
     }
+  }
+
+  if (has_random_) {
+    auto gen = at::cuda::detail::getDefaultCUDAGenerator();
+    // TODO: total hack. Switch to numel when it is available.
+    int64_t total_elements_per_thread = (1LL << 28);
+    {
+      std::lock_guard<std::mutex> lock(gen->mutex_);
+      auto philox_engine_inputs =
+          gen->philox_engine_inputs(total_elements_per_thread);
+      rand_seed = philox_engine_inputs.first;
+      rand_offset = philox_engine_inputs.second;
+    }
+    ptr_to_args[buffer_args.size()] = &rand_seed;
+    ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
 
   // Launch the kernels

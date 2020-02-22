@@ -23,7 +23,7 @@ static void unpack_dim_args(
 
 } // namespace
 
-Tensor Compute(
+Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     std::function<Expr(const std::vector<Var>&)> body_func) {
@@ -33,10 +33,10 @@ Tensor Compute(
   Expr body = body_func(args);
   Function* func = new Function(
       func_name, std::move(dims), std::move(args), std::move(body));
-  return Tensor(func, 0);
+  return new Tensor(func, 0);
 }
 
-Tensor Compute(
+Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     std::function<Expr(const Var&)> body_func) {
@@ -47,10 +47,10 @@ Tensor Compute(
   Expr body = body_func(args[0]);
   Function* func =
       new Function(func_name, std::move(dims), std::move(args), std::move(body));
-  return Tensor(func, 0);
+  return new Tensor(func, 0);
 }
 
-Tensor Compute(
+Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     std::function<Expr(const Var&, const Var&)> body_func) {
@@ -61,10 +61,10 @@ Tensor Compute(
   Expr body = body_func(args[0], args[1]);
   Function* func = new Function(
       func_name, std::move(dims), std::move(args), std::move(body));
-  return Tensor(func, 0);
+  return new Tensor(func, 0);
 }
 
-Tensor Compute(
+Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     std::function<Expr(const Var&, const Var&, const Var&)> body_func) {
@@ -75,10 +75,10 @@ Tensor Compute(
   Expr body = body_func(args[0], args[1], args[2]);
   Function* func = new Function(
       func_name, std::move(dims), std::move(args), std::move(body));
-  return Tensor(func, 0);
+  return new Tensor(func, 0);
 }
 
-Tensor Compute(
+Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
     std::function<Expr(const Var&, const Var&, const Var&, const Var&)>
@@ -90,7 +90,7 @@ Tensor Compute(
   Expr body = body_func(args[0], args[1], args[2], args[3]);
   Function* func = new Function(
       func_name, std::move(dims), std::move(args), std::move(body));
-  return Tensor(func, 0);
+  return new Tensor(func, 0);
 }
 
 Stmt Function::ElementStmt() {

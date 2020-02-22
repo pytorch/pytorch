@@ -42,8 +42,8 @@ static Dtype texprType(const c10::optional<at::ScalarType>& st) {
   }
 }
 
-static at::ScalarType tensorType(const Tensor& t) {
-  auto const& stype = t.dtype().scalar_type();
+static at::ScalarType tensorType(Tensor* t) {
+  auto const& stype = t->function()->body().dtype().scalar_type();
   if (stype == kInt32) {
     return at::ScalarType::Int;
   } else if (stype == kFloat32) {
@@ -174,10 +174,10 @@ std::vector<Expr> TensorExprKernel::valueShape(const torch::jit::Value* v) {
   if (it == tensors_.end()) {
     return {1};
   }
-  return it->second.dims();
+  return it->second->function()->dims();
 }
 
-Tensor TensorExprKernel::ComputeOneOperand(
+Tensor* TensorExprKernel::ComputeOneOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&)> inner_expr) {
@@ -196,7 +196,7 @@ Tensor TensorExprKernel::ComputeOneOperand(
       });
 }
 
-Tensor TensorExprKernel::ComputeTwoOperand(
+Tensor* TensorExprKernel::ComputeTwoOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&)> inner_expr) {
@@ -219,7 +219,7 @@ Tensor TensorExprKernel::ComputeTwoOperand(
       });
 }
 
-Tensor TensorExprKernel::ComputeTwoOperandWithAlpha(
+Tensor* TensorExprKernel::ComputeTwoOperandWithAlpha(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&)> inner_expr) {
@@ -243,7 +243,7 @@ Tensor TensorExprKernel::ComputeTwoOperandWithAlpha(
       });
 }
 
-Tensor TensorExprKernel::ComputeThreeOperand(
+Tensor* TensorExprKernel::ComputeThreeOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&, const Expr&)> inner_expr) {
@@ -269,7 +269,7 @@ Tensor TensorExprKernel::ComputeThreeOperand(
       });
 }
 
-Tensor TensorExprKernel::ComputeFourOperand(
+Tensor* TensorExprKernel::ComputeFourOperand(
     const std::string& name,
     const torch::jit::Value* v,
     std::function<Expr(const Expr&, const Expr&, const Expr&, const Expr&)>
@@ -298,7 +298,7 @@ Tensor TensorExprKernel::ComputeFourOperand(
       });
 }
 
-Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
+Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
   switch (v->node()->kind()) {
     case aten::add: {
       return ComputeTwoOperandWithAlpha(
@@ -739,33 +739,33 @@ Tensor TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
 }
 
 void TensorExprKernel::LowerToBackend(BackendType backend_type) {
-  std::vector<Tensor> tensor_outputs(tensor_outputs_);
+  std::vector<Tensor*> tensor_outputs(tensor_outputs_);
 
   if (backend_type == BackendType::kCudaCodeGen) {
     for (int i = 0; i < tensor_outputs_.size(); i++) {
-      const Tensor& tensor = tensor_outputs_[i];
-      Expr total_count = tensor.dim(0);
-      for (int i = 1; i < tensor.ndim(); i++) {
-        total_count = total_count * tensor.dim(i);
+      Tensor* tensor = tensor_outputs_[i];
+      Expr total_count = tensor->function()->dim(0);
+      for (int i = 1; i < tensor->function()->ndim(); i++) {
+        total_count = total_count * tensor->function()->dim(i);
       }
       // Flatten the index for GPU kernels.
       // TODO: move this to fusing axis when it is ready.
-      Tensor new_out = Compute(
-          tensor.function()->func_var().name_hint() + "_flat",
+      Tensor* new_out = Compute(
+          tensor->function()->func_var().name_hint() + "_flat",
           {total_count},
           [tensor](const Var& index) -> Expr {
             std::vector<Expr> dims;
             Expr value = index;
-            for (int i = tensor.ndim() - 1; i >= 0; i--) {
+            for (int i = tensor->function()->ndim() - 1; i >= 0; i--) {
               Expr idx = value;
               if (i > 0) {
-                idx = Mod::make(value, tensor.dim(i));
+                idx = Mod::make(value, tensor->function()->dim(i));
               }
               dims.push_back(idx);
-              value = value / tensor.dim(i);
+              value = value / tensor->function()->dim(i);
             }
             std::reverse(dims.begin(), dims.end());
-            return tensor.call(dims);
+            return tensor->call(dims);
           });
       tensor_outputs[i] = new_out;
     }
@@ -775,13 +775,13 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    p.second.ComputeInline();
+    p.second->ComputeInline();
   }
   if (backend_type == kCudaCodeGen) {
     for (int i = 0; i < tensor_outputs_.size(); i++) {
-      tensor_outputs_[i].ComputeInline();
-      Tensor tensor = tensor_outputs[i];
-      Var index = tensor.arg(0);
+      tensor_outputs_[i]->ComputeInline();
+      Tensor* tensor = tensor_outputs[i];
+      Var index = tensor->function()->arg(0);
       int loop_levels = GetTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loop_levels = (loop_levels > 0) ? loop_levels : kDefaultLoopLevels;
@@ -795,8 +795,8 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 	if (block_size < 0) {
 	  block_size = kDefaultBlockSize;
 	}
-	tensor.SplitWithMask(index, block_size, true, &outer, &inner);
-	tensor.GPUExecConfig({outer}, {inner});
+	tensor->SplitWithMask(index, block_size, true, &outer, &inner);
+	tensor->GPUExecConfig({outer}, {inner});
       } else if (loop_levels == 3) {
 	Var outer;
 	Var inner;
@@ -807,9 +807,9 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 	const int kDefaultBlockSize = 256;
 	block_count = (block_count > 0) ? block_count : kDefaultBlockCount;
 	block_size = (block_size > 0) ? block_size : kDefaultBlockSize;
-	tensor.SplitWithMask(index, block_count * block_size, true, &outer, &inner);
-	tensor.SplitWithMask(inner, block_size, true, &inner_1, &inner_2);
-	tensor.GPUExecConfig({inner_1}, {inner_2});
+	tensor->SplitWithMask(index, block_count * block_size, true, &outer, &inner);
+	tensor->SplitWithMask(inner, block_size, true, &inner_1, &inner_2);
+	tensor->GPUExecConfig({inner_1}, {inner_2});
       } else {
 	throw std::runtime_error("Invalid loop-level: " + std::to_string(loop_levels));
       }

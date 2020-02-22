@@ -975,7 +975,7 @@ void testATengeInt() {
   Buffer c(Var("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
-  std::vector<int> c_buffer(N, 0);
+  std::vector<int> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
   Var i("i", kInt32);
@@ -995,7 +995,7 @@ void testATengeInt() {
   SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
   ir_eval(a_buffer, b_buffer, c_buffer);
 
-  assertAllEqual(c_buffer, 1);
+  assertAllEqual(c_buffer, 0);
 }
 
 void testATengtInt() {

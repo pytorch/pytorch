@@ -592,14 +592,14 @@ class TORCH_API ScheduleNode : public KernelScopedObject {
 
  private:
   friend class Schedule;
-  explicit ScheduleNode(const std::vector<Tensor>& funcs);
+  explicit ScheduleNode(const std::vector<Tensor*>& funcs);
   ScheduleObject* CloneScheduleObject(ScheduleObject* object);
   ScheduleObject* LookUpCloneScheduleObject(ScheduleObject* object);
   Stmt Lower(TensorExprNode* node);
   Stmt LowerNoSibling(TensorExprNode* node);
 
-  std::vector<Tensor> output_tensors_;
-  std::vector<Tensor> internal_tensors_;
+  std::vector<Tensor*> output_tensors_;
+  std::vector<Tensor*> internal_tensors_;
   std::vector<Function*> inlined_functions_;
   TensorExprNode* root_node_ = nullptr; // not owned
   std::vector<ScheduleObject*> schedule_objects_; // Owned
@@ -633,11 +633,11 @@ Object* CloneObject(Object* object) {
 
 class TORCH_API Schedule {
  public:
-  static Schedule make(const std::vector<Tensor>& funcs) {
+  static Schedule make(const std::vector<Tensor*>& funcs) {
     return Schedule(new ScheduleNode(funcs));
   }
 
-  explicit Schedule(const std::vector<Tensor>& funcs)
+  explicit Schedule(const std::vector<Tensor*>& funcs)
       : node_(new ScheduleNode(funcs)) {}
 
   Stmt Lower() {

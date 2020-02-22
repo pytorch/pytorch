@@ -797,11 +797,11 @@ void testLLVMStoreFloat() {
 void testLLVMSimpleMath01() {
   KernelScope kernel_scope;
   const int N = 1024;
-  Tensor tensor = Compute(
+  Tensor* tensor = Compute(
       "f", {{N, "i"}}, [](const Var& i) { return cast<float>(i * i + 1); });
   Schedule sch = Schedule::make({tensor});
   Stmt stmt = sch.Lower();
-  Buffer f_buf(tensor.function()->func_var(), kFloat32, {N});
+  Buffer f_buf(tensor->function()->func_var(), kFloat32, {N});
   LLVMCodeGen cg(stmt, {f_buf});
 
   PaddedBuffer<float> f_v(N, "f_v");
@@ -820,11 +820,11 @@ void testLLVMComputeMul() {
   const int N = 1024;
   Buffer a(Var("a", kHandle), kFloat32, {N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
-  Tensor c = Compute("c", {{N, "i"}}, [&](const Var& i) {
+  Tensor* c = Compute("c", {{N, "i"}}, [&](const Var& i) {
     return Load::make(a, i, 1) * Load::make(b, i, 1);
   });
 
-  Buffer c_buf(c.function()->func_var(), kFloat32, {N});
+  Buffer c_buf(c->function()->func_var(), kFloat32, {N});
   Schedule sch = Schedule::make({c});
   Stmt s = sch.Lower();
 
@@ -844,13 +844,13 @@ void testLLVMBroadcastAdd() {
   const int N = 1024;
   Buffer a(Var("a", kHandle), kFloat32, {M, N});
   Buffer b(Var("b", kHandle), kFloat32, {N});
-  Tensor c =
+  Tensor* c =
       Compute("c", {{M, "i"}, {N, "j"}}, [&](const Var& i, const Var& j) {
         Expr mask(1);
         return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
       });
 
-  Buffer c_buf(c.function()->func_var(), kFloat32, {M, N});
+  Buffer c_buf(c->function()->func_var(), kFloat32, {M, N});
   Schedule sch = Schedule::make({c});
   Stmt s = sch.Lower();
 
@@ -920,7 +920,7 @@ void testLLVMTensorDynamicShapeAdd() {
     Var n("n", kInt32);
     Buffer a(Var("a", kHandle), kFloat32, {n});
     Buffer b(Var("b", kHandle), kFloat32, {n});
-    Tensor c =
+    Tensor* c =
         Compute("c", {{n, "n"}}, [&](const Var& i) { return a(i) + b(i); });
     Schedule sch = Schedule::make({c});
     Stmt s = sch.Lower();
@@ -943,7 +943,7 @@ void testLLVMDynamicShape2D() {
     Var n("n", kInt32);
     Buffer a(Var("a", kHandle), kFloat32, {m, n});
     Buffer b(Var("b", kHandle), kFloat32, {m, n});
-    Tensor c =
+    Tensor* c =
         Compute("c", {{m, "m"}, {n, "n"}}, [&](const Var& i, const Var& j) {
           return a(i, j) + b(i, j);
         });

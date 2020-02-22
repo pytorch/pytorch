@@ -61,7 +61,6 @@ namespace jit {
   _(ModuleDefine)                      \
   _(QualifiedName)                     \
   _(ClassImport)                       \
-  _(ProfiledTensorTypeHashing)         \
   _(ScriptObject)                      \
   _(SaveExtraFilesHook)                \
   _(DCE)                               \

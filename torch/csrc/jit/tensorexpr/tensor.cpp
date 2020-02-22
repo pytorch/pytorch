@@ -8,14 +8,14 @@ namespace tensorexpr {
 using schedule::TensorExprNode;
 // using schedule::ScheduleNode;
 
-void TensorOperationNode::SplitWithTail(
+void TensorOperation::SplitWithTail(
     const Var& loop_var,
     int factor,
     bool factor_on_inner,
     Var* outer_var,
     Var* inner_var,
     Var* tail_var,
-    TensorOperation* tail_op) {
+    TensorOperation** tail_op) {
   check_expr_node();
   schedule::ScheduleNode* schedule = expr_node_->schedule();
   schedule::TensorExprNode* tail_expr_node = nullptr;
@@ -29,11 +29,11 @@ void TensorOperationNode::SplitWithTail(
       tail_var,
       &tail_expr_node);
   if (!tail_expr_node) {
-    *tail_op = TensorOperation::make(tail_expr_node);
+    *tail_op = new TensorOperation(tail_expr_node);
   }
 }
 
-void TensorOperationNode::SplitWithMask(
+void TensorOperation::SplitWithMask(
     const Var& loop_var,
     int factor,
     bool factor_on_inner,
@@ -46,7 +46,7 @@ void TensorOperationNode::SplitWithMask(
       expr_node_, loop_var, factor, factor_on_inner, outer_var, inner_var);
 }
 
-void TensorOperationNode::GPUExecConfig(
+void TensorOperation::GPUExecConfig(
     const std::vector<Var>& blockIdx,
     const std::vector<Var>& threadIdx) {
   check_expr_node();
@@ -54,13 +54,13 @@ void TensorOperationNode::GPUExecConfig(
   schedule->GPUExecConfig(expr_node_, blockIdx, threadIdx);
 }
 
-void TensorOperationNode::ComputeInline() {
+void TensorOperation::ComputeInline() {
   check_expr_node();
   schedule::ScheduleNode* schedule = expr_node_->schedule();
   schedule->ComputeInline(expr_node_);
 }
 
-void TensorOperationNode::check_expr_node() {
+void TensorOperation::check_expr_node() {
   if (expr_node_ == nullptr) {
     throw std::runtime_error(
         "expr_node in this tensor is null. It is likely that no schedule is attached.");

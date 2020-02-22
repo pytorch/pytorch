@@ -32,9 +32,64 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
       out << ")";
     }
+
+    const static auto printStrides = std::getenv("PRINT_STRIDES");
+    if (printStrides) {
+      if (auto ndim = value->strides().size()) {
+        out << "{";
+        for (size_t i = 0; i < *ndim; ++i) {
+          if (i > 0) {
+            out << ", ";
+          }
+          if (auto s = value->strides()[i]) {
+            out << *s;
+          } else {
+            out << "*";
+          }
+        }
+        out << "}";
+      }
+    }
+
+    const static auto printContiguity = std::getenv("PRINT_CONT");
+    if (printContiguity) {
+      if (auto ndim = value->contiguity().size()) {
+          out << "[";
+          for (size_t i = 0; i < *ndim; ++i) {
+            if (i > 0) {
+              out << ", ";
+            }
+            if (auto s = value->contiguity()[i]) {
+              out << *s;
+            } else {
+              out << "*";
+            }
+          }
+          out << "]";
+      }
+    }
+
+
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
+
+    const static auto printAttrs = std::getenv("PYTORCH_PRINT_ATTRS");
+    if (printAttrs) {
+      out << "[";
+      out
+          << (value->requiresGrad().has_value()
+                  ? (*value->requiresGrad() ? "R" : "!R")
+                  : "R?");
+      out << " ";
+      // dtype, device, sz, ss, req, undef
+      out
+          << (value->undefined().has_value()
+                  ? (*value->undefined() ? "U" : "!U")
+                  : "U?");
+      out << "]";
+    }
+
   } else if(t.kind() == TypeKind::ListType) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
@@ -120,6 +175,7 @@ TensorTypePtr TensorType::get() {
   static auto value = TensorType::create(
       {},
       {},
+      VaryingShape{c10::optional<size_t>()},
       VaryingShape{c10::optional<size_t>()},
       VaryingShape{c10::optional<size_t>()},
       {});
@@ -504,9 +560,64 @@ TensorTypePtr TensorType::merge(TensorTypePtr other) const {
   auto dev = merge_primitive(device(), other->device());
   auto sz = sizes().merge(other->sizes());
   auto srs = strides().merge(other->strides());
+  auto conts = contiguity().merge(other->contiguity());
   auto gr = merge_primitive(requiresGrad(), other->requiresGrad());
   auto undef = merge_primitive(undefined(), other->undefined());
-  return TensorType::create(scalar_type, dev, sz, srs, gr, undef);
+  return TensorType::create(scalar_type, dev, sz, srs, conts, gr, undef);
+}
+
+// static size_t bind(std::map<int64_t, size_t>& symbols2dims, int64_t symbol,
+// val size_t) {
+
+// }
+
+bool TensorType::operator==(const c10::Type& rhs) const {
+  if (rhs.kind() != kind()) {
+    return false;
+  }
+  auto rt = rhs.expect<TensorType>();
+
+  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
+      strides() == rt->strides() && contiguity() == rt->contiguity() &&
+      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
+      undefined() == rt->undefined();
+}
+
+TensorTypePtr TensorType::merge(
+    const at::Tensor& t,
+    std::map<int64_t, size_t>& symbols2dims) const {
+  auto scalar_type = merge_primitive(scalarType(), {t.scalar_type()});
+  auto dev = merge_primitive(device(), {t.device()});
+  auto new_sizes = t.sizes();
+  std::vector<c10::optional<int64_t>> new_symbols;
+
+  if (new_sizes.size() == sizes().size()) {
+    for (size_t i = 0; i < new_sizes.size(); i++) {
+      auto symbol = sizes()[i];
+      if (!symbol.has_value()) {
+        new_symbols.push_back(c10::nullopt);
+      } else {
+        // refactor into bind
+        // TORCH_INTERNAL_ASSERT(*symbol < 0);
+        if (symbols2dims.count(symbol.value()) == 0) {
+          symbols2dims[symbol.value()] = new_sizes[i];
+          new_symbols.push_back(symbol);
+        } else {
+          new_symbols.push_back(
+              (symbols2dims[symbol.value()] == new_sizes[i]) ? symbol
+                                                             : c10::nullopt);
+        }
+      }
+    }
+  }
+
+  auto contNstrides = contiguityStrideIndices(new_sizes, t.strides());
+  auto conts = contiguity().merge(VaryingStrides(std::get<0>(contNstrides)));
+  auto srs = strides().merge(VaryingStrides(std::get<1>(contNstrides)));
+  auto gr = merge_primitive(requiresGrad(), {t.requires_grad()});
+  auto undef = merge_primitive(undefined(), {false});
+  return TensorType::create(
+      scalar_type, dev, VaryingShape{new_symbols}, srs, conts, gr, undef);
 }
 
 std::ostream& operator<<(std::ostream & out, const VaryingShape & vs) {
@@ -643,6 +754,67 @@ std::string TupleType::python_str() const {
     ss << "]";
   }
   return ss.str();
+}
+
+static std::vector<bool> findContiguous(
+    const at::IntArrayRef& sizes,
+    const at::IntArrayRef& strides) {
+  AT_ASSERT(sizes.size() == strides.size());
+  std::vector<bool> cont(sizes.size());
+  for (size_t i = 0; i < sizes.size(); ++i) {
+    const auto expected_stride =
+        (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
+    cont[i] = (strides[i] == expected_stride);
+  }
+  return cont;
+}
+
+std::tuple<std::vector<int64_t>, std::vector<int64_t>> TensorType::
+    contiguityStrideIndices(at::IntArrayRef sizes, at::IntArrayRef strides) {
+  auto contiguity_bool = findContiguous(sizes, strides);
+
+  std::vector<int64_t> stride_indices(sizes.size());
+  std::iota(stride_indices.begin(), stride_indices.end(), 0);
+
+  std::sort(
+      stride_indices.begin(),
+      stride_indices.end(),
+      [&strides](const int& a, const int& b) {
+        // break ties in case of unsqueezed dims
+        // i.e. (1, 1, 5)
+        if (strides[a] == strides[b]) {
+          return a > b;
+        }
+        return strides[a] < strides[b];
+      });
+
+  std::vector<int64_t> contiguity;
+  for (auto si : stride_indices) {
+    contiguity.push_back(static_cast<size_t>(contiguity_bool[si]));
+  }
+
+  return std::make_tuple(contiguity, stride_indices);
+}
+
+TensorType::TensorType(const at::Tensor& tensor)
+    : Type(TypeKind::TensorType),
+      scalar_type_(tensor.scalar_type()),
+      device_(tensor.device()),
+      sizes_(tensor.sizes().size()),
+      strides_(tensor.sizes().size()),
+      requires_grad_(tensor.requires_grad()),
+      undefined_(!tensor.defined()) {
+  // any updates to `isSubtypeOf`, TensorType c-tor or
+  // `isCompatibleWithInCurrentExecutionContext` need to maintain the
+  // following `TensorType::create(actual_tensor)->isSubtypeOf(expected_type)
+  //  == expected_type->isCompatibleWithInCurrentExecutionContext(t)`
+  if (!tensor.is_mkldnn() && !tensor.is_sparse()) {
+    auto contNstrides =
+        contiguityStrideIndices(tensor.sizes().vec(), tensor.strides().vec());
+    sizes_ = tensor.sizes().vec();
+    contiguity_ = VaryingStrides(std::get<0>(contNstrides));
+    strides_ = VaryingStrides(std::get<1>(contNstrides));
+  }
 }
 
 bool TensorType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {

@@ -170,10 +170,15 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
 
   // profile until a graph is ready
   if (!pr_->ready()) {
+    const static auto merge = std::getenv("PYTORCH_MERGE");
+    if (merge) {
+      GRAPH_DUMP("Profiled Graph (merge): ", pr_->graph());
+    }
     return *profiling_plan_;
   }
 
   auto copy = pr_->graph()->copy();
+  pr_->convertToStaticShapes(copy->block());
   runProfilingOptimizations(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy, remaining_bailout_depth);

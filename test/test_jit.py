@@ -4019,6 +4019,80 @@ class TestScript(JitTestCase):
 
         self.checkScript(fn, (torch.ones(2, 2), ))
 
+
+    def test_strides(self):
+        def strides(a):
+            return a.t()
+
+        with enable_profiling_mode():
+            j = torch.jit.script(strides)
+            a = torch.ones(3, 4)
+            j(a)
+            j(a)
+
+
+
+    def test_symbolic_shapes(self):
+        with enable_profiling_mode():
+            torch._C._jit_set_num_profiled_runs(2)
+
+            def simple_add(a, b):
+                return a + b
+
+            def sym_shape(a, b, c):
+                t1 = a + b
+                t2 = t1 * c
+                return t2
+
+            # j = torch.jit.script(sym_shape)
+            j = torch.jit.script(simple_add)
+
+            # a = torch.ones(7, 1, 4)
+            # b = torch.ones(7, 5, 1)
+            # c = torch.ones(7, 5, 4)
+
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(7, 6)
+            # j (a, b)
+            # j (b, b)
+            # j (a, b)
+
+            # a = torch.ones(7, 1)
+            # b = torch.ones(7, 5)
+            # c = torch.ones(7, 6)
+            # j (a, b)
+            # j (c, a)
+            # j (a, b)
+
+            a = torch.ones(7)
+            b = torch.ones(8)
+            j(a, a)
+            j(b, b)
+            j(a, a)
+
+            #b = torch.ones(1)
+
+            # (7, 1, 4)
+            # (7, 5, 1)
+            # (7, 5, 1)
+
+            # j(b, b, a)
+            # j(a, b, a)
+            # j(a, a, b)
+            #j(a, b, b)
+            #j(b, b, b)
+
+            # j(c, b, c)
+            # j(a, b, a)
+            # j(c, b, c)
+            # j(a, b, a)
+
+
+
+
+
+
     def test_request_bailout(self):
         with enable_profiling_mode():
 
@@ -6510,6 +6584,18 @@ a")
             bailout_graph_str = str(my_slice.graph_for(a))
             FileCheck().check_count("prim::BailOut", 1).run(bailout_graph_str)
 
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_unsqueeze_guard_elimination(self):
+        @torch.jit.script
+        def my_unsqueeze(x):
+            return torch.unsqueeze(x, 0) + torch.unsqueeze(x, 0)
+
+        a = torch.rand(32, 4)
+
+        with enable_profiling_mode():
+            my_unsqueeze(a)
+            bailout_graph_str = str(my_unsqueeze.graph_for(a))
+            FileCheck().check_count("prim::BailOut", 2).run(bailout_graph_str)
 
     def test_resize_input_ops(self):
         # resize_ and resize_as resize the input tensor. because our shape analysis

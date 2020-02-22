@@ -807,6 +807,10 @@ class Intrinsics : public CallNode<Intrinsics> {
     return Expr(new Intrinsics(op_type, params));
   }
 
+  static Expr make(IntrinsicsOp op_type, Dtype dtype) {
+    return Expr(new Intrinsics(op_type, dtype));
+  }
+
   IntrinsicsOp op_type() const {
     return op_type_;
   }
@@ -885,6 +889,12 @@ class Intrinsics : public CallNode<Intrinsics> {
   using BaseClass = CallNode<Intrinsics>;
 
   TORCH_API static int OpArgCount(IntrinsicsOp op_type);
+
+  Intrinsics(IntrinsicsOp op_type, Dtype dtype)
+      : BaseClass(IntrinsicsDtype(op_type, dtype), kIntrinsics, {}),
+        op_type_(op_type) {
+    CHECK_EQ(OpArgCount(op_type), 0);
+  }
 
   Intrinsics(IntrinsicsOp op_type, const Expr& v1)
       : BaseClass(IntrinsicsDtype(op_type, v1.dtype()), kIntrinsics, {v1}),

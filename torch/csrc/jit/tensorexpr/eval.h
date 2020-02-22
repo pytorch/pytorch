@@ -229,7 +229,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = (lhs_v[i] == rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kNE:
-          result_v[i] = (lhs_v[i] != rhs_v[i]) ? 1 : 0;
+          result_v[i] = (lhs_v[i] != rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kGT:
           result_v[i] = (lhs_v[i] != rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
