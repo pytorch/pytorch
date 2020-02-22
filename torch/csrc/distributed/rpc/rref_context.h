@@ -17,6 +17,13 @@ namespace callback {
 void TORCH_API confirmPendingUser(
     const rpc::Message& message,
     const c10::optional<utils::FutureError>& futErr);
+
+// It's the callback for finishing creating owner rref, it returned deletedRRef,
+// so that the deletedRRef can be handled under GIL in python_functions.cpp if
+// deletedRRef contains python object.
+c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
+    const Message& message,
+    const c10::optional<utils::FutureError>& futErr);
 } // namespace callback
 
 // Manages RRef lifetime and keeps track of RRef forks.
@@ -60,16 +67,22 @@ class TORCH_API RRefContext {
   }
 
   // create a ``UserRRef`` owned by the worker ``ownerId``
-  c10::intrusive_ptr<UserRRef> createUserRRef(worker_id_t ownerId, const TypePtr& type);
+  c10::intrusive_ptr<UserRRef> createUserRRef(
+      worker_id_t ownerId,
+      const TypePtr& type);
 
   // Convert an RRefForkData into an RRef. This RRef could be user or owner.
   // This RRef could have already existed before, or could be created in this
   // method, we pass type here to validate or help the rref creation.
-  c10::intrusive_ptr<RRef> getOrCreateRRef(const RRefForkData& rfd, const TypePtr& type);
+  c10::intrusive_ptr<RRef> getOrCreateRRef(
+      const RRefForkData& rfd,
+      const TypePtr& type);
 
   // Get the ``OwnerRRef`` of id ``rrefId``. If it does not exist, create a new
   // one.
-  c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(const RRefId& rrefId, const TypePtr& type);
+  c10::intrusive_ptr<OwnerRRef> getOrCreateOwnerRRef(
+      const RRefId& rrefId,
+      const TypePtr& type);
 
   // Create an empty owner rref of type.
   c10::intrusive_ptr<OwnerRRef> createOwnerRRef(const TypePtr& type);
@@ -122,12 +135,16 @@ class TORCH_API RRefContext {
   // previously submitted rpc/remote calls are acked before sending out the
   // RREF_USER_DELETE message. Otherwise, the OwnerRRef could be deleted too
   // soon.
-  void addPendingChild(const ForkId& forkId, const c10::intrusive_ptr<RRef>& rref);
+  void addPendingChild(
+      const ForkId& forkId,
+      const c10::intrusive_ptr<RRef>& rref);
   void delPendingChild(const ForkId& forkId);
 
   // When a UserRRef is created, it is added into pendingUsers_ to be held alive
   // until it receives RREF_USER_ACCEPT from the owner.
-  void addPendingUser(const ForkId& forkId, const c10::intrusive_ptr<RRef>& rref);
+  void addPendingUser(
+      const ForkId& forkId,
+      const c10::intrusive_ptr<RRef>& rref);
   void delPendingUser(const ForkId& forkId);
 
   void delUser(
@@ -187,7 +204,8 @@ class TORCH_API RRefContext {
   //     It can be used or shared, but cannot be deleted, and hence kept alive
   //     in this map. A message of type RREF_USER_ACCEPT will remove the
   //     corresponding RRef from this map.
-  std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash> pendingUsers_;
+  std::unordered_map<ForkId, c10::intrusive_ptr<RRef>, ForkId::Hash>
+      pendingUsers_;
 
   // (2) A UserRRef has forked a child UserRRef which has not been accepted by
   //     the owner yet.
