@@ -223,7 +223,7 @@ std::tuple<torch::Tensor, torch::Tensor> PackedSequenceTest_padded_sequence(torc
   return std::make_tuple(padded_tensor, lengths);
 }
 
-void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rnn_utils::PackedSequence& b) {
+void assert_is_equal_packed_sequence(const rnn_utils::PackedSequence& a, const rnn_utils::PackedSequence& b) {
   ASSERT_TRUE(torch::allclose(a.data(), b.data()));
   ASSERT_TRUE(torch::allclose(a.batch_sizes(), b.batch_sizes()));
   ASSERT_TRUE(
@@ -232,6 +232,13 @@ void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rn
   ASSERT_TRUE(
     (!a.unsorted_indices().defined() && !b.unsorted_indices().defined()) ||
     torch::allclose(a.unsorted_indices(), b.unsorted_indices()));
+}
+
+void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rnn_utils::PackedSequence& b) {
+  ASSERT_TRUE(a.data().is_same(b.data()));
+  ASSERT_TRUE(a.batch_sizes().is_same(b.batch_sizes()));
+  ASSERT_TRUE(a.sorted_indices().is_same(b.sorted_indices()));
+  ASSERT_TRUE(a.unsorted_indices().is_same(b.unsorted_indices()));
 }
 
 TEST_F(PackedSequenceTest, WrongOrder) {
@@ -307,9 +314,9 @@ TEST_F(PackedSequenceTest, To) {
       auto b = a.cuda();
       assert_is_same_packed_sequence(b, b.to(torch::kCUDA));
       assert_is_same_packed_sequence(b, b.cuda());
-      assert_is_same_packed_sequence(a, b.to(torch::kCPU));
-      assert_is_same_packed_sequence(b, a.to(torch::kCUDA));
-      assert_is_same_packed_sequence(a, b.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
+      assert_is_equal_packed_sequence(a, b.to(torch::kCPU));
+      assert_is_equal_packed_sequence(b, a.to(torch::kCUDA));
+      assert_is_equal_packed_sequence(a, b.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
       assert_is_same_packed_sequence(b, b.to(torch::kInt32));
     }
   }
@@ -327,7 +334,7 @@ TEST_F(NNUtilsTest, PackSequence) {
     ASSERT_TRUE(torch::allclose(padded, std::get<0>(unpacked)));
     rnn_utils::PackedSequence pack_padded = rnn_utils::pack_padded_sequence(
         padded, lengths, batch_first, enforce_sorted);
-    assert_is_same_packed_sequence(packed, pack_padded);
+    assert_is_equal_packed_sequence(packed, pack_padded);
   };
 
   // single dimensional
