@@ -111,7 +111,8 @@ class FakeQuantize(Module):
         for name in local_state:
             key = prefix + name
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                val = state_dict[key]
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
