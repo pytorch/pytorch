@@ -292,7 +292,7 @@ TEST_F(PackedSequenceTest, TotalLength) {
   }
 }
 
-void PackedSequenceTest_To_do_test() {
+TEST_F(PackedSequenceTest, To) {
   for (bool enforce_sorted : std::vector<bool>{true, false}) {
     torch::Tensor padded, lengths;
     std::tie(padded, lengths) = PackedSequenceTest_padded_sequence(torch::kInt);
@@ -322,14 +322,6 @@ void PackedSequenceTest_To_do_test() {
       }
     }
   }
-}
-
-TEST_F(PackedSequenceTest, To) {
-  PackedSequenceTest_To_do_test();
-}
-
-TEST_F(PackedSequenceTest, To_CUDA) {
-  PackedSequenceTest_To_do_test();
 }
 
 TEST_F(NNUtilsTest, PackSequence) {
