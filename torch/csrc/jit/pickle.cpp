@@ -120,17 +120,17 @@ IValue pickle_load(const std::vector<char>& data) {
 
 IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
-    ClassResolver class_resolver,
+    TypeResolver type_resolver,
     const std::vector<at::Tensor>* tensor_table) {
   Unpickler unpickler(
-      std::move(reader), std::move(class_resolver), tensor_table);
+      std::move(reader), std::move(type_resolver), tensor_table);
   return unpickler.parse_ivalue();
 }
 
 IValue unpickle(
     const char* data,
     size_t size,
-    ClassResolver class_resolver,
+    TypeResolver type_resolver,
     const std::vector<at::Tensor>* tensor_table) {
   size_t bytes_read = 0;
   return unpickle(
@@ -145,7 +145,7 @@ IValue unpickle(
         bytes_read += len;
         return len;
       },
-      std::move(class_resolver),
+      std::move(type_resolver),
       tensor_table);
 }
 
