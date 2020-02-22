@@ -224,14 +224,19 @@ std::tuple<torch::Tensor, torch::Tensor> PackedSequenceTest_padded_sequence(torc
 }
 
 void assert_is_equal_packed_sequence(const rnn_utils::PackedSequence& a, const rnn_utils::PackedSequence& b) {
+  std::cout << "assert_is_equal_packed_sequence: here1" << std::endl;
   ASSERT_TRUE(torch::allclose(a.data(), b.data()));
+  std::cout << "assert_is_equal_packed_sequence: here2" << std::endl;
   ASSERT_TRUE(torch::allclose(a.batch_sizes(), b.batch_sizes()));
+  std::cout << "assert_is_equal_packed_sequence: here3" << std::endl;
   ASSERT_TRUE(
     (!a.sorted_indices().defined() && !b.sorted_indices().defined()) ||
     torch::allclose(a.sorted_indices(), b.sorted_indices()));
+  std::cout << "assert_is_equal_packed_sequence: here4" << std::endl;
   ASSERT_TRUE(
     (!a.unsorted_indices().defined() && !b.unsorted_indices().defined()) ||
     torch::allclose(a.unsorted_indices(), b.unsorted_indices()));
+  std::cout << "assert_is_equal_packed_sequence: here5" << std::endl;
 }
 
 void assert_is_same_packed_sequence(const rnn_utils::PackedSequence& a, const rnn_utils::PackedSequence& b) {
@@ -314,9 +319,14 @@ TEST_F(PackedSequenceTest, To) {
       auto b = a.cuda();
       assert_is_same_packed_sequence(b, b.to(torch::kCUDA));
       assert_is_same_packed_sequence(b, b.cuda());
+      std::cout << "PackedSequenceTest_To: here1" << std::endl;
       assert_is_equal_packed_sequence(a, b.to(torch::kCPU));
+      std::cout << "PackedSequenceTest_To: here2" << std::endl;
       assert_is_equal_packed_sequence(b, a.to(torch::kCUDA));
+      std::cout << "PackedSequenceTest_To: here3" << std::endl;
+      // yf225 TODO: is a's sorted_indices dtype different from RHS's sorted_indices dtype in Python test??
       assert_is_equal_packed_sequence(a, b.to(torch::device(torch::kCPU).dtype(torch::kInt32)));
+      std::cout << "PackedSequenceTest_To: here4" << std::endl;
       assert_is_same_packed_sequence(b, b.to(torch::kInt32));
     }
   }
