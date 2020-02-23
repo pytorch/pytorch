@@ -2,11 +2,11 @@
 
 #include <torch/csrc/jit/ir.h>
 
-/* `getCustomPreFusionPasses()` returns a vector of passes that will be executed
+/* `getCustomPrePasses()` returns a vector of passes that will be executed
  * after differentiation but before any fusion. This is the de-facto location
  * for compiler backends to insert passes.
  *
- * `getCustomPostFusionPasses()` returns a vector of passes that will be
+ * `getCustomPostPasses()` returns a vector of passes that will be
  * executed after differentiation and after fusion (if any). This is the
  * location for fusion cleanup passes if they are needed.
  *
@@ -23,8 +23,8 @@ namespace jit {
 // A pass modifies a Graph in place.
 using Pass = std::function<void(std::shared_ptr<Graph>&)>;
 
-TORCH_API std::vector<Pass>& getCustomPostFusionPasses();
-TORCH_API std::vector<Pass>& getCustomPreFusionPasses();
+TORCH_API std::vector<Pass>& getCustomPostPasses();
+TORCH_API std::vector<Pass>& getCustomPrePasses();
 
 struct TORCH_API RegisterPostFusionPass {
   RegisterPostFusionPass(Pass p);
