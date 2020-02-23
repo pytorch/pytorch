@@ -14012,9 +14012,19 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.empty(size, dtype=dtype, device=device)
         t.random_()
-        if dtype != torch.bfloat16 and dtype != torch.half and dtype != torch.float32:
-            self.assertTrue(0 <= t.min() < alpha * to_inc)
-            self.assertTrue((to_inc - alpha * to_inc) < t.max() <= to_inc)
+        t.fill_(0)
+        t.random_()
+        t.fill_(42)
+        t.random_()
+        if dtype != torch.bfloat16:
+            t.sum()
+        if dtype != torch.bfloat16:
+            t.max()
+        if dtype != torch.bfloat16:
+            t.min()
+        # if dtype != torch.bfloat16 and dtype != torch.half and dtype != torch.float32:
+        #     self.assertTrue(0 <= t.min() < alpha * to_inc)
+        #     self.assertTrue((to_inc - alpha * to_inc) < t.max() <= to_inc)
 
     @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)
