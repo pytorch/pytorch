@@ -221,7 +221,23 @@ private:
     case aten::div:
     case aten::t:
     case aten::sigmoid:
+    case aten::sin:
+    case aten::cos:
+    case aten::tan:
+    case aten::sinh:
+    case aten::cosh:
     case aten::tanh:
+    case aten::asin:
+    case aten::acos:
+    case aten::atan:
+    case aten::atan2:
+    case aten::floor:
+    case aten::fmod:
+    case aten::ceil:
+    case aten::trunc:
+    case aten::sqrt:
+    case aten::rsqrt:
+    case aten::remainder:
     case aten::mm:
     case aten::min:
     case aten::max:
@@ -246,7 +262,18 @@ private:
     case aten::rand_like:
     case aten::erf:
     case aten::erfc:
-      return checkInputs(n, no_exceptions);
+    case aten::exp:
+    case aten::expm1:
+    case aten::log:
+    case aten::log2:
+    case aten::log10:
+    case aten::frac:
+    case aten::lerp:
+    case aten::lgamma:
+    case aten::reciprocal:
+    case aten::addcmul:
+    case aten::where:
+     return checkInputs(n, no_exceptions);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
@@ -257,6 +284,10 @@ private:
              n->input(3)->node()->kind() == prim::Constant &&
              // the stride is constant
              n->input(4)->node()->kind() == prim::Constant;
+    case aten::unsqueeze:
+     // check that the dimension argument is constant
+     return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
+            n->input(1)->node()->kind() == prim::Constant;
     case aten::cat:
       // check that the dimension argument is constant
       return n->input(1)->node()->kind() == prim::Constant &&

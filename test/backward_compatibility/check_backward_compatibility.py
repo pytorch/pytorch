@@ -21,6 +21,8 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('aten::tril_indices', datetime.date(2020, 3, 1)),
+    ('aten::triu_indices', datetime.date(2020, 3, 1)),
     ('prim::Drop', datetime.date(2020, 3, 1)),
     ('prim::Store', datetime.date(2020, 3, 1)),
     ('aten::_ncf_view', datetime.date(2020, 3, 1)),
@@ -29,6 +31,28 @@ white_list = [
     ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
     ('aten::is_owner', datetime.date(2020, 3, 1)),
     ('aten::to_here', datetime.date(2020, 3, 1)),
+    ('prim::isinstance', datetime.date(2020, 3, 1)),
+    ('prim::CreateObject', datetime.date(2020, 3, 1)),
+    ('prim::Uninitialized', datetime.date(2020, 3, 1)),
+    ('prim::fork', datetime.date(2020, 3, 1)),
+    ('prim::unchecked_cast', datetime.date(2020, 3, 1)),
+    ('prim::DictConstruct', datetime.date(2020, 3, 1)),
+    ('prim::ListConstruct', datetime.date(2020, 3, 1)),
+    ('prim::ListUnpack', datetime.date(2020, 3, 1)),
+    ('prim::TupleConstruct', datetime.date(2020, 3, 1)),
+    ('prim::TupleIndex', datetime.date(2020, 3, 1)),
+    ('prim::TupleSlice', datetime.date(2020, 3, 1)),
+    ('prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('prim::AutogradAdd', datetime.date(2020, 3, 1)),
+    ('prim::AutogradAnyNonZero', datetime.date(2020, 3, 1)),
+    ('onnx::Shape', datetime.date(2020, 3, 1)),
+    ('onnx::Reshape', datetime.date(2020, 3, 1)),
+    ('prim::BroadcastSizes', datetime.date(2020, 3, 1)),
+    ('prim::Print', datetime.date(2020, 3, 1)),
+    ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
+    ('prim::Constant', datetime.date(2020, 3, 1)),
+    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('_aten::format', datetime.date(2020, 3, 1)),
 ]
 
 
@@ -90,10 +114,12 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line or "RRef" in line:
+            if "torch.classes" in line or "RRef" in line or "Any" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
                 # TODO Delete RRef special case after add the RRef type
+                # TODO: wait until nightly knows how to parse Any
                 continue
+
             s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)

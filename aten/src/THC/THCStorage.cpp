@@ -46,7 +46,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
                                   self->data(),
                                   THMin(self->numel(), size) * itemsize,
                                   cudaMemcpyDeviceToDevice,
-                                  THCState_getCurrentStream(state)));
+                                  c10::cuda::getCurrentCUDAStream()));
     }
 
     // Destructively overwrite data_ptr
@@ -65,7 +65,7 @@ THCStorage* THCStorage_new(
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(
       data_type,
       0,
-      state->cudaDeviceAllocator,
+      c10::cuda::CUDACachingAllocator::get(),
       true).release();
   return storage;
 }
