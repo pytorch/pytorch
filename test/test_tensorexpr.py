@@ -776,6 +776,24 @@ def test_unary_ops():
             np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
 
+def test_rand_like():
+    devices = ["cuda"] if torch.cuda.is_available() else []
+    N = 1 << 16
+    def run_rand_like(x, y):
+        return torch.rand_like(torch.add(x, y))
+    for device in devices:
+        x = torch.rand(N, device=device)
+        traced = torch.jit.trace(run_rand_like, (x, x), check_trace=False)
+        x_v = traced(x, x)
+        x_np = x.cpu().numpy()
+        x1_mean = np.mean(x_np)
+        x2_mean = np.mean(x_np ** 2)
+        x3_mean = np.mean(x_np ** 3)
+        np.testing.assert_allclose(x1_mean, 1. / 2, rtol=2e-2)
+        np.testing.assert_allclose(x2_mean, 1. / 3, rtol=2e-2)
+        np.testing.assert_allclose(x3_mean, 1. / 4, rtol=2e-2)
+
+
 def test_nans():
     def test_max(x, y):
         return torch.max(2 * x, 2 * y)

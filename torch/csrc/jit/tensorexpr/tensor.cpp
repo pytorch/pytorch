@@ -55,7 +55,13 @@ void TensorOperation::GPUExecConfig(
 }
 
 void TensorOperation::ComputeInline() {
-  check_expr_node();
+  // TODO: find a better way to detect that no schedule might be created for this.
+  // Even though this operation might be used at the Torch JIT level, it might be
+  // still be pruned out at the expression level, such as "y = rand_like(x)".
+  // For now, we tentatively treat as if this tensor is not part of the schedule.
+  if (expr_node_ == nullptr) {
+    return;
+  }
   schedule::ScheduleNode* schedule = expr_node_->schedule();
   schedule->ComputeInline(expr_node_);
 }
