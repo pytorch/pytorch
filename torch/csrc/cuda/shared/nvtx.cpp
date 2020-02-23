@@ -1,6 +1,5 @@
 #include <torch/csrc/utils/pybind.h>
 #include <nvToolsExt.h>
-#include <nvToolsExtCuda.h>
 
 namespace torch { namespace cuda { namespace shared {
 
