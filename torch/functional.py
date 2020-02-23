@@ -16,7 +16,6 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
-    'lobpcg',
     'lu',
     'lu_unpack',
     'norm',

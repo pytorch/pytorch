@@ -1,17 +1,29 @@
 """Locally Optimal Block Preconditioned Conjugate Gradient methods.
 """
 # Author: Pearu Peterson
-# Created: November 2019
+# Created: February 2020
 
 __all__ = ['lobpcg']
 
 import torch
 from . import _linalg_utils as _utils
 
-
-def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
-           largest=True, tracker=None, method=None, **params):
-    """Find the k smallest (or largest) eigenvalues and the corresponding
+def lobpcg(A,                   # type: Tensor
+           k=None,              # type: Optional[int]
+           B=None,              # type: Optional[Tensor]
+           X=None,              # type: Optional[Tensor]
+           n=None,              # type: Optional[int]
+           iK=None,             # type: Optional[Tensor]
+           niter=None,          # type: Optional[int]
+           tol=None,            # type: Optional[float]
+           largest=None,        # type: Optional[bool]
+           method=None,         # type: Optional[str]
+           tracker=None,        # type: Optional[None]
+           ortho_iparams=None,  # type: Optional[Dict[str, int]]
+           ortho_fparams=None,  # type: Optional[Dict[str, float]]
+           ortho_bparams=None,  # type: Optional[Dict[str, bool]]
+           ):
+    """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive defined generalized
     eigenvalue problem using matrix-free LOBPCG methods.
 
@@ -19,13 +31,13 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
     selectable via `method` argument:
 
       `method="basic"` - the LOBPCG method introduced by Andrew
-      Knyazev, see [Knyazev2001]. Supports dense, sparse, and batches
-      of dense matrices. A less robust method, may fail when Cholesky
-      is applied to singular input.
+      Knyazev, see [Knyazev2001]. A less robust method, may fail when
+      Cholesky is applied to singular input.
 
       `method="ortho"` - the LOBPCG method with orthogonal basis
-      selection [StathopoulosEtal2002]. Supports dense and sparse
-      matrices. A robust method.
+      selection [StathopoulosEtal2002]. A robust method.
+
+    Supported inputs are dense, sparse, and batches of dense matrices.
 
     .. note:: In general, the basic method spends least time per
       iteration. However, the robust methods converge much faster and
@@ -80,46 +92,40 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
 
       tracker (callable, optional) : a function for tracing the
                  iteration process. When specified, it is called at
-                 each iteration step with the following keyword
-                 arguments:
+                 each iteration step with LOBPCG instance as an
+                 argument. The LOBPCG instance holds the full state of
+                 the iteration process in the following attributes:
 
-                   `istep` - the current iteration step
+                   `iparams`, `fparams`, `bparams` - dictionaries of
+                   integer, float, and boolean valued input
+                   parameters, respectively
+
+                   `ivars`, `fvars`, `bvars`, `tvars` - dictionaries
+                   of integer, float, boolean, and Tensor valued
+                   iteration variables, respectively.
+
+                   `A`, `B`, `iK` - input Tensor arguments.
+
+                   `E`, `X`, `S`, `R` - iteration Tensor variables.
+
+                 For instance:
+
+                   `ivars["istep"]` - the current iteration step
                    `X` - the current approximation of eigenvectors
                    `E` - the current approximation of eigenvalues
                    `R` - the current residual
-                   `nc` - the current number of converged eigenpairs
-                   `rerr` - the current state of convergence criteria
-                   `A`, `B`, `X` - the input matrices
-                   `k`, `n`, `tol`, ... - the input parameters
-                   `S`, `W`, `Z`, `np`, `ns` - various work arrays and
-                     parameters of the iteration process
+                   `ivars["converged_count"]` - the current number of converged eigenpairs
+                   `tvars["rerr"]` - the current state of convergence criteria
 
-                 The recommended signature of tracker callable is
-                 `tracker(istep, X, E, R, **params) -> None` where
-                 `params` dictionary may contain other iteration
-                 parameters that are specific to the selected
-                 method. For instance, when `method` is `"basic"` then
-                 the `params` dictionary contains:
+                 Note that when `tracker` stores Tensor objects from
+                 the LOBPCG instance, it must make copies of these.
 
-                   `R_cond` - the condition number of Cholesky
-                     factorization
+                 If `tracker` sets `bvars["force_stop"] = True`, the
+                 iteration process will be hard-stopped.
 
-                 When `method` is `ortho` then `params` contains:
-
-                   `ortho.UMUmI_rerr`, `ortho.VMU_rerr`, `ortho.i`,
-                   `ortho.j` - the statistics from orthogonalization
-                   process.
-
-                 Note that when `tracker` stores its arguments, it
-                 must make copies of these.
-
-                 Note that when `tracker` returns a non-zero value,
-                 the iteration process will be interrupted and the
-                 current approximation of the eigenpairs will be
-                 returned as they are.
-
-      params (dict, optional): various method-dependent parameters to
-                 LOBPCG algorithms.
+      ortho_iparams, ortho_fparams, ortho_bparams (dict, optional):
+                 various parameters to LOBPCG algorithm when using
+                 `method="ortho"`.
 
     Returns:
 
@@ -147,36 +153,23 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
       `https://epubs.siam.org/doi/abs/10.1137/17M1129830`_
 
     """
-    if B is not None:
-        assert A.shape == B.shape, (A.shape, B.shape)
+    # type: (...) -> Tuple[Tensor, Tensor]
 
-    if len(A.shape) > 2:
-        if B is None:
-            return _batches_apply(
-                lambda A_: lobpcg(A_, B=B, k=k, X=X, n=n, iK=iK, niter=niter,
-                                  tol=tol, largest=largest, tracker=tracker,
-                                  method=method, **params)
-                , 2, (A,))
-        return _batches_apply(
-            lambda A_, B_: lobpcg(A_, B=B_, k=k, X=X, n=n, iK=iK, niter=niter,
-                                  tol=tol, largest=largest, tracker=tracker,
-                                  method=method, **params)
-            , 2, (A, B))
+    # A must be square:
+    assert A.shape[-2] == A.shape[-1], A.shape
+    if B is not None:
+        # A and B must have the same shapes:
+        assert A.shape == B.shape, (A.shape, B.shape)
 
     dtype = _utils.get_floating_dtype(A)
     device = A.device
-    m = A.shape[-1]
-    assert A.shape[-2] == m, A.shape  # expecting square matrix
+    feps = {torch.float32: 1.2e-07,
+            torch.float64: 2.23e-16}[dtype]
+    tol = feps ** 0.5
 
-    if X is None:
-        if n is None:
-            n = k
-        X = torch.randn((m, n), device=device, dtype=dtype)
-    else:
-        if X.shape[:-1] != A.shape[:-1]:
-            raise ValueError('A and X have inconsistent shapes: {}[:-1] != {}[:-1]'
-                             .format(A.shape, X.shape))
-        n = X.shape[-1]
+    m = A.shape[-1]
+    k = 1 if k is None else k
+    n = (k if X is None else X.shape[-1]) if n is None else n
 
     if (m < 3 * n):
         raise ValueError(
@@ -184,22 +177,165 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
             ' is smaller than 3 x the number of requested eigenpairs (={})'
             .format(m, n))
 
-    if tol is None:
-        feps = {torch.float32: 1.2e-07,
-                torch.float64: 2.23e-16}[dtype]
-        tol = feps ** 0.5
+    method = 'ortho' if method is None else method
 
-    # Estimate A and B norms
-    X_norm = _utils.norm(X)
-    A_norm = _utils.norm(_utils.matmul(A, X)) / X_norm
-    B_norm = _utils.norm(_utils.matmul(B, X)) / X_norm
+    iparams = {
+        'm': m,
+        'n': n,
+        'k': k,
+        'niter': 1000 if niter is None else niter,
+    }
 
-    S = torch.zeros(A.shape[:-1] + (3 * n,), dtype=dtype, device=device)
+    fparams = {
+        'tol': tol,
+    }
 
-    def converged_eigenpairs_count(R, X, E):
-        # Use backward stable convergence criterion, see discussion in
-        # Sec 4.3 of [DuerschEtal2018]
-        rerr = torch.norm(R, dim=-2) / (torch.norm(X, dim=-2) * (A_norm + E[:X.shape[-1]] * B_norm))
+    bparams = {
+        'largest': True if largest is None else largest
+    }
+
+    if method == 'ortho':
+        if ortho_iparams is not None:
+            iparams.update(ortho_iparams)
+        if ortho_fparams is not None:
+            fparams.update(ortho_fparams)
+        if ortho_bparams is not None:
+            bparams.update(ortho_bparams)
+        iparams['ortho_i_max'] = iparams.get('ortho_i_max', 3)
+        iparams['ortho_j_max'] = iparams.get('ortho_j_max', 3)
+        fparams['ortho_tol'] = fparams.get('ortho_tol', tol)
+        fparams['ortho_tol_drop'] = fparams.get('ortho_tol_drop', tol)
+        fparams['ortho_tol_replace'] = fparams.get('ortho_tol_replace', tol)
+        bparams['ortho_use_drop'] = bparams.get('ortho_use_drop', False)
+
+    if len(A.shape) > 2:
+        N = int(torch.prod(torch.tensor(A.shape[:-2])))
+        bA = A.reshape((N,) + A.shape[-2:])
+        bB = B.reshape((N,) + A.shape[-2:]) if B is not None else None
+        bX = X.reshape((N,) + X.shape[-2:]) if X is not None else None
+        bE = torch.empty((N, k), dtype=dtype, device=device)
+        bXret = torch.empty((N, m, k), dtype=dtype, device=device)
+        for i in range(N):
+            A_ = bA[i]
+            B_ = bB[i] if bB is not None else None
+            X_ = torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
+            assert len(X_.shape) == 2 and X_.shape[0] == m, (X_.shape, m)
+            iparams['batch_index'] = i
+            worker = LOBPCG(A_, B_, X_, iK, iparams, fparams, bparams, method, tracker)
+            worker.run()
+            bE[i] = worker.E[:k]
+            bXret[i] = worker.X[:, :k]
+        return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
+
+    X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
+    assert len(X.shape) == 2 and X.shape[0] == m, (X.shape, m)
+
+    worker = LOBPCG(A, B, X, iK, iparams, fparams, bparams, method, tracker)
+    worker.run()
+    return worker.E[:k], worker.X[:, :k]
+
+
+@torch.jit.script
+class LOBPCG:
+    """Worker class of LOBPCG methods.
+    """
+
+    def __init__(self,
+                 A,        # type: Optional[Tensor]
+                 B,        # type: Optional[Tensor]
+                 X,        # type: Tensor
+                 iK,       # type: Optional[Tensor]
+                 iparams,  # type: Dict[str, int]
+                 fparams,  # type: Dict[str, float]
+                 bparams,  # type: Dict[str, bool]
+                 method,   # type: str
+                 tracker   # type: None
+                 ):
+        # type: (...) -> None
+
+        # constant parameters
+        self.A = A
+        self.B = B
+        self.iK = iK
+        self.iparams = iparams
+        self.fparams = fparams
+        self.bparams = bparams
+        self.method = method
+        self.tracker = tracker
+        m = iparams['m']
+        n = iparams['n']
+
+        # variable parameters
+        self.X = X
+        self.E = torch.zeros((n, ), dtype=X.dtype, device=X.device)
+        self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
+        self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
+        self.tvars = {}               # type: Dict[str, Tensor]
+        self.ivars = {'istep': 0}     # type: Dict[str, int]
+        self.fvars = {'_': 0.0}       # type: Dict[str, float]
+        self.bvars = {'_': False}     # type: Dict[str, bool]
+
+    def __str__(self):
+        lines = ['LOPBCG:']
+        lines += ['  iparams={}'.format(self.iparams)]
+        lines += ['  fparams={}'.format(self.fparams)]
+        lines += ['  bparams={}'.format(self.bparams)]
+        lines += ['  ivars={}'.format(self.ivars)]
+        lines += ['  fvars={}'.format(self.fvars)]
+        lines += ['  bvars={}'.format(self.bvars)]
+        lines += ['  tvars={}'.format(self.tvars)]
+        lines += ['  A={}'.format(self.A)]
+        lines += ['  B={}'.format(self.B)]
+        lines += ['  iK={}'.format(self.iK)]
+        lines += ['  X={}'.format(self.X)]
+        lines += ['  E={}'.format(self.E)]
+        r = ''
+        for line in lines:
+            r += line + '\n'
+        return r
+
+    def update(self):
+        """Set and update iteration variables.
+        """
+        if self.ivars['istep'] == 0:
+            X_norm = float(_utils.norm(self.X))
+            A_norm = float(_utils.norm(_utils.matmul(self.A, self.X)) / X_norm)
+            B_norm = float(_utils.norm(_utils.matmul(self.B, self.X)) / X_norm)
+            self.fvars['X_norm'] = X_norm
+            self.fvars['A_norm'] = A_norm
+            self.fvars['B_norm'] = B_norm
+            self.ivars['iterations_left'] = self.iparams['niter']
+            self.ivars['converged_count'] = 0
+            self.ivars['converged_end'] = 0
+
+        if self.method == 'ortho':
+            self._update_ortho()
+        else:
+            self._update_basic()
+
+        self.ivars['iterations_left'] = self.ivars['iterations_left'] - 1
+        self.ivars['istep'] = self.ivars['istep'] + 1
+
+    def update_residual(self):
+        """Update residual R from A, B, X, E.
+        """
+        mm = _utils.matmul
+        self.R = mm(self.A, self.X) - torch.matmul(mm(self.B, self.X), torch.diag_embed(self.E))
+
+    def update_converged_count(self):
+        """Determine the number of converged eigenpairs using backward stable
+        convergence criterion, see discussion in Sec 4.3 of [DuerschEtal2018].
+
+        Users may redefine this method for custom convergence criteria.
+        """
+        # (...) -> int
+        prev_count = self.ivars['converged_count']
+        tol = self.fparams['tol']
+        A_norm = self.fvars['A_norm']
+        B_norm = self.fvars['B_norm']
+        E, X, R = self.E, self.X, self.R
+        rerr = torch.norm(R, 2, (0, )) / (torch.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm))
+
         converged = rerr < tol
         count = 0
         for b in converged:
@@ -208,371 +344,323 @@ def lobpcg(A, B=None, k=1, X=None, n=None, iK=None, niter=1000, tol=None,
                 # strict ordering of eigenpairs
                 break
             count += 1
-        return count, rerr
+        assert count >= prev_count, (
+            'the number of converged eigenpairs '
+            '(was %s, got %s) cannot decrease' % (prev_count, count))
+        self.ivars['converged_count'] = count
+        self.tvars['rerr'] = rerr
+        return count
 
-    if tracker is None:
+    def stop_iteration(self):
+        """Return True to stop iterations.
 
-        def tracker(*args, **kwargs):
-            pass
+        Note that tracker (if defined) can force-stop iterations by
+        setting ``worker.bvars['force_stop'] = True``.
+        """
+        return (self.bvars.get('force_stop', False)
+                or self.ivars['iterations_left'] == 0
+                or self.ivars['converged_count'] >= self.iparams['k'])
 
-    if method is None:
-        method = 'ortho'
+    def run(self):
+        """Run LOBPCG iterations.
 
-    return {'basic': _lobpcg_worker_basic,
-            'ortho': _lobpcg_worker_ortho}[method](
-                torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
-                tracker, converged_eigenpairs_count, **params)
+        Use this method as a template for implementing LOBPCG
+        iteration scheme with custom tracker that is compatible with
+        TorchScript.
+        """
+        self.update()
 
+        if not torch.jit.is_scripting() and self.tracker is not None:
+            self.call_tracker()
 
-def _batches_apply(func, ndim, tensors):
-    n = len(tensors[0].shape)
-    if n > ndim:
-        result = []
-        results = None
-        for items in zip(*[tensor.chunk(tensor.shape[0]) for tensor in tensors]):
-            lst = []
-            for item in items:
-                lst.append(item[0])
-            r = _batches_apply(func, ndim, lst)
-            if isinstance(r, tuple):
-                if results is None:
-                    results = [[] for r_ in r]
-                else:
-                    assert len(results) == len(r)
-                for i, r_ in enumerate(r):
-                    if isinstance(r_, int):
-                        r_ = torch.tensor([r_], device=tensor.device)
-                    else:
-                        r_ = r_.reshape((1,) + r_.shape)
-                    results[i].append(r_)
-            else:
-                result.append(torch.tensor([r], device=tensor.device))
-        if results is not None:
-            return tuple(map(torch.cat, results))
-        return torch.cat(result)
-    return func(*tensors)
+        while not self.stop_iteration():
 
+            self.update()
 
-def svqb(M, U, tau=1e-6, drop=False):
-    """Return M-orthonormal U.
+            if not torch.jit.is_scripting() and self.tracker is not None:
+                self.call_tracker()
 
-    .. note:: When `drop` is `False` then `svqb` is based on the
-              Algorithm 4 from [DuerschPhD2015] that is a slight
-              modification of the corresponding algorithm introduced
-              in [StathopolousWu2002]. Otherwise,
+    @torch.jit.unused
+    def call_tracker(self):
+        """Interface for tracking iteration process in Python mode.
 
-    .. note:: `M=None` is iterpreted as identity matrix
+        Tracking the iteration process is disabled in TorchScript
+        mode. In fact, one should specify tracker=None when JIT
+        compiling functions using lobpcg.
+        """
+        # do nothing when in TorchScript mode
+        pass
 
-    Arguments:
+    # Internal methods
 
-      M (Tensor) : positive definite matrix, size is (m, m)
-      U (Tensor) : initial approximation, size is (m, n)
-      tau (float, optional) : positive tolerance
-      drop (bool, optional) : when True, drop columns that
-                 contribution to the `span([U])` is small.
+    def _update_basic(self):
+        """
+        Update or initialize iteration variables when `method == "basic"`.
+        """
+        mm = torch.matmul
+        ns = self.ivars['converged_end']
+        nc = self.ivars['converged_count']
+        n = self.iparams['n']
+        largest = self.bparams['largest']
 
-    Returns:
+        if self.ivars['istep'] == 0:
+            Ri = self._get_rayleigh_ritz_transform(self.X)
+            M = _utils.qform(_utils.qform(self.A, self.X), Ri)
+            E, Z = _utils.symeig(M, largest)
+            self.X[:] = mm(self.X, mm(Ri, Z))
+            self.E[:] = E
+            np = 0
+            self.update_residual()
+            nc = self.update_converged_count()
+            self.S[..., :n] = self.X
 
-      U (Tensor) : M-orthonormal columns (:math:`U^T M U = I`), size
-                   is (m, n1), where `n1 = n` if `drop` is `False,
-                   otherwise `n1 <= n`.
-    """
-    # type: (Tensor, Tensor, Optional[float], Optional[bool]) -> Tensor
-    if tau is None:
-        tau = 1e-6
-    if drop is None:
-        drop = False
-    if torch.numel(U) == 0:
-        return U
-    UMU = _utils.qform(M, U)
-    d = UMU.diagonal(0, -2, -1)
-    # detect and drop zero columns from U
-    nz = torch.where(abs(d) != 0.0)
-    assert len(nz) == 1, nz
-    if len(nz[0]) < len(d):
-        U = U[:, nz[0]]
+            W = _utils.matmul(self.iK, self.R)
+            self.ivars['converged_end'] = ns = n + np + W.shape[-1]
+            self.S[:, n + np:ns] = W
+        else:
+            S_ = self.S[:, nc:ns]
+            Ri = self._get_rayleigh_ritz_transform(S_)
+            M = _utils.qform(_utils.qform(self.A, S_), Ri)
+            E_, Z = _utils.symeig(M, largest)
+            self.X[:, nc:] = mm(S_, mm(Ri, Z[:, nc:n]))
+            self.E[nc:] = E_[:n - nc]
+            P = mm(S_, mm(Ri, Z[:, n:2 * n - nc]))
+            np = P.shape[-1]
+
+            self.update_residual()
+            nc = self.update_converged_count()
+            self.S[..., :n] = self.X
+            self.S[:, n:n + np] = P
+            W = _utils.matmul(self.iK, self.R[:, nc:])
+
+            self.ivars['converged_end'] = ns = n + np + W.shape[-1]
+            self.S[:, n + np:ns] = W
+
+    def _update_ortho(self):
+        """
+        Update or initialize iteration variables when `method == "ortho"`.
+        """
+        mm = torch.matmul
+        ns = self.ivars['converged_end']
+        nc = self.ivars['converged_count']
+        n = self.iparams['n']
+        largest = self.bparams['largest']
+
+        if self.ivars['istep'] == 0:
+            Ri = self._get_rayleigh_ritz_transform(self.X)
+            M = _utils.qform(_utils.qform(self.A, self.X), Ri)
+            E, Z = _utils.symeig(M, largest)
+            self.X = mm(self.X, mm(Ri, Z))
+            self.update_residual()
+            np = 0
+            nc = self.update_converged_count()
+            self.S[:, :n] = self.X
+            W = self._get_ortho(self.R, self.X)
+            ns = self.ivars['converged_end'] = n + np + W.shape[-1]
+            self.S[:, n + np:ns] = W
+
+        else:
+            S_ = self.S[:, nc:ns]
+            # Rayleigh-Ritz procedure
+            E_, Z = _utils.symeig(_utils.qform(self.A, S_), largest)
+
+            # Update E, X, P
+            self.X[:, nc:] = mm(S_, Z[:, :n - nc])
+            self.E[nc:] = E_[:n - nc]
+            P = mm(S_, mm(Z[:, n - nc:], _utils.basis(_utils.transpose(Z[:n - nc, n - nc:]))))
+            np = P.shape[-1]
+
+            # check convergence
+            self.update_residual()
+            nc = self.update_converged_count()
+
+            # update S
+            self.S[:, :n] = self.X
+            self.S[:, n:n + np] = P
+            W = self._get_ortho(self.R[:, nc:], self.S[:, :n + np])
+            ns = self.ivars['converged_end'] = n + np + W.shape[-1]
+            self.S[:, n + np:ns] = W
+
+    def _get_rayleigh_ritz_transform(self, S):
+        """Return a transformation matrix that is used in Rayleigh-Ritz
+        procedure for reducing a general eigenvalue problem :math:`(S^TAS)
+        C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
+        S^TAS Ri) Z = Z E` where `C = Ri Z`.
+
+        Arguments:
+        S (Tensor): the matrix basis for the search subspace, size is
+                    :math:`(m, n)`.
+
+        Returns:
+        Ri (tensor): upper-triangular transformation matrix of size
+                     :math:`(n, n)`.
+        """
+        B = self.B
+        mm = torch.matmul
+        SBS = _utils.qform(B, S)
+        d1 = SBS.diagonal(0, -2, -1) ** -0.5
+        d = torch.zeros(d1.shape + (1, ),
+                        device=d1.device,
+                        dtype=d1.dtype)
+        d[:, 0] = d1
+        dd = mm(d, _utils.transpose(d))
+        d_ = mm(d, _utils.transpose(torch.ones_like(d)))
+        R = torch.cholesky(dd * SBS, upper=True)
+        # TODO: could use LAPACK ?trtri as R is upper-triangular
+        Rinv = torch.inverse(R)
+        return Rinv * d_
+
+    def _get_svqb(self,
+                  U,     # Tensor
+                  drop,  # bool
+                  tau    # float
+                  ):
+        """Return B-orthonormal U.
+
+        .. note:: When `drop` is `False` then `svqb` is based on the
+                  Algorithm 4 from [DuerschPhD2015] that is a slight
+                  modification of the corresponding algorithm introduced
+                  in [StathopolousWu2002]. Otherwise,
+
+        Arguments:
+
+          U (Tensor) : initial approximation, size is (m, n)
+          drop (bool) : when True, drop columns that
+                     contribution to the `span([U])` is small.
+          tau (float) : positive tolerance
+
+        Returns:
+
+          U (Tensor) : B-orthonormal columns (:math:`U^T B U = I`), size
+                       is (m, n1), where `n1 = n` if `drop` is `False,
+                       otherwise `n1 <= n`.
+        """
+        # type: (Tensor, bool, float) -> Tensor
         if torch.numel(U) == 0:
             return U
-        UMU = _utils.qform(M, U)
-        d = UMU.diagonal(0, -2, -1)
+        UBU = _utils.qform(self.B, U)
+        d = UBU.diagonal(0, -2, -1)
+        # detect and drop zero columns from U
         nz = torch.where(abs(d) != 0.0)
-        assert len(nz[0]) == len(d)
-
-    D = torch.diag_embed(d ** -0.5)
-    DUMUD = _utils.qform(UMU, D)
-    E, Z = _utils.symeig(DUMUD, eigenvectors=True)
-    t = tau * abs(E).max()
-    if drop:
-        keep = torch.where(E > t)
-        assert len(keep) == 1, keep
-        E = E[keep[0]]
-        Z = Z[:, keep[0]]
-    else:
-        E[(torch.where(E < t))[0]] = t
-    return torch.chain_matmul(U, D, Z, torch.diag_embed(E ** -0.5))
-
-
-def _ortho(M, U, V, tau_ortho=1e-6, tau_drop=1e-6, tau_replace=1e-6,
-           use_drop=False, **params):
-    """Return M-orthonormal U with columns are M-orthogonal to V.
-
-    .. note:: When `use_drop` is `False` then `ortho` is based on the
-              Algorithm 3 from [DuerschPhD2015] that is a slight
-              modification of the corresponding algorithm introduced
-              in [StathopolousWu2002]. Otherwise, the function
-              implements Algorithm 6 from [DuerschPhD2015]
-
-    .. note:: If all U columns are M-collinear to V then the returned
-              tensor U will be empty.
-
-    Arguments:
-
-      M (Tensor) : positive definite matrix, size is (m, m)
-      U (Tensor) : initial approximation, size is (m, n)
-      V (Tensor) : M-orthogonal external basis, size is (m, k)
-      tau_ortho (float, optional) : positive tolerance for orthogonality checks.
-      tau_drop (float, optional) : positive tolerance passed to svqb when called in drop mode
-      tau_replace (float, optional) : positive tolerance passed to svqb when called in replace mode
-      use_drop (bool, optional) : when True, enable dropping U columns
-                   that have small contribution to the `span([U, V])`.
-
-    Returns:
-
-      U (Tensor) : M-orthonormal columns (:math:`U^T M U = I`) such
-                   that :math:`V^T M U=0`, size is (m, n1), where `n1
-                   = n` if `drop` is `False, otherwise `n1 <= n`.
-
-      stats (dict) : statistics information
-    """
-    mm = torch.matmul
-    mm_M = _utils.matmul
-    MV_norm = _utils.norm(mm_M(M, V))
-    MU = mm_M(M, U)
-    VMU = mm(_utils.transpose(V), MU)
-    i = j = 0
-    i_max = params.get('ortho.i_max', 3)
-    j_max = params.get('ortho.j_max', 3)
-    stats = {'ortho.UMUmI_rerr': {},
-             'ortho.VMU_rerr': {}}
-    for i in range(i_max):
-        U = U - mm(V, VMU)
-        drop = False
-        tau_svqb = tau_drop
-        for j in range(j_max):
-            if use_drop:
-                U = svqb(M, U, drop=drop, tau=tau_svqb)
-                drop = True
-                tau_svqb = tau_replace
-            else:
-                U = svqb(M, U, drop=False, tau=tau_replace)
+        assert len(nz) == 1, nz
+        if len(nz[0]) < len(d):
+            U = U[:, nz[0]]
             if torch.numel(U) == 0:
-                # all initial U columns are M-collinear to V
-                stats['ortho.i'] = i
-                stats['ortho.j'] = j
-                return U, stats
-            MU = mm_M(M, U)
-            UMU = mm(_utils.transpose(U), MU)
+                return U
+            UBU = _utils.qform(self.B, U)
+            d = UBU.diagonal(0, -2, -1)
+            nz = torch.where(abs(d) != 0.0)
+            assert len(nz[0]) == len(d)
+
+        D = torch.diag_embed(d ** -0.5)
+        DUBUD = _utils.qform(UBU, D)
+        E, Z = _utils.symeig(DUBUD, eigenvectors=True)
+        t = tau * abs(E).max()
+        if drop:
+            keep = torch.where(E > t)
+            assert len(keep) == 1, keep
+            E = E[keep[0]]
+            Z = Z[:, keep[0]]
+        else:
+            E[(torch.where(E < t))[0]] = t
+        return torch.chain_matmul(U, D, Z, torch.diag_embed(E ** -0.5))
+
+    def _get_ortho(self, U, V):
+        """Return B-orthonormal U with columns are B-orthogonal to V.
+
+        .. note:: When `bparams["ortho_use_drop"] == False` then
+                  `_get_ortho` is based on the Algorithm 3 from
+                  [DuerschPhD2015] that is a slight modification of
+                  the corresponding algorithm introduced in
+                  [StathopolousWu2002]. Otherwise, the method
+                  implements Algorithm 6 from [DuerschPhD2015]
+
+        .. note:: If all U columns are B-collinear to V then the
+                  returned tensor U will be empty.
+
+        Arguments:
+
+          U (Tensor) : initial approximation, size is (m, n)
+          V (Tensor) : B-orthogonal external basis, size is (m, k)
+
+        Returns:
+
+          U (Tensor) : B-orthonormal columns (:math:`U^T B U = I`)
+                       such that :math:`V^T B U=0`, size is (m, n1),
+                       where `n1 = n` if `drop` is `False, otherwise
+                       `n1 <= n`.
+        """
+        mm = torch.matmul
+        mm_B = _utils.matmul
+        m = self.iparams['m']
+        tau_ortho = self.fparams['ortho_tol']
+        tau_drop = self.fparams['ortho_tol_drop']
+        tau_replace = self.fparams['ortho_tol_replace']
+        i_max = self.iparams['ortho_i_max']
+        j_max = self.iparams['ortho_j_max']
+        # when use_drop==True, enable dropping U columns that have
+        # small contribution to the `span([U, V])`.
+        use_drop = self.bparams['ortho_use_drop']
+
+        # clean up variables from the previous call
+        for vkey in list(self.fvars.keys()):
+            if vkey.startswith('ortho_') and vkey.endswith('_rerr'):
+                self.fvars.pop(vkey)
+        self.ivars.pop('ortho_i', 0)
+        self.ivars.pop('ortho_j', 0)
+
+        BV_norm = _utils.norm(mm_B(self.B, V))
+        BU = mm_B(self.B, U)
+        VBU = mm(_utils.transpose(V), BU)
+        i = j = 0
+        stats = ''
+        for i in range(i_max):
+            U = U - mm(V, VBU)
+            drop = False
+            tau_svqb = tau_drop
+            for j in range(j_max):
+                if use_drop:
+                    U = self._get_svqb(U, drop, tau_svqb)
+                    drop = True
+                    tau_svqb = tau_replace
+                else:
+                    U = self._get_svqb(U, False, tau_replace)
+                if torch.numel(U) == 0:
+                    # all initial U columns are B-collinear to V
+                    self.ivars['ortho_i'] = i
+                    self.ivars['ortho_j'] = j
+                    return U
+                BU = mm_B(self.B, U)
+                UBU = mm(_utils.transpose(U), BU)
+                U_norm = _utils.norm(U)
+                BU_norm = _utils.norm(BU)
+                R = UBU - torch.eye(UBU.shape[-1],
+                                    device=UBU.device,
+                                    dtype=UBU.dtype)
+                R_norm = _utils.norm(R)
+                rerr = R_norm / (BU_norm * U_norm)
+                vkey = 'ortho_UBUmI_rerr[{}, {}]'.format(i, j)
+                self.fvars[vkey] = float(rerr)
+                if rerr < tau_ortho:
+                    break
+            VBU = mm(_utils.transpose(V), BU)
+            VBU_norm = _utils.norm(VBU)
             U_norm = _utils.norm(U)
-            MU_norm = _utils.norm(MU)
-            R = UMU - torch.eye(UMU.shape[-1],
-                                device=UMU.device,
-                                dtype=UMU.dtype)
-            R_norm = _utils.norm(R)
-            rerr = R_norm / (MU_norm * U_norm)
+            rerr = VBU_norm / (BV_norm * U_norm)
+            vkey = 'ortho_VBU_rerr[{}]'.format(i)
+            self.fvars[vkey] = float(rerr)
             if rerr < tau_ortho:
-                stats['ortho.UMUmI_rerr'][i, j] = rerr
                 break
-        VMU = mm(_utils.transpose(V), MU)
-        VMU_norm = _utils.norm(VMU)
-        rerr = VMU_norm / (MV_norm * U_norm)
-        if rerr < tau_ortho:
-            stats['ortho.VMU_rerr'][j] = rerr
-            break
-        if M is not None and M.shape[-1] < U.shape[-1] + V.shape[-1]:
-            raise ValueError(
-                'Overdetermined shape of U:'
-                ' #M-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold'
-                .format(M.shape[-1], U.shape[-1], V.shape[-1]))
-    stats['ortho.i'] = i
-    stats['ortho.j'] = j
-    return U, stats
+            if m < U.shape[-1] + V.shape[-1]:
+                raise ValueError(
+                    'Overdetermined shape of U:'
+                    ' #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold'
+                    .format(self.B.shape[-1], U.shape[-1], V.shape[-1]))
+        self.ivars['ortho_i'] = i
+        self.ivars['ortho_j'] = j
+        return U
 
 
-def _get_rayleigh_ritz_transform(B, S):
-    """Return a transformation matrix that is used in Rayleigh-Ritz
-    procedure for reducing a general eigenvalue problem :math:`(S^TAS)
-    C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
-    S^TAS Ri) Z = Z E` where `C = Ri Z`.
-
-    Arguments:
-      B (Tensor): the input matrix of size :math:`(*, m, m)`. When
-                   specified as None, identity matrix is assumed.
-      S (Tensor): the matrix basis for the search subspace, size is
-                  :math:`(m, n)`.
-
-    Returns:
-      Ri (tensor): upper-triangular transformation matrix of size
-                   :math:`(n, n)`.
-    """
-    mm = torch.matmul
-    SBS = _utils.qform(B, S)
-    d1 = SBS.diagonal(0, -2, -1) ** -0.5
-    d = torch.zeros(d1.shape + (1, ),
-                    device=d1.device,
-                    dtype=d1.dtype)
-    d[:, 0] = d1
-    dd = mm(d, _utils.transpose(d))
-    d_ = mm(d, _utils.transpose(torch.ones(d.shape,
-                                           device=d.device,
-                                           dtype=d.dtype)))
-    R = torch.cholesky(dd * SBS, upper=True)
-    # TODO: use LAPACK ?trtri as R is upper-triangular
-    Rinv = torch.inverse(R)
-    return Rinv * d_
-
-
-def _residual(A, B, X, E):
-    """Return residual :math:`A X - B X diag(E)`.
-    """
-    mm = _utils.matmul
-    n = X.shape[-1]
-    return mm(A, X) - torch.matmul(mm(B, X), torch.diag_embed(E[:n]))
-
-
-def _lobpcg_worker_basic(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
-                         tracker, converged_count, **params):
-    mm = torch.matmul
-
-    # Rayleigh-Ritz procedure, initialize
-    Ri = _get_rayleigh_ritz_transform(B, X)
-    R_diag_abs = abs(Ri.diagonal(0, -2, -1))
-    R_cond = R_diag_abs.max() / R_diag_abs.min()
-
-    M = _utils.qform(_utils.qform(A, X), Ri)
-    E, Z = _utils.symeig(M, largest)
-    X = mm(X, mm(Ri, Z))
-    R = _residual(A, B, X, E)
-    np = 0
-    nc, rerr = converged_count(R, X, E)
-    S[..., :n] = X
-    W = _utils.matmul(iK, R)
-    ns = n + np + W.shape[-1]
-    S[..., n + np:ns] = W
-
-    tracker_args = dict(istep=0, X=X, E=E, R=R, S=S, W=W, k=k, n=n,
-                        A=A, B=B, tol=tol, R_cond=R_cond,
-                        nc=nc, np=np, ns=ns, Z=Z, rerr=rerr)
-    if tracker(**tracker_args):
-        niter = 0  # skip iteration
-
-    while nc < k and niter:
-        niter -= 1
-
-        S_ = S[:, nc:ns]
-
-        # Rayleigh-Ritz procedure
-        Ri = _get_rayleigh_ritz_transform(B, S_)
-        R_diag_abs = abs(Ri.diagonal(0, -2, -1))
-        R_cond = R_diag_abs.max() / R_diag_abs.min()
-
-        tracker_args['R_cond'] = R_cond
-        M = _utils.qform(_utils.qform(A, S_), Ri)
-        E_, Z = _utils.symeig(M, largest)
-
-        # Update X, E, P
-        X[:, nc:] = mm(S_, mm(Ri, Z[:, nc:n]))
-        E[nc:] = E_[:n - nc]
-        P = mm(S_, mm(Ri, Z[:, n:2 * n - nc]))
-        np = P.shape[-1]
-
-        # check convergence
-        R = _residual(A, B, X, E)
-        prev_nc = nc
-        nc, rerr = converged_count(R, X, E)
-        assert nc >= prev_nc, (
-            'the number of converged eigenpairs '
-            '(was %s, got %s) cannot decrease' % (prev_nc, nc))
-
-        # update S
-        S[:, :n] = X
-        S[:, n:n + np] = P
-        W = _utils.matmul(iK, R[:, nc:])
-        ns = n + np + W.shape[-1]
-        S[:, n + np:ns] = W
-
-        tracker_args['istep'] += 1
-        tracker_args.update(
-            nc=nc, np=np, ns=ns, rerr=rerr, R_cond=R_cond, R=R, W=W, Z=Z)
-        if tracker(**tracker_args):
-            break
-
-    return E[:k], X[:, :k]
-
-
-def _lobpcg_worker_ortho(torch, A, B, X, S, m, n, k, iK, niter, tol, largest,
-                         tracker, converged_count, **params):
-    mm = torch.chain_matmul
-
-    params['tol_ortho'] = params.get('tol_ortho', tol)
-    params['tol_drop'] = params.get('tol_drop', tol)
-    params['tol_replace'] = params.get('tol_replace', tol)
-    params['ortho.i_max'] = params.get('ortho.i_max', 3)
-    params['ortho.j_max'] = params.get('ortho.j_max', 3)
-
-    # Rayleigh-Ritz procedure, initialize
-    Ri = _get_rayleigh_ritz_transform(B, X)
-    M = _utils.qform(_utils.qform(A, X), Ri)
-    E, Z = _utils.symeig(M, largest)
-    X = mm(X, Ri, Z)
-    R = _residual(A, B, X, E)
-    np = 0
-    nc, rerr = converged_count(R, X, E)
-    S[:, :n] = X
-    W, ortho_stats = _ortho(B, R, X, **params)
-    ns = n + np + W.shape[-1]
-    S[:, n + np:ns] = W
-
-    tracker_args = dict(istep=0, A=A, B=B, largest=largest,
-                        X=X, E=E, R=R, S=S, W=W, k=k, n=n,
-                        tol=tol,
-                        nc=nc, np=np, ns=ns, Z=Z, rerr=rerr)
-    tracker_args.update(ortho_stats)
-    if tracker(**tracker_args):
-        niter = 0  # skip iteration
-
-    while nc < k and niter:
-        niter -= 1
-
-        S_ = S[:, nc:ns]
-
-        # Rayleigh-Ritz procedure
-        E_, Z = _utils.symeig(_utils.qform(A, S_), largest)
-
-        # Update E, X, P
-        X[:, nc:] = mm(S_, Z[:, :n - nc])
-        E[nc:] = E_[:n - nc]
-        P = mm(S_, Z[:, n - nc:], _utils.basis(_utils.transpose(Z[:n - nc, n - nc:])))
-        np = P.shape[-1]
-
-        # check convergence
-        R = _residual(A, B, X, E)
-        prev_nc = nc
-        nc, rerr = converged_count(R, X, E)
-        assert nc >= prev_nc, (
-            'the number of converged eigenpairs '
-            '(was %s, got %s) cannot decrease' % (prev_nc, nc))
-
-        # update S
-        S[:, :n] = X
-        S[:, n:n + np] = P
-        W, ortho_stats = _ortho(B, R[:, nc:], S[:, :n + np], **params)
-        ns = n + np + W.shape[-1]
-        S[:, n + np:ns] = W
-
-        tracker_args['istep'] += 1
-        tracker_args.update(
-            ortho_stats, nc=nc, np=np, ns=ns, rerr=rerr, R=R, W=W, Z=Z)
-        if tracker(**tracker_args):
-            break
-
-    return E[:k], X[:, :k]
+# Calling tracker is separated from LOBPCG definitions because
+# TorchScript does not support user-defined callback arguments:
+LOBPCG.call_tracker = lambda self: self.tracker(self)

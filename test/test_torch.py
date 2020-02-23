@@ -13656,8 +13656,16 @@ class TestTorchDeviceType(TestCase):
         from torch._linalg_utils import matmul, qform
         from torch._lobpcg import lobpcg
 
-        def test_tracker(istep, A, B, X, E, R, rerr, nc, k, tol, **params):
+        def test_tracker(worker):
+            k = worker.iparams['k']
+            nc = worker.ivars['converged_count']
             if k <= nc:
+                tol = worker.fparams['tol']
+                rerr = worker.tvars['rerr']
+                X = worker.X
+                E = worker.E
+                B = worker.B
+                A = worker.A
                 dtype = X.dtype
                 device = X.device
 
@@ -13757,63 +13765,6 @@ class TestTorchDeviceType(TestCase):
             E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              prec=prec)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_lobpcg_utils(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_matrix
-        from torch._linalg_utils import matmul
-        from torch._lobpcg import svqb
-        from torch._lobpcg import _ortho as ortho
-        from torch._lobpcg import _get_rayleigh_ritz_transform as get_rayleigh_ritz_transform
-        mm = torch.matmul
-
-        for m, n in [(5, 1), (6, 2), (9, 3), (100, 5)]:
-            # check svqb
-            M = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
-            Uin = random_matrix(m, n, device=device)
-            for drop in [False, True]:
-                Uout = svqb(M, Uin, drop=drop)
-                self.assertEqual(mm(Uout.transpose(-2, -1), matmul(M, Uout)),
-                                 torch.eye(Uout.shape[-1], device=device, dtype=dtype))
-
-            nv = max(1, n - 1)
-            V = svqb(M, random_matrix(m, nv, device=device), drop=False)
-            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, V)),
-                             torch.eye(V.shape[-1], device=device, dtype=dtype))
-
-            # check ortho
-            Uin = random_matrix(m, n, device=device)
-            U, _ = ortho(M, Uin, V, use_drop=False)
-            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
-                             torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
-                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
-
-            U, _ = ortho(M, Uin, V, use_drop=True)
-            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
-                             torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
-                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
-
-            Uin[:, 0] = V[:, 0]
-            U, _ = ortho(M, Uin, V, use_drop=True)
-            self.assertEqual(mm(U.transpose(-2, -1), matmul(M, U)),
-                             torch.eye(U.shape[-1], device=device, dtype=dtype))
-            self.assertEqual(mm(V.transpose(-2, -1), matmul(M, U)),
-                             torch.zeros((V.shape[-1], U.shape[-1]), device=device, dtype=dtype))
-
-            # check get_RR_transform
-            A = random_symmetric_pd_matrix(m, device=device, dtype=dtype)
-            S = random_matrix(m, n, device=device)
-            for B in [None, random_symmetric_pd_matrix(m, device=device, dtype=dtype)]:
-                Ri = get_rayleigh_ritz_transform(B, S)
-                M = torch.chain_matmul(Ri.transpose(-2, -1), S.transpose(-2, -1), matmul(A, S), Ri)
-                E, Z = torch.symeig(M, eigenvectors=True)
-                C = torch.matmul(Ri, Z)
-                self.assertEqual(torch.chain_matmul(S.transpose(-2, -1), matmul(A, S), C),
-                                 torch.chain_matmul(S.transpose(-2, -1), matmul(B, S), C, E.diag_embed()))
 
     @slowTest
     @onlyCPU

@@ -42,7 +42,7 @@ def conjugate(A):
 
     .. note:: If A's dtype is not complex, A is returned.
     """
-    if A.dtype in [torch.complex32, torch.complex64, torch.complex128]:    
+    if A.is_complex():
         return A.conj()
     return A
 
@@ -72,12 +72,14 @@ def norm(A):
 def bform(X, A, Y):
     """Return bilinear form of matrices: :math:`X^T A Y`.
     """
+    # type: (Tensor, Optional[Tensor], Tensor) -> Tensor
     return matmul(transpose(X), matmul(A, Y))
 
 
 def qform(A, S):
     """Return quadratic form :math:`S^T A S`.
     """
+    # type: (Optional[Tensor], Tensor) -> Tensor
     return bform(S, A, S)
 
 
