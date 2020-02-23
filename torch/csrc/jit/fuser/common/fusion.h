@@ -236,6 +236,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * Simple Registration methods. These methods do 2 things:
    * Register the Statment/Val/Expr
    */
+  
   StmtNameType registerVal(Val* val) {
     if (val->fusion()) {
       TORCH_CHECK(val->fusion() == this);
@@ -244,7 +245,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       }
     }
     val_set_.emplace(val);
-    return getValName();
+    return getValName(*(val->getValType()));
   }
 
   /*
@@ -335,10 +336,22 @@ struct TORCH_API Fusion : public IRInputOutput {
   std::set<Val*> val_set_;
   std::set<Expr*> expr_set_;
 
+  //map from valtype to individual name counters
+  std::unordered_map<ValType, StmtNameType> val_type_name_map = {
+    {ValType::Tensor,       0},
+    {ValType::TensorView,   0},
+    {ValType::TensorDomain, 0},
+    {ValType::IterDomain,   0},
+    {ValType::Scalar,       0}
+  };
+
+  //Generic counters
   StmtNameType val_name_counter_ = 0;
   StmtNameType expr_name_counter_ = 0;
 
-  StmtNameType getValName() {
+  StmtNameType getValName(ValType vtype) {
+    if(val_type_name_map.find(vtype) != val_type_name_map.end())
+      return val_type_name_map[vtype]++;
     return val_name_counter_++;
   }
   StmtNameType getExprName() {
