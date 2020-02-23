@@ -13900,6 +13900,7 @@ class TestTorchDeviceType(TestCase):
     def test_min_max(self, device, dtype):
         size = 2000
         t = torch.empty(size, dtype=dtype, device=device)
+        t.random_()
         t.min()
         t.max()
 
