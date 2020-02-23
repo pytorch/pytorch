@@ -13994,7 +13994,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.float, torch.double)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float, torch.double, torch.half, torch.bfloat16)
+                  torch.float, torch.double, torch.half) # , torch.bfloat16
     def test_random_default(self, device, dtype):
         size = 2000
         alpha = 0.1
