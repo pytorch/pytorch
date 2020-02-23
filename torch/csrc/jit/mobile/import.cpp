@@ -47,7 +47,7 @@ IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
   return row->elements().at(1);
 }
 
-void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::CompilationUnit> mcu) {
+void parseMethods(const std::vector<IValue>& vals, const std::shared_ptr<mobile::CompilationUnit>& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
