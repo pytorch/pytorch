@@ -284,7 +284,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(worker_names, expected_worker_names)
 
         worker_ids = {worker_info.id for worker_info in worker_infos}
-        expected_worker_ids = {rank for rank in range(self.world_size)}
+        expected_worker_ids = set(range(self.world_size))
         self.assertEqual(worker_ids, expected_worker_ids)
 
     @dist_init

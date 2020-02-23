@@ -51,8 +51,9 @@ def broadcast_tensors(*tensors):
         tensor([[0, 1, 2],
                 [0, 1, 2]])
     """
-    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-        return handle_torch_function(broadcast_tensors, tensors, *tensors)
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(broadcast_tensors, tensors, *tensors)
     return torch._C._VariableFunctions.broadcast_tensors(tensors)
 
 
@@ -74,8 +75,10 @@ def split(tensor, split_size_or_sections, dim=0):
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
-    if type(tensor) is not Tensor and has_torch_function((tensor,)):
-        return handle_torch_function(split, (tensor,), tensor, split_size_or_sections, dim=dim)
+    if not torch.jit.is_scripting():
+        if type(tensor) is not Tensor and has_torch_function((tensor,)):
+            return handle_torch_function(split, (tensor,), tensor, split_size_or_sections,
+                                         dim=dim)
     # Overwriting reason:
     # This dispatches to two ATen functions depending on the type of
     # split_size_or_sections. The branching code is in tensor.py, which we
@@ -133,6 +136,12 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         >>> torch.norm(A_ - A)
         tensor(2.9802e-08)
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (LU_data, LU_pivots)
+        if any(type(t) is not Tensor for t in tens_ops) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                lu_unpack, tens_ops, LU_data, LU_pivots, unpack_data=unpack_data,
+                unpack_pivots=unpack_pivots)
     shape = LU_data.shape
     # In generalized LU factorization, the following shape relations hold:
     #   A.shape[-2:] == (m, n)
@@ -243,8 +252,9 @@ Examples::
     >>> torch.einsum('...ij->...ji', A).shape # batch permute
     torch.Size([2, 3, 5, 4])
 """
-    if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
-        return handle_torch_function(einsum, operands, *operands)
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
+            return handle_torch_function(einsum, operands, *operands)
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
@@ -280,8 +290,9 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
                 [4, 5, 6],
                 [4, 5, 6]])
     """
-    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-        return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
     if kwargs:
         raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
@@ -374,10 +385,12 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         Tensor: A tensor containing the STFT result with shape described above
 
     """
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(
-            stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length, window=window,
-            center=center, pad_mode=pad_mode, normalized=normalized, onesided=onesided)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                stft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
+                window=window, center=center, pad_mode=pad_mode, normalized=normalized,
+                onesided=onesided)
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.
     if center:
@@ -451,10 +464,11 @@ def unique(input, sorted=True, return_inverse=False, return_counts=False, dim=No
                 [ 1,  2]])
 
     """
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(
-            unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
-            return_counts=return_counts, dim=dim)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                unique, (input,), input, sorted=sorted, return_inverse=return_inverse,
+                return_counts=return_counts, dim=dim)
     if dim is not None:
         output, inverse_indices, counts = torch._C._VariableFunctions.unique_dim(
             input,
@@ -530,10 +544,11 @@ def unique_consecutive(input, return_inverse=False, return_counts=False, dim=Non
         >>> counts
         tensor([2, 2, 1, 2, 1])
     """
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(
-            unique_consecutive, (input,), input, return_inverse=return_inverse,
-            return_counts=return_counts, dim=dim)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                unique_consecutive, (input,), input, return_inverse=return_inverse,
+                return_counts=return_counts, dim=dim)
     output, inverse_indices, counts = torch._C._VariableFunctions.unique_consecutive(
         input, return_inverse=return_inverse, return_counts=return_counts, dim=dim)
     if return_inverse and return_counts:
@@ -589,8 +604,9 @@ def tensordot(a, b, dims=2):
                 [ 0.8223,  3.9445,  3.2168, -0.2400,  3.4117,  1.7780]])
 
     """
-    if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
-        return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
+    if not torch.jit.is_scripting():
+        if (type(a) is not Tensor or type(b) is not Tensor) and has_torch_function((a, b)):
+            return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
     if isinstance(dims, (list, tuple)) or \
        (isinstance(dims, torch.Tensor) and dims.numel() > 1):
         dims_a, dims_b = dims
@@ -632,8 +648,9 @@ def cartesian_prod(*tensors):
                 [3, 4],
                 [3, 5]])
     """
-    if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-        return handle_torch_function(cartesian_prod, tensors, *tensors)
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(cartesian_prod, tensors, *tensors)
     return torch._C._VariableFunctions.cartesian_prod(tensors)
 
 
@@ -678,8 +695,10 @@ def cdist(x1, x2, p=2, compute_mode='use_mm_for_euclid_dist_if_necessary'):
                 [2.7138, 3.8322],
                 [2.2830, 0.3791]])
     """
-    if (type(x1) is not Tensor or type(x2) is not Tensor) and has_torch_function((x1, x2)):
-        return handle_torch_function(cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
+    if not torch.jit.is_scripting():
+        if (type(x1) is not Tensor or type(x2) is not Tensor) and has_torch_function((x1, x2)):
+            return handle_torch_function(
+                cdist, (x1, x2), x1, x2, p=p, compute_mode=compute_mode)
     if compute_mode == 'use_mm_for_euclid_dist_if_necessary':
         return torch._C._VariableFunctions.cdist(x1, x2, p, None)
     elif compute_mode == 'use_mm_for_euclid_dist':
@@ -750,9 +769,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
         >>> torch.norm(d[0, :, :]), torch.norm(d[1, :, :])
         (tensor(3.7417), tensor(11.2250))
     """
-    if type(input) is not Tensor and has_torch_function((input,)):
-        return handle_torch_function(
-            norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
     ndim = input.dim()
 
     # catch default case
@@ -819,8 +839,9 @@ def chain_matmul(*matrices):
 
     .. _`[CLRS]`: https://mitpress.mit.edu/books/introduction-algorithms-third-edition
     """
-    if any(type(t) is not Tensor for t in matrices) and has_torch_function(matrices):
-        return handle_torch_function(chain_matmul, matrices, *matrices)
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in matrices) and has_torch_function(matrices):
+            return handle_torch_function(chain_matmul, matrices, *matrices)
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
@@ -891,9 +912,10 @@ def lu(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if type(A) is not Tensor and has_torch_function((A,)):
-        return handle_torch_function(
-            lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
+    if not torch.jit.is_scripting():
+        if type(A) is not Tensor and has_torch_function((A,)):
+            return handle_torch_function(
+                lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     # If get_infos is True, then we don't need to check for errors and vice versa
     result = torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
     if out is not None:
