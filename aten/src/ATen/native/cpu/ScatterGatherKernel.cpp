@@ -1,22 +1,23 @@
+
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 
 #define CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(operation) cpu_scatter_gather_base_kernel( \
-                                                                                        self, dim, index, src, \
-                                                                                        method_name, [&] ( \
-                                                                                                          auto* self_data, auto self_dim_stride, \
-                                                                                                          const auto* index_data, auto index_dim_stride, \
-                                                                                                          const auto* src_data, auto src_dim_stride) { \
-                                                                                                       for (int64_t i = 0; i < index_dim_size; ++i) { \
-                                                                                                         int64_t idx_dim = index_data[i * index_dim_stride]; \
-                                                                                                         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size, \
-                                                                                                                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim, \
-                                                                                                                     " with size ", self_dim_size); \
-                                                                                                         self_data[idx_dim * self_dim_stride] operation src_data[i * src_dim_stride]; \
-                                                                                                       } \
-                                                                                                     }, \
-                                                                                        /*serial_exec=*/false); \
+  self, dim, index, src, \
+  method_name, [&] (                                                    \
+    auto* self_data, auto self_dim_stride,                              \
+    const auto* index_data, auto index_dim_stride,                      \
+    const auto* src_data, auto src_dim_stride) {                        \
+      for (int64_t i = 0; i < index_dim_size; ++i) {                    \
+        int64_t idx_dim = index_data[i * index_dim_stride];             \
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,            \
+                    "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim, \
+                    " with size ", self_dim_size);                      \
+        self_data[idx_dim * self_dim_stride] operation src_data[i * src_dim_stride]; \
+      }                                                                 \
+   },                                                                   \
+  /*serial_exec=*/false);                                               \
   
 
 namespace at { namespace native {

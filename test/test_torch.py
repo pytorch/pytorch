@@ -10841,18 +10841,16 @@ class TestTorchDeviceType(TestCase):
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[4],[1]], device=device).repeat(1, width), "multiply"),
+             torch.tensor([[8],[2]], device=device).repeat(1, width), "multiply"),
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[1],[2]], device=device).repeat(1, width), "divide"),
+             torch.tensor([[0.5],[2]], device=device).repeat(1, width), "divide"),
         ]
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result)            
-
-
+            self.assertEqual(input, result, operation)
 
     def test_scatter_bool(self, device):
         x = torch.tensor([[True, True, True], [True, True, True]], device=device)
