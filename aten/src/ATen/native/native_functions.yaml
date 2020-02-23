@@ -3956,6 +3956,11 @@
     CPU: scatter_cpu_
     CUDA: legacy::cuda::_th_scatter_
 
+- func: scatter_.reduce(Tensor(a!) self, int dim, Tensor index, Tensor src, *, str reduce) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: scatter_cpu_reduce_
+
 - func: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   use_c10_dispatcher: full
   variants: function, method

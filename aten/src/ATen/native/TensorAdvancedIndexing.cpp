@@ -507,6 +507,12 @@ Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Te
   return self;
 }
 
+Tensor & scatter_cpu_reduce_(Tensor & self, int64_t dim, const Tensor & index,
+                      const Tensor & src, std::string reduce) {
+  std::cout << "reduce str: " << reduce << std::endl;    
+  return self;
+}
+
 Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   scatter_fill_stub(self.device().type(), self, dim, index, src);
   return self;
