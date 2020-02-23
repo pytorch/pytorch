@@ -517,7 +517,6 @@ Tensor & scatter_cpu_reduce_(Tensor & self, int64_t dim, const Tensor & index,
     scatter_reduce_stub(self.device().type(), self, dim, index, src, reduce);
   }
 
-
   return self;
 }
 
