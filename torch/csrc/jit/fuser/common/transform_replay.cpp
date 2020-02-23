@@ -62,12 +62,13 @@ void TransformReplay::compute_influence(Merge* expr) {
 }
 
 void TransformReplay::compute_influence(Reorder* expr) {
+  // pos2axis[new_pos] = old_pos Generate new axis2pos map
   const std::vector<int>& pos2axis = expr->pos2axis();
 
   std::vector<bool> reorder_influence(influence.size(), false);
   for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
-    int old_pos = i;
-    int new_pos = pos2axis[i];
+    int new_pos = i;
+    int old_pos = pos2axis[i];
     reorder_influence[old_pos] = influence[new_pos];
   }
 
@@ -174,10 +175,6 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
   } else {
     // Fake it
     axis_map.insert(axis_map.begin() + expr->axis() + 1, -1);
-    for (decltype(axis_map.size()) i = expr->axis() + 1; i < axis_map.size();
-         i++)
-      if (axis_map[i] != -1)
-        axis_map[i]++;
   }
 
   influence.insert(influence.begin() + axis + 1, influence[axis]);
@@ -195,6 +192,7 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
   } else {
     // If we aren't applying the merge, we won't change any following axis
     // Doesn't matter which axis we propagate for the merge in the axis_map
+    assert(axis_map[axis+1] == -1);
   }
   axis_map.erase(axis_map.begin() + expr->axis() + 1);
 
