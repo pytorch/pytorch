@@ -75,6 +75,7 @@ DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_stub);
 DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
+DEFINE_DISPATCH(scatter_reduce_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -510,20 +511,14 @@ Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Te
 Tensor & scatter_cpu_reduce_(Tensor & self, int64_t dim, const Tensor & index,
                       const Tensor & src, std::string reduce) {
   if (reduce == "sum") {
-    return scatter_add_cpu_(self, dim, index, src);
-  }
-  else if (reduce == "subtract") {
-  }
-  else if (reduce == "multiply") {
-    
-  }
-  else if (reduce == "divide") {
-    
+    scatter_add_stub(self.device().type(), self, dim, index, src);
   }
   else {
-    // TODO: figure out how to check for wrong arg for reduce and raise an error.
-    std::cout << "There's no reduction operator called " << reduce << std::endl;
+    scatter_reduce_stub(self.device().type(), self, dim, index, src, reduce);
   }
+
+
+  return self;
 }
 
 Tensor & scatter_fill_cpu_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {

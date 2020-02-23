@@ -1,7 +1,6 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
-#include <mutex>
 
 namespace at { namespace native {
 
@@ -307,11 +306,17 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     /*serial_exec=*/false);
 }
 
+void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src,
+                               std::string& reduce) {
+  
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
 REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
 REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
 REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
 
 }} // namespace at::native
