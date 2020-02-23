@@ -204,12 +204,7 @@ static void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
     return;
   }
 
-  auto temp_tensor = result;
-  if (!result.is_contiguous()) {
-    temp_tensor = temp_tensor.contiguous();
-  }
-
-  auto n = input_shape[wrap_dim];
+  const auto n = input_shape[wrap_dim];
   const int64_t M = std::accumulate(
       input_shape.cbegin(),
       input_shape.cbegin() + wrap_dim,
@@ -224,27 +219,31 @@ static void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
       );
 
   auto self_ptr = self.data_ptr<scalar_t>();
-  auto out_ptr = temp_tensor.data_ptr<scalar_t>();
-  auto offset = N * n;
+  auto out_ptr = result.data_ptr<scalar_t>();
+  const auto self_offset_h = self.stride(wrap_dim - 1);
+  const auto self_offset_l = self.stride(wrap_dim);
+  const auto out_offset_h = result.stride(wrap_dim - 1);
+  const auto out_offset_l = result.stride(wrap_dim);
+
   parallel_for(0, M, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    auto s_index =  offset * begin;
+    auto s_index =  self_offset_h * begin;
+    auto o_index =  out_offset_h * begin;
     for (int64_t f = begin; f < end; ++f) {
       for (auto j = 0; j < N; j++ ) {
         scalar_t cum_number = init_v;
-        auto index = s_index;
+        auto self_index = s_index;
+	    auto out_index = o_index;
         for (auto k =0; k < n; k++) {
-          cum_number = op(cum_number, self_ptr[index + j]);
-          out_ptr[index + j] = cum_number;
-          index += N;
+          cum_number = op(cum_number, self_ptr[self_index + j]);
+          out_ptr[out_index + j] = cum_number;
+          self_index += self_offset_l;
+	      out_index += out_offset_l;
         }
       }
-      s_index += offset;
+      s_index += self_offset_h;
+      o_index += out_offset_h;
     }
   });
-
-  if (!result.is_contiguous()) {
-    result.copy_(temp_tensor);
-  }
 }
 
 Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
