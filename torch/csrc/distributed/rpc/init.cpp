@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
