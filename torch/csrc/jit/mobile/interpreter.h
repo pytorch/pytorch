@@ -18,7 +18,7 @@ struct Code {
 };
 
 struct InterpreterState {
-  TORCH_API explicit InterpreterState(const std::shared_ptr<Code>& code);
+  TORCH_API explicit InterpreterState(std::shared_ptr<Code> code);
   TORCH_API bool run(Stack& stack);
 
  private:

@@ -19,8 +19,8 @@ class CompilationUnit {
 class TORCH_API Module {
  public:
   Module(c10::intrusive_ptr<c10::ivalue::Object> object,
-         const std::shared_ptr<CompilationUnit>& cu)
-      : object_(object), cu_(cu) {};
+         std::shared_ptr<CompilationUnit> cu)
+      : object_(object), cu_(std::move(cu)) {};
   Module() {}
   c10::IValue run_method(const std::string& method_name, Stack stack);
   c10::IValue forward(std::vector<c10::IValue> inputs) {
