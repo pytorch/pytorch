@@ -62,7 +62,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, \
+    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
@@ -247,16 +247,6 @@ def get_fn(file_name, script_path):
     spec.loader.exec_module(module)
     fn = module.fn
     return fn
-
-
-def get_execution_plan(graph_executor_state):
-    execution_plans = list(graph_executor_state.execution_plans.values())
-    num_plans = len(execution_plans)
-    if num_plans != 1:
-        raise RuntimeError('This test assumes this GraphExecutor should '
-                           'only have one execution plan, got: {}'.format(num_plans))
-    return execution_plans[0]
-
 
 def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
     if diff_graph_idx is None:
@@ -1973,7 +1963,7 @@ graph(%Ra, %Rb):
 
         trace_graph, _ = torch.jit._get_trace_graph(fn, (x,), _force_outplace=True)
         self.run_pass('dce', trace_graph)
-        ops = [n for n in trace_graph.nodes()]
+        ops = list(trace_graph.nodes())
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -3889,23 +3879,23 @@ graph(%Ra, %Rb):
         slstm(*inputs).sum().backward()
         global fw_graph
         fw_graph = slstm.graph_for(*inputs)
-        nodes = [n for n in fw_graph.nodes()]
+        nodes = list(fw_graph.nodes())
         tested_blocks = False
         for node in nodes:
-            for output in [o for o in node.outputs()]:
+            for output in node.outputs():
                 self.assertTrue(hasattr(output, 'type'))
                 self.assertTrue(output.type() is not None)
-            for input in [i for i in node.inputs()]:
+            for input in node.inputs():
                 self.assertTrue(hasattr(input, 'type'))
                 self.assertTrue(input.type() is not None)
-            for block in [b for b in node.blocks()]:
+            for block in node.blocks():
                 tested_blocks = True
                 self.assertTrue(hasattr(block, 'inputs'))
                 self.assertTrue(hasattr(block, 'outputs'))
-                for output in [o for o in block.outputs()]:
+                for output in block.outputs():
                     self.assertTrue(hasattr(output, 'type'))
                     self.assertTrue(output.type() is not None)
-                for input in [i for i in block.inputs()]:
+                for input in block.inputs():
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
@@ -5293,6 +5283,88 @@ def foo(x):
             x, y = z
             return y[0][1]
         self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
+
+    def test_nested_aug_assign(self):
+        @torch.jit.script
+        class SomeClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __iadd__(self, x):
+                # type: (int)
+                self.num += x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        @torch.jit.script
+        class SomeOutOfPlaceClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __add__(self, x):
+                # type: (int)
+                self.num = x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        class Child(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 2
+                self.o = SomeClass()
+                self.oop = SomeOutOfPlaceClass()
+                self.list = [1, 2, 3]
+
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self):
+                self.child.x += 1
+                self.child.o += 5
+                self.child.oop += 5
+                some_list = [1, 2]
+                self.child.list += some_list
+                self.child.list *= 2
+                return self.child.x, self.child.o, self.child.list, self.child.oop
+
+        a = A()
+        sa = torch.jit.script(A())
+        eager_result = a()
+        script_result = sa()
+        self.assertEqual(eager_result, script_result)
+        self.assertEqual(a.child.x, sa.child.x)
+        self.assertEqual(a.child.o, sa.child.o)
+        self.assertEqual(a.child.list, sa.child.list)
+
+        @torch.jit.script
+        class SomeNonAddableClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        # with self.assertRaisesRegex(RuntimeError, "")
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = SomeNonAddableClass()
+
+            def forward(self):
+                self.x += SomeNonAddableClass()
+                return self.x
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
+            torch.jit.script(A())
 
     def test_nested_list_construct(self):
         def foo():
@@ -10013,7 +10085,7 @@ a")
             self.assertEqual(o, v)
 
             with self.assertRaisesRegex(Exception, "object is not iterable"):
-                print([val for val in m])
+                print(list(m))
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -10846,30 +10918,32 @@ a")
             bar()
 
     def test_tuples(self):
-        def foo(i):
-            a = (i + 4, i * 2)
-            c = a
-            # some nonsense with if-statements and loops to check
-            # that tuple lowering doesn't fail
-            if True:
-                c = (i * 9, i + 1)
-            t0, t1 = c
-            while False:
-                t0, t1 = c
-                c = (t1, t0)
-            x = (1,)
-            y = 1,
-            return t0, x, y
-
-        v = torch.rand(10, 3)
-        self.checkScript(foo, (v,))
-
-        with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
-            @torch.jit.script
-            def mixtypes(x):
-                a = (x, x)
+        # TODO: jitter issue.
+        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+            def foo(i):
+                a = (i + 4, i * 2)
+                c = a
+                # some nonsense with if-statements and loops to check
+                # that tuple lowering doesn't fail
                 if True:
-                    a = 4
+                    c = (i * 9, i + 1)
+                t0, t1 = c
+                while False:
+                    t0, t1 = c
+                    c = (t1, t0)
+                x = (1,)
+                y = 1,
+                return t0, x, y
+
+            v = torch.rand(10, 3)
+            self.checkScript(foo, (v,))
+
+            with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
+                @torch.jit.script
+                def mixtypes(x):
+                    a = (x, x)
+                    if True:
+                        a = 4
 
     def test_if_tuple_sizes(self):
         with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
@@ -12755,7 +12829,7 @@ a")
         self.assertEqual(torch.jit.script(mod)(torch.tensor(.5)), [])
 
         def bad_type_annotation():
-            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
+            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])  # noqa: C416
             return out
 
         with self.assertRaisesRegex(Exception, "Expected list type annotation"):
