@@ -3,12 +3,12 @@
 
 C10_DEFINE_bool(
     caffe2_tvm_profiling_based_jit,
-    true,
+    false,
     "Use profiling based jit for TVM transform");
 
 C10_DEFINE_int32(
     caffe2_tvm_min_ops,
-    10,
+    8,
     "Minimal number of supported ops for the subgraph to be lowered to TVM");
 
 namespace caffe2 {
@@ -179,7 +179,7 @@ void TvmTransformer::transform(
   }
 
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_ssa_net.pbtxt");
   }
 
   // We are ready to transform the net
@@ -193,7 +193,7 @@ void TvmTransformer::transform(
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
   pred_net->Swap(&net_opt);
   if (opts_.debug) {
-    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pb_txt");
+    dumpNet(*pred_net, shape_hints, "debug_full_opt_net.pbtxt");
   }
 }
 
@@ -202,23 +202,20 @@ NetDef TvmTransformer::applyTvmTransform(
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blacklisted_ops,
     const ShapeInfoMap& shape_hints) {
-  auto profiling_based_jit = opts_.profiling_based_jit;
+  const auto profiling_based_jit = opts_.profiling_based_jit;
   auto tvm_supports = [&blacklisted_ops, &shape_hints, &profiling_based_jit](
                           const caffe2::OperatorDef& op) {
     const static std::unordered_set<std::string> supported_ops{
-        "Add",        "Sum",
-        "FC",         "FCTransposed",
-        "Flatten",    "Relu",
-        "Sigmoid",    "Softmax",
-        "Split",      "EnsureCPUOutput",
-        "Reshape",    "ExpandDims",
-        "Concat",     "BatchMatMul",
-        "MatMul",     "BatchGather",
-        "DotProduct", "Transpose",
-        "Mul",        "Tanh",
-        "Logit",      "Cast",
-        "Copy",       "ReplaceNaN",
-        "Clip"};
+        "Add",        "BatchGather", "BatchMatMul",
+        "Cast",       "Clip",        "Concat",
+        "Copy",       "DotProduct",  "EnsureCPUOutput",
+        "ExpandDims", "FC",          "FCTransposed",
+        "Flatten",    "Logit",       "MatMul",
+        "Mul",        "Relu",        "Reshape",
+        "ReplaceNaN", "Sigmoid",     "Softmax",
+        "Split",      "Sum",         "Tanh",
+        "Transpose",
+    };
 
     try {
       // If the op position is black listed, return false

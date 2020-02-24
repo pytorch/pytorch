@@ -94,11 +94,7 @@ def infer_concrete_type_builder(nn_module):
         # allows NoneType parameters. These parameters are not returned as
         # part of `parameters()` and its variants, but are available
         # through direct attribute access.
-        #
-        # So to achieve the nn.Module behavior, add the NoneType parameters
-        # as an attribute.
-        should_register_as_parameter = item is not None
-        concrete_type_builder.add_attribute(name, attr_type, should_register_as_parameter)
+        concrete_type_builder.add_attribute(name, attr_type, True)
         added_names.add(name)
 
     for name, item in nn_module._buffers.items():

@@ -1,9 +1,9 @@
 # In the open-source build, these are generated into
 # torch/csrc/{autgrad,jit}/generated. In fbcode, this distinction is
 # not currently relevant so they are combined into one list.
-from __future__ import absolute_import, division, print_function, unicode_literals
-load("@bazel_skylib//lib:new_sets.bzl", "sets")
-load("//caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
+load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+load("@fbcode_macros//build_defs:cpp_python_extension.bzl", "cpp_python_extension")
+load("@fbsource//xplat/caffe2/caffe2/fb:defs_gpu.bzl", "gpu_library_selector")
 
 GENERATED_CPP = [
     "Functions.cpp",
@@ -190,9 +190,29 @@ libtorch_sources = [
     "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/eval.cpp",
+    "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/ir.cpp",
+    "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/types.cpp",
+    "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+    "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/eval.cpp",
+    "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/ir.cpp",
+    "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/types.cpp",
+    "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -200,73 +220,85 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
-    "torch/csrc/autograd/functions/comm.cpp"
+    "torch/csrc/autograd/functions/comm.cpp",
 ]
 
+torch_cpp_srcs = [
+    "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
+    "torch/csrc/api/src/data/datasets/mnist.cpp",
+    "torch/csrc/api/src/data/samplers/distributed.cpp",
+    "torch/csrc/api/src/data/samplers/random.cpp",
+    "torch/csrc/api/src/data/samplers/sequential.cpp",
+    "torch/csrc/api/src/data/samplers/stream.cpp",
+    "torch/csrc/api/src/enum.cpp",
+    "torch/csrc/api/src/jit.cpp",
+    "torch/csrc/api/src/serialize.cpp",
+    "torch/csrc/api/src/nn/init.cpp",
+    "torch/csrc/api/src/nn/module.cpp",
+    "torch/csrc/api/src/nn/modules/_functions.cpp",
+    "torch/csrc/api/src/nn/modules/activation.cpp",
+    "torch/csrc/api/src/nn/modules/batchnorm.cpp",
+    "torch/csrc/api/src/nn/modules/normalization.cpp",
+    "torch/csrc/api/src/nn/modules/instancenorm.cpp",
+    "torch/csrc/api/src/nn/modules/conv.cpp",
+    "torch/csrc/api/src/nn/modules/dropout.cpp",
+    "torch/csrc/api/src/nn/modules/distance.cpp",
+    "torch/csrc/api/src/nn/modules/embedding.cpp",
+    "torch/csrc/api/src/nn/modules/fold.cpp",
+    "torch/csrc/api/src/nn/modules/linear.cpp",
+    "torch/csrc/api/src/nn/modules/loss.cpp",
+    "torch/csrc/api/src/nn/modules/padding.cpp",
+    "torch/csrc/api/src/nn/modules/pixelshuffle.cpp",
+    "torch/csrc/api/src/nn/modules/pooling.cpp",
+    "torch/csrc/api/src/nn/modules/rnn.cpp",
+    "torch/csrc/api/src/nn/modules/upsampling.cpp",
+    "torch/csrc/api/src/nn/modules/container/functional.cpp",
+    "torch/csrc/api/src/nn/modules/container/named_any.cpp",
+    "torch/csrc/api/src/nn/options/activation.cpp",
+    "torch/csrc/api/src/nn/options/batchnorm.cpp",
+    "torch/csrc/api/src/nn/options/conv.cpp",
+    "torch/csrc/api/src/nn/options/dropout.cpp",
+    "torch/csrc/api/src/nn/options/instancenorm.cpp",
+    "torch/csrc/api/src/nn/options/linear.cpp",
+    "torch/csrc/api/src/nn/options/normalization.cpp",
+    "torch/csrc/api/src/nn/options/embedding.cpp",
+    "torch/csrc/api/src/nn/options/padding.cpp",
+    "torch/csrc/api/src/nn/options/pooling.cpp",
+    "torch/csrc/api/src/nn/options/rnn.cpp",
+    "torch/csrc/api/src/nn/options/vision.cpp",
+    "torch/csrc/api/src/optim/adagrad.cpp",
+    "torch/csrc/api/src/optim/adam.cpp",
+    "torch/csrc/api/src/optim/lbfgs.cpp",
+    "torch/csrc/api/src/optim/optimizer.cpp",
+    "torch/csrc/api/src/optim/rmsprop.cpp",
+    "torch/csrc/api/src/optim/serialize.cpp",
+    "torch/csrc/api/src/optim/sgd.cpp",
+    "torch/csrc/api/src/serialize/input-archive.cpp",
+    "torch/csrc/api/src/serialize/output-archive.cpp",
+]
+
+libtorch_python_cuda_sources = [
+    "torch/csrc/cuda/Event.cpp",
+    "torch/csrc/cuda/Module.cpp",
+    "torch/csrc/cuda/Storage.cpp",
+    "torch/csrc/cuda/Stream.cpp",
+    "torch/csrc/cuda/Tensor.cpp",
+    "torch/csrc/cuda/python_comm.cpp",
+    "torch/csrc/cuda/python_nccl.cpp",
+    "torch/csrc/cuda/serialization.cpp",
+    "torch/csrc/cuda/utils.cpp",
+    "torch/csrc/distributed/c10d/ddp.cpp",
+]
 
 def add_torch_libs():
     r = {}
 
     torch_cpp_headers = {
         header[len("torch/csrc/api/include/torch/"):]: header
-        for header in glob(["torch/csrc/api/include/**/*.h"])
+        for header in native.glob(["torch/csrc/api/include/**/*.h"])
     }
 
     torch_cpp_headers["script.h"] = "torch/script.h"
-
-    torch_cpp_srcs = [
-        "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA
-        "torch/csrc/api/src/data/datasets/mnist.cpp",
-        "torch/csrc/api/src/data/samplers/distributed.cpp",
-        "torch/csrc/api/src/data/samplers/random.cpp",
-        "torch/csrc/api/src/data/samplers/sequential.cpp",
-        "torch/csrc/api/src/data/samplers/stream.cpp",
-        "torch/csrc/api/src/enum.cpp",
-        "torch/csrc/api/src/jit.cpp",
-        "torch/csrc/api/src/serialize.cpp",
-        "torch/csrc/api/src/nn/init.cpp",
-        "torch/csrc/api/src/nn/module.cpp",
-        "torch/csrc/api/src/nn/modules/_functions.cpp",
-        "torch/csrc/api/src/nn/modules/activation.cpp",
-        "torch/csrc/api/src/nn/modules/batchnorm.cpp",
-        "torch/csrc/api/src/nn/modules/normalization.cpp",
-        "torch/csrc/api/src/nn/modules/instancenorm.cpp",
-        "torch/csrc/api/src/nn/modules/conv.cpp",
-        "torch/csrc/api/src/nn/modules/dropout.cpp",
-        "torch/csrc/api/src/nn/modules/distance.cpp",
-        "torch/csrc/api/src/nn/modules/embedding.cpp",
-        "torch/csrc/api/src/nn/modules/fold.cpp",
-        "torch/csrc/api/src/nn/modules/linear.cpp",
-        "torch/csrc/api/src/nn/modules/loss.cpp",
-        "torch/csrc/api/src/nn/modules/padding.cpp",
-        "torch/csrc/api/src/nn/modules/pixelshuffle.cpp",
-        "torch/csrc/api/src/nn/modules/pooling.cpp",
-        "torch/csrc/api/src/nn/modules/rnn.cpp",
-        "torch/csrc/api/src/nn/modules/upsampling.cpp",
-        "torch/csrc/api/src/nn/modules/container/functional.cpp",
-        "torch/csrc/api/src/nn/modules/container/named_any.cpp",
-        "torch/csrc/api/src/nn/options/activation.cpp",
-        "torch/csrc/api/src/nn/options/batchnorm.cpp",
-        "torch/csrc/api/src/nn/options/conv.cpp",
-        "torch/csrc/api/src/nn/options/dropout.cpp",
-        "torch/csrc/api/src/nn/options/instancenorm.cpp",
-        "torch/csrc/api/src/nn/options/linear.cpp",
-        "torch/csrc/api/src/nn/options/normalization.cpp",
-        "torch/csrc/api/src/nn/options/embedding.cpp",
-        "torch/csrc/api/src/nn/options/padding.cpp",
-        "torch/csrc/api/src/nn/options/pooling.cpp",
-        "torch/csrc/api/src/nn/options/rnn.cpp",
-        "torch/csrc/api/src/nn/options/vision.cpp",
-        "torch/csrc/api/src/optim/adagrad.cpp",
-        "torch/csrc/api/src/optim/adam.cpp",
-        "torch/csrc/api/src/optim/lbfgs.cpp",
-        "torch/csrc/api/src/optim/optimizer.cpp",
-        "torch/csrc/api/src/optim/rmsprop.cpp",
-        "torch/csrc/api/src/optim/serialize.cpp",
-        "torch/csrc/api/src/optim/sgd.cpp",
-        "torch/csrc/api/src/serialize/input-archive.cpp",
-        "torch/csrc/api/src/serialize/output-archive.cpp",
-    ]
 
     libtorch_python_sources = [
         ":generate-code=python_functions.cpp",
@@ -358,20 +390,7 @@ def add_torch_libs():
         "test/cpp/jit/torch_python_test.cpp",
     ]
 
-    libtorch_python_sources.extend(glob(["test/cpp/jit/test_*.cpp"]))
-
-    libtorch_python_cuda_sources = [
-        "torch/csrc/cuda/Event.cpp",
-        "torch/csrc/cuda/Module.cpp",
-        "torch/csrc/cuda/Storage.cpp",
-        "torch/csrc/cuda/Stream.cpp",
-        "torch/csrc/cuda/Tensor.cpp",
-        "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/python_nccl.cpp",
-        "torch/csrc/cuda/serialization.cpp",
-        "torch/csrc/cuda/utils.cpp",
-        "torch/csrc/distributed/c10d/ddp.cpp",
-    ]
+    libtorch_python_sources.extend(native.glob(["test/cpp/jit/test_*.cpp"]))
 
     compiler_flags_cpu = [
         "-DUSE_C10D",
@@ -399,7 +418,7 @@ def add_torch_libs():
                 "-Wno-pessimizing-move",
                 "-Wno-return-type-c-linkage",
                 "-Wno-unknown-pragmas",
-            ]
+            ],
         },
         "headers": native.glob(["torch/csrc/**/*.h", "torch/csrc/generic/*.cpp", "test/cpp/jit/*.h"]),
     }
@@ -419,36 +438,36 @@ def add_torch_libs():
     ]
 
     cpp_library(
-        name="libtorch",
-        srcs=libtorch_sources,
-        link_whole=True,
-        propagated_pp_flags=propagated_pp_flags,
-        deps=[
+        name = "libtorch",
+        srcs = libtorch_sources,
+        link_whole = True,
+        propagated_pp_flags = propagated_pp_flags,
+        deps = [
             ":generated-autograd-headers",
             ":generated-autograd-headers-bare",
             ":generated-jit-headers",
             "//caffe2/aten:ATen-cpu",
             "//caffe2/caffe2:caffe2_cpu",
-            "//caffe2/torch/lib/libshm:libshm",
             "//caffe2/caffe2/quantization/server:dnnlowp_ops",
+            "//caffe2/torch/lib/libshm:libshm",
         ],
-        external_deps=[
+        external_deps = [
             ("nanopb", None, "protobuf-nanopb"),
             ("protobuf", None),
         ],
-        compiler_flags=compiler_flags_cpu,
+        compiler_flags = compiler_flags_cpu,
         **common_flags
     )
 
     cpp_library(
-        name="libtorch_cuda",
-        srcs=libtorch_cuda_sources,
-        link_whole=True,
+        name = "libtorch_cuda",
+        srcs = libtorch_cuda_sources,
+        link_whole = True,
         # TODO: putting USE_CUDA in propagated_pp_flags is error-prone
-        propagated_pp_flags=propagated_pp_flags + [
+        propagated_pp_flags = propagated_pp_flags + [
             "-DUSE_CUDA",
         ],
-        deps=[
+        deps = [
             ":generated-autograd-headers",
             ":generated-autograd-headers-bare",
             ":generated-jit-headers",
@@ -459,48 +478,48 @@ def add_torch_libs():
             "//caffe2/caffe2:caffe2_gpu",
             "//caffe2/torch/lib/libshm:libshm",
         ],
-        external_deps=[
+        external_deps = [
             ("cudnn", None, "cudnn-lazy"),
             ("nccl", None, "nccl-lazy"),
             ("cuda", None, "nvToolsExt-lazy"),
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
         ],
-        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
+        compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 
     # torch-cpp is still conditionally compiled based on USE_CUDA. Ideally we'd
     # separate it out as an additive library instead.
     gpu_library_selector(
-        name="torch-cpp",
-        deps_cpu=[":torch-cpp-cpu"],
-        deps_cuda=[":torch-cpp-cuda"],
-        merge_cpu_deps=False,
+        name = "torch-cpp",
+        deps_cpu = [":torch-cpp-cpu"],
+        deps_cuda = [":torch-cpp-cuda"],
+        merge_cpu_deps = False,
     )
 
     # USE_CUDA flag is propagated through propagated_pp_flags on libtorch
     cpp_library(
-        name="torch-cpp-cuda",
-        srcs=torch_cpp_srcs,
-        headers=torch_cpp_headers,
-        header_namespace="torch",
-        deps=[
+        name = "torch-cpp-cuda",
+        srcs = torch_cpp_srcs,
+        headers = torch_cpp_headers,
+        header_namespace = "torch",
+        deps = [
             ":libtorch_cuda",
             "//caffe2/torch/fb/init:init",
         ],
-        external_deps=[
+        external_deps = [
             ("cuda", None, "cuda-lazy"),
             ("cudnn", None, "cudnn-lazy"),
         ],
     )
 
     cpp_library(
-        name="torch-cpp-cpu",
-        srcs=torch_cpp_srcs,
-        headers=torch_cpp_headers,
-        header_namespace="torch",
-        deps=[
+        name = "torch-cpp-cpu",
+        srcs = torch_cpp_srcs,
+        headers = torch_cpp_headers,
+        header_namespace = "torch",
+        deps = [
             ":libtorch",
             "//caffe2/torch/fb/init:init",
         ],
@@ -510,57 +529,57 @@ def add_torch_libs():
     # separate it out as an additive library instead.
     # TODO: split it into cpp and cuda parts similarly to libtorch
     gpu_library_selector(
-        name="_C_impl",
-        deps_cpu=[":_C_impl_cpu"],
-        deps_cuda=[":_C_impl_cuda"],
-        merge_cpu_deps=False,
+        name = "_C_impl",
+        deps_cpu = [":_C_impl_cpu"],
+        deps_cuda = [":_C_impl_cuda"],
+        merge_cpu_deps = False,
     )
 
     cpp_library(
-        name="_C_impl_cpu",
-        srcs=libtorch_python_sources,
-        link_whole=True,
-        deps=[
+        name = "_C_impl_cpu",
+        srcs = libtorch_python_sources,
+        link_whole = True,
+        deps = [
             ":torch-cpp-cpu",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d_cpu",
             "//caffe2/torch/lib/libshm:libshm",
         ],
-        external_deps=[
+        external_deps = [
             ("numpy", None, "cpp"),
             ("pybind11", None),
             ("python", None),
         ],
-        compiler_flags=compiler_flags_cpu,
+        compiler_flags = compiler_flags_cpu,
         **common_flags
     )
 
     cpp_library(
-        name="_C_impl_cuda",
-        srcs=libtorch_python_sources + libtorch_python_cuda_sources,
-        link_whole=True,
-        deps=[
+        name = "_C_impl_cuda",
+        srcs = libtorch_python_sources + libtorch_python_cuda_sources,
+        link_whole = True,
+        deps = [
             ":torch-cpp-cuda",
             "//caffe2/torch/fb/init:init",
             "//caffe2/torch/lib/c10d:c10d",
             "//caffe2/torch/lib/libshm:libshm",
         ],
-        external_deps=[
+        external_deps = [
             ("numpy", None, "cpp"),
             ("pybind11", None),
             ("python", None),
         ],
-        compiler_flags=compiler_flags_cpu + compiler_flags_cuda,
+        compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
 
     cpp_python_extension(
-        name="_C",
-        srcs=[
+        name = "_C",
+        srcs = [
             "torch/csrc/stub.cpp",
         ],
-        base_module="torch",
-        deps=[":_C_impl"],
+        base_module = "torch",
+        deps = [":_C_impl"],
     )
 
     return r
