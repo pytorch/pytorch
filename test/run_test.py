@@ -228,12 +228,19 @@ def test_distributed(executable, test_module, test_directory, options):
             os.environ['BACKEND'] = backend
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
-            if with_init_file:
-                if test_module == "test_distributed":
-                    init_method = 'file://{}/'.format(tmp_dir)
-                else:
-                    init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+
+            # Tests are flaky if using TCP store in test_distributed.py,
+            # as ports could be racy, see flaky test
+            # https://github.com/pytorch/pytorch/issues/30676.
+            # Since test_distributed.py does not have TCP store related tests,
+            # making test_distributed to use file store only.
+            if test_module == "test_distributed":
+                init_method = 'file://{}/'.format(tmp_dir)
                 os.environ['INIT_METHOD'] = init_method
+            elif with_init_file:
+                init_method = 'file://{}/shared_init_file'.format(tmp_dir)
+                os.environ['INIT_METHOD'] = init_method
+
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
