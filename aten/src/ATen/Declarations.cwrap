@@ -135,7 +135,6 @@
   backends:
     - CUDA
   return: argument 0
-  scalar_check: self.dim() == 0
   arguments:
     - arg: THTensor* result
       output: True
