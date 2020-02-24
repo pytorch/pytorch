@@ -144,7 +144,8 @@ void IterVisitor::traverse(
   traverse(fusion, outputs_to_visit);
 }
 
-//Debug function 
+//Debug function
+/*
 std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
   os<<"<";
   while(!vals.empty()){
@@ -155,7 +156,7 @@ std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
   }
   return os<<">";
 }
-
+*/
 void DependencyCheck::handle(Val* val){
   //Debug dependency chain
   //std::cout << "Handle val: " << val << " deps: " << dep_chain << std::endl;

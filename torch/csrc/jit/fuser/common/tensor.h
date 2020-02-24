@@ -238,8 +238,11 @@ struct TORCH_API TensorView : public Val {
   TensorDomain* domain() const noexcept { return domain_; }
 
   bool same_as(const TensorView* const other) const{
+    bool same_tensor = tensor() == nullptr
+                    || other->tensor() == nullptr 
+                    ? tensor()==nullptr && other->tensor()==nullptr : tensor()->same_as(other->tensor());
     return(
-         tensor()->same_as(other->tensor())
+         same_tensor
       && domain()->same_as(other->domain())
       && getDataType().value() == other->getDataType().value()
     );
