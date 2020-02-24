@@ -147,19 +147,6 @@ namespace modern {
 
 namespace detail {
 
-// The `pointers` converts std::tuple<T1, T2, ....> to std::tuple<T1*, T2*, ....>
-
-template <typename T>
-struct pointers_helper {};
-
-template <typename... types>
-struct pointers_helper<std::tuple<types...>> {
-  using type = std::tuple<types *...>;
-};
-
-template <typename T>
-using pointers = typename pointers_helper<T>::type;
-
 // What does the `static_unroll` do?
 //
 // We want to do something like:
@@ -217,22 +204,15 @@ inline int can_vectorize_up_to(array_t pointers) {
 }  // namespace detail
 
 template<int i>
-struct compute_base_ptrs {
-  template <typename arg_ptrs, typename array_t>
-  static __device__ void apply(arg_ptrs &args_base, array_t data, int idx) {
+struct load_with_policy {
+  template <typename args_t, typename policy_t, typename array_t>
+  static __device__ void apply(args_t *args, policy_t policy, array_t data, int idx) {
+    using arg_t = std::tuple_element_t<i, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    std::get<i>(args_base) = reinterpret_cast<std::tuple_element_t<i, arg_ptrs>>(data[i + 1]) + idx;
-  }
-};
-
-template<int i>
-struct load_with_policy {
-  template <typename args_t, typename policy_t>
-  static __device__ void apply(args_t *args, policy_t policy, detail::pointers<args_t> args_base) {
-    using arg_t = std::tuple_element_t<i, args_t>;
+    auto ptr = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
     auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
-    policy.load(args_accessor, std::get<i>(args_base));
+    policy.load(args_accessor, ptr);
   }
 };
 
@@ -247,16 +227,13 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
 
   // compute base pointers for this block
   int idx = block_work_size * blockIdx.x;
-  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  detail::pointers<args_t> args_base;
-  detail::static_unroll<compute_base_ptrs, arity>::with_args(args_base, data, idx);
 
   return_t results[thread_work_size];
   cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
   args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
+  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, data, idx);
 
   // compute
   #pragma unroll
@@ -268,6 +245,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
 
   // store
   auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
+  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
   policy.store(result_accessor, result_base);
 }
 
