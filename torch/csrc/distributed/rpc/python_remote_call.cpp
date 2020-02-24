@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -33,8 +34,11 @@ std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   auto values = value.toTuple()->elements();
 
   // remove the last element from values and convert it back to an RRef
