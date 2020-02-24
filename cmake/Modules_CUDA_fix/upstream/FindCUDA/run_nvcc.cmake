@@ -261,6 +261,7 @@ cuda_execute_process(
   ${nvcc_host_compiler_flags}
   ${CUDA_NVCC_FLAGS}
   -DNVCC
+  -v
   ${CUDA_NVCC_INCLUDE_ARGS}
   )
 

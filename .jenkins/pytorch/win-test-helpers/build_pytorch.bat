@@ -119,10 +119,10 @@ if not "%USE_CUDA%"=="0" (
         del /S /Q %%i
       )
     )
-    copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
+    REM copy %TMP_DIR_WIN%\bin\sccache.exe %TMP_DIR_WIN%\bin\nvcc.exe
   )
 
-  set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc
+  REM set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc
 
   if "%REBUILD%"=="" set USE_CUDA=1
 
