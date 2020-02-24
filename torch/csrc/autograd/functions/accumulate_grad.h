@@ -28,7 +28,6 @@ struct TORCH_API AccumulateGrad : public Node {
       at::Tensor variable_grad,
       const at::Tensor& new_grad,
       size_t num_expected_refs,
-      bool has_post_hooks,
       const std::function<void(at::Tensor&&)>& update_grad_fn);
 
   Variable variable;

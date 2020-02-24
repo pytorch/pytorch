@@ -27,7 +27,6 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     at::Tensor variable_grad,
     const at::Tensor& new_grad,
     size_t num_expected_refs,
-    bool has_post_hooks,
     const std::function<void(at::Tensor&&)>& update_grad_fn) {
   // Copy since we need to work with non-const Tensor. Grab the original
   // use_count beforehand though.
@@ -42,14 +41,14 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled() && !new_grad_copy.is_sparse() &&
         new_grad_copy.is_contiguous() &&
-        new_grad_use_count <= num_expected_refs + has_post_hooks) {
+        new_grad_use_count <= num_expected_refs) {
       // first check it is in first-order grad only mode
       // then check not sparse before is_contiguous
       // then check contiguous, otherwise later in place accumulation may fail
-      // and lastly, check it is the last reference before we grab it.
-      // If the function has post hooks (for example, a DDP allreduce hook),
-      // call_function in Engine.cpp will temporarily bump the refcount by one,
-      // hence the addition of has_post_hooks.
+      // and lastly, check if the use_count is less than or equal to the number
+      // of references we expect before grabbing it. The number of references we
+      // expect is basically internal structures that are holding references to
+      // the Tensor and that is fine since these are not exposed to the user.
       update_grad_fn(new_grad_copy.detach());
     } else {
       if (new_grad_copy.is_sparse()) {
@@ -101,12 +100,15 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   const auto& new_grad = grads[0];
   at::Tensor& grad = variable.grad();
+  // If the function has post hooks (for example, a DDP allreduce hook),
+  // call_function in Engine.cpp will temporarily bump the refcount by one,
+  // hence the addition of !post_hooks().empty() for num_expected_refs in
+  // addition to the one reference that we're holding.
   accumulateGradAndCallHooks(
       variable,
       grad,
       new_grad,
-      1, // only 1 reference expected to be held to ensure we can void clone.
-      !post_hooks().empty(),
+      1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = grad_update; });
 
   return variable_list();

@@ -315,7 +315,8 @@ auto Engine::thread_main(
         // Reentrant thread's graph task should not expire since we hold a
         // reference to it in this method.
         TORCH_INTERNAL_ASSERT(!reentrant_thread);
-        // GraphTask for function is no longer valid, skipping further execution.
+        // GraphTask for function is no longer valid, skipping further
+        // execution.
         continue;
       }
 
