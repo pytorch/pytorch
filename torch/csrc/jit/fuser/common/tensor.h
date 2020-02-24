@@ -206,7 +206,7 @@ struct TORCH_API TensorView : public Val {
   TensorView& operator=(TensorView&& other) = delete;
 
   TensorView(Tensor* _tensor)
-      : Val(ValType::TensorView)
+      : Val(ValType::TensorView, _tensor->getDataType().value())
       , tensor_(_tensor)
       , compute_at_view_(nullptr)
       , compute_at_axis_(-1) {
@@ -214,12 +214,24 @@ struct TORCH_API TensorView : public Val {
       }
 
   TensorView(Tensor* _tensor, TensorDomain* _domain)
-      : Val(ValType::TensorView)
+      : Val(ValType::TensorView, _tensor->getDataType().value())
       , tensor_(_tensor)
       , compute_at_view_(nullptr)
       , compute_at_axis_(-1) {
         copyDomain(_domain);
       }
+
+  TensorView(TensorDomain* _domain, DataType dtype)
+      : Val(ValType::TensorView, dtype)
+      , tensor_(nullptr)
+      , compute_at_view_(nullptr)
+      , compute_at_axis_(-1) {
+        copyDomain(_domain);
+  }
+
+  //We'll copy the TensorView with some minor modifications
+  //Reduction axes won't get copied over.
+  TensorView* cloneForOutput(DataType dtype) const;
 
   Tensor* tensor() const noexcept { return tensor_; }
   TensorDomain* domain() const noexcept { return domain_; }
@@ -228,6 +240,7 @@ struct TORCH_API TensorView : public Val {
     return(
          tensor()->same_as(other->tensor())
       && domain()->same_as(other->domain())
+      && getDataType().value() == other->getDataType().value()
     );
   }
 
