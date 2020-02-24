@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-using ClassResolver =
+using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 using ObjLoader =
@@ -22,23 +22,23 @@ class Unpickler {
   // tensors inside the pickle are references to the tensor_table
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
-      ClassResolver class_resolver,
+      TypeResolver type_resolver,
       const std::vector<at::Tensor>* tensor_table)
       : reader_(reader),
         tensor_table_(tensor_table),
-        class_resolver_(std::move(class_resolver)) {}
+        type_resolver_(std::move(type_resolver)) {}
 
   // tensors inside the pickle contain meta-data, the raw tensor
   // dead is retrieved by calling `read_record`.
   Unpickler(
       std::function<size_t(char*, size_t)> reader,
-      ClassResolver class_resolver,
+      TypeResolver type_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
       c10::optional<at::Device> device)
       : reader_(reader),
         tensor_table_(nullptr),
-        class_resolver_(std::move(class_resolver)),
+        type_resolver_(std::move(type_resolver)),
         obj_loader_(std::move(obj_loader)),
         read_record_(std::move(read_record)),
         device_(std::move(device)) {}
@@ -103,7 +103,7 @@ class Unpickler {
   const std::vector<at::Tensor>* tensor_table_;
 
   // optionally nullptr, needs to be present for creating classes
-  ClassResolver class_resolver_;
+  TypeResolver type_resolver_;
   ObjLoader obj_loader_;
   IValue empty_tuple_;
 
