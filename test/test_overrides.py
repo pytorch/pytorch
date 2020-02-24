@@ -374,6 +374,11 @@ IGNORED_TORCH_FUNCTIONS = (
     torch.nn.functional.upsample_nearest,
     torch.nn.functional.has_torch_function,
     torch.nn.functional.handle_torch_function,
+    torch.set_autocast_enabled,
+    torch.is_autocast_enabled,
+    torch.clear_autocast_cache,
+    torch.autocast_increment_nesting,
+    torch.autocast_decrement_nesting,
 )
 
 # Every function in the torch API that can be overriden needs an entry
