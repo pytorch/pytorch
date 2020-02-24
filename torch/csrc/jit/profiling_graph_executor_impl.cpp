@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
@@ -83,6 +84,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   specializeAutogradZero(*copy);
 
   runRequiredPasses(copy);
+  PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
 
@@ -95,7 +97,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       Gradient gradient = differentiate(diff_graph);
       runOptimization(gradient.f);
       // run non diff optimization on the forward graph
-      runNondiffOptimization(gradient.f);
+      runNondiffOptimization(gradient.f, true);
       packGradient(gradient, dnode);
     }
     InlineAutodiffSubgraphs(
@@ -103,7 +105,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
 
   } else {
-    runNondiffOptimization(copy);
+    runNondiffOptimization(copy, true);
   }
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
@@ -123,6 +125,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     return;
   }
 
+  DecomposeOps(copy);
   ConstantPropagation(copy);
   EliminateDeadCode(copy);
   EliminateCommonSubexpression(copy);

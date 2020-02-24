@@ -1,5 +1,8 @@
 #pragma once
 
+// Common
+#include <torch/nn/modules/common.h>
+
 // Containers
 #include <torch/nn/modules/container/any.h>
 #include <torch/nn/modules/container/functional.h>

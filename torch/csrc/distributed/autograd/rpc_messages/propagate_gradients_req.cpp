@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/pickle.h>
 
 namespace torch {
@@ -11,8 +12,11 @@ using torch::autograd::Variable;
 
 PropagateGradientsReq::PropagateGradientsReq(
     const AutogradMetadata& autogradMetadata,
-    std::vector<Variable> grads)
-    : autogradMetadata_(autogradMetadata), grads_(std::move(grads)) {}
+    std::vector<Variable> grads,
+    bool retainGraph)
+    : autogradMetadata_(autogradMetadata),
+      grads_(std::move(grads)),
+      retainGraph_(retainGraph) {}
 
 Message PropagateGradientsReq::toMessage() && {
   std::vector<at::IValue> ivalues;
@@ -24,6 +28,9 @@ Message PropagateGradientsReq::toMessage() && {
   // Now add autograd metadata.
   ivalues.emplace_back(autogradMetadata_.autogradContextId);
   ivalues.emplace_back(autogradMetadata_.autogradMessageId);
+
+  // Add retain graph.
+  ivalues.emplace_back(retainGraph_);
 
   // Now pickle using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
@@ -41,12 +48,19 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   // Unpickle the message and retrieve tupleElements.
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  IValue tuple =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  IValue tuple = jit::unpickle(
+      payload,
+      payload_size,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Build PropagateGradientsReq.
-  TORCH_INTERNAL_ASSERT(tupleElements.size() >= 2);
+  TORCH_INTERNAL_ASSERT(tupleElements.size() >= 3);
+
+  // Retrieve retainGraph.
+  bool retainGraph = tupleElements.back().toBool();
+  tupleElements.pop_back();
 
   // Build AutogradMetadata.
   int64_t autogradContextId, autogradMessageId;
@@ -64,7 +78,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
   }
 
   return std::unique_ptr<PropagateGradientsReq>(
-      new PropagateGradientsReq(autogradMetadata, grads));
+      new PropagateGradientsReq(autogradMetadata, grads, retainGraph));
 }
 
 const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {
@@ -74,6 +88,10 @@ const AutogradMetadata& PropagateGradientsReq::getAutogradMetadata() {
 const std::vector<torch::autograd::Variable>& PropagateGradientsReq::
     getGrads() {
   return grads_;
+}
+
+bool PropagateGradientsReq::retainGraph() {
+  return retainGraph_;
 }
 
 } // namespace autograd
