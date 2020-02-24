@@ -161,7 +161,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  memory::detail::static_unroll<memory::load_with_policy, arity>::with_args(args, policy, idx);
+  policy.load(args, idx);
 
   // compute
   #pragma unroll

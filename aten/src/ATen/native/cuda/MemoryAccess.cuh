@@ -44,6 +44,19 @@ struct static_unroll<func, end, end> {
   static inline C10_HOST_DEVICE void with_args(Args... args) {}
 };
 
+template<int i>
+struct load_with_policy {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(policy_t &self, args_t *args, int idx) {
+    using arg_t = std::tuple_element_t<i, args_t>;
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
+    auto ptr = reinterpret_cast<arg_t *>(self.data[i + 1]) + idx;
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    self.load1(args_accessor, ptr);
+  }
+};
+
 }  // namespace detail
 
 // aligned vector generates vectorized load/store on CUDA
@@ -77,6 +90,12 @@ struct checked_unroll {
       to(i) = from[thread_idx];
       thread_idx += num_threads;
     }
+  }
+
+  template<typename args_t>
+  __device__ inline void load(args_t *args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
+    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
@@ -126,6 +145,12 @@ struct vectorized {
         to(vec_size * i + j) = v.val[j];
       }
     }
+  }
+
+  template<typename args_t>
+  __device__ inline void load(args_t *args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
+    detail::static_unroll<detail::load_with_policy, arity>::with_args(*this, args, idx);
   }
 
   template<typename scalar_t>
@@ -190,18 +215,5 @@ inline int can_vectorize_up_to(array_t pointers) {
   detail::static_unroll<detail::can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
-
-template<int i>
-struct load_with_policy {
-  template <typename args_t, typename policy_t>
-  static __device__ void apply(args_t *args, policy_t policy, int idx) {
-    using arg_t = std::tuple_element_t<i, args_t>;
-    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
-    // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(policy.data[i + 1]) + idx;
-    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
-    policy.load1(args_accessor, ptr);
-  }
-};
 
 }}} // namespace at::native::memory
