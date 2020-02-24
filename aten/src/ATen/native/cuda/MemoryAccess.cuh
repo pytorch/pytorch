@@ -67,7 +67,7 @@ struct checked_unroll {
   }
 
   template<typename accessor_t, typename scalar_t>
-  __device__ inline void load(accessor_t to, scalar_t *from) {
+  __device__ inline void load1(accessor_t to, scalar_t *from) {
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
@@ -113,7 +113,7 @@ struct vectorized {
   }
 
   template<typename accessor_t, typename scalar_t>
-  __device__ inline void load(accessor_t to, scalar_t *from) {
+  __device__ inline void load1(accessor_t to, scalar_t *from) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
     vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
@@ -173,7 +173,7 @@ struct can_vectorize_up_to_helper {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    result = std::min(result, detail::can_vectorize_up_to<arg_t>(pointers[i + 1]));
+    result = std::min<int>(result, detail::can_vectorize_up_to<arg_t>(pointers[i + 1]));
   }
 };
 
@@ -190,5 +190,18 @@ inline int can_vectorize_up_to(array_t pointers) {
   detail::static_unroll<detail::can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
   return result;
 }
+
+template<int i>
+struct load_with_policy {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(args_t *args, policy_t policy, int idx) {
+    using arg_t = std::tuple_element_t<i, args_t>;
+    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
+    // need a +1 offset to get the input
+    auto ptr = reinterpret_cast<arg_t *>(policy.data[i + 1]) + idx;
+    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
+    policy.load1(args_accessor, ptr);
+  }
+};
 
 }}} // namespace at::native::memory

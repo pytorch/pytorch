@@ -145,19 +145,6 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
 // See the note for namespace legacy above.
 namespace modern {
 
-template<int i>
-struct load_with_policy {
-  template <typename args_t, typename policy_t>
-  static __device__ void apply(args_t *args, policy_t policy, int idx) {
-    using arg_t = std::tuple_element_t<i, args_t>;
-    // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
-    // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(policy.data[i + 1]) + idx;
-    auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
-    policy.load(args_accessor, ptr);
-  }
-};
-
 template<typename func_t, typename policy_t>
 __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   // Assumption:
@@ -174,7 +161,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  memory::detail::static_unroll<load_with_policy, arity>::with_args(args, policy, idx);
+  memory::detail::static_unroll<memory::load_with_policy, arity>::with_args(args, policy, idx);
 
   // compute
   #pragma unroll

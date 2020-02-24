@@ -45,29 +45,29 @@ TEST(TestLoops, HasSameArgTypes) {
 TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
   char *ptr = reinterpret_cast<char *>(buffer1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr), 4);
-  ASSERT_EQ(can_vectorize_up_to<int64_t>(ptr), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<bool>(ptr), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int8_t>(ptr), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int16_t>(ptr), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int>(ptr), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int64_t>(ptr), 4);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 1), 1);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 1), 1);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<bool>(ptr + 1), 1);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int8_t>(ptr + 1), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 2), 2);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 2), 2);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 2), 1);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<bool>(ptr + 2), 2);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int8_t>(ptr + 2), 2);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int16_t>(ptr + 2), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 4), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 4), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 4), 2);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr + 4), 1);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<bool>(ptr + 4), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int8_t>(ptr + 4), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int16_t>(ptr + 4), 2);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int>(ptr + 4), 1);
 
-  ASSERT_EQ(can_vectorize_up_to<bool>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int8_t>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int16_t>(ptr + 8), 4);
-  ASSERT_EQ(can_vectorize_up_to<int>(ptr + 8), 2);
-  ASSERT_EQ(can_vectorize_up_to<int64_t>(ptr + 8), 1);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<bool>(ptr + 8), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int8_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int16_t>(ptr + 8), 4);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int>(ptr + 8), 2);
+  ASSERT_EQ(memory::detail::can_vectorize_up_to<int64_t>(ptr + 8), 1);
 }
 
 // The following kernel copy values by using vectorized policies
@@ -83,7 +83,7 @@ __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size];
   auto accessor = [&](int index) -> scalar_t & { return buf[index]; };
-  policy.load(accessor, src + 256 * blockIdx.x);
+  policy.load1(accessor, src + 256 * blockIdx.x);
   policy.store(buf, idx);
 }
 
