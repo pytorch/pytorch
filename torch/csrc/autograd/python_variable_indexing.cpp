@@ -340,7 +340,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
   bool is_tracing = torch::jit::tracer::isTracing();
 
-  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, Variable&& value) {
+  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, const Variable& value) {
     at::indexing::set_item(self_, {std::move(tensor_index)}, value, is_tracing);
   };
 
@@ -350,19 +350,19 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
-    handle_simple_type(at::indexing::TensorIndex(at::indexing::Ellipsis), std::move(value));
+    handle_simple_type(at::indexing::TensorIndex(at::indexing::Ellipsis), value);
     return 0;
   } else if (index == Py_None) {
-    handle_simple_type(at::indexing::TensorIndex(at::indexing::None), std::move(value));
+    handle_simple_type(at::indexing::TensorIndex(at::indexing::None), value);
     return 0;
   } else if (index == Py_True) {
-    handle_simple_type(at::indexing::TensorIndex(true), std::move(value));
+    handle_simple_type(at::indexing::TensorIndex(true), value);
     return 0;
   } else if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), std::move(value));
+    handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), value);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
@@ -370,7 +370,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    handle_simple_type(at::indexing::TensorIndex({start, stop, step}), std::move(value));
+    handle_simple_type(at::indexing::TensorIndex({start, stop, step}), value);
     return 0;
   }
 
