@@ -146,10 +146,9 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
     // Fast path for NHWC
     Tensor output = at::_empty_affine_quantized(
         output_shape,
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
-        input.q_zero_point(),
-        input.suggest_memory_format());
+        input.q_zero_point());
     if (input.dim() == 3 || input.size(0) == 1) {
       qadaptive_avg_pool2d_nhwc_stub(
           input.device().type(),
