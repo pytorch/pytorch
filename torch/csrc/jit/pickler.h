@@ -99,6 +99,9 @@ struct WriteableTensorData {
   size_t numel() const {
     return tensor_.storage().numel();
   }
+  bool storageHasDeleter() const {
+    return tensor_.storage().data_ptr().get_context() != nullptr;
+  }
 
  private:
   friend WriteableTensorData getWriteableTensorData(const at::Tensor& tensor);
@@ -152,6 +155,9 @@ class Pickler {
   void pushTuple(const IValue& ivalue);
   void pushString(const std::string& string);
   void pushDevice(const IValue& ivalue);
+  #ifdef USE_DISTRIBUTED
+    void pushRRef(const IValue& ivalue);
+  #endif
   // unmemoized version
   void pushStringImpl(const std::string& string);
   void pushStorageOfTensor(const at::Tensor& tensor);

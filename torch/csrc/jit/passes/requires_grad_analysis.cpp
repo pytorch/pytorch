@@ -58,7 +58,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
       "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
 
-  if (comparison_ops.find(node)) {
+  if (node->isMemberOf(comparison_ops)) {
     return setRequiresGrad(node->output(), false);
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {

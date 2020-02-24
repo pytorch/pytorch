@@ -4,8 +4,8 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         (None, [
-            XImportant("2.7.9"),
-            X("2.7"),
+            # XImportant("2.7.9"),
+            # X("2.7"),
             XImportant("3.5"),  # Not run on all PRs, but should be included on [test all]
             X("nightly"),
         ]),
