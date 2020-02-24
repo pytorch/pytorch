@@ -215,7 +215,7 @@ std::vector<torch::Tensor> PackedSequenceTest_ordered_sequence(torch::ScalarType
 std::tuple<torch::Tensor, torch::Tensor> PackedSequenceTest_padded_sequence(torch::ScalarType tensor_type) {
   // Create Tensor of random padded sequences
   auto ordered = PackedSequenceTest_ordered_sequence(tensor_type);
-  auto lengths = torch::empty({ordered.size()}, torch::kInt64);
+  auto lengths = torch::empty({(int64_t)ordered.size()}, torch::kInt64);
   for (int64_t i = 0; i < ordered.size(); i++) {
     lengths[i] = ordered[i].size(0);
   }
