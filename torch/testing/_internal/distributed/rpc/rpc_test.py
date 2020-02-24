@@ -647,7 +647,7 @@ class RpcTest(RpcAgentTestFixture):
         if self.rank == 1:
             with torch.autograd.profiler.profile() as prof:
                 record_function = None
-                # Cannot use contextlib.nullcontext since that is py3.7+, cannot use contextlib.supress since that is py3.3+
+                # Cannot use contextlib.nullcontext since that is py3.7+, cannot use contextlib.suppress since that is py3.3+
                 if use_record_function_ctx:
                     record_function = torch.autograd.profiler.record_function("foo")
                     record_function.__enter__()
