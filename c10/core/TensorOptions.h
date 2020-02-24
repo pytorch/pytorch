@@ -326,12 +326,12 @@ struct C10_API TensorOptions {
   ///
   TensorOptions merge_in(TensorOptions options) const noexcept {
     TensorOptions r = options;
-    if (!r.has_device()) r.set_device(device());
-    if (!r.has_dtype()) r.set_dtype(dtype());
-    if (!r.has_layout()) r.set_layout(layout());
+    if (!r.has_device()) r.set_device(device_opt());
+    if (!r.has_dtype()) r.set_dtype(dtype_opt());
+    if (!r.has_layout()) r.set_layout(layout_opt());
     // NB: requires grad is right biased; not a logical AND/OR!
-    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
-    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad_opt());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory_opt());
     return r;
   }
 
