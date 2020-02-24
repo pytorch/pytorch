@@ -11777,6 +11777,46 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2, 3), beta * value, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
+    @onlyCPU  # not supported by CUBLAS
+    def test_blas_nan_out(self, device):
+        # These functions should work correctly with NaN filled outputs,
+        # but need special handling, see [NOTE: cpu_zero]
+        b = 3
+        n = 5
+        m = 7
+        p = 11
+
+        # torch.mv
+        nm = torch.randn((m, n), device=device).t()
+        _m = torch.randn((), device=device).expand(m)
+        _m_out = torch.full((m,), float('nan'), device=device)
+        self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
+        self.assertEqual(0, torch.isnan(torch.mv(nm, _m)).sum())
+
+        # torch.mm
+        mp = torch.randn((p, m), device=device).t()
+        np_out = torch.full((n, p), float('nan'), device=device)
+        self.assertEqual(torch.mm(nm, mp), torch.mm(nm, mp, out=np_out))
+
+        # torch.bmm
+        bnm = torch.randn((b, m, n), device=device).transpose(1, 2)
+        bmp = torch.randn((b, p, m), device=device).transpose(1, 2)
+        bnp_out = torch.full((b, n, p), float('nan'), device=device)
+        self.assertEqual(torch.bmm(bnm, bmp), torch.bmm(bnm, bmp, out=bnp_out))
+
+    @onlyCPU  # not supported by CUBLAS
+    def test_blas_mv_large_input(self, device):
+        # This would previously fail if the allocated output had NaNs, see:
+        # https://github.com/pytorch/pytorch/issues/31663 and [NOTE: cpu_zero]
+        n = 3000
+        m = 200
+
+        nm = torch.randn((m, n), device=device).t()
+        _m = torch.randn((), device=device).expand(m)
+        _m_out = torch.full((m,), 0., device=device)
+
+        self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
+
     @skipCUDAIfRocm
     def test_unique_dim(self, device):
         self.assertFalse(hasattr(torch, 'unique_dim'))
