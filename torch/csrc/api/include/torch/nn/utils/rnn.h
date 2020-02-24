@@ -215,8 +215,8 @@ inline PackedSequence pack_padded_sequence(
 ///     batch_first (bool, optional): if ``true``, the output will be in ``B x T x *``
 ///         format.
 ///     padding_value (double, optional): values for padded elements.
-///     total_length (int64_t, optional): if not ``None``, the output will be padded to
-///         have length `total_length`. This method will throw `ValueError`
+///     total_length (int64_t, optional): if specified, the output will be padded to
+///         have length `total_length`. This method will throw error
 ///         if `total_length` is less than the max sequence length in
 ///         `sequence`.
 /// 
