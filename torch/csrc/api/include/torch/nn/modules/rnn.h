@@ -5,6 +5,7 @@
 #include <torch/nn/modules/common.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/pimpl.h>
+#include <torch/nn/utils/rnn.h>
 #include <torch/types.h>
 
 #include <ATen/ATen.h>
@@ -15,35 +16,22 @@
 #include <memory>
 #include <vector>
 
+using namespace torch::nn::utils::rnn;
+
 namespace torch {
 namespace nn {
-
-/// The output of a single invocation of an RNN module's `forward()` method.
-struct TORCH_API RNNOutput {
-  /// The result of applying the specific RNN algorithm
-  /// to the input tensor and input state.
-  Tensor output;
-  /// The new, updated state that can be fed into the RNN
-  /// in the next forward step.
-  Tensor state;
-};
 
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
 template <typename Derived>
 class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  /// These must line up with the CUDNN mode codes:
-  /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
-  enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
-
-  explicit RNNImplBase(
-      const RNNOptionsBase& options_,
-      optional<CuDNNMode> cudnn_mode = nullopt,
-      int64_t number_of_gates = 1);
+  explicit RNNImplBase(const RNNOptionsBase& options_);
 
   /// Initializes the parameters of the RNN module.
   void reset() override;
+
+  void reset_parameters();
 
   /// Overrides `nn::Module::to()` to call `flatten_parameters()` after the
   /// original operation.
@@ -65,53 +53,47 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// called once upon construction, inside `reset()`.
   void flatten_parameters();
 
-  /// The RNN's options.
-  RNNOptionsBase options;
+  virtual std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
 
-  /// The weights for `input x hidden` gates.
-  std::vector<Tensor> w_ih;
-  /// The weights for `hidden x hidden` gates.
-  std::vector<Tensor> w_hh;
-  /// The biases for `input x hidden` gates.
-  std::vector<Tensor> b_ih;
-  /// The biases for `hidden x hidden` gates.
-  std::vector<Tensor> b_hh;
+ public:
+  virtual std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+
+  std::vector<Tensor> all_weights() const;
+
+  /// The RNN's options.
+  RNNOptionsBase options_base;
 
  protected:
-  /// The function signature of `rnn_relu`, `rnn_tanh` and `gru`.
-  using RNNFunctionSignature = std::tuple<Tensor, Tensor>(
-      /*input=*/const Tensor&,
-      /*state=*/const Tensor&,
-      /*params=*/TensorList,
-      /*has_biases=*/bool,
-      /*layers=*/int64_t,
-      /*dropout=*/double,
-      /*train=*/bool,
-      /*bidirectional=*/bool,
-      /*batch_first=*/bool);
+  // Resets _flat_weights
+  // Note: be v. careful before removing this, as 3rd party device types
+  // likely rely on this behavior to properly .to() modules like LSTM.
+  void reset_flat_weights();
 
-  /// A generic `forward()` used for RNN and GRU (but not LSTM!). Takes the ATen
-  /// RNN function as first argument.
-  RNNOutput generic_forward(
-      std::function<RNNFunctionSignature> function,
-      const Tensor& input,
-      Tensor state);
+  std::vector<std::string> _flat_weights_names;
+  std::vector<std::vector<std::string>> _all_weights;
+  std::vector<Tensor> _flat_weights;
 
-  /// Returns a flat vector of all weights, with layer weights following each
-  /// other sequentially in (w_ih, w_hh, b_ih, b_hh) order.
-  std::vector<Tensor> flat_weights() const;
+  void check_input(const Tensor& input, const Tensor& batch_sizes);
 
-  /// Very simple check if any of the parameters (weights, biases) are the same.
-  bool any_parameters_alias() const;
+  std::tuple<int64_t, int64_t, int64_t> get_expected_hidden_size(const Tensor& input, const Tensor& batch_sizes);
 
-  /// The number of gate weights/biases required by the RNN subclass.
-  int64_t number_of_gates_;
+  void check_hidden_size(
+    const Tensor& hx,
+    std::tuple<int64_t, int64_t, int64_t> expected_hidden_size,
+    std::string msg = "Expected hidden size {1}, got {2}");
 
-  /// The cuDNN RNN mode, if this RNN subclass has any.
-  optional<CuDNNMode> cudnn_mode_;
+  void check_forward_args(Tensor input, Tensor hidden, Tensor batch_sizes);
 
-  /// The cached result of the latest `flat_weights()` call.
-  std::vector<Tensor> flat_weights_;
+  Tensor permute_hidden(Tensor hx, const Tensor& permutation);
+
+  std::tuple<Tensor, Tensor> forward_helper(
+    const Tensor& input,
+    const Tensor& batch_sizes,
+    const Tensor& sorted_indices,
+    int64_t max_batch_size,
+    Tensor hx);
 };
 } // namespace detail
 
@@ -125,17 +107,6 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(const RNNOptions& options_);
-
-  /// Pretty prints the `RNN` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  /// Applies the `RNN` module to an input sequence and input state.
-  /// The `input` should follow a `(sequence, batch, features)` layout unless
-  /// `batch_first` is true, in which case the layout should be `(batch,
-  /// sequence, features)`.
-  RNNOutput forward(const Tensor& input, Tensor state = {});
- protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
  public:
   RNNOptions options;
 };
@@ -157,13 +128,28 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
       : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
   explicit LSTMImpl(const LSTMOptions& options_);
 
-  /// Applies the `LSTM` module to an input sequence and input state.
-  /// The `input` should follow a `(sequence, batch, features)` layout unless
-  /// `batch_first` is true, in which case the layout should be `(batch,
-  /// sequence, features)`.
-  RNNOutput forward(const Tensor& input, Tensor state = {});
+  std::tuple<Tensor, std::tuple<Tensor, Tensor>> forward(
+    const Tensor& input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::optional<std::tuple<Tensor, Tensor>>())})
+
+ public:
+  std::tuple<PackedSequence, std::tuple<Tensor, Tensor>> forward_with_packed_input(
+    const PackedSequence& packed_input, torch::optional<std::tuple<Tensor, Tensor>> hx_opt = {});
+
+  LSTMOptions options;
+
+ protected:
+  void check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes);
+
+  std::tuple<Tensor, Tensor> permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation);
+
+  std::tuple<Tensor, std::tuple<Tensor, Tensor>> forward_helper(
+    const Tensor& input,
+    const Tensor& batch_sizes,
+    const Tensor& sorted_indices,
+    int64_t max_batch_size,
+    torch::optional<std::tuple<Tensor, Tensor>> hx_opt);
 };
 
 /// A `ModuleHolder` subclass for `LSTMImpl`.
@@ -183,13 +169,22 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(const GRUOptions& options_);
 
-  /// Applies the `GRU` module to an input sequence and input state.
-  /// The `input` should follow a `(sequence, batch, features)` layout unless
-  /// `batch_first` is true, in which case the layout should be `(batch,
-  /// sequence, features)`.
-  RNNOutput forward(const Tensor& input, Tensor state = {});
+  std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {}) override;
  protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::Tensor())})
+
+ public:
+  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {}) override;
+
+  GRUOptions options;
+
+ protected:
+  std::tuple<Tensor, Tensor> forward_helper(
+    const Tensor& input,
+    const Tensor& batch_sizes,
+    const Tensor& sorted_indices,
+    int64_t max_batch_size,
+    Tensor hx);
 };
 
 /// A `ModuleHolder` subclass for `GRUImpl`.
