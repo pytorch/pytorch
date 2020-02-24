@@ -53,11 +53,16 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       update_grad_fn(new_grad_copy.detach());
     } else if (
         !GradMode::is_enabled() && new_grad_copy.is_sparse() &&
+        new_grad_copy._indices().is_contiguous() &&
+        new_grad_copy._values().is_contiguous() &&
         new_grad_use_count <= num_expected_refs + has_post_hooks) {
       // Can't detach sparse tensor (since metadata changes are not allowed
       // after detach), so just create a new one for the grad which is a
       // shallow copy. We need a shallow copy so that modifying the original
       // grad tensor doesn't modify the grad we accumulate.
+      // We only skip clone if indices and values themselves are contiguous for
+      // backward compatiblity reasons. Since without this optimization, earlier
+      // we would clone the entire SparseTensor which cloned indices and values.
       update_grad_fn(at::sparse_coo_tensor(
           new_grad_copy._indices(),
           new_grad_copy._values(),
@@ -111,7 +116,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  auto new_grad = std::move(grads[0]);
+  const auto& new_grad = grads[0];
   at::Tensor& grad = variable.grad();
   accumulateGradAndCallHooks(
       variable,

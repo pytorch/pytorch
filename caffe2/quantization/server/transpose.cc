@@ -1,6 +1,6 @@
 #include "transpose.h"
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 namespace fbgemm {
 

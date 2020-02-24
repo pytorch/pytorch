@@ -1927,7 +1927,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             for i in range(10):
                 dist_autograd.backward([loss], retain_graph=True)
 
-        # non-contiguous indices and value should not trigger copy either.
+        # non-contiguous indices and value, we should trigger a copy.
         with dist_autograd.context() as context_id:
             emb_matrix = NonContGradFunc.apply(a, b)
             loss = F.embedding_bag(emb_matrix, input, offsets, sparse=True).sum()
@@ -1938,10 +1938,11 @@ class DistAutogradTest(RpcAgentTestFixture):
             p_b = grads[b]._values().data_ptr()
             # check a,b uses different grad buffer
             self.assertFalse(p_a == p_b)
-            # check one of them is using the computed buffer
-            self.assertTrue(p_a == p_g or p_b == p_g)
+            # Verify we cloned both grads.
+            self.assertFalse(p_a == p_g)
+            self.assertFalse(p_b == p_g)
 
-            # Run backwards multiple times.
+            # Run backwards multiple times to verify accumulation.
             for i in range(10):
                 dist_autograd.backward([loss], retain_graph=True)
 
