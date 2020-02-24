@@ -45,14 +45,16 @@ bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
+          !(lhs.max_exp_avg_sq().defined() ^ rhs.max_exp_avg_sq().defined());
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(exp_avg);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(exp_avg_sq);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(max_exp_avg_sq);
+  if(max_exp_avg_sq().defined()) {
+    _TORCH_OPTIM_SERIALIZE_TORCH_ARG(max_exp_avg_sq);
+  }
 }
 
 void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
@@ -80,6 +82,8 @@ void Adam::step() {
         state->exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
         if(options.amsgrad()) {
           state->max_exp_avg_sq(torch::zeros_like(p.data(), MemoryFormat::Preserve));
+        } else {
+          state->max_exp_avg_sq({});
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
@@ -138,11 +142,41 @@ size_t Adam::size() const noexcept {
 }
 
 void Adam::save(serialize::OutputArchive& archive) const {
-  // serialize(*this, archive);
+  serialize(*this, archive);
 }
 
 void Adam::load(serialize::InputArchive& archive) {
-  // serialize(*this, archive);
+  IValue pytorch_version;
+  if (archive.try_read("pytorch_version", pytorch_version)) {
+    serialize(*this, archive);
+  }
+  else { // deserializing archives saved in old format (prior to version 1.5.0)
+    TORCH_WARN(
+      "Your serialized Adam optimizer is still using the old serialization format. "
+      "You should re-save your Adam optimizer to use the new serialization format.");
+    std::vector<int64_t> step_buffers;
+    std::vector<at::Tensor> exp_average_buffers;
+    std::vector<at::Tensor> exp_average_sq_buffers;
+    std::vector<at::Tensor> max_exp_average_sq_buffers;
+    torch::optim::serialize(archive, "step_buffers", step_buffers);
+    torch::optim::serialize(archive, "exp_average_buffers", exp_average_buffers);
+    torch::optim::serialize(archive, "exp_average_sq_buffers", exp_average_sq_buffers);
+    torch::optim::serialize(archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
+    // since there were no param_groups prior to version 1.5.0, assuming all tensors are now in one param_group
+    std::vector<Tensor> params = param_groups_.at(0).params();
+    for (size_t idx = 0; idx < step_buffers.size(); idx++) {
+      auto state = std::make_unique<AdamParamState>();
+      state->step(step_buffers[idx]);
+      state->exp_avg(exp_average_buffers[idx]);
+      state->exp_avg_sq(exp_average_sq_buffers[idx]);
+      if(idx < max_exp_average_sq_buffers.size()) {
+        state->max_exp_avg_sq(max_exp_average_sq_buffers[idx]);
+      } else {
+        state->max_exp_avg_sq({});
+      }
+      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
+    }
+  }
 }
 } // namespace optim
 } // namespace torch

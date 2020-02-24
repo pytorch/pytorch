@@ -127,7 +127,6 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
   ASSERT_TRUE(optim3_2_state.size() == 2);
-
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
   ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
@@ -551,6 +550,56 @@ TEST(SerializeTest, Optim_SGD) {
   auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
   OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
+}
+
+TEST(SerializeTest, Optim_Adam) {
+  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions());
+
+  // bc compatibility check
+  auto model1 = Linear(5, 2);
+  auto model1_params = model1->parameters();
+  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
+  model1_params.emplace_back(torch::randn({2,3}));
+  auto optim1 = torch::optim::Adam(model1_params, torch::optim::AdamOptions());
+
+  auto x = torch::ones({10, 5});
+  auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
+    optimizer.zero_grad();
+    auto y = model->forward(x).sum();
+    y.backward();
+    optimizer.step();
+  };
+  step(optim1, model1);
+
+  std::vector<int64_t> step_buffers;
+  std::vector<at::Tensor> exp_average_buffers;
+  std::vector<at::Tensor> exp_average_sq_buffers;
+  std::vector<at::Tensor> max_exp_average_sq_buffers;
+  const auto& params_ = optim1.param_groups()[0].params();
+  const auto& optim1_state = optim1.state();
+  for (size_t i = 0; i < params_.size(); i++) {
+    if(i != (params_.size() - 1)) {
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      const AdamParamState& curr_state_ = static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
+      step_buffers.emplace_back(curr_state_.step());
+      exp_average_buffers.emplace_back(curr_state_.exp_avg());
+      exp_average_sq_buffers.emplace_back(curr_state_.exp_avg_sq());
+      if(curr_state_.max_exp_avg_sq().defined()) {
+        max_exp_average_sq_buffers.emplace_back(curr_state_.max_exp_avg_sq());
+      }
+    }
+  }
+  // write momentum_buffers to the file
+  auto optim_tempfile_old_format = c10::make_tempfile();
+  torch::serialize::OutputArchive output_archive;
+  write_step_buffers(output_archive, "step_buffers", step_buffers);
+  write_tensors_to_archive(output_archive, "exp_average_buffers", exp_average_buffers);
+  write_tensors_to_archive(output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
+  write_tensors_to_archive(output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
+  output_archive.save_to(optim_tempfile_old_format.name);
+  auto optim1_2 = Adam(model1_params, torch::optim::AdamOptions());
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, XOR_CUDA) {

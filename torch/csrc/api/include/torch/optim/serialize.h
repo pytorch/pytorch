@@ -219,8 +219,13 @@ void serialize(
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
-  archive.read(#name, ivalue); \
-  name(ivalue.to<T>()); \
+  bool exists = archive.try_read(#name, ivalue); \
+  if(exists) { \
+    name(ivalue.to<T>()); \
+  } else { \
+    /*undefined tensor*/ \
+    name({}); \
+  } \
 }
 } // namespace optim
 } // namespace torch

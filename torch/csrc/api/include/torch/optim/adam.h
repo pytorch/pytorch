@@ -19,7 +19,7 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
-  AdamOptions(double learning_rate);
+  AdamOptions(double learning_rate = 1e-3);
   TORCH_ARG(double, lr) = 1e-3;
   TORCH_ARG(double, beta1) = 0.9;
   TORCH_ARG(double, beta2) = 0.999;
@@ -66,7 +66,7 @@ class TORCH_API Adam : public Optimizer {
  private:
   template <typename Self, typename Archive>
   static void serialize(Self& self, Archive& archive) {
-    //_TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adam);
+    _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(Adam);
   }
 };
 } // namespace optim
