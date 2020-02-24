@@ -197,7 +197,7 @@ namespace detail {
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
     assert_is_valid_output_type<T, AllowDeprecatedTypes>();
-    return c10::ivalue::from(v);
+    return c10::ivalue::from(std::forward<T>(v));
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
