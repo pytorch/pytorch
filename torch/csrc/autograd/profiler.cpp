@@ -115,7 +115,7 @@ void pushRange(std::string name) {
   pushRangeImpl(StringView(std::move(name)));
 }
 
-void popRange(StringView name) {
+void popRange(const StringView& name) {
   if (state == ProfilerState::Disabled) {
     return;
   }
