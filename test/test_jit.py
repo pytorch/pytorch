@@ -3798,6 +3798,14 @@ graph(%Ra, %Rb):
                 warnings.warn("x is less than 2")
             return x
 
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if bool(x < 2):
+                    warnings.warn("x is less than 2")
+                return x
+
+
+        scripted_mod = torch.jit.script(M())
         scripted_fn = torch.jit.script(fn)
 
         with warnings.catch_warnings(record=True) as warns:
@@ -3806,7 +3814,12 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as script_warns:
             scripted_fn(torch.ones(1))
 
+        with warnings.catch_warnings(record=True) as script_mod_warns:
+            scripted_mod(torch.ones(1))
+
         self.assertEqual(str(warns[0]), str(script_warns[0]))
+        self.assertEqual(len(script_mod_warns), 1)
+        self.assertEqual(str(warns[0].message), str(script_mod_warns[0].message))
 
     def test_no_erroneous_warnings(self):
         import warnings
