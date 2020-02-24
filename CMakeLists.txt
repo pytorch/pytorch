@@ -202,6 +202,7 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
+option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)

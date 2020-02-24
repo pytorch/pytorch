@@ -10872,6 +10872,13 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
 
+    def test_softshrink_negative(self, device):
+        input = torch.randn(5, device=device, requires_grad=True)
+        m = torch.nn.Softshrink(-1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'lambda must be greater or equal to 0, but found to be -1\.'):
+            m(input)
+
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
 if __name__ == '__main__':
