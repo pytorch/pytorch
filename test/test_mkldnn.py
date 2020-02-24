@@ -145,9 +145,7 @@ class TestMkldnn(TestCase):
             conv2d_loaded = torch.jit.load(fname)
 
             self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
-            # with DNNL upgrade we should switch to no-reordering,
-            # but for now we keep the 5d tensor
-            # self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
+            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
             self.assertEqual(
                 conv2d(x),
                 conv2d_loaded(x.to_mkldnn()).to_dense())

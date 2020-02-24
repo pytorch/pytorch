@@ -57,7 +57,7 @@ Tensor mkldnn_reorder_conv2d_weight(
   auto padding_vec = expand_param_if_needed(padding, "padding", 2);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", 2);
 
-  ideep::tensor w = itensor_from_mkldnn(self).as_weights();
+  auto w = itensor_from_mkldnn(self);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
   // dimension when groups > 1, having dimension [g, o/g, i, h, w] instead of
@@ -69,9 +69,8 @@ Tensor mkldnn_reorder_conv2d_weight(
     w.reshape({wdims[0] * wdims[1], wdims[2], wdims[3], wdims[4]});
   }
 
-  w.make_group(groups);
-  ideep::tensor::descriptor desc =
-      ideep::convolution_forward::expected_weights_descriptor(
+  auto desc =
+      ideep::convolution_forward::expected_weights_desc(
           w.get_dims(),
           w.get_data_type(),
           {stride_vec.cbegin(), stride_vec.cend()},
