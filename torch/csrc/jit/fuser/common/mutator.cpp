@@ -96,10 +96,16 @@ void BaseMutator::mutate(Fusion* fusion) {
 }
 
  Statement* BaseMutator::mutate( TensorView*  tv) {
-   Tensor* t = static_cast< Tensor*>(mutate(tv->tensor()));
+   Tensor* t = nullptr;
+   if(tv->tensor() != nullptr)
+      t = static_cast< Tensor*>(mutate(tv->tensor()));
    TensorDomain* td = static_cast< TensorDomain*>( mutate(tv->domain()));
 
-  if(!(  tv->tensor()->same_as(t)
+    bool same_tensor = tv->tensor() == nullptr
+                    || t == nullptr 
+                     ? tv->tensor()==nullptr && t == nullptr : tv->tensor()->same_as(t);
+
+  if(!(  same_tensor
       && tv->domain()->same_as(td)))
       return new TensorView(t, td);
  return tv;
