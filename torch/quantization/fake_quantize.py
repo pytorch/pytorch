@@ -106,7 +106,8 @@ class FakeQuantize(Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-
+        # Removing this function throws an error that the the size of the loaded tensor does not match the original size
+        # i.e., These buffers start out with numel 0 and become numel 1 once they have their first forward pass.
         local_state = ['scale', 'zero_point']
         for name in local_state:
             key = prefix + name
