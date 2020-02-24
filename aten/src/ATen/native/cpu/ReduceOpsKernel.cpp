@@ -17,13 +17,12 @@ namespace at { namespace native { namespace {
 
 using namespace vec256;
 
-template <typename func_t>
+template <typename scalar_t, typename func_t>
 static inline void cpu_cum_base_kernel(Tensor& result,
     const Tensor& self,
     int64_t dim,
-    const std::string& method_name,
     const func_t& f,
-    const auto init_val,
+    scalar_t init_val,
     bool serial_exec = true) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
@@ -47,72 +46,67 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   iter.dont_compute_common_dtype();
   iter.dont_resize_outputs();
   iter.add_output(result_restrided);
-  iter.add_input(self_restrided, self.device(), self.scalar_type());
+  iter.add_input(self_restrided);
   iter.build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), method_name, [&] {
-      auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-        auto* result_data_bytes = data[0];
-        const auto* self_data_bytes = data[1];
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    auto* result_data_bytes = data[0];
+    const auto* self_data_bytes = data[1];
 
-        for (int64_t i = 0; i < n; ++i) {
-          f(
-            (scalar_t*)result_data_bytes, result_dim_stride,
-            (scalar_t*)self_data_bytes, self_dim_stride,
-            (at::acc_type<scalar_t, false>) init_val
-          );
-          result_data_bytes += strides[0];
-          self_data_bytes += strides[1];
-        }
-      };
-      if (serial_exec) {
-        iter.serial_for_each(loop, {0, iter.numel()});
-      } else {
-        iter.for_each(loop);
-      }
+    for (int64_t i = 0; i < n; ++i) {
+      f(
+        (scalar_t*)result_data_bytes, result_dim_stride,
+        (scalar_t*)self_data_bytes, self_dim_stride, init_val
+      );
+      result_data_bytes += strides[0];
+      self_data_bytes += strides[1];
     }
-  );
+  };
+  if (serial_exec) {
+    iter.serial_for_each(loop, {0, iter.numel()});
+  } else {
+    iter.for_each(loop);
+  }
+
 }
 
 static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  cpu_cum_base_kernel(
-    result, self, wrap_dim, "cumsum_out_cpu", [&] (
-      auto* result_data, auto result_dim_stride,
-      const auto* self_data, auto self_dim_stride, auto init_val
-    ) {
-      auto cum_number = init_val;
-      using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
-      for (int64_t i = 0; i < self_dim_size; ++i) {
-        cum_number += self_data[i * self_dim_stride];
-        result_data[i * result_dim_stride] = (scalar_t)cum_number;
-      }
-    }, /*init_val=*/ 0, /*serial_exec=*/true
-  );
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cumsum_out_cpu", [&] {
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+      scalar_t* result_data, auto result_dim_stride,
+      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          cum_number += self_data[i * self_dim_stride];
+          result_data[i * result_dim_stride] = (scalar_t)cum_number;
+        }
+      }, /*init_val=*/ 0, /*serial_exec=*/true
+    );
+  });
 }
 
 static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  cpu_cum_base_kernel(
-    result, self, wrap_dim, "cumprod_out_cpu", [&] (
-      auto* result_data, auto result_dim_stride,
-      const auto* self_data, auto self_dim_stride, auto init_val
-    ) {
-      auto cum_number = init_val;
-      using scalar_t = typename std::remove_pointer<decltype(self_data)>::type;
-      for (int64_t i = 0; i < self_dim_size; ++i) {
-        cum_number *= self_data[i * self_dim_stride];
-        result_data[i * result_dim_stride] = (scalar_t)cum_number;
-      }
-    }, /*init_val=*/ 1, /*serial_exec=*/true
-  );
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cumprod_out_cpu", [&] {
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+      scalar_t* result_data, auto result_dim_stride,
+      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          cum_number *= self_data[i * self_dim_stride];
+          result_data[i * result_dim_stride] = (scalar_t)cum_number;
+        }
+      }, /*init_val=*/ 1, /*serial_exec=*/true
+    );
+  });
 }
 
 static void sum_kernel_impl(TensorIterator& iter) {
