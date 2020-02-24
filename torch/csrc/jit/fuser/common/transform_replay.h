@@ -42,6 +42,8 @@ namespace fuser {
  * unnecessary parts of the domain.
  *
  * EXAMPLES:
+ * 
+ * ANOTHER ITER EXAMPLE:
  *   T2[I, J, K] = T1[I, J, K] * 2.0
  * T2.split(axis = 0, factor = ...)
  *   T2[Io, Ii, J, K] = T1[I, J, K] * 2.0
@@ -69,39 +71,13 @@ namespace fuser {
  *       //consumer view on T1 will be produced at a later stage.
  *
  *
+ * SIMPLE REDUCTION EXAMPLE:
  *   T1[I, J, K] = ...
- *   T2[I, R, K] = T1[I, J, K] //.sum(axis = 1)   //Where R is a reduction axis
- * T2.split(axis = 0, factor = ...)
- * //R == J except R.isReduction() == true
- *   T2[Io, Ii, R, K] = T1[I, J, K]
- * T1.compute_at(T2, axis=2)
- *   T2[Io, Ii, R, K] = T1[Io, Ii, J, K]
- *
- * for(io : Io)
- *  for(ii : Ii)
- *   for(j : J)
- *    for(k : K)
- *     //produce T1:
- *     T1[io, ii, j, k] = ...
- *   for(k: K)
- *    //Must be before all reduction axes
- *    T2[io, ii, k] = 0.0
- *   for(r : R)
- *    for(k : K)
- *     //consume T1, produce T2
- *     T2[io, ii, k] += T1[io, ii, r, k]
- *
- *   T1[I, J, K] = ...
- *   T2[I, R, K] = T1[I, J, K] //.sum(axis = 1)
+ *   T2[I, R, K] = T1[I, J, K] //.sum(axis = 1), we reduce on R/J to produce T2[I, K]
  * T2.split(axis = 0, factor = ...)
  *   T2[Io, Ii, R, K] = T1[I, J, K]
  * T1.compute_at(T2, axis=3)
  *   T2[Io, Ii, R, K] = T1[Io, Ii, J, K]
- *
- * Is this an error? We're using a value before we reduce it.
- * But we're only using it to reduce it. I'm pretty sure TE/Halide
- * would not work with this, but it seems like we could generate
- * reasonable code from this...
  *
  * for(io : Io)
  *  for(ii : Ii)
@@ -113,6 +89,36 @@ namespace fuser {
  *     T1[io, ii, r, k] = ...
  *     //consume T1 produce T2:
  *     T2[io, ii, k] += T1[io, ii, r, k]
+ *
+ *
+ * REDUCTION EXAMPLE RESULTING IN AN ERROR:
+ *   T1[I, R, K] = ... //R is reduction domain, we reduce on R to produce T1[I, K]
+ *   T2[I, K] = T1[I, K]
+ *
+ * for(i : I)
+ *   for(k : K)
+ *     T1[i, k] = init
+ *   for(r : R)
+ *     for(k : K)
+ *       T1[i, k] += ...[i, r, k]
+ * for(i : I)
+ *   for(k : K)
+ *     T2[i, k] = T1[i, k]
+ *
+ * T1.compute_at(T2, axis=2)
+ * This should be an error, or a warning and changed to:
+ * T1.compute_at(T2, axis=1)
+ * The error is because the kernel would have to be:
+ *
+ * for(i : I)
+ *   T1[i, k] = init
+ *   for(r : R)
+ *     for(k : K)
+ *       T1[i, k] += ...[i, r, k]
+ *   for(k : K)
+ *     T2[i, k] = T1[i, k]
+ *
+ * Otherwise we would produce incorrect results.
  *
  */
 
