@@ -10204,7 +10204,7 @@ a")
             # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
             return torch.lu(x, get_infos=True)
 
-        self.checkScript(lu, (torch.randn(2, 3, 3),))
+        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
