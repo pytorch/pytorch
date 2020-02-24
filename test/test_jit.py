@@ -13934,6 +13934,17 @@ a")
 
         self.checkScript(really_slice_out_of_bounds, [])
 
+    def test_tensor_options_behavior_mismatch(self):
+        # Tests for https://github.com/pytorch/pytorch/issues/30763
+
+        def sparse_coo():
+            return torch.sparse_coo_tensor((2, 2), dtype=torch.double)
+        self.checkScript(sparse_coo, ())
+
+        def zeros_like(x):
+            return torch.zeros_like(x, dtype=torch.double)
+        self.checkScript(zeros_like, (torch.randn(2, 3), ))
+
     def test_namedtuple_attr(self):
         def f(x):
             return x.max(dim=1).indices + torch.max(x, dim=1).indices

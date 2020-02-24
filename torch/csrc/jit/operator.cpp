@@ -69,7 +69,7 @@ struct OperatorRegistry {
           op_ptr_it != operators_by_sig.end(),
           "Couldn't find an operator for ",
           name,
-          ". Do you have to update a set of hardcoded JIT ops?");
+          ". Do you have to update a set of hardcoded JIT ops (e.g., in torch/csrc/jit/ir.cpp)?");
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;
