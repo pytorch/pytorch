@@ -239,6 +239,19 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   return tv;
 }
 
+TensorView* TensorView::cloneForOutput(DataType dtype) const {
+  std::vector<IterDomain*> domain_copy;
+  for(decltype(this->domain()->size()) i = 0; i<this->domain()->size(); i++){
+    //If reduction axis, don't copy it over. Reduction axes are owned by consumers
+    //and we're copying over a producer.
+    if(this->domain()->axis(i)->isReduction())
+      continue;
+    domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
+  }
+  TensorDomain *td = new TensorDomain(domain_copy);
+  return new TensorView(td, dtype);
+};
+
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   std::cout<<"Calling TV"<<this->name()<<".computeAt(TV"<<consumer->name()<<")"<<std::endl;
   /*

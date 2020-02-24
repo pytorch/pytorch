@@ -292,6 +292,9 @@ TensorView* TransformReplay::replay(TensorView* target) {
 }
 
 /*
+ * TODO: When we compare root axes, we should ignore reduction axes in the
+ * producer. Reduction axes are owned by a consumer.
+ * 
  * TODO: We should be able to relax the constraints of replay a bit. Right now
  * it requires that the root domain of the target and replay are completely 
  * the same. However, we should only require that the root derived from the
