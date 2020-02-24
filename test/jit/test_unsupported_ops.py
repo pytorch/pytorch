@@ -48,11 +48,13 @@ class TestUnsupportedOps(JitTestCase):
 
         # Complete issue and set of ops is https://github.com/pytorch/pytorch/issues/30763
         # only testing one here because they should be fixed all at once
+        # ezyang: But actually, I handled all of the _like overloads first
+        # because they're special
 
         with self.assertRaisesRegex(Exception, "Argument layout not provided."):
-            def foo(x):
-                return torch.ones_like(x, dtype=torch.double)
-            foo(torch.tensor([2.]))
+            def foo():
+                return torch.sparse_coo_tensor((2, 2), dtype=torch.double)
+            foo()
             print(torch.jit.script(foo).graph)
 
     def test_ops_bound_in_functional(self):
