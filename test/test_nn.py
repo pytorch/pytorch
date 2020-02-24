@@ -8210,44 +8210,69 @@ class TestNNInit(TestCase):
 
     def test_dirac_properties(self):
         for dims in [3, 4, 5]:
-            input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5)
-            init.dirac_(input_tensor)
+            for groups in [1, 2, 3]:
+                # prepare random tensor with random sizes, but fits groups
+                a, c, d, e = (random.randint(1, 5) for _ in range(4))
+                b = random.randint(1, 5 * groups)  # same range as a*groups but all range allowed
+                # make sure first dim divides by groups
+                input_tensor = torch.randn((a * groups, b, c, d, e)[:dims])
 
-            c_out, c_in = input_tensor.size(0), input_tensor.size(1)
-            min_d = min(c_out, c_in)
-            # Check number of nonzeros is equivalent to smallest dim
-            assert torch.nonzero(input_tensor).size(0) == min_d
-            # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
-            self.assertEqual(input_tensor.sum(), min_d)
+                init.dirac_(input_tensor, groups)
+
+                c_out, c_in = input_tensor.size(0) // groups, input_tensor.size(1)
+                min_d = min(c_out, c_in)
+                # Check number of nonzeros is equivalent to smallest dim (for each group)
+                assert torch.nonzero(input_tensor).size(0) == min_d * groups
+                # Check sum of values (can have precision issues, hence assertEqual) is also equivalent
+                self.assertEqual(input_tensor.sum(), min_d * groups)
+
 
     def test_dirac_identity(self):
-        batch, in_c, out_c, size, kernel_size = 8, 3, 4, 5, 3
-        # Test 1D
-        input_var = torch.randn(batch, in_c, size)
-        filter_var = torch.zeros(out_c, in_c, kernel_size)
-        init.dirac_(filter_var)
-        output_var = F.conv1d(input_var, filter_var)
-        input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
-        self.assertEqual(input_tensor[:, :, 1:-1], output_tensor[:, :in_c, :])  # Assert in_c outputs are preserved
-        assert torch.nonzero(output_tensor[:, in_c:, :]).numel() == 0  # Assert extra outputs are 0
+        for groups in [1, 3]:
+            batch, in_c, out_c, size, kernel_size = 8, 3, 9, 5, 3  # in_c, out_c must divide by groups
+            eff_out_c = out_c // groups
 
-        # Test 2D
-        input_var = torch.randn(batch, in_c, size, size)
-        filter_var = torch.zeros(out_c, in_c, kernel_size, kernel_size)
-        init.dirac_(filter_var)
-        output_var = F.conv2d(input_var, filter_var)
-        input_tensor, output_tensor = input_var.data, output_var.data
-        self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
-        assert torch.nonzero(output_tensor[:, in_c:, :, :]).numel() == 0
+            # Test 1D
+            input_var = torch.randn(batch, in_c, size)
+            filter_var = torch.zeros(eff_out_c, in_c, kernel_size)
+            filter_var = torch.cat([filter_var] * groups)
+            init.dirac_(filter_var, groups)
+            output_var = F.conv1d(input_var, filter_var)
+            input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
+            for g in range(groups):
+                # Assert in_c outputs are preserved (per each group)
+                self.assertEqual(input_tensor[:, :, 1:-1], 
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :])  
+                # Assert extra outputs are 0
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :]).numel() == 0  
 
-        # Test 3D
-        input_var = torch.randn(batch, in_c, size, size, size)
-        filter_var = torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size)
-        init.dirac_(filter_var)
-        output_var = F.conv3d(input_var, filter_var)
-        input_tensor, output_tensor = input_var.data, output_var.data
-        self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
-        assert torch.nonzero(output_tensor[:, in_c:, :, :, :]).numel() == 0
+            # Test 2D
+            input_var = torch.randn(batch, in_c, size, size)
+            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size)
+            filter_var = torch.cat([filter_var] * groups)
+            init.dirac_(filter_var, groups)
+            output_var = F.conv2d(input_var, filter_var)
+            input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
+            for g in range(groups):
+                # Assert in_c outputs are preserved (per each group)
+                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], 
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :])  
+                # Assert extra outputs are 0
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :]).numel() == 0  
+
+            # Test 3D
+            input_var = torch.randn(batch, in_c, size, size, size)
+            filter_var = torch.zeros(eff_out_c, in_c, kernel_size, kernel_size, kernel_size)
+            filter_var = torch.cat([filter_var] * groups)
+            init.dirac_(filter_var, groups)
+            output_var = F.conv3d(input_var, filter_var)
+            input_tensor, output_tensor = input_var.data, output_var.data
+            for g in range(groups):
+                # Assert in_c outputs are preserved (per each group)
+                self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], 
+                                 output_tensor[:, eff_out_c * g:eff_out_c * g + in_c, :, :, :])  
+                # Assert extra outputs are 0
+                assert torch.nonzero(output_tensor[:, eff_out_c * g + in_c:eff_out_c * (g + 1), :, :, :]).numel() == 0  
 
     def test_dirac_only_works_on_3_4_5d_inputs(self):
         for dims in [1, 2, 6]:
@@ -10846,6 +10871,13 @@ class TestNNDeviceType(NNTestCase):
         helper([2, 3])
         helper([2, 3, 5, 7])
         helper([2, 3, 5, 7, 9])
+
+    def test_softshrink_negative(self, device):
+        input = torch.randn(5, device=device, requires_grad=True)
+        m = torch.nn.Softshrink(-1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'lambda must be greater or equal to 0, but found to be -1\.'):
+            m(input)
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
