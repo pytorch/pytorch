@@ -209,35 +209,14 @@ Tensor& rrelu_with_noise_cpu_(
   return at::native::rrelu_with_noise_out_cpu(self, self, noise, lower, upper, training, generator);
 }
 
-Tensor& rrelu_with_noise_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& noise,
-    Scalar lower,
-    Scalar upper,
-    bool training,
-    bool inplace) {
-  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
-  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
-  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
-    grad_input = grad_output.mul(noise);
-  } else {
-    auto negative = (lower_tensor + upper_tensor) / 2;
-    Scalar negative_slope = negative.item();
-    grad_input = at::leaky_relu_backward(grad_output, self, negative_slope, inplace);
-  }
-  return grad_input;
-}
-
 Tensor rrelu_with_noise_backward(
     const Tensor& grad_output,
-    const Tensor& self,
+    const Tensor& self_or_result,
     const Tensor& noise,
     Scalar lower,
     Scalar upper,
     bool training,
-    bool inplace) {
+    bool is_result) {
   auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
   auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
@@ -245,7 +224,7 @@ Tensor rrelu_with_noise_backward(
   } else {
     auto negative = (lower_tensor + upper_tensor) / 2;
     Scalar negative_slope = negative.item();
-    return at::leaky_relu_backward(grad_output, self, negative_slope, inplace);
+    return at::leaky_relu_backward(grad_output, self_or_result, negative_slope, is_result);
   }
 }
 
@@ -667,41 +646,24 @@ Tensor & leaky_relu_(
 
 // Note: [for leaky_relu_backward and leaky_relu_backward_out]
 // leakyReLu backward calculation doesn't support in-place call with non-positive slope.
-// The reason is that for in-place call, the forward will be saved into autograd graph node
+// The reason is that for in-place call, the forward result will be saved into autograd node
 // instead of the input itself, when calculating backward gradient, there is no way to know
 // whether the original input for current node is positive or not if the input slope is
 // non-positive. eg. forward is 2, slope is -0.2, the original input for this node could be
 // either 2, or -10, so no way to get a correct backward gradient in this case.
-Tensor& leaky_relu_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    const Tensor& input,
-    Scalar negval,
-    bool inplace) {
-  TORCH_CHECK(
-    !inplace || negval.to<double>() > 0.0,
-    "In-place leakyReLu backward calculation is triggered with a negtive slope which is not supported. "
-    "This is caused by calling in-place version forward function with a negative slope, "
-    "please call out-of-place version instead.");
-
-  auto iter = TensorIterator::binary_op(grad_input, input, grad_output);
-  leaky_relu_backward_stub(iter.device_type(), iter, negval);
-  return grad_input;
-}
-
 Tensor leaky_relu_backward(
     const Tensor& grad_output,
-    const Tensor& input,
+    const Tensor& self_or_result,
     Scalar negval,
-    bool inplace) {
+    bool is_result) {
   TORCH_CHECK(
-    !inplace || negval.to<double>() > 0.0,
-    "In-place leakyReLu backward calculation is triggered with a negtive slope which is not supported. "
-    "This is caused by calling in-place version forward function with a negative slope, "
+    !is_result || negval.to<double>() > 0.0,
+    "In-place leakyReLu backward calculation is triggered with a non-positive slope which is not supported. "
+    "This is caused by calling in-place function with a non-positive slope, "
     "please call out-of-place version instead.");
 
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, input, grad_output);
+  auto iter = TensorIterator::binary_op(result, self_or_result, grad_output);
   leaky_relu_backward_stub(iter.device_type(), iter, negval);
   return iter.output();
 }

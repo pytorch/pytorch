@@ -1313,8 +1313,9 @@
   grad_output: grad.to(output.dtype()) - (grad.to(output.dtype()) * output.exp()).sum(dim, true)
   self: log_softmax_double_backward(grad.to(output.dtype()), grad_output, dim, output).to(self.dtype())
 
-- name: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool inplace=False) -> Tensor
-  grad_output: leaky_relu_backward(grad, self, negative_slope, inplace)
+- name: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result=False) -> Tensor
+  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself
+  grad_output: leaky_relu_backward(grad, self, negative_slope, false)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: max_pool2d_with_indices_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] stride, int[2] padding, int[2] dilation, bool ceil_mode, Tensor indices) -> Tensor
@@ -1346,8 +1347,9 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
   target: non_differentiable
 
-- name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool inplace=False) -> Tensor
-  grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, inplace)
+- name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result=False) -> Tensor
+  # self_is_result is always false here since double backward call is an out-of-place call, self is input itself 
+  grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training, false)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: reflection_pad1d_backward(Tensor grad_output, Tensor self, int[2] padding) -> Tensor
