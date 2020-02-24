@@ -3,10 +3,13 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-__all__ = ['lobpcg']
-
+from __future__ import division
 import torch
 from . import _linalg_utils as _utils
+
+
+__all__ = ['lobpcg']
+
 
 def lobpcg(A,                   # type: Tensor
            k=None,              # type: Optional[int]
