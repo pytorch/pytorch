@@ -22,8 +22,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
-    scalar_t init_val,
-    bool serial_exec = true) {
+    scalar_t init_val) {
   if (result.sizes() != self.sizes()) {
     result.resize_as_(self);
   }
@@ -65,12 +64,8 @@ static inline void cpu_cum_base_kernel(Tensor& result,
       self_data_bytes += strides[1];
     }
   };
-  if (serial_exec) {
-    iter.serial_for_each(loop, {0, iter.numel()});
-  } else {
-    iter.for_each(loop);
-  }
 
+  iter.for_each(loop);
 }
 
 static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
@@ -86,7 +81,7 @@ static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
           cum_number += self_data[i * self_dim_stride];
           result_data[i * result_dim_stride] = (scalar_t)cum_number;
         }
-      }, /*init_val=*/ 0, /*serial_exec=*/true
+      }, /*init_val=*/ 0
     );
   });
 }
@@ -104,7 +99,7 @@ static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) 
           cum_number *= self_data[i * self_dim_stride];
           result_data[i * result_dim_stride] = (scalar_t)cum_number;
         }
-      }, /*init_val=*/ 1, /*serial_exec=*/true
+      }, /*init_val=*/ 1
     );
   });
 }
