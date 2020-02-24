@@ -22,7 +22,8 @@ void registerCUDAMethods(CUDAStubs* stubs) {
 
 ProfilerState state = ProfilerState::Disabled;
 uint16_t next_thread_id = 0;
-// Protects access to next_thread_id and all_event_lists_map.
+// Protects access to next_thread_id and all_event_lists_map, which multiple
+// threads read to create their per-thread list of profiler events.
 std::mutex all_event_lists_map_mutex;
 std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
     all_event_lists_map;
@@ -114,7 +115,7 @@ void pushRange(std::string name) {
   pushRangeImpl(StringView(std::move(name)));
 }
 
-void popRange() {
+void popRange(StringView name) {
   if (state == ProfilerState::Disabled) {
     return;
   }
@@ -123,7 +124,7 @@ void popRange() {
   } else {
     getEventList().record(
         EventKind::PopRange,
-        StringView(""),
+        name,
         thread_id,
         state == ProfilerState::CUDA);
   }
@@ -182,12 +183,12 @@ void enableProfiler(ProfilerConfig config) {
             auto& eventList = eventListIter->second;
             eventList->record(
                       EventKind::PopRange,
-                      StringView(""),
+                      fn.name(),
                       fn.getThreadId(),
                       state == ProfilerState::CUDA);
           }
         } else {
-          popRange();
+          popRange(fn.name());
         }
       },
       config.report_input_shapes);

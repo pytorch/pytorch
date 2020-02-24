@@ -180,6 +180,9 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // This mutex is used to serialize access when different threads are writing
+  // to the same instance of RangeEventList.
+  std::mutex mut;
   constexpr static size_t MB = 1024 * 1024;
   constexpr static size_t event_block_size = 16 * MB;
   constexpr static size_t num_block_elements =
@@ -202,6 +205,7 @@ struct RangeEventList {
 
   template<typename... Args>
   void record(Args&&... args) {
+    std::lock_guard<std::mutex> guard(mut);
     if (blocks.empty() || blocks.front().size() == num_block_elements) {
       allocBlock();
     }
@@ -209,6 +213,7 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
+    std::lock_guard<std::mutex> guard(mut);
     std::vector<Event> result;
     for (auto & block : blocks) {
       result.insert(result.begin(),
@@ -225,7 +230,7 @@ struct RangeEventList {
 TORCH_API RangeEventList& getEventList();
 TORCH_API void mark(std::string name, bool include_cuda = true);
 TORCH_API void pushRange(std::string name);
-TORCH_API void popRange();
+TORCH_API void popRange(StringView name = StringView(""));
 
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
