@@ -28,18 +28,6 @@ enum class TORCH_API DataType {
 };
 
 enum class TORCH_API ExprType {
-<<<<<<< HEAD
-  Add
-  // Sub,
-  // Mul,
-  // Div,
-  // Mod,
-  // Loop,
-  // Swap,
-  // Merge,
-  // Split,
-  // Index,
-=======
     UnaryOp
   , BinaryOp
   , Split
@@ -61,7 +49,7 @@ enum class TORCH_API BinaryOpType {
   , Mul
   , Div
   , Mod
->>>>>>> Create BinaryOp and UnaryOp Exprs.
+  , CeilDiv
 };
 
 enum class ParallelType {

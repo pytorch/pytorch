@@ -59,6 +59,7 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
   , {BinaryOpType::Mul, "Mul"}
   , {BinaryOpType::Div, "Div"}
   , {BinaryOpType::Mod, "Mod"}
+  , {BinaryOpType::CeilDiv, "ceilDiv"}
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_string_map {
     {BinaryOpType::Add, "+"}
