@@ -258,9 +258,9 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 
   // handle simple types: none, ellipsis
   if (index == Py_None) {
-    return THPVariable_Wrap(self_.unsqueeze(0));
+    return THPVariable_Wrap(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, /*is_tracing=*/false));
   } else if (index == Py_Ellipsis) {
-    return THPVariable_Wrap(at::alias(self_));
+    return THPVariable_Wrap(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, /*is_tracing=*/false));
   }
 
   bool is_tracing = torch::jit::tracer::isTracing();
