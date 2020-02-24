@@ -228,6 +228,7 @@ if (USE_ROCM)
       ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
       ${GENERATED_THNN_CXX_CUDA}
       )

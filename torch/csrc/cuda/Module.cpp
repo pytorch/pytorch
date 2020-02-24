@@ -515,7 +515,7 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
-#ifdef USE_CUDNN
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
 void initCudnnBindings(PyObject* module);
 #endif
 

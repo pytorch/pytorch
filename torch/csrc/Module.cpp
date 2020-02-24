@@ -47,10 +47,6 @@
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 
-#ifdef USE_CUDNN
-#include <cudnn.h>
-#endif
-
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/autograd.h>
@@ -600,23 +596,6 @@ bool THDPBFloat16Storage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
-// TODO: Refactor this in some less manual way
-#ifdef USE_CUDNN
-static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
-{
-  return PyLong_FromLong(CUDNN_VERSION);
-}
-
-static PyMethodDef _THCUDNN_methods[] = {
-  {"_cudnn_version", (PyCFunction)THCUDNN_cudnn_version, METH_VARARGS, nullptr},
-  {nullptr}
-};
-
-PyMethodDef* THCUDNN_methods() {
-  return _THCUDNN_methods;
-}
-#endif
-
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
 // Guaranteed to be invoked from Python under GIL, no locking on map needed
 static void LogAPIUsageOnceFromPython(const std::string& event) {
@@ -645,9 +624,6 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
-#endif
-#ifdef USE_CUDNN
-  THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D

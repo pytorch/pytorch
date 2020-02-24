@@ -21,25 +21,23 @@ if _cudnn is not None:
     def _init():
         global __cudnn_version
         if __cudnn_version is None:
-            __cudnn_version = _cudnn.getVersion()
-            compile_version = torch._C._cudnn_version()
-            # cuDNN version is MAJOR*1000 + MINOR*100 + PATCH
-            runtime_major = __cudnn_version // 1000
-            runtime_minor = (__cudnn_version % 1000) // 100
-            compile_major = compile_version // 1000
-            compile_minor = (compile_version % 1000) // 100
+            __cudnn_version = _cudnn.getVersionInt()
+            runtime_version = _cudnn.getRuntimeVersion()
+            compile_version = _cudnn.getCompileVersion()
+            runtime_major, runtime_minor, _ = runtime_version
+            compile_major, compile_minor, _ = compile_version
             # Different major versions are always incompatible
             # Starting with cuDNN 7, minor versions are backwards-compatible
             if runtime_major != compile_major:
                 cudnn_compatible = False
-            elif runtime_major < 7:
+            elif runtime_major < 7 or not _cudnn.is_cuda:
                 cudnn_compatible = runtime_minor == compile_minor
             else:
                 cudnn_compatible = runtime_minor >= compile_minor
             if not cudnn_compatible:
                 raise RuntimeError(
                     'cuDNN version incompatibility: PyTorch was compiled against {} '
-                    'but linked against {}'.format(compile_version, __cudnn_version))
+                    'but linked against {}'.format(compile_version, runtime_version))
         return True
 else:
     def _init():
