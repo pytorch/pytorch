@@ -13766,6 +13766,89 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              prec=prec)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @onlyCPU
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
+    def test_lobpcg_scipy(self, device, dtype):
+        """Compare torch and scipy.sparse.linalg implementations of lobpcg
+        """
+        import time
+        from torch.testing._internal.common_utils import random_sparse_pd_matrix
+        from scipy.sparse.linalg import lobpcg as scipy_lobpcg
+        import scipy.sparse
+
+        def toscipy(A):
+            if A.layout == torch.sparse_coo:
+                values = A.coalesce().values().numpy().copy()
+                indices = A.coalesce().indices().numpy().copy()
+                return scipy.sparse.coo_matrix((values, (indices[0], indices[1])), A.shape)
+            return A.numpy().copy()
+
+        niter = 1000
+        repeat = 10
+        m = 500  # size of the square matrix
+        k = 7     # the number of requested eigenpairs
+        A1 = random_sparse_pd_matrix(m, density=2.0 / m)
+        B1 = random_sparse_pd_matrix(m, density=2.0 / m)
+        X1 = torch.randn((m, k), dtype=torch.double)
+
+        A2 = toscipy(A1)
+        B2 = toscipy(B1)
+        X2 = toscipy(X1)
+
+        # Standard eigenvalue problem
+        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter)
+        E2, V2 = scipy_lobpcg(A2, X2, maxiter=niter)
+        self.assertEqual(E1, torch.from_numpy(E2))
+
+        # Generalized eigenvalue problem
+        E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter)
+        E2, V2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter)
+        self.assertEqual(E1, torch.from_numpy(E2))
+
+        # Timings
+        elapsed_ortho = 0
+        elapsed_ortho_general = 0
+        elapsed_scipy = 0
+        elapsed_general_scipy = 0
+        for i in range(repeat):
+            start = time.time()
+            torch.lobpcg(A1, X=X1, niter=niter, method='ortho')
+            end = time.time()
+            elapsed_ortho += end - start
+
+            start = time.time()
+            torch.lobpcg(A1, X=X1, B=B1, niter=niter, method='ortho')
+            end = time.time()
+            elapsed_ortho_general += end - start
+
+            start = time.time()
+            scipy_lobpcg(A2, X2, maxiter=niter)
+            end = time.time()
+            elapsed_scipy += end - start
+
+            start = time.time()
+            scipy_lobpcg(A2, X2, B=B2, maxiter=niter)
+            end = time.time()
+            elapsed_general_scipy += end - start
+
+        elapsed_ortho_ms = 1000.0 * elapsed_ortho / repeat
+        elapsed_ortho_general_ms = 1000.0 * elapsed_ortho_general / repeat
+        elapsed_scipy_ms = 1000.0 * elapsed_scipy / repeat
+        elapsed_general_scipy_ms = 1000.0 * elapsed_general_scipy / repeat
+
+        print('''
+CPU timings: torch.lobpcg vs scipy.sparse.linalg.lobpcg
+-------------------------------------------------------
+              | standard    | generalized | method
+torch.lobpcg  | {:10.2f}  | {:10.2f}  | ortho
+scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
+-(input size: {:4}, eigenpairs:{:2}, units: ms per call)-
+        '''.format(elapsed_ortho_ms, elapsed_ortho_general_ms,
+                   elapsed_scipy_ms, elapsed_general_scipy_ms,
+                   m, k))
+
     @slowTest
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)

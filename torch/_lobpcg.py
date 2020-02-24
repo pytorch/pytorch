@@ -62,13 +62,15 @@ def lobpcg(A,                   # type: Tensor
                   m)`. When specified, it will be used as preconditioner.
 
       k (integer, optional): the number of requested
-                  eigenpairs. Default is `1`.
+                  eigenpairs. Default is the number of :math:`X`
+                  columns (when specified) or `1`.
 
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
                   is `k`. If :math:`X` is specifed, the value of `n`
-                  is ignored.
+                  (when specified) must be the number of :math:`X`
+                  columns.
 
       tol (float, optional): residual tolerance for stopping
                  criterion. Default is `feps ** 0.5` where `feps` is
@@ -168,8 +170,8 @@ def lobpcg(A,                   # type: Tensor
     tol = feps ** 0.5
 
     m = A.shape[-1]
-    k = 1 if k is None else k
-    n = (k if X is None else X.shape[-1]) if n is None else n
+    k = (1 if X is None else X.shape[-1]) if k is None else k
+    n = (k if n is None else n) if X is None else X.shape[-1]
 
     if (m < 3 * n):
         raise ValueError(
@@ -219,7 +221,7 @@ def lobpcg(A,                   # type: Tensor
             A_ = bA[i]
             B_ = bB[i] if bB is not None else None
             X_ = torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
-            assert len(X_.shape) == 2 and X_.shape[0] == m, (X_.shape, m)
+            assert len(X_.shape) == 2 and X_.shape == (m, n), (X_.shape, (m, n))
             iparams['batch_index'] = i
             worker = LOBPCG(A_, B_, X_, iK, iparams, fparams, bparams, method, tracker)
             worker.run()
@@ -228,7 +230,7 @@ def lobpcg(A,                   # type: Tensor
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
     X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
-    assert len(X.shape) == 2 and X.shape[0] == m, (X.shape, m)
+    assert len(X.shape) == 2 and X.shape == (m, n), (X.shape, (m, n))
 
     worker = LOBPCG(A, B, X, iK, iparams, fparams, bparams, method, tracker)
     worker.run()
