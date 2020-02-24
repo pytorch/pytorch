@@ -205,19 +205,19 @@ inline int can_vectorize_up_to(array_t pointers) {
 
 template<int i>
 struct load_with_policy {
-  template <typename args_t, typename policy_t, typename array_t>
-  static __device__ void apply(args_t *args, policy_t policy, array_t data, int idx) {
+  template <typename args_t, typename policy_t>
+  static __device__ void apply(args_t *args, policy_t policy, int idx) {
     using arg_t = std::tuple_element_t<i, args_t>;
     // `data` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input
-    auto ptr = reinterpret_cast<arg_t *>(data[i + 1]) + idx;
+    auto ptr = reinterpret_cast<arg_t *>(policy.data[i + 1]) + idx;
     auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
     policy.load(args_accessor, ptr);
   }
 };
 
-template<typename func_t, typename array_t, typename policy_t>
-__device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_t policy) {
+template<typename func_t, typename policy_t>
+__device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   // Assumption:
   // 1. all tensors are contiguous, that is: stride == sizeof(type) for all tensors
   using traits = function_traits<func_t>;
@@ -233,7 +233,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, data, idx);
+  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, idx);
 
   // compute
   #pragma unroll
@@ -244,9 +244,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   }
 
   // store
-  auto result_accessor = [&] __device__ (int index) -> return_t & { return results[index]; };
-  return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
-  policy.store(result_accessor, result_base);
+  policy.store(results, idx);
 }
 
 template<int vec_size, typename func_t, typename array_t>
@@ -256,9 +254,9 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   int remaining = N - block_work_size * blockIdx.x;
 
   if (remaining < block_work_size) {  // if this block handles the reminder, just do a naive unrolled loop
-    elementwise_kernel_helper(f, data, typename memory::policies::checked_unroll(remaining));
+    elementwise_kernel_helper(f, typename memory::policies::checked_unroll<array_t>(data, remaining));
   } else {  // if this block has a full `block_work_size` data to handle, use vectorized memory access
-    elementwise_kernel_helper(f, data, typename memory::policies::template vectorized<vec_size>());
+    elementwise_kernel_helper(f, typename memory::policies::template vectorized<vec_size, array_t>(data));
   }
 }
 

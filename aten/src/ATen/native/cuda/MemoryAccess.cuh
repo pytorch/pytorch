@@ -18,11 +18,13 @@ struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
 
 namespace policies {
 
+template<typename data_t>
 struct checked_unroll {
 
+  data_t data;
   int remaining;
 
-  __device__ checked_unroll(int remaining): remaining(remaining) {}
+  __device__ checked_unroll(data_t data, int remaining): data(data), remaining(remaining) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
     return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
@@ -41,15 +43,16 @@ struct checked_unroll {
     }
   }
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void store(accessor_t from, scalar_t *to) {
+  template<typename scalar_t>
+  __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size; i++) {
       if (thread_idx >= remaining) {
         return;
       }
-      to[thread_idx] = from(i);
+      to[thread_idx] = from[i];
       thread_idx += num_threads;
     }
   }
@@ -59,11 +62,15 @@ struct checked_unroll {
 // has its job to do. So the reminders should be handled by the the caller
 // manually.
 
-template <int vec_size>  // vec_size: number of scalars, can be 1, 2, or 4.
+template <int vec_size, typename data_t>  // vec_size: number of scalars, can be 1, 2, or 4.
 struct vectorized {
 
   static_assert(thread_work_size % vec_size == 0, "The workload per thread must be a multiple of vec_size");
   static constexpr int loop_size = thread_work_size / vec_size;
+
+  data_t data;
+
+  __device__ vectorized(data_t data) : data(data) {}
 
   __device__ inline constexpr bool check_inbounds(int thread_work_elem) {
     return true;
@@ -85,9 +92,10 @@ struct vectorized {
     }
   }
 
-  template<typename accessor_t, typename scalar_t>
-  __device__ inline void store(accessor_t from, scalar_t *to) {
+  template<typename scalar_t>
+  __device__ inline void store(scalar_t *from, int idx) {
     using vec_t = aligned_vector<scalar_t, vec_size>;
+    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + idx;
     vec_t *to_ = reinterpret_cast<vec_t *>(to);
     int thread_idx = threadIdx.x;
     #pragma unroll
@@ -95,7 +103,7 @@ struct vectorized {
       int index = thread_idx + i * num_threads;
       vec_t v;
       for (int j = 0; j < vec_size; j++) {
-        v.val[j] = from(vec_size * i + j);
+        v.val[j] = from[vec_size * i + j];
       }
       to_[index] = v;
     }
