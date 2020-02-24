@@ -248,46 +248,6 @@ void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storag
   THTensor_setStorage(self, storage_, storageOffset_, size_, stride_);
 }
 
-void THTensor_(setStorage1d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                       {size0_}, {stride0_});
-}
-
-void THTensor_(setStorage2d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                       {size0_, size1_},
-                       {stride0_, stride1_});
-}
-
-void THTensor_(setStorage3d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_)
-{
-  THTensor_(setStorage)(self, storage_, storageOffset_,
-                        {size0_, size1_, size2_},
-                        {stride0_, stride1_, stride2_});
-}
-
-void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_,
-                             int64_t size3_, int64_t stride3_)
-{
-
-  int64_t size[4] = {size0_, size1_, size2_, size3_};
-  int64_t stride[4] = {stride0_, stride1_, stride2_, stride3_};
-
-  THTensor_(setStorage)(self, storage_, storageOffset_, size, stride);
-}
-
-
 void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension, int64_t firstIndex, int64_t size)
 {
   if(!src)
