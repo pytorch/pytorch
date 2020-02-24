@@ -10194,6 +10194,18 @@ a")
         inps = (torch.randn(10), 7)
         self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
 
+        def lu(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return torch.lu(x)
+
+        self.checkScript(lu, (torch.randn(2, 3, 3),))
+
+        def lu_infos(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.lu(x, get_infos=True)
+
+        self.checkScript(lu, (torch.randn(2, 3, 3),))
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):

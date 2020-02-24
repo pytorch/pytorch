@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from itertools import product
 
 from ._overrides import has_torch_function, handle_torch_function
+from ._jit_internal import boolean_dispatch
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -845,7 +846,8 @@ def chain_matmul(*matrices):
     return torch._C._VariableFunctions.chain_matmul(matrices)
 
 
-def lu(A, pivot=True, get_infos=False, out=None):
+def _lu_impl(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor] 
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
@@ -917,20 +919,50 @@ def lu(A, pivot=True, get_infos=False, out=None):
             return handle_torch_function(
                 lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     # If get_infos is True, then we don't need to check for errors and vice versa
-    result = torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+    return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
+
+def _check_list_size(out_len, get_infos, out):
+    # type: (int, bool, List[Tensor])    
+    get_infos_int = 1 if get_infos else 0
+    if out_len - get_infos_int != 2:
+        raise TypeError("expected tuple of {} elements but got {}"
+                        .format(2 + int(get_infos), len(out_len)))
+    if not isinstance(out, (tuple, list)):
+        raise TypeError("argument 'out' must be tuple of Tensors, not {}"
+                        .format(type(out).__name__))
+
+def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor] 
+    result = _lu_impl(A, pivot, get_infos, out)
     if out is not None:
-        if not isinstance(out, (tuple, list)):
-            raise TypeError("argument 'out' must be tuple of Tensors, not {}"
-                            .format(type(out).__name__))
-        if len(out) - int(get_infos) != 2:
-            raise TypeError("expected tuple of {} elements but got {}"
-                            .format(2 + int(get_infos), len(out)))
-        return (out[i].resize_as_(result[i]).copy_(result[i]) for i in range(len(out)))
-    if get_infos:
+        _check_list_size(len(out), get_infos, out)
+        for i in range(len(out)):
+            out[i].resize_as_(result[i]).copy_(result[i])
+        return out
+    else:
         return result  # A_LU, pivots, infos
+
+def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor] 
+    result = _lu_impl(A, pivot, get_infos, out)
+    if out is not None:
+        _check_list_size(len(out), get_infos, out)
+        for i in range(len(out)):
+            out[i].resize_as_(result[i]).copy_(result[i])
+        return out
     else:
         return result[0], result[1]  # A_LU, pivots
 
+# The return type of lu depends on `get_infos`, so in order to resolve the output type
+# of lu in TorchScript we need to statically know the value of `get_infos` 
+lu = boolean_dispatch(
+    arg_name='get_infos',
+    arg_index=2,
+    default=False,
+    if_true=_lu_with_infos,
+    if_false=_lu_no_infos,
+    module_name=__name__,
+    func_name='lu')
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')

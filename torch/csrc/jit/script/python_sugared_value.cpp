@@ -463,7 +463,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     TORCH_INTERNAL_ASSERT(result);
   }
 
-  if (!result) {
+  if (!result.has_value()) {
     throw error;
   }
 
