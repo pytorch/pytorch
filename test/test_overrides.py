@@ -214,6 +214,10 @@ def sub_mean(mat):
 def sub_mm(mat1, mat2):
     return -1
 
+@implements_sub(bar)
+def sub_bar(mat):
+    return 1
+
 @implements_sub(torch.div)
 def sub_div(input, other, out=None):
     return NotImplemented
@@ -924,19 +928,19 @@ class TensorLike(object):
         return HANDLED_FUNCTIONS_TENSOR_LIKE[func](*args, **kwargs)
 
 class TestTorchFunctionOverride(TestCase):
-    def test_mean(self):
+    def test_mean_semantics(self):
         """Test that a function with one argument can be overrided"""
         t1 = DiagonalTensor(5, 2)
         t2 = SubTensor([[1, 2], [1, 2]])
         t3 = SubDiagonalTensor(5, 2)
-        self.assertEqual(torch.mean(t1), 12.5)
+        self.assertEqual(torch.mean(t1), 0.4)
         self.assertEqual(bar(t1), -1)
         self.assertEqual(torch.mean(t2), 0)
-        self.assertEqual(bar(t2), t2)
-        self.assertEqual(torch.mean(t3), 125)
+        self.assertEqual(bar(t2), 1)
+        self.assertEqual(torch.mean(t3), 4.0)
         self.assertEqual(bar(t3), 0)
 
-    def test_mm(self):
+    def test_mm_semantics(self):
         """Test that a function with multiple arguments can be overrided"""
         t1 = DiagonalTensor(5, 2)
         t2 = torch.eye(5) * 2
@@ -964,7 +968,7 @@ class TestTorchFunctionOverride(TestCase):
         self.assertEqual(torch.mm(t4, t2), 1)
         self.assertEqual(torch.mm(t2, t4), 1)
         self.assertEqual(torch.mm(t3, t4), -1)
-        self.assertEqual(torch.mm(t4, t3), 0)
+        self.assertEqual(torch.mm(t4, t3), 1)
 
     def test_precedence_semantics(self):
         """Test semantics for __torch_function__ for functions that take
