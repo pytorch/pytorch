@@ -508,33 +508,35 @@ void testGPU_FusionComputeAt() {
   dom.push_back(new IterDomain(new Int()));
 
   TensorDomain* td = new TensorDomain(dom);
-  TensorView* tv = new TensorView(new Tensor(DataType::Float, td));
+  TensorView* tv0 = new TensorView(new Tensor(DataType::Float, td));
   TensorView* tv2 = new TensorView(new Tensor(DataType::Float, td));
   TensorView* tv3 = new TensorView(new Tensor(DataType::Float, td));
 
   // tv2 = tv3 + 1.0
   BinaryOp* add_node =
       new BinaryOp(BinaryOpType::Add, tv2, tv3, new Float(1.0));
-  // tv = tv2 + 1.0
+  // tv0 = tv2 + 1.0
   BinaryOp* add_node2 =
-      new BinaryOp(BinaryOpType::Add, tv, tv2, new Float(1.0));
+      new BinaryOp(BinaryOpType::Add, tv0, tv2, new Float(1.0));
 
   //[I0, I1, R0, I2]
-  tv = split(tv, 0, 4);
+  tv0 = split(tv0, 0, 4);
   //[I0o, I0i{4}, I1, R0, I2]
-  tv = merge(tv, 1);
+  tv0 = merge(tv0, 1);
   //[I0o, I0i{4}*I1, R0, I2]
-  tv = split(tv, -1, 2);
+  tv0 = split(tv0, -1, 2);
   //[I0o, I0i{4}*I1, R0, I2o, I2i{2}]
-  tv = reorder(tv, {{0, 2}, {2, 0}, {3, 4}});
+  tv0 = reorder(tv0, {{0, 2}, {2, 0}, {3, 4}});
   //[R0, I0i{4}*I1, I0o, I2i, I2o{2}]
-  std::cout << "Replaying: " << td << "\n-> " << tv << "\n on " << tv2
+  std::cout << "Replaying: " << td << "\n-> " << tv0 << "\n on " << tv2
             << " and " << tv3 << "\nwith \'compute_at(2)\' produces:\n"
-            << tv3->computeAt(tv, 2)
+
+            << tv3->computeAt(tv0, 2)
+
             << "\nWhich should be unchanged, however\n"
             << tv2 << " should be along the lines of: "
             << "\n[R0, I0i{4}*I1, I0o, I2]" << std::endl;
-
+ 
 }
 
 void testGPU_FusionComputeAt2() {
@@ -575,6 +577,49 @@ void testGPU_FusionComputeAt2() {
             << tv2->computeAt(tv, 2) << std::endl;
   std::cout << "Which should be along the lines of:";
   std::cout << "[I0o, I0i{2}, I1, R0, I2]" << std::endl;
+}
+
+void testGPU_FusionComputeAt3() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+
+  TensorDomain* td = new TensorDomain(dom);
+  TensorView* tv0 = new TensorView(new Tensor(DataType::Float, td));
+  TensorView* tv1 = new TensorView(new Tensor(DataType::Float, td));
+  TensorView* tv2 = new TensorView(new Tensor(DataType::Float, td));
+  TensorView* tv3 = new TensorView(new Tensor(DataType::Float, td));
+
+  new BinaryOp(BinaryOpType::Add, tv1, new Float(0.0), new Float(1.0));
+  new BinaryOp(BinaryOpType::Add, tv0, tv1, new Float(2.0));
+  new BinaryOp(BinaryOpType::Add, tv2, tv1, new Float(3.0));
+  new BinaryOp(BinaryOpType::Add, tv3, tv2, new Float(4.0));
+
+  //tv1 =   0 + 1
+  //tv0 = tv1 + 2
+  //tv2 = tv1 + 2
+  //tv3 = tv2 + 2
+  std::cout << "Replaying " << tv3 << "->";
+  //[I0, I1]
+  tv3 = split(tv3, 0, 4);
+  //[I0o, I0i{4}, I1]
+  tv3 = reorder(tv3, {{2, 0}});
+  //[I1, I0o, I0i{4}]
+  tv3 = split(tv3, 0, 2);
+  //[I1o, I1i{2} I0o, I0i{4}]
+  tv3 = reorder(
+      tv3,
+      { {0, 2}, {1, 3} });
+  //[I0o, I0i{4}, I1o, I1i{2}]
+
+  std::cout << tv3 <<std::endl;
+  tv1->computeAt(tv3, 1);
+
+  std::cout << "on to:\n" << tv1 << "\n" << tv2 << "\nand\n" << tv0 << std::endl;
+  std::cout << "These domains should approximately be: [I0o, I0i{4}, I1o, I1i{2}]" << std::endl;
 }
 
 void testGPU_FusionParser() {

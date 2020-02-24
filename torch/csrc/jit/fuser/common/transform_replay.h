@@ -7,13 +7,10 @@
 #include <algorithm>
 #include <vector>
 
-// Could be in a .cpp file:
-#include <torch/csrc/jit/fuser/common/fusion.h>
-
 // For debug:
-/**/
+/*
 #include <torch/csrc/jit/fuser/common/iriostream.h>
-/**/
+*/
 namespace torch {
 namespace jit {
 namespace fuser {

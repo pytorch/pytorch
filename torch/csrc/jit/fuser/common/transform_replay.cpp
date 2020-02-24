@@ -1,12 +1,4 @@
-#include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
-
-#include <algorithm>
-#include <vector>
-
-// Could be in a .cpp file:
 #include <torch/csrc/jit/fuser/common/fusion.h>
 
 // For debug:
@@ -300,6 +292,13 @@ TensorView* TransformReplay::replay(TensorView* target) {
 }
 
 /*
+ * TODO: We should be able to relax the constraints of replay a bit. Right now
+ * it requires that the root domain of the target and replay are completely 
+ * the same. However, we should only require that the root derived from the
+ * axes < compute_at_axis match. We could even go further and look for those
+ * matching axes as they don't necessairly need to be in the same order.
+ * However, once they're replayed they should be.
+ *
  * 1) Take the reference, trace back its domain history to get all the
  * split/merge/reorder calls, as well as its original domain. Get the
  * original domain of the target as well.
@@ -331,11 +330,19 @@ TensorView* TransformReplay::runReplay(
   /* STEP 1 */
   // Trace back to the root TensorDomain's of ref and target
   TensorDomain* target_root = get_root(replay_target->domain());
+  // Reset the tensor domain of the target, this is the only way we can be certain
+  // That we can actually replay the ops of ref.
+  replay_target->setDomain(target_root);
   // As we trace the ref, record the operations to go from replay_ref ->
   // ref_root, save in "record"
   TensorDomain* ref_root = get_root(replay_ref->domain(), true);
-  // Domain sizes must match at root for replay!
+    
+
+  // Domain sizes must match at root for replay.
   TORCH_CHECK(target_root->size() == ref_root->size());
+  for(decltype(target_root->size()) i=0; i<target_root->size(); i++){
+    TORCH_CHECK(ref_root->axis(i)->same_as(target_root->axis(i)));
+  }
   this->compute_at_axis = compute_at_axis;
 
   /* STEP 2 */

@@ -149,6 +149,10 @@ struct TORCH_API TensorDomain : public Val {
   std::vector<IterDomain*> domain;
 };
 
+//Going to friend TransformReplay so it can reset TensorView domain before replaying.
+//We could narrow friend down to a single function but it would require including the entire header.
+struct TransformReplay;
+
 struct TORCH_API Tensor : public Val {
   ~Tensor() = default;
 
@@ -191,8 +195,6 @@ struct TORCH_API Tensor : public Val {
   const c10::optional<TensorContiguity> contiguity_;
   TensorDomain* domain_;
 };
-
-struct TensorView;
 
 struct TORCH_API TensorView : public Val {
   ~TensorView() = default;
@@ -238,6 +240,7 @@ struct TORCH_API TensorView : public Val {
   friend TensorView* split(TensorView*, int axis, int factor);
   friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
   friend TensorView* merge(TensorView*, int axis);
+  friend TransformReplay;
 
 protected:
   void setDomain(TensorDomain* td){domain_ = td;}

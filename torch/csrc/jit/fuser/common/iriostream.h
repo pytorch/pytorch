@@ -15,6 +15,9 @@ struct Statement;
 struct Val;
 struct Expr;
 
+struct UnaryOp;
+struct BinaryOp;
+
 struct Tensor;
 struct TensorDomain;
 struct TensorView;

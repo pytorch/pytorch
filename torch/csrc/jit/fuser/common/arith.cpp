@@ -83,6 +83,10 @@ TORCH_API Val* mod(Val* v1, Val* v2){
   return binary_op(BinaryOpType::Mod, v1, v2);
 }
 
+TORCH_API Val* ceilDiv(Val* v1, Val* v2){
+  return binary_op(BinaryOpType::CeilDiv, v1, v2);
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

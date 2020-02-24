@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
-#include <torch/csrc/jit/fuser/common/mutator.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/mutator.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
 
 namespace torch {
@@ -52,11 +52,7 @@ const c10::optional<TensorContiguity>& Tensor::getContiguityInfo() const {
  * Split, Merge, Reorder constructors
  */
 
-Split::Split(
-    TensorDomain* _out,
-    TensorDomain* _in,
-    int _axis,
-    Int* _factor)
+Split::Split(TensorDomain* _out, TensorDomain* _in, int _axis, Int* _factor)
     : Expr(ExprType::Split),
       out_{_out},
       in_{_in},
@@ -84,12 +80,10 @@ Reorder::Reorder(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
-
-
 TensorView* split(TensorView* tv, int axis, int factor) {
-  
   TensorDomain* td = tv->domain();
-  if(axis<0) axis+=tv->domain()->size();
+  if (axis < 0)
+    axis += tv->domain()->size();
   assert(axis >= 0 && axis < td->size());
   IterDomain* id = td->axis(axis);
 
@@ -99,33 +93,34 @@ TensorView* split(TensorView* tv, int axis, int factor) {
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
-        throw std::runtime_error("Cannot split axis within compute at range.");
+      throw std::runtime_error("Cannot split axis within compute at range.");
 
   std::vector<IterDomain*> new_domain;
 
   Int* fact = new Int(factor);
   Int* one = new Int(1);
-  
+
   for (decltype(td->size()) i = 0; i < td->size(); i++) {
     if (i != axis)
       new_domain.push_back(td->axis(i));
     else {
       // outer loop size
-      Val* vo = add(div(sub(id->size(), one), fact), one);
-
+      Val* vo = ceilDiv(id->size(), fact);
       Int* so = static_cast<Int*>(vo);
 
       // outer loop IterDomain
-      IterDomain* ido = new IterDomain(so, id->parallel_method(), id->isReduction());
+      IterDomain* ido =
+          new IterDomain(so, id->parallel_method(), id->isReduction());
       new_domain.push_back(ido);
 
       // inner loop IterDomain
-      IterDomain* idi = new IterDomain(fact, id->parallel_method(), id->isReduction());
+      IterDomain* idi =
+          new IterDomain(fact, id->parallel_method(), id->isReduction());
       new_domain.push_back(idi);
     }
   }
   TensorDomain* split_td = new TensorDomain(new_domain);
-  Split* split_node = new Split(split_td, td, axis, fact); //For record keeping
+  Split* split_node = new Split(split_td, td, axis, fact); // For record keeping
   tv->setDomain(split_td);
   return tv;
 }
@@ -136,17 +131,19 @@ TensorView* merge(TensorView* tv, int axis) {
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
-        throw std::runtime_error("Cannot split axis within compute at range.");
+      throw std::runtime_error("Cannot split axis within compute at range.");
 
   IterDomain* first = tv->domain()->axis(axis);
-  IterDomain* second = tv->domain()->axis(axis+1);
+  IterDomain* second = tv->domain()->axis(axis + 1);
 
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
 
   Val* merged_id_size = mul(first->size(), second->size());
-  IterDomain* merged_id =
-      new IterDomain(static_cast<Int*>(merged_id_size), first->parallel_method(), first->isReduction());
+  IterDomain* merged_id = new IterDomain(
+      static_cast<Int*>(merged_id_size),
+      first->parallel_method(),
+      first->isReduction());
 
   std::vector<IterDomain*> new_domain;
   for (decltype(td->size()) i = 0; i < td->size(); i++) {
@@ -157,18 +154,16 @@ TensorView* merge(TensorView* tv, int axis) {
     }
   }
   TensorDomain* merged_td = new TensorDomain(new_domain);
-  Merge* merge_node = new Merge(merged_td, td, axis); //For record keeping
+  Merge* merge_node = new Merge(merged_td, td, axis); // For record keeping
   tv->setDomain(merged_td);
   return tv;
 }
 
 /*
- * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of the iter
- * axes.
- */ 
-TensorView* reorder(
-    TensorView* tv,
-    std::unordered_map<int, int> axis2pos) {
+ * Takes axis2pos map, axis2pos[old_pos] = new_pos, to modify the ordering of
+ * the iter axes.
+ */
+TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   TensorDomain* td = tv->domain();
   auto ndims = td->size();
   // Map to save from previous order, to new order.
@@ -224,11 +219,12 @@ TensorView* reorder(
       pos2axis[i] = *it++;
   }
 
-  //pos2axis is now filled
-  if(tv->getComputeAtView() != nullptr){
-    for(int i = 0; i < tv->getComputeAtAxis(); i++){
-      if(pos2axis[i] != i)
-        throw std::runtime_error("Cannot reorder axis within compute at range.");
+  // pos2axis is now filled
+  if (tv->getComputeAtView() != nullptr) {
+    for (int i = 0; i < tv->getComputeAtAxis(); i++) {
+      if (pos2axis[i] != i)
+        throw std::runtime_error(
+            "Cannot reorder axis within compute at range.");
     }
   }
 
@@ -243,40 +239,68 @@ TensorView* reorder(
   return tv;
 }
 
-TensorView* TensorView::computeAt(TensorView* consumer, int axis){
+TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
+  std::cout<<"Calling TV"<<this->name()<<".computeAt(TV"<<consumer->name()<<")"<<std::endl;
   /*
-   * TODO:
    * Recursive compute_at:
-   * Recurse backward from consumer, to this, make sure there's a dependency chain there.
-   * After recursing, recurse again, and call ComputeAt for all tensors between this and consumer.
-   * 
-   * Assert direct consumer/this relationship.
-   * Compute at modifies the consumer, not the this.
+   * Recurse backward from consumer, to this, make sure there's a dependency
+   * chain there. Call ComputeAt for all tensors between this and consumer.
+   *
+   * Compute at modifies this, not consumer.
    */
 
-  std::stack<Val*> dep_chain = DependencyCheck::getDependencyChain(this, consumer);
-  //forward apply to uses of this.
-  //Recursively apply replay.
-  TensorView* ref = consumer;
-  //dep_chain = deps <- consumer (doesn't have this)
-  //We want to apply:
-  //  replay(consumer, dep)
-  //  replay(dep, this)
-  while(!dep_chain.empty()){
-    Val* val = dep_chain.top(); dep_chain.pop();
+  std::stack<Val*> dep_chain =
+      DependencyCheck::getDependencyChain(this, consumer);
+  // forward apply to uses of this.
+  // Recursively apply replay.
+  TensorView* running_consumer = consumer;
+  // dep_chain = deps <- consumer (this chain doesn't contain this)
+  // We want to apply:
+  //  dep[n-1].compute_at(consumer)
+  //  ...
+  //  this.compute_at(dep[0])
+  while (!dep_chain.empty()) {
+    Val* val = dep_chain.top();
+    dep_chain.pop();
     TORCH_CHECK(val->getValType() == ValType::TensorView);
     TensorView* tv = static_cast<TensorView*>(val);
-    if(tv->same_as(consumer))
+    if (tv->same_as(consumer))
       continue;
-    TransformReplay::replay(ref, tv, axis);
-    ref = tv; //replay is in-place
+    tv->computeAt(running_consumer, axis);
+    // TransformReplay::replay(running_consumer, tv, axis);
+    running_consumer = tv; // replay is in-place
+  }
+  // At this point running_consumer is the direct consumer of this
+
+  // If another view consumes this, we may be computing this at a position that
+  // doesn't match that consumer. Likely producing too little for that next
+  // consumer
+  for (Expr* other_use : FusionGuard::getCurFusion()->uses(this)) {
+    for (Val* maybe_other_consumer : other_use->outputs()) {
+      if (*(maybe_other_consumer->getValType()) != ValType::TensorView)
+        continue;
+
+      TensorView* other_consumer =
+          static_cast<TensorView*>(maybe_other_consumer);
+      if (running_consumer->same_as(other_consumer))
+        continue;
+
+      if (DependencyCheck::isDependencyOf(running_consumer, other_consumer)) {
+        // There seem to be two choices here, either running_consumer or consumer
+        // I believe they end up being equivelent, but uncertain they actually are.
+        consumer->computeAt(other_consumer, axis);
+      } else {
+        other_consumer->computeAt(consumer, axis);
+      }
+    }
   }
 
-  if(FusionGuard::getCurFusion()->origin(this) == nullptr)
+  if (FusionGuard::getCurFusion()->origin(this) == nullptr)
     return this;
-    
-  //Dep chain doesn't contain this, run on this manually.
-  return TransformReplay::replay(ref, this, axis);
+
+  // Dep chain doesn't contain this, try to run on replay, as it may be merging
+  // two independent loop nests of the same sizes.
+  return TransformReplay::replay(running_consumer, this, axis);
 }
 
 } // namespace fuser
