@@ -348,7 +348,8 @@ public:
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN
-  Vec256<BFloat16> compare(const Vec256<BFloat16>& other, const int imm8) const {
+  template<int imm8>
+  Vec256<BFloat16> compare(const Vec256<BFloat16>& other) const {
     __m256 a_lo, a_hi;
     __m256 b_lo, b_hi;
     cvtbf16_fp32(values, a_lo, a_hi);
@@ -358,22 +359,22 @@ public:
     return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> operator==(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_EQ_OQ);
+    return compare<_CMP_EQ_OQ>(other);
   }
   Vec256<BFloat16> operator!=(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_NEQ_OQ);
+    return compare<_CMP_NEQ_OQ>(other);
   }
   Vec256<BFloat16> operator<(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_LT_OQ);
+    return compare<_CMP_LT_OQ>(other);
   }
   Vec256<BFloat16> operator<=(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_LE_OQ);
+    return compare<_CMP_LE_OQ>(other);
   }
   Vec256<BFloat16> operator>(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_GT_OQ);
+    return compare<_CMP_GT_OQ>(other);
   }
   Vec256<BFloat16> operator>=(const Vec256<BFloat16>& other) const {
-    return compare(other, _CMP_GE_OQ);
+    return compare<_CMP_GE_OQ>(other);
   }
 };
 
