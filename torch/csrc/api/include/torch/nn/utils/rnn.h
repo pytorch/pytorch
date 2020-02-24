@@ -11,7 +11,7 @@ inline Tensor invert_permutation(const Tensor& permutation) {
   if (!permutation.defined()) {
     return torch::Tensor();
   }
-  Tensor output = torch::empty_like(permutation, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = torch::empty_like(permutation, torch::MemoryFormat::Contiguous);
   output.scatter_(0, permutation,
                   torch::arange(0, permutation.numel(), permutation.device()));
   return output;
