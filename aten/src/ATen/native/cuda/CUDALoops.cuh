@@ -145,64 +145,6 @@ invoke(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[]
 // See the note for namespace legacy above.
 namespace modern {
 
-namespace detail {
-
-// What does the `static_unroll` do?
-//
-// We want to do something like:
-//
-//    using args_t = typename traits::ArgsTuple;
-//    args_t args;
-//    #pragma unroll
-//    for (int i = 0; i < traits::arity; i++) {
-//      std::get<i>(args) = ....
-//    }
-//
-// but unfortunately the above code does not work because
-// the template argument has to be a compile time constant
-// so `static_unroll` is created to simulate `#pragma unroll`
-// using template metaprogramming.
-
-template<template<int i> typename func, int end, int current=0>
-struct static_unroll {
-  template<typename... Args>
-  static inline C10_HOST_DEVICE void with_args(Args&&... args) {
-    func<current>::apply(std::forward<Args>(args)...);
-    static_unroll<func, end, current+1>::with_args(args...);
-  }
-};
-
-template<template<int i> typename func, int end>
-struct static_unroll<func, end, end> {
-  template<typename... Args>
-  static inline C10_HOST_DEVICE void with_args(Args... args) {}
-};
-
-template<int i>
-struct can_vectorize_up_to_helper {
-  template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
-    using arg_t = typename traits::template arg<i>::type;
-    // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
-    // need a +1 offset to get the input
-    result = std::min(result, memory::can_vectorize_up_to<arg_t>(pointers[i + 1]));
-  }
-};
-
-template<typename func_t, typename array_t>
-inline int can_vectorize_up_to(array_t pointers) {
-  using traits = function_traits<func_t>;
-  using return_t = typename traits::result_type;
-  constexpr int arity = traits::arity;
-  int result = memory::can_vectorize_up_to<return_t>(pointers[0]);
-  // We need to get the type for each argument of `func_t`, this can only
-  // be done at compile time.
-  static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
-  return result;
-}
-
-}  // namespace detail
-
 template<int i>
 struct load_with_policy {
   template <typename args_t, typename policy_t>
@@ -225,7 +167,6 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using args_t = typename traits::ArgsTuple;
   constexpr int arity = traits::arity;
 
-  // compute base pointers for this block
   int idx = block_work_size * blockIdx.x;
 
   return_t results[thread_work_size];
@@ -233,7 +174,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
-  detail::static_unroll<load_with_policy, arity>::with_args(args, policy, idx);
+  memory::detail::static_unroll<load_with_policy, arity>::with_args(args, policy, idx);
 
   // compute
   #pragma unroll
@@ -269,7 +210,7 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   }
   int64_t grid = (N + block_work_size - 1) / block_work_size;
   auto stream = at::cuda::getCurrentCUDAStream();
-  int vec_size = detail::can_vectorize_up_to<func_t>(data);
+  int vec_size = memory::can_vectorize_up_to<func_t>(data);
   switch (vec_size) {
   case 4:
     elementwise_kernel<4, func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
