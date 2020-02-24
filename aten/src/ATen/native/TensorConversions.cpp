@@ -44,13 +44,7 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
   return r;
 }
 
-Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+Tensor to(const Tensor& self, const TensorOptions& options, bool non_blocking, bool copy) {
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
 
@@ -78,7 +72,7 @@ Tensor to(const Tensor& self, const TensorOptions& options_, bool non_blocking, 
   if (dtype_opt) {
     specified_options = specified_options.dtype(dtype_opt.value());
   }
-  return to_impl(self, specified_options.memory_format(optional_memory_format), non_blocking, copy);
+  return to_impl(self, specified_options, non_blocking, copy);
 }
 
 Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {

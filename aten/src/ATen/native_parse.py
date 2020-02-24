@@ -227,6 +227,7 @@ def parse_arguments(name, args, func_variants, declaration, func_return):
         make_topt_arg('layout', 'Layout'),
         make_topt_arg('device', 'Device'),
         make_topt_arg('pin_memory', 'bool'),
+        make_topt_arg('memory_format', 'MemoryFormat'),
     ]
 
     corresponding_topt = {
@@ -246,7 +247,7 @@ def parse_arguments(name, args, func_variants, declaration, func_return):
             return None
 
     def is_tensor_option(argument):
-        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory']
+        return argument['name'] in ['dtype', 'layout', 'device', 'pin_memory', 'memory_format']
 
     new_arguments = []
     idx = 0

@@ -258,7 +258,7 @@ Tensor normal_cpu(double mean, const Tensor& std, Generator* gen) {
 }
 
 Tensor normal_cpu(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
+  Tensor ret = at::empty({0}, mean.options().memory_format(MemoryFormat::Contiguous));
   normal_out_cpu(ret, mean, std, gen);
   return ret;
 }

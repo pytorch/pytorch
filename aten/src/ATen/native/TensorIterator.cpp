@@ -153,7 +153,7 @@ static void maybe_copy_casting_to_common_dtype(OperandInfo& op, ScalarType commo
       op.tensor = op.tensor.to(common_dtype);
     } else {
       op.tensor =
-          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+          at::empty_like(op.tensor, op.tensor.options().dtype(common_dtype).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
     }
     op.current_dtype = common_dtype;
   }
@@ -912,7 +912,7 @@ bool TensorIterator::fast_set_up() {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
+            op.tensor = at::empty(shape_, op.options().memory_format(MemoryFormat::Contiguous));
             op.current_dtype = op.target_dtype;
           }
         }
@@ -924,7 +924,7 @@ bool TensorIterator::fast_set_up() {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+            op.tensor = at::empty(shape_, op.options().memory_format(MemoryFormat::ChannelsLast));
             op.current_dtype = op.target_dtype;
           }
         }

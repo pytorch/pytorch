@@ -153,7 +153,8 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device})
-        .pinned_memory(${pin_memory});
+        .pinned_memory(${pin_memory})
+        .memory_format(${memory_format});
 #ifdef USE_STATIC_DISPATCH
     auto result_ = at::${name}(${args_with_tensor_options});
 #else
@@ -165,7 +166,8 @@ const auto options = TensorOptions()
         .dtype(${dtype})
         .layout(${layout})
         .device(${device})
-        .pinned_memory(${pin_memory});;
+        .pinned_memory(${pin_memory})
+        .memory_format(${memory_format});
 auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
@@ -295,17 +297,20 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             layout = args[tensor_options_arg_index + 1]
             device = args[tensor_options_arg_index + 2]
             pin_memory = args[tensor_options_arg_index + 3]
+            memory_format = args[tensor_options_arg_index + 4]
             args_with_tensor_options = args[:tensor_options_arg_index] + \
-                ['options'] + args[(tensor_options_arg_index + 4):]
+                ['options'] + args[(tensor_options_arg_index + 5):]
             if is_namespace_function:
                 return CALL_NAMESPACE_WITH_TENSOR_OPTIONS.substitute(
                     name=decl['name'], dtype=dtype, layout=layout,
                     device=device, pin_memory=pin_memory,
+                    memory_format=memory_format,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options))
             else:
                 return CALL_METHOD_WITH_TENSOR_OPTIONS.substitute(
                     name=decl['name'], dtype=dtype, layout=layout,
                     device=device, pin_memory=pin_memory,
+                    memory_format=memory_format,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
         else:
@@ -428,6 +433,8 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             {'name': 'device', 'simple_type': 'Device'},
             # pin_memory is specified as a boolean
             {'name': 'pin_memory', 'simple_type': 'bool', 'default': False},
+            # memory_format is specified as MemoryFormat
+            {'name': 'memory_format', 'simple_type': 'MemoryFormat'},
         ]
         # TODO: Don't repack this into TensorOptions. Needs various changes in downstream code.
         if 'default' in arg:

@@ -105,8 +105,7 @@ class QLinearDynamicInt8 final : public torch::OperatorKernel {
     auto output = at::empty(out_sizes, input.options().dtype(at::kFloat));
     auto buffer = at::empty_like(
         output,
-        output.options().dtype(at::kInt),
-        LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+        output.options().dtype(at::kInt).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
     int num_tasks = at::get_num_threads();
     at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {

@@ -98,13 +98,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options) {
 
   AT_ASSERT(options.device().type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
@@ -140,16 +134,15 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
 Tensor empty(
     IntArrayRef size,
     at::optional<DimnameList> names,
-    const TensorOptions& options,
-    optional<MemoryFormat> optional_memory_format) {
+    const TensorOptions& options) {
   if (!names.has_value()) {
-    return at::empty(size, options, optional_memory_format);
+    return at::empty(size, options);
   }
   TORCH_CHECK(options.layout() == Layout::Strided,
       "NYI: named tensors only support strided layout");
   TORCH_CHECK(options.device().type() == DeviceType::CPU || options.device().type() == DeviceType::CUDA,
       "NYI: named tensors only support CPU and CUDA tensors");
-  auto result = at::empty(size, options, optional_memory_format);
+  auto result = at::empty(size, options);
   internal_set_names_inplace(result, names);
   return result;
 }
@@ -163,13 +156,7 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptio
 
 Tensor& empty_out(
     Tensor& result,
-    IntArrayRef size,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  // Preferably, this argument would not be accepted by _out, but the code
-  // generator requires the out and non-out overloads to match exactly
-  TORCH_CHECK(
-      !optional_memory_format.has_value(),
-      "'memory_format' argument is incompatible with 'out' tensor argument");
+    IntArrayRef size) {
   check_size_nonnegative(size);
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0);
@@ -197,22 +184,12 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, DEFINE_CAST_OP)
 
 Tensor empty_like(
     const Tensor& self,
-    const TensorOptions& options_,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    const TensorOptions& options_) {
+
+  TensorOptions options = self.options().merge_in(options_);
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-
-  TensorOptions options =
-      self.options()
-          .merge_in(options_)
-          .merge_in(TensorOptions().memory_format(optional_memory_format));
-
-  TORCH_CHECK(
-      !(options.layout() != kStrided &&
-          optional_memory_format.has_value()),
+      !(options.layout() != kStrided && options.has_memory_format()),
       "memory format option is only supported by strided tensors");
   if (options.layout() == kSparse && self.is_sparse()) {
     auto result = at::empty({0}, options); // to be resized
@@ -227,7 +204,7 @@ Tensor empty_like(
 
     // TODO: To support all features of MemoryFormat::Preserve we need to add
     // _empty_affine_quantized_strided function and use it similarly to
-    // Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory_format)
+    // Tensor clone(const Tensor& src)
     // if (self.is_non_overlapping_and_dense()) -> _empty_affine_quantized_strided
     if (memory_format == MemoryFormat::Preserve) {
       memory_format = self.suggest_memory_format();
@@ -343,9 +320,8 @@ Tensor& full_out(Tensor& result, IntArrayRef size, Scalar fill_value) {
 Tensor full_like(
     const Tensor& self,
     Scalar fill_value,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self);
   return result.fill_(fill_value);
 }
 
@@ -395,9 +371,8 @@ Tensor& ones_out(Tensor& result, IntArrayRef size) {
 
 Tensor ones_like(
     const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self, options);
   return result.fill_(1);
 }
 
@@ -441,9 +416,8 @@ Tensor& rand_out(Tensor& result, IntArrayRef size, Generator* generator) {
 
 Tensor rand_like(
     const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self, options);
   return result.uniform_(0, 1, nullptr);
 }
 
@@ -509,9 +483,8 @@ Tensor& randint_out(
 Tensor randint_like(
     const Tensor& self,
     int64_t high,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self, options);
   return result.random_(0, high, nullptr);
   return native::randint(high, self.sizes(), nullptr, options);
 }
@@ -520,9 +493,8 @@ Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self, options);
   return result.random_(low, high, nullptr);
 }
 
@@ -560,9 +532,8 @@ Tensor& normal_out(Tensor& result, double mean, double std,
 
 Tensor randn_like(
     const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, options, optional_memory_format);
+    const TensorOptions& options) {
+  auto result = at::empty_like(self, options);
   return result.normal_(0, 1, nullptr);
 }
 
@@ -739,15 +710,14 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
 
 Tensor zeros_like(
     const Tensor& self,
-    const TensorOptions& options,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    const TensorOptions& options) {
   if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
         self.sizes(), self.sparse_dim(), self.dense_dim());
     return res;
   }
-  auto result = at::empty_like(self, options, optional_memory_format);
+  auto result = at::empty_like(self, options);
   return result.zero_();
 }
 
@@ -928,7 +898,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
       memory_format = src.suggest_memory_format();
     }
   }
-  auto self = at::empty_like(src, src.options(), memory_format);
+  auto self = at::empty_like(src, src.options().memory_format(memory_format));
   self.copy_(src);
   return self;
 }

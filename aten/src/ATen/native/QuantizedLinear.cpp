@@ -97,8 +97,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // Allocate output Tensor and a buffer for fbgemmPacked to use
   std::vector<int64_t> output_size = input.sizes().vec();
   output_size.back() = N;
-  Tensor output = at::empty(output_size, input.options().dtype(at::kFloat), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor buffer = at::empty(output_size, input.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor output = at::empty(output_size, input.options().dtype(at::kFloat).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  Tensor buffer = at::empty(output_size, input.options().dtype(at::kInt).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
   // Pull out the PackBMatrix instance from the owning tensor
   auto& pack_b =
@@ -236,7 +236,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   q_params.precision = kPrecision;
 
   Tensor quantized = at::native::empty_like(
-      weight_contig, weight_contig.options().dtype(at::kChar), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      weight_contig, weight_contig.options().dtype(at::kChar).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
   fbgemm::Quantize<int8_t>(
@@ -248,7 +248,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Calculate column offsets of the weight and store them away in a tensor.
   // Similarly to quantization, this can be done once and cached.
   Tensor col_offsets = at::empty(
-      {weight_contig.size(0)}, weight_contig.options().dtype(at::kInt), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      {weight_contig.size(0)}, weight_contig.options().dtype(at::kInt).memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   CalcColOffsetsTranspose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
