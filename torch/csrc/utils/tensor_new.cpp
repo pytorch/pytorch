@@ -170,7 +170,7 @@ ScalarType infer_scalar_type(PyObject *obj) {
     return ScalarType::Bool;
   }
   if (PyComplex_Check(obj)) {
-    return ScalarType::ComplexDouble;
+    return ScalarType::ComplexFloat;
   }
   if (THPVariable_Check(obj)) {
     auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
