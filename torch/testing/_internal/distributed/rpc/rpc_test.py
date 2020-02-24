@@ -237,6 +237,12 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+@torch.jit.script
+def heavy_rpc_torchscript(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor /= i + 1
+    return 0
 
 def raise_func():
     raise ValueError("Expected error")
@@ -257,6 +263,7 @@ def clear_global_rref():
 
 @torch.jit.script
 def one_arg(value):
+    # type: (Tensor) -> Tensor
     return value + 1
 
 
@@ -265,16 +272,21 @@ class MyScriptClass:
     def __init__(self):
         self.a = 10
 
+@torch.jit.interface
+class MyModuleInterface(torch.nn.Module):
+    def forward(self):
+        # type: () -> Tensor
+        pass
 
 class MyScriptModule(torch.jit.ScriptModule):
-    def __init__(self):
+    def __init__(self, rank):
         super().__init__()
-        self.a = 10
+        self.a = torch.ones(rank)
 
     @torch.jit.script_method
-    def my_method(self):
-        self.a = 11
-
+    def forward(self):
+        # type: () -> Tensor
+        return self.a
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -877,7 +889,7 @@ class RpcTest(RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptModule), args=()
+                "worker{}".format(dst_rank), _qualified_name(MyScriptModule), args=(self.rank, )
             )
 
         with self.assertRaisesRegex(
@@ -885,15 +897,17 @@ class RpcTest(RpcAgentTestFixture):
         ):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
+                _qualified_name(MyScriptModule(self.rank).forward),
                 args=(),
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
             ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule().my_method, args=()
-            )
+                'worker{}'.format(dst_rank),
+                MyScriptModule(self.rank).forward,
+                args=())
+
 
     @dist_init
     def test_nested_rpc(self):
@@ -919,8 +933,8 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(fut.wait(), 0)
         tok = time.time()
         print(
-            "Rank {} finished testing {} {} times in {} seconds.".format(
-                self.rank, f.__name__, repeat, tok - tik
+            "Rank {} finished testing {} times in {} seconds.".format(
+                self.rank, repeat, tok - tik
             )
         )
 
@@ -931,6 +945,10 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
+
+    @dist_init
+    def test_stress_heavy_rpc_torchscript(self):
+        self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
 
     @dist_init
     def test_builtin_remote_ret(self):
@@ -1716,25 +1734,98 @@ class RpcTest(RpcAgentTestFixture):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
         self.assertTrue(torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler)
 
-
 @unittest.skipIf(
     sys.version_info < (3, 0),
     "Pytorch distributed rpc package " "does not support python2",
 )
 class RpcJitTest(RpcAgentTestFixture):
     @dist_init
-    def test_rref_as_arg(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        rref_var = rpc_return_rref("worker{}".format(dst_rank))
-
+    def test_rref_as_arg_and_return(self):
         @torch.jit.script
-        def rref_tensor_to_here(rref_var):
+        def rref_to_here(rref_var):
             # type: (RRef[Tensor]) -> Tensor
             return rref_var.to_here()
 
-        res = rref_tensor_to_here(rref_var)
-        self.assertEqual(res, torch.ones(2, 2) + 1)
+        @torch.jit.script
+        def return_rref(rref_var):
+            # type: (RRef[Tensor]) -> RRef[Tensor]
+            return rref_var
+
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        local_ret = one_arg(torch.ones(2, 2))
+
+        # create rref on current rank
+        rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+
+        # pass rref to another user in rpc call
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref,))
+        self.assertEqual(ret, local_ret)
+
+        # return rref in rpc call
+        rref1 = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            return_rref,
+            args=(rref,))
+        self.assertEqual(rref1.to_here(), local_ret)
+
+        # pass rref to another user in remote call
+        rref2 = rpc.remote(
+            "worker{}".format(dst_rank),
+            rref_to_here,
+            args=(rref,))
+        self.assertEqual(rref2.to_here(), local_ret)
+
+        # return rref in remote call
+        rref3 = rpc.remote(
+            "worker{}".format(dst_rank),
+            return_rref,
+            args=(rref,))
+        self.assertEqual(rref3.to_here().to_here(), local_ret)
+
+    @dist_init
+    def test_remote_script_module(self):
+        @torch.jit.ignore
+        def my_script_module_init(rank):
+            # type: (int) -> MyModuleInterface
+            return MyScriptModule(rank)
+
+        @torch.jit.script
+        def construct_my_script_module(rank):
+            # type: (int) -> MyModuleInterface
+            return my_script_module_init(rank)
+
+        @torch.jit.script
+        def run_ref_script_module(ref_script_module, t):
+            # type: (RRef[MyModuleInterface], Tensor) -> Tensor
+            module = ref_script_module.to_here()
+            return module.forward() + t
+
+        # TODO, need more investigation
+        # there is rref leak when shutting down, suspect it is because
+        # ref as arg is passed to pybind boundary, and the ref is not garbage
+        # collected by python when calling shutdown()
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = True
+
+        local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
+
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        remote_ref = rpc.remote(
+            "worker{}".format(dst_rank),
+            construct_my_script_module,
+            args=(self.rank, ))
+
+        # pass rref arg to owner
+        ret = rpc.rpc_sync(
+            "worker{}".format(dst_rank),
+            run_ref_script_module,
+            args=(remote_ref, torch.ones(self.rank)))
+        self.assertEqual(ret, local_ret)
 
     @dist_init
     def test_rref_is_owner(self):
