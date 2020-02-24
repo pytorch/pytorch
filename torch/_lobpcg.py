@@ -236,7 +236,7 @@ def lobpcg(A,                   # type: Tensor
 
 
 @torch.jit.script
-class LOBPCG:
+class LOBPCG(object):
     """Worker class of LOBPCG methods.
     """
 
