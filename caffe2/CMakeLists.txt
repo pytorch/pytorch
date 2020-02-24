@@ -454,6 +454,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
+
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -755,6 +766,7 @@ ENDIF()
 
   if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if (USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
     endif()
@@ -871,6 +883,14 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+endif()
+
+# Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
+# jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
+if (USE_DISTRIBUTED)
+  target_compile_definitions(torch_cpu PRIVATE
+    USE_DISTRIBUTED
+  )
 endif()
 
 if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
