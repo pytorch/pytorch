@@ -29,6 +29,7 @@ __global__ void ComputeMulGradientCUDAKernel(
     const TIn* W,
     TGrad* dX) {
   __shared__ typename BlockReduce<TGrad>::TempStorage temp_storage;
+  int valid = min(inner_size, CAFFE_CUDA_NUM_THREADS);
   for (int i = blockIdx.x; i < outer_size; i += gridDim.x) {
     TGrad sum = 0;
     for (int j = threadIdx.x; j < inner_size; j += blockDim.x) {
@@ -55,7 +56,7 @@ __global__ void ComputeMulGradientCUDAKernel(
       sum += dY[Y_index] * W[W_index];
 #endif
     }
-    sum = BlockReduce<TGrad>(temp_storage).Reduce(sum, cub::Sum());
+    sum = BlockReduce<TGrad>(temp_storage).Sum(sum, valid);
     if (threadIdx.x == 0) {
       dX[i] = sum;
     }
@@ -88,9 +89,10 @@ void ComputeMulGradientCUDAImpl(
     W_strides_arr.data[i] = W_dims[i] == 1 ? 0 : cur_stride;
     cur_stride *= W_dims[i];
   }
+  int threads = std::min(inner_size, CAFFE_CUDA_NUM_THREADS);
   ComputeMulGradientCUDAKernel<TGrad, TIn, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-         CAFFE_CUDA_NUM_THREADS,
+         threads,
          0,
          context->cuda_stream()>>>(
           outer_size,
