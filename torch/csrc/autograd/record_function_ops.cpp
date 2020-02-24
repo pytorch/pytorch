@@ -4,8 +4,8 @@
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
-CAFFE_KNOWN_TYPE(torch::autograd::profiler::
-                     RecordFunction); // NOLINT(bugprone-exception-escape)
+// NOLINTNEXTLINE(bugprone-exception-escape)
+CAFFE_KNOWN_TYPE(torch::autograd::profiler::RecordFunction);
 } // namespace caffe2
 
 namespace torch {
