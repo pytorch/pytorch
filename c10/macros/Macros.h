@@ -84,8 +84,8 @@
 #endif
 
 // suppress an unused variable.
-#ifdef _MSC_VER
-#define C10_UNUSED
+#if defined(_MSC_VER) && !defined(__clang__)
+#define C10_UNUSED __pragma(warning(suppress: 4100 4101))
 #else
 #define C10_UNUSED __attribute__((__unused__))
 #endif //_MSC_VER
@@ -218,7 +218,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #endif // ANDROID / IOS / MACOS
 
 // Portably determine if a type T is trivially copyable or not.
-#if __GNUG__ && __GNUC__ < 5
+#if defined(__GNUG__) && __GNUC__ < 5
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value

@@ -141,13 +141,37 @@ jobs:
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
+    parameters:
+      test_name:
+        type: string
+        default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.11"
+      vc_year:
+        type: string
+        default: "2017"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
     executor: windows-cpu-with-nvidia-cuda
     steps:
       - checkout
       - run:
           name: Install VS2017
           command: |
-            powershell .circleci/scripts/vs_install.ps1
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              powershell .circleci/scripts/vs_install.ps1
+            fi
       - run:
           name: Install Cuda
           command: |
@@ -177,13 +201,33 @@ jobs:
       test_name:
         type: string
         default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.11"
+      vc_year:
+        type: string
+        default: "2017"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
     executor: windows-with-nvidia-gpu
     steps:
       - checkout
       - run:
           name: Install VS2017
           command: |
-            powershell .circleci/scripts/vs_install.ps1
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              powershell .circleci/scripts/vs_install.ps1
+            fi
       - run:
           name: Test
           no_output_timeout: "30m"
