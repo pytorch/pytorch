@@ -885,16 +885,16 @@
 ]]
 [[
   name: _th_mv
-  cpu_bfloat16: True
   cuda_bfloat16: True
   cname: addmv
+  backends:
+    - CUDA
   variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
       resize: [ [self, 0] ]
-      cpu_zero: True
     - argument 0
     - THTensor* self
     - THTensor* vec
@@ -903,9 +903,10 @@
 ]]
 [[
   name: _th_mm
-  cpu_bfloat16: True
   cuda_bfloat16: True
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   options:
     - cname: addmm
@@ -913,7 +914,6 @@
         - arg: THTensor* result
           output: True
           resize: [ [self, 0], [mat2,1] ]
-          cpu_zero: True
         - argument 0
         - THTensor* self
         - THTensor* mat2
@@ -933,7 +933,6 @@
     - arg: THTensor* result
       output: True
       resize: [ [self,0], [self,1], [mat2,2] ]
-      cpu_zero: True
     - argument 0
     - THTensor* self
     - THTensor* mat2

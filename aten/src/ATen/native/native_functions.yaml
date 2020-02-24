@@ -1934,7 +1934,7 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_mm
+    CPU: mm_cpu
     CUDA: legacy::cuda::_th_mm
     SparseCPU: _sparse_mm
     SparseCUDA: _sparse_mm
@@ -1942,7 +1942,7 @@
 
 - func: mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_mm_out
+    CPU: mm_cpu_out
     CUDA: legacy::cuda::_th_mm_out
     SparseCPU: _sparse_mm_out
     SparseCUDA: _sparse_mm_out
@@ -2007,13 +2007,13 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    CPU: legacy::cpu::_th_mv
+    CPU: mv_cpu
     CUDA: legacy::cuda::_th_mv
   supports_named_tensor: True
 
 - func: mv.out(Tensor self, Tensor vec, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_mv_out
+    CPU: mv_cpu_out
     CUDA: legacy::cuda::_th_mv_out
   supports_named_tensor: True
 
