@@ -98,7 +98,14 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+
   AT_ASSERT(options.device().type() == DeviceType::CPU);
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
@@ -125,7 +132,7 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options, c10::optional<c
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
@@ -199,7 +206,15 @@ Tensor empty_like(
     const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
 
-  TensorOptions options = self.options().merge_in(options_);
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_in(TensorOptions().memory_format(optional_memory_format));
 
   TORCH_CHECK(
       !(options.layout() != kStrided &&
@@ -212,10 +227,9 @@ Tensor empty_like(
     return result;
   }
 
-  if (self.is_quantized()) {
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
-    auto memory_format =
-        optional_memory_format.value_or(MemoryFormat::Preserve);
+  if (self.is_quantized()) {
 
     // TODO: To support all features of MemoryFormat::Preserve we need to add
     // _empty_affine_quantized_strided function and use it similarly to
@@ -225,6 +239,19 @@ Tensor empty_like(
       memory_format = self.suggest_memory_format();
     }
 
+
+    // Note [Explicit nullopt MemoryFormat argument]
+    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    // Some functions which we call default the OPTIONAL MemoryFormat
+    // argument to something that's not nullopt.  If we pass the
+    // MemoryFormat via TensorOptions, we must explicitly disable this
+    // defaulting process, by explicitly passing nullopt for the MemoryFormat
+    // argument.  When codegen is adjusted so we can delete this argument from
+    // the method signature, the argument will just disappear entirely.
+    //
+    // BTW, there are a few places where the optional MemoryFormat is None,
+    // but I still pass in nullopt for robustness.
+
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
     TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
@@ -233,10 +260,11 @@ Tensor empty_like(
                 " Input tensor's dtype: ", self.dtype());
     auto qscheme = self.qscheme();
     if (qscheme == kPerTensorAffine) {
-      return at::_empty_affine_quantized(self.sizes(), options,
+      return at::_empty_affine_quantized(self.sizes(), options.memory_format(memory_format),
                                          self.q_scale(),
                                          self.q_zero_point(),
-                                         memory_format);
+                                         // See Note [Explicit nullopt MemoryFormat argument]
+                                         c10::nullopt);
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
@@ -244,8 +272,9 @@ Tensor empty_like(
           self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
-          options,
-          memory_format);
+          options.memory_format(memory_format),
+          // See Note [Explicit nullopt MemoryFormat argument]
+          c10::nullopt);
     } else {
       TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
     }
@@ -253,16 +282,16 @@ Tensor empty_like(
 
   Tensor result;
 
-  auto memory_format =
-      optional_memory_format.value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      result = at::empty_strided(self.sizes(), self.strides(), options);
+      result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else {
-      result = at::empty(self.sizes(), options, self.suggest_memory_format());
+      // See Note [Explicit nullopt MemoryFormat argument]
+      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
     }
   } else {
-    result = at::empty(self.sizes(), options, memory_format);
+    // See Note [Explicit nullopt MemoryFormat argument]
+    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
   }
 
   if (self.opt_names()) {
