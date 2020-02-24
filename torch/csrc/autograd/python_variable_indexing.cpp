@@ -119,7 +119,7 @@ static inline Variable applySlicing(
     const Variable& self,
     PyObject* index,
     variable_list& outIndices,
-    bool disable_slice_optimization,
+    bool is_tracing,
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -185,7 +185,7 @@ static inline Variable applySlicing(
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
       // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-      /*disable_slice_optimization=*/disable_slice_optimization,
+      /*disable_slice_optimization=*/is_tracing,
       /*original_tensor_device=*/self_device,
       /*prev_dim_result_sizes=*/result.sizes());
   }
@@ -293,9 +293,8 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
   Variable sliced = applySlicing(
-    self_, holder.get(), variableIndices, /*disable_slice_optimization=*/is_tracing, self_.device(), self_.sizes());
+    self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_.device(), self_.sizes());
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
@@ -380,9 +379,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
   Variable sliced = applySlicing(
-    self_, holder.get(), variableIndices, /*disable_slice_optimization=*/is_tracing, self_device, self_.sizes());
+    self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_device, self_.sizes());
   if (variableIndices.empty()) {
     at::indexing::copy_to(sliced, value);
     return 0;
