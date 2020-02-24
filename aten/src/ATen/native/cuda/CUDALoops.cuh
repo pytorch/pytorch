@@ -261,7 +261,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // compute
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    results[i] = c10::guts::apply(f, args[i]);
+    if (policy.check_inbounds(i)) {
+      results[i] = c10::guts::apply(f, args[i]);
+    }
   }
 
   // store
