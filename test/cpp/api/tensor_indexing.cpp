@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-// yf225 TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
+// TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
 // is ready to ship.
 #include <ATen/native/TensorIndexing.h>
 #include <torch/torch.h>
@@ -130,25 +130,11 @@ TEST(TensorIndexingTest, TestAdvancedIndexingWithArrayRefOfTensor) {
   }
 }
 
-// yf225 TODO: I will remove the Python tests in the comments once the PR is approved.
-
-/*
-class TestIndexing(TestCase):
-    def test_single_int(self):
-        v = torch.randn(5, 7, 3)
-        self.assertEqual(v[4].shape, (7, 3))
-*/
 TEST(TensorIndexingTest, TestSingleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
 }
 
-/*
-    def test_multiple_int(self):
-        v = torch.randn(5, 7, 3)
-        self.assertEqual(v[4].shape, (7, 3))
-        self.assertEqual(v[4, :, 1].shape, (7,))
-*/
 TEST(TensorIndexingTest, TestMultipleInt) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({4}).sizes(), torch::IntArrayRef({7, 3}));
@@ -159,14 +145,6 @@ TEST(TensorIndexingTest, TestMultipleInt) {
   ASSERT_EQ(v.index({4, 3, 1}).item<double>(), 0);
 }
 
-/*
-    def test_none(self):
-        v = torch.randn(5, 7, 3)
-        self.assertEqual(v[None].shape, (1, 5, 7, 3))
-        self.assertEqual(v[:, None].shape, (5, 1, 7, 3))
-        self.assertEqual(v[:, None, None].shape, (5, 1, 1, 7, 3))
-        self.assertEqual(v[..., None].shape, (5, 7, 3, 1))
-*/
 TEST(TensorIndexingTest, TestNone) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({None}).sizes(), torch::IntArrayRef({1, 5, 7, 3}));
