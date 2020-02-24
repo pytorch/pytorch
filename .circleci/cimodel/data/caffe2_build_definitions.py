@@ -73,8 +73,8 @@ class Conf:
         lang_substitutions = {
             "onnx_py2": "py2",
             "onnx_py3.6": "py3.6",
-            "onnx_py3.6_part1": "py3.6-part1",
-            "onnx_py3.6_part2": "py3.6-part2",
+            "onnx_py3.6_part1": "py3.6",
+            "onnx_py3.6_part2": "py3.6",
             "cmake": "py2",
         }
 
