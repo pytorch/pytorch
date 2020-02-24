@@ -202,8 +202,7 @@ static inline Tensor applySlice(
     int64_t start,
     int64_t stop,
     int64_t step,
-    bool ensure_view,
-    bool is_tracing,
+    bool disable_slice_optimization,
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
   // TODO: implement negative step
@@ -213,7 +212,7 @@ static inline Tensor applySlice(
   // over the shape of the `self` tensor, and we still want to record
   // the slice.
   int64_t length = (self_device == at::kCPU || self_device == at::kCUDA) ? self_sizes[dim] : self.size(dim);
-  if (!ensure_view && start == 0 && stop == length && step == 1 && !is_tracing) {
+  if (!disable_slice_optimization && start == 0 && stop == length && step == 1) {
     return self;
   }
   return self.slice(dim, start, stop, step);
@@ -368,6 +367,7 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
   dst.copy_(b_src);
 }
 
+// See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
 static inline Tensor handleDimInMultiDimIndexing(
     const Tensor& prev_dim_result,
     const Tensor& original_tensor,
@@ -376,7 +376,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     int64_t* specified_dims_ptr,
     int64_t real_dim,
     std::vector<Tensor>& outIndices,
-    bool is_tracing,
+    bool disable_slice_optimization,
     const at::Device& original_tensor_device,
     const IntArrayRef& prev_dim_result_sizes) {
   if (index.is_integer()) {
@@ -388,8 +388,7 @@ static inline Tensor handleDimInMultiDimIndexing(
       index.slice().start(),
       index.slice().stop(),
       index.slice().step(),
-      /*ensure_view=*/false,
-      /*is_tracing=*/is_tracing,
+      /*disable_slice_optimization=*/disable_slice_optimization,
       original_tensor_device,
       prev_dim_result_sizes);
     (*dim_ptr)++;
@@ -435,7 +434,7 @@ static inline Tensor applySlicing(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
     std::vector<Tensor>& outIndices,
-    bool is_tracing,
+    bool disable_slice_optimization,
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
   int64_t dim = 0;
@@ -454,7 +453,7 @@ static inline Tensor applySlicing(
       /*specified_dims=*/&specified_dims,
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
-      /*is_tracing=*/is_tracing,
+      /*disable_slice_optimization=*/disable_slice_optimization,
       /*original_tensor_device=*/self_device,
       /*prev_dim_result_sizes=*/result.sizes());
   }
@@ -470,8 +469,34 @@ static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& ind
   return self.index_put_(impl::typeConvertIndices(self, std::move(indices)), value);
 }
 
+// NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+//
+// Question: When should we set `disable_slice_optimization` to `true` when calling C++ tensor indexing
+// functions from Python indexing code?
+//
+// Answer: What "slice optimization" means: when we have a slicing expression like `x[0:5, 0]`, where the sliced tensor
+// was of size 5 in dimension 0, we would skip dispatching the actual slice call as an optimization. However, here are
+// the cases where we DON'T want this optimization:
+//
+// 1. When we are doing 1-D slicing (e.g. `tensor[:]`).
+//    Reason: we always return a shallow copy for expressions such as `tensor[:]` / `tensor[...]` / `tensor[:, :]`.
+//    (Note that for `tensor[:, :]`, we return an alias of `tensor` by doing the following:
+//    ```
+//    Tensor sliced = impl::applySlicing(self, indices, tensorIndices, disable_slice_optimization, self_device, self_sizes);
+//    if (tensorIndices.empty()) {
+//      if (sliced.is_same(self)) {
+//        // ensure we return a shallow copy for things like x[...]
+//        sliced = at::alias(sliced);
+//      }
+//      return sliced;
+//    }
+//    ```)
+// 2. When we are doing JIT tracing.
+//    Reason: JIT tracing needs the `self.slice(...)` call to properly trace the slice operation.
+
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
-static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool is_tracing_and_1d_slice_or_Nd = false) {
+// See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
@@ -487,8 +512,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
         index.slice().start(),
         index.slice().stop(),
         index.slice().step(),
-        /*ensure_view=*/true,
-        /*is_tracing=*/is_tracing_and_1d_slice_or_Nd,
+        /*disable_slice_optimization=*/true,
         self_device,
         self_sizes);
     } else if (index.is_none()) {
@@ -505,7 +529,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing_and_1d_slice_or_Nd, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, disable_slice_optimization, self_device, self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
@@ -520,7 +544,8 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
-static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool is_tracing_and_1d_slice_or_Nd = false) {
+// See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
@@ -547,8 +572,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
         index.slice().start(),
         index.slice().stop(),
         index.slice().step(),
-        /*ensure_view=*/false,
-        /*is_tracing=*/is_tracing_and_1d_slice_or_Nd,
+        /*disable_slice_optimization=*/disable_slice_optimization,
         self_device,
         self_sizes), value);
       return;
@@ -556,7 +580,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing_and_1d_slice_or_Nd, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, disable_slice_optimization, self_device, self_sizes);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;

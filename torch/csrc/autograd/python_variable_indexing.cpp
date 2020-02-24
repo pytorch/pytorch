@@ -119,7 +119,7 @@ static inline Variable applySlicing(
     const Variable& self,
     PyObject* index,
     variable_list& outIndices,
-    bool is_tracing,
+    bool disable_slice_optimization,
     const at::Device& self_device,
     const IntArrayRef& self_sizes) {
   int64_t size = PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -184,7 +184,8 @@ static inline Variable applySlicing(
       /*specified_dims_ptr=*/&specified_dims,
       /*real_dim=*/i,
       /*outIndices=*/outIndices,
-      /*is_tracing=*/is_tracing,
+      // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+      /*disable_slice_optimization=*/disable_slice_optimization,
       /*original_tensor_device=*/self_device,
       /*prev_dim_result_sizes=*/result.sizes());
   }
@@ -280,8 +281,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       recordSliceTrace(index);
     }
     return THPVariable_Wrap(
-      at::indexing::get_item(
-        self_, {at::indexing::TensorIndex({start, stop, step})}, /*is_tracing_and_1d_slice_or_Nd=*/is_tracing));
+      at::indexing::get_item(self_, {at::indexing::TensorIndex({start, stop, step})}));
   } else if (index == Py_False || index == Py_True) {
     return THPVariable_Wrap(([&]() {
       pybind11::gil_scoped_release no_gil;
@@ -293,7 +293,9 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_.device(), self_.sizes());
+  // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+  Variable sliced = applySlicing(
+    self_, holder.get(), variableIndices, /*disable_slice_optimization=*/is_tracing, self_.device(), self_.sizes());
   if (variableIndices.empty()) {
     if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
@@ -368,8 +370,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing) {
       recordSliceTrace(index);
     }
+    // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
     at::indexing::set_item(
-      self_, {at::indexing::TensorIndex({start, stop, step})}, value, /*is_tracing_and_1d_slice_or_Nd=*/is_tracing);
+      self_, {at::indexing::TensorIndex({start, stop, step})}, value, /*disable_slice_optimization=*/is_tracing);
     return 0;
   }
 
@@ -377,7 +380,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   THPObjectPtr holder = wrapTuple(index);
 
   variable_list variableIndices;
-  Variable sliced = applySlicing(self_, holder.get(), variableIndices, is_tracing, self_device, self_.sizes());
+  // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
+  Variable sliced = applySlicing(
+    self_, holder.get(), variableIndices, /*disable_slice_optimization=*/is_tracing, self_device, self_.sizes());
   if (variableIndices.empty()) {
     at::indexing::copy_to(sliced, value);
     return 0;

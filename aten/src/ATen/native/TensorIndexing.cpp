@@ -56,14 +56,14 @@ static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar 
     }
   }
 
-  return set_item(self, indices, value, /*is_tracing=*/false);
+  return set_item(self, indices, value);
 }
 
 } // namespace indexing
 
 Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
   OptionalDeviceGuard device_guard(device_of(*this));
-  return at::indexing::get_item(*this, indices, /*is_tracing=*/false);
+  return at::indexing::get_item(*this, indices);
 }
 Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) const {
   return index(ArrayRef<at::indexing::TensorIndex>(indices));
@@ -71,7 +71,7 @@ Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) c
 
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs) {
   OptionalDeviceGuard device_guard(device_of(*this));
-  at::indexing::set_item(*this, indices, rhs, /*is_tracing=*/false);
+  at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
