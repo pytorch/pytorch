@@ -547,15 +547,12 @@ REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
-<<<<<<< HEAD
 REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
-=======
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
 REGISTER_DISPATCH(bitwise_xor_stub, &bitwise_xor_kernel);
 REGISTER_DISPATCH(lshift_stub, &lshift_kernel);
 REGISTER_DISPATCH(rshift_stub, &rshift_kernel);
->>>>>>> master
 REGISTER_DISPATCH(logical_xor_stub, &logical_xor_kernel);
 REGISTER_DISPATCH(logical_and_stub, &logical_and_kernel);
 REGISTER_DISPATCH(logical_or_stub, &logical_or_kernel);
