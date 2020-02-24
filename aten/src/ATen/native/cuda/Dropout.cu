@@ -158,13 +158,14 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
    iter.add_output(ret);
    iter.add_input(src);
    iter.add_input(mask);
+   iter.dont_compute_common_dtype();
 
    iter.build();
 
    at::native::gpu_kernel(
        iter,
-       [=]GPU_LAMBDA(const scalar_t src_val, const uint8_t mask_val, accscalar_t scale_val) -> scalar_t {
-          return (float)mask_val * src_val * scale_val;
+       [=]GPU_LAMBDA(const scalar_t src_val, const uint8_t mask_val) -> scalar_t {
+          return (float)mask_val * src_val * scale;
        });
 }
 
