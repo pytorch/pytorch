@@ -14,12 +14,13 @@ namespace cpu {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool, iter.dtype(), "random_from_to_kernel_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if ((
       std::is_same<scalar_t, int64_t>::value ||
       std::is_same<scalar_t, double>::value ||
-      std::is_same<scalar_t, float>::value) && range >= 1ULL << 32)
+      std::is_same<scalar_t, float>::value ||
+      std::is_same<scalar_t, at::BFloat16>::value) && range >= 1ULL << 32)
     {
       cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
         return static_cast<scalar_t>(static_cast<int64_t>((generator->random64() % range) + base));
@@ -37,16 +38,17 @@ void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, R
 // to(exclusive) = None (= std::numeric_limits<int64_t>::max() + 1)
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if (std::is_same<scalar_t, int64_t>::value ||
         std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, float>::value) {
+        std::is_same<scalar_t, float>::value ||
+        std::is_same<scalar_t, at::BFloat16>::value) {
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
         return static_cast<scalar_t>(static_cast<int64_t>(generator->random64()));
       });
     } else {
-      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double and float");
+      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double, float and bfloat16");
     }
   });
 }

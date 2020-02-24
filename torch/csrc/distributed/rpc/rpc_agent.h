@@ -13,6 +13,11 @@ namespace rpc {
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
+// Input is qualified name string, output is JIT StrongTypePtr
+// Same as jit::TypeResolver, did not import jit::TypeResolver to here
+// because it could instroduce cyclic dependencies.
+using TypeResolver =
+    std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 struct RpcBackendOptions {
   RpcBackendOptions() = default;
@@ -212,11 +217,19 @@ class TORCH_API RpcAgent {
   // Retrieve wheher we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
+  // Set type resolver that will be passed to JIT pickler to resolver type Ptr
+  // based on type str.
+  void setTypeResolver(std::shared_ptr<TypeResolver> typeResolver);
+
+  // Get the type resolver
+  std::shared_ptr<TypeResolver> getTypeResolver();
+
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
   std::atomic<std::chrono::milliseconds> rpcTimeout_;
   std::atomic<bool> profilingEnabled_;
+  std::shared_ptr<TypeResolver> typeResolver_;
 
  private:
   static std::shared_ptr<RpcAgent> currentRpcAgent_;

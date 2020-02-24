@@ -331,6 +331,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       return dptr;
     };
 
+    // No need to pass typeResolver here, as it always processes string and
+    // tensors only
     torch::jit::Unpickler unpickler(
         metaDataReadFunc, nullptr, nullptr, sectionReadFunc, {});
     auto ival = unpickler.parse_ivalue();
