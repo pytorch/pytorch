@@ -59,18 +59,21 @@ def _check_rpc_done(rank_distance):
 def _torch_ones(sizes, requires_grad=False):
     return torch.ones(sizes, requires_grad=requires_grad)
 
-
-# creates an owner rref on the given dst, and the rref holds a torch.ones tensor
-# of the given size.
-def _create_ones_rref_on(dst, sizes):
-    return rpc.remote(dst, _torch_ones, args=(sizes,), kwargs={"requires_grad": True})
-
-
 # This method must be called on the rref owner, and verifies that the grad of
 # rref tensor equals to the given grad.
 def _compare_owner_value(context_id, rref, grad):
     grads = dist_autograd.get_gradients(context_id)
     return torch.equal(grads[rref.local_value()], grad)
+
+
+def create_tensor():
+    return torch.ones((3, 3), requires_grad=True)
+
+
+@torch.jit.script
+def create_torchscript_tensor():
+    # type: () -> Tensor
+    return torch.ones((3, 3)).requires_grad_()
 
 
 def my_py_add(t1, t2):
@@ -88,6 +91,13 @@ def my_rref_add(rref_t1, t2):
 
 @torch.jit.script
 def my_script_add(t1, t2):
+    return torch.add(t1, t2)
+
+
+@torch.jit.script
+def my_script_ref_add(ref_t1, t2):
+    # type: (RRef[Tensor], Tensor) -> Tensor
+    t1 = ref_t1.to_here()
     return torch.add(t1, t2)
 
 
@@ -137,6 +147,16 @@ def _all_contexts_cleaned_up(timeout_seconds=10):
 def _run_trainer(rref_t1, t2, ps, rank_diff):
     with dist_autograd.context() as context_id:
         ret = rpc.rpc_sync(ps, my_rref_add, args=(rref_t1, t2))
+        dist_autograd.backward([ret.sum()])
+        # prevent deleting dist autograd context
+        rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
+        rpc.rpc_sync(ps, _check_rpc_done, args=(0,))
+
+# This function is the same as _run_trainer, except rpc calls torchscript
+# function "my_script_ref_add" instead of python funciton "my_rref_add"
+def _run_trainer_torchscript(rref_t1, t2, ps, rank_diff):
+    with dist_autograd.context() as context_id:
+        ret = rpc.rpc_sync(ps, my_script_ref_add, args=(rref_t1, t2))
         dist_autograd.backward([ret.sum()])
         # prevent deleting dist autograd context
         rpc.rpc_sync(ps, _set_rpc_done, args=(context_id, rank_diff))
@@ -913,8 +933,7 @@ class DistAutogradTest(RpcAgentTestFixture):
     #
     # These four test ps-trainer groups run on completely separate autograd
     # graphs, but they share the same set of underlying RpcAgents.
-    @dist_init
-    def test_trainer_ps(self):
+    def _test_trainer_ps(self, create_ref_fn, trainer_fn):
         local_grads = None
         t1 = torch.ones((3, 3), requires_grad=True)
         t2 = torch.zeros((3, 3), requires_grad=True)
@@ -923,13 +942,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         local_ret.sum().backward()
 
         # create rref on self
-        # TODO: simplify this once we support rpc to self
-        self_name = "worker{}".format(self.rank)
-        rref_t1 = rpc.rpc_sync(
-            "worker{}".format(self._next_rank()),
-            _create_ones_rref_on,
-            args=(self_name, (3, 3)),
-        )
+        rref_t1 = rpc.remote(
+            "worker{}".format(self.rank),
+            create_ref_fn,
+            args=())
 
         # kick off forward and backward pass on three other workers (trainers)
         rank_diffs = [1, 2, 3]
@@ -938,8 +954,8 @@ class DistAutogradTest(RpcAgentTestFixture):
             futures.append(
                 rpc.rpc_async(
                     "worker{}".format((self.rank + rank_diff) % self.world_size),
-                    _run_trainer,
-                    args=(rref_t1, t2, self_name, rank_diff),
+                    trainer_fn,
+                    args=(rref_t1, t2, "worker{}".format(self.rank), rank_diff),
                 )
             )
 
@@ -954,7 +970,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             # are all correct
             ctx_id = ctx_ids[rank_diff]
             grads = dist_autograd.get_gradients(ctx_id)
-            local_t1 = rref_t1.local_value()
+            local_t1 = rref_t1.to_here()
             self.assertIn(local_t1, grads)
             self.assertEqual(grads[local_t1], t1.grad)
 
@@ -964,6 +980,21 @@ class DistAutogradTest(RpcAgentTestFixture):
         # wait until all trainers are done
         for fut in futures:
             fut.wait()
+
+    @dist_init
+    def test_trainer_ps(self):
+        self._test_trainer_ps(create_tensor, _run_trainer)
+
+    @dist_init
+    def test_trainer_ps_torchscript_functions(self):
+        # TODO, need more investigation
+        # there is rref leak when shutting down, suspect it is because
+        # ref as arg is passed to pybind boundary, and the ref is not garbage
+        # collected by python when calling shutdown()
+        import torch.distributed.rpc.api as api
+        api._ignore_rref_leak = True
+
+        self._test_trainer_ps(create_torchscript_tensor, _run_trainer_torchscript)
 
     @dist_init
     def test_backward_multiple_round_trips(self):
@@ -1261,8 +1292,8 @@ class DistAutogradTest(RpcAgentTestFixture):
             ExecMode.REMOTE,
         ]:
             with dist_autograd.context() as context_id:
-                ret = self._exec_func(exec_mode, my_script_add, t1, t2)
-                loss = ret.sum()
+                forward_ret = self._exec_func(exec_mode, my_script_add, t1, t2)
+                loss = forward_ret.sum()
                 ret = self._verify_backwards(
                     exec_mode, [loss], context_id, local_grads, t1, t2
                 )
