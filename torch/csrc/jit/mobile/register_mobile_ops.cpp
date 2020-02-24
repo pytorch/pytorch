@@ -97,6 +97,12 @@ void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   push(*stack, self.isSameIdentity(obj));
 }
 
+void __isnot__kernel(const c10::OperatorHandle& op, Stack* stack) {
+  c10::IValue self, obj;
+  pop(*stack, self, obj);
+  push(*stack, !self.isSameIdentity(obj));
+}
+
 void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = at::log_softmax(
     (std::move(peek(*stack, 0, 3))).toTensor(),
@@ -380,6 +386,12 @@ static auto registry = torch::RegisterOperators().op(
      return at::dropout(input, p, train);
   })
 ).op(
+  "_aten::feature_dropout(Tensor input, float p, bool train) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & input, double p, bool train) {
+     return at::feature_dropout(input, p, train);
+  })
+).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options()
     .kernel<&permute_kernel>(c10::DispatchKey::CPUTensorId)
@@ -417,6 +429,9 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel<&__is__kernel>()
+).op(
+  "_aten::__isnot__(t1 self, t2 obj) -> bool",
+  torch::RegisterOperators::options().catchAllKernel<&__isnot__kernel>()
 ).op(
   "_aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   torch::RegisterOperators::options().kernel<&log_softmax_kernel>(c10::DispatchKey::CPUTensorId)
