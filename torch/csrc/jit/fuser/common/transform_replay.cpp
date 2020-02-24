@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/fuser/common/transform_replay.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
+#include <torch/csrc/jit/fuser/common/transform_replay.h>
 
 // For debug:
 /*
@@ -170,6 +170,7 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
   }
 
   influence.insert(influence.begin() + axis + 1, influence[axis]);
+
   return tv;
 }
 
@@ -184,7 +185,7 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
   } else {
     // If we aren't applying the merge, we won't change any following axis
     // Doesn't matter which axis we propagate for the merge in the axis_map
-    assert(axis_map[axis+1] == -1);
+    assert(axis_map[axis + 1] == -1);
   }
   axis_map.erase(axis_map.begin() + expr->axis() + 1);
 
@@ -294,9 +295,9 @@ TensorView* TransformReplay::replay(TensorView* target) {
 /*
  * TODO: When we compare root axes, we should ignore reduction axes in the
  * producer. Reduction axes are owned by a consumer.
- * 
+ *
  * TODO: We should be able to relax the constraints of replay a bit. Right now
- * it requires that the root domain of the target and replay are completely 
+ * it requires that the root domain of the target and replay are completely
  * the same. However, we should only require that the root derived from the
  * axes < compute_at_axis match. We could even go further and look for those
  * matching axes as they don't necessairly need to be in the same order.
@@ -330,23 +331,18 @@ TensorView* TransformReplay::runReplay(
     TensorView* replay_ref,
     TensorView* replay_target,
     int compute_at_axis) {
+  this->compute_at_axis = compute_at_axis;
   /* STEP 1 */
   // Trace back to the root TensorDomain's of ref and target
   TensorDomain* target_root = get_root(replay_target->domain());
-  // Reset the tensor domain of the target, this is the only way we can be certain
-  // That we can actually replay the ops of ref.
+
+  // Reset the tensor domain of the target, this is the only way we can be
+  // certain That we can actually replay the ops of ref.
+
   replay_target->setDomain(target_root);
   // As we trace the ref, record the operations to go from replay_ref ->
   // ref_root, save in "record"
   TensorDomain* ref_root = get_root(replay_ref->domain(), true);
-    
-
-  // Domain sizes must match at root for replay.
-  TORCH_CHECK(target_root->size() == ref_root->size());
-  for(decltype(target_root->size()) i=0; i<target_root->size(); i++){
-    TORCH_CHECK(ref_root->axis(i)->same_as(target_root->axis(i)));
-  }
-  this->compute_at_axis = compute_at_axis;
 
   /* STEP 2 */
   // Mark compute_at_axis and below as "influenced", trace back through
@@ -357,6 +353,17 @@ TensorView* TransformReplay::runReplay(
   // used during replay to forward propagate influence.
   std::vector<bool> root_influence_vector = influence;
 
+  auto init_size = replay_target->domain()->size();
+  for (decltype(init_size) i = 0; i < init_size; i++)
+    if (!replay_target->domain()->axis(i)->isReduction())
+      axis_map.push_back(i);
+
+  // Domain sizes must match at root for replay.
+  TORCH_CHECK(axis_map.size() == ref_root->size());
+  for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
+    TORCH_CHECK(ref_root->axis(i)->same_as(target_root->axis(axis_map[i])));
+  }
+
   /* STEP 3 */
   // Replay operations while forward propagating influence. The resulting
   // influence can be different in forward propagation, than in backward
@@ -366,11 +373,14 @@ TensorView* TransformReplay::runReplay(
   // actually execute those based on influence. If we didn't track all
   // axes, we wouldn't know what axis split/merge/reorder are referencing
   // as they're relative to the "full" replay that produced the reference.
-  auto init_size = replay_target->domain()->size();
-  for (decltype(init_size) i = 0; i < init_size; i++)
-    axis_map.push_back(i);
+  TensorView* replayed = replay(replay_target);
 
-  return replay(replay_target);
+  for (decltype(replayed->domain()->size()) i{0}; i < compute_at_axis; i++)
+    if (replayed->domain()->axis(i)->isReduction())
+      throw std::runtime_error(
+          "Generated a compute_at dependency where a reduction would be used before computed.");
+
+  return replayed;
 }
 
 TensorView* TransformReplay::replay(

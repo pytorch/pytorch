@@ -509,19 +509,12 @@ void testGPU_FusionComputeAt() {
 
   TensorDomain* td = new TensorDomain(dom);
   //TensorView* tv0 = new TensorView(new Tensor(DataType::Float, td));
-  //TensorView* tv2 = new TensorView(new Tensor(DataType::Float, td));
-  TensorView* tv0 = new TensorView(new Tensor(DataType::Float, td));
-  TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(1.0)));
-  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(1.0)));
+  TensorView* tv0 = new TensorView(td, DataType::Float);
+  new BinaryOp(BinaryOpType::Add, tv0, new Float(0.0), new Float(1.0));
+  TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(2.0)));
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(3.0)));
 
-  // tv2 = tv3 + 1.0
-  //BinaryOp* add_node =
-  //    new BinaryOp(BinaryOpType::Add, tv2, tv3, new Float(1.0));
-  // tv0 = tv2 + 1.0
-  //BinaryOp* add_node2 =
-  //    new BinaryOp(BinaryOpType::Add, tv0, tv2, new Float(1.0));
-
-  std::cout<<fusion<<std::endl;
+  ASSERT_ANY_THROW(tv0->computeAt(tv2, 3));
 
   //[I0, I1, I2]
   tv2 = split(tv2, 0, 4);
@@ -534,14 +527,13 @@ void testGPU_FusionComputeAt() {
   //[I0i{4}*I1, I0o, I2i, I2o{2}]
   std::cout << "Replaying: " << td << "\n-> " << tv2 << "\n on " << tv0
             << " and " << tv1 << "\nwith \'compute_at(2)\' produces:\n"
-
             << tv0->computeAt(tv2, 2)
-
-            << "\nWhich should be unchanged, however\n"
+            << "\nWhich should along the lines of:"
+            << "\n[I0i{4}*I1, I0o, R0, I2]\n"
             << tv1 << " should be along the lines of: "
             << "\n[I0i{4}*I1, I0o, I2]" << std::endl;
- 
-}
+  
+ }
 
 void testGPU_FusionComputeAt2() {
   Fusion fusion;
@@ -550,9 +542,6 @@ void testGPU_FusionComputeAt2() {
   std::vector<IterDomain*> dom;
   dom.push_back(new IterDomain(new Int()));
   dom.push_back(new IterDomain(new Int()));
-  //TODO: Using reduction axis is broken as they are not properly handled in
-  //compute at and TransformReplay
-  //dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
   dom.push_back(new IterDomain(new Int()));
   dom.push_back(new IterDomain(new Int()));
 
@@ -562,13 +551,13 @@ void testGPU_FusionComputeAt2() {
 
   TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(1.0)));
   
-  //[I0, I1, R0, I2]
+  //[I0, I1, I2, I3]
   tv1 = split(tv1, -1, 4);
-  //[I0, I1, R0, I2o, I2i{4}]
+  //[I0, I1, I2, I3o, I3i{4}]
   tv1 = reorder(tv1, {{3, 0}, {0, 3}, {1, 4}, {4, 1}});
-  //[I2o, I2i{4}, R0, I0, I1]
+  //[I3o, I3i{4}, I2, I0, I1]
   tv1 = split(tv1, 3, 2);
-  //[I2o, I2i{4}, R0, I0o, I0i{2}, I1]
+  //[I3o, I3i{4}, I2, I0o, I0i{2}, I1]
   tv1 = reorder(
       tv1,
       {
@@ -576,13 +565,13 @@ void testGPU_FusionComputeAt2() {
           //{0, 4} //doesn't need to be specified
           //{1, 5} //doesn't need to be specified
       });
-  //[I0o, I0i{2}, I1, R0, I2o, I2i{4}]
+  //[I0o, I0i{2}, I1, I2, I3o, I3i{4}]
 
   std::cout << "Replaying: " << td << "\n -> " << tv1 << "\n on " << tv0
             << "\n with \'compute_at(2)\' produces: \n"
             << tv0->computeAt(tv1, 2) << std::endl;
   std::cout << "Which should be along the lines of:";
-  std::cout << "[I0o, I0i{2}, I1, R0, I2]" << std::endl;
+  std::cout << "[I0o, I0i{2}, I1, I2, I3]" << std::endl;
   
 }
 
