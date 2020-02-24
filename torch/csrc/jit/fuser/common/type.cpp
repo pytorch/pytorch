@@ -15,7 +15,7 @@ DataType promote_type(const DataType& t1, const DataType& t2){
 
 //Return highest on list (smallest enum val)
 ValType promote_type(const ValType& t1, const ValType& t2){
-  TORCH_CHECK(t1 >= ValType::Tensor && t2 >= ValType::Tensor);
+  TORCH_CHECK(t1 >= ValType::TensorView && t2 >= ValType::TensorView);
   //Check that it's a promotable type (with dtype)
   //static_assert??
   return t1 < t2 ? t1 : t2;

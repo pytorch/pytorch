@@ -232,6 +232,7 @@ struct TORCH_API TensorView : public Val {
   //We'll copy the TensorView with some minor modifications
   //Reduction axes won't get copied over.
   TensorView* cloneForOutput(DataType dtype) const;
+  TensorView* clone() const{ return cloneForOutput(getDataType().value());}
 
   Tensor* tensor() const noexcept { return tensor_; }
   TensorDomain* domain() const noexcept { return domain_; }
