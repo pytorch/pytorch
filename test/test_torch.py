@@ -5414,7 +5414,6 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         qy = qyraw.permute(0, 3, 2, 1)
         test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
 
-
     # Tests to make sure we still handle .data properly until it is removed
     def test_dot_data_use(self):
         # .data allows to change the Tensors types inplace, check that we still
