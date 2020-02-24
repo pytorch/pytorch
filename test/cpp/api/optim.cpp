@@ -211,30 +211,30 @@ TEST(OptimTest, XORConvergence_RMSpropWithMomentum) {
       RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
 }
 
-TEST(OptimTest, XORConvergence_Adam) {
-  ASSERT_TRUE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
-}
-
-TEST(OptimTest, XORConvergence_AdamWithAmsgrad) {
-  ASSERT_TRUE(test_optimizer_xor<Adam>(
-      AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
-}
-
-TEST(OptimTest, ProducesPyTorchValues_Adam) {
-  check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam());
-}
-
-TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecay) {
-  check_exact_values<Adam>(
-      AdamOptions(1.0).weight_decay(1e-2),
-      expected_parameters::Adam_with_weight_decay());
-}
-
-TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
-  check_exact_values<Adam>(
-      AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
-      expected_parameters::Adam_with_weight_decay_and_amsgrad());
-}
+// TEST(OptimTest, XORConvergence_Adam) {
+//   ASSERT_TRUE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
+// }
+//
+// TEST(OptimTest, XORConvergence_AdamWithAmsgrad) {
+//   ASSERT_TRUE(test_optimizer_xor<Adam>(
+//       AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
+// }
+//
+// TEST(OptimTest, ProducesPyTorchValues_Adam) {
+//   check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam());
+// }
+//
+// TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecay) {
+//   check_exact_values<Adam>(
+//       AdamOptions(1.0).weight_decay(1e-2),
+//       expected_parameters::Adam_with_weight_decay());
+// }
+//
+// TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
+//   check_exact_values<Adam>(
+//       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
+//       expected_parameters::Adam_with_weight_decay_and_amsgrad());
+// }
 
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
