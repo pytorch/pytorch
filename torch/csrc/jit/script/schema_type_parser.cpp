@@ -21,6 +21,7 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
 using c10::QSchemeType;
@@ -53,6 +54,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
+      {"Any", at::AnyType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -201,6 +203,14 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     value = FutureType::create(subtype);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+    L.next(); // RRef
+    L.expect('(');
+    auto p = parseType();
+    auto subtype = std::move(p.first);
+    auto subalias = std::move(p.second);
+    L.expect(')');
+    value = RRefType::create(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
     L.next();
     value = TensorType::get();
@@ -219,8 +229,14 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "torch") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
     L.next();
+    L.expect('.');
+    auto torch_tok = L.expect(TK_IDENT);
+    if (torch_tok.text() != "torch") {
+      throw ErrorReport(torch_tok.range)
+          << "Expected classes namespace but got " << torch_tok.text();
+    }
     L.expect('.');
     auto classes_tok = L.expect(TK_IDENT);
     if (classes_tok.text() != "classes") {
@@ -229,7 +245,8 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
-    value = getCustomClass(std::string("torch.classes.") + class_tok.text());
+    value = getCustomClass(
+        std::string("__torch__.torch.classes.") + class_tok.text());
     if (!value) {
       throw ErrorReport(class_tok.range)
           << "Unknown custom class type " << class_tok.text()

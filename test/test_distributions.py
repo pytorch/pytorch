@@ -36,8 +36,8 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf
-from common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
-from common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
@@ -46,7 +46,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
                                  LogNormal, LowRankMultivariateNormal,
-                                 Multinomial, MultivariateNormal,
+                                 MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal, OneHotCategorical, Pareto,
                                  Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
@@ -59,13 +59,13 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             CatTransform, ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
-                                            SoftmaxTransform,
+                                            TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
 from torch.nn.functional import softmax
 
-# load_tests from common_utils is used to automatically filter tests for
+# load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
@@ -430,7 +430,20 @@ EXAMPLES = [
             'scale': torch.randn(5, 5).abs().requires_grad_(),
             'concentration': torch.randn(1).abs().requires_grad_()
         }
-    ])
+    ]),
+    Example(MixtureSameFamily, [
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': Normal(torch.randn(5, requires_grad=True), 
+                                             torch.rand(5, requires_grad=True)),
+        },
+        {
+            'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
+            'component_distribution': MultivariateNormal(
+                loc=torch.randn(5, 2, requires_grad=True),
+                covariance_matrix=torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True)),
+        },     
+    ]) 
 ]
 
 BAD_EXAMPLES = [
@@ -1558,6 +1571,92 @@ class TestDistributions(TestCase):
                 LogisticNormal(mean_th, std_th), ref_dist,
                 'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
                 multivariate=True)
+
+    def test_mixture_same_family_shape(self):
+        normal_case_1d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Normal(torch.randn(5), torch.rand(5)))
+        normal_case_1d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Normal(torch.randn(3, 5), torch.rand(3, 5)))
+        normal_case_1d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Normal(torch.randn(4, 3, 5), torch.rand(4, 3, 5)))
+        normal_case_2d = MixtureSameFamily(
+            Categorical(torch.rand(5)),
+            Independent(Normal(torch.randn(5, 2), torch.rand(5, 2)), 1))
+        normal_case_2d_batch = MixtureSameFamily(
+            Categorical(torch.rand(3, 5)), 
+            Independent(Normal(torch.randn(3, 5, 2), torch.rand(3, 5, 2)), 1))
+        normal_case_2d_multi_batch = MixtureSameFamily(
+            Categorical(torch.rand(4, 3, 5)), 
+            Independent(Normal(torch.randn(4, 3, 5, 2), torch.rand(4, 3, 5, 2)), 1))
+
+        self.assertEqual(normal_case_1d.sample().size(), ())
+        self.assertEqual(normal_case_1d.sample((2,)).size(), (2,))
+        self.assertEqual(normal_case_1d.sample((2, 7)).size(), (2, 7))            
+        self.assertEqual(normal_case_1d_batch.sample().size(), (3,))
+        self.assertEqual(normal_case_1d_batch.sample((2,)).size(), (2, 3))
+        self.assertEqual(normal_case_1d_batch.sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample().size(), (4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2,)).size(), (2, 4, 3))
+        self.assertEqual(normal_case_1d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3))
+
+        self.assertEqual(normal_case_2d.sample().size(), (2,))
+        self.assertEqual(normal_case_2d.sample((2,)).size(), (2, 2))
+        self.assertEqual(normal_case_2d.sample((2, 7)).size(), (2, 7, 2))            
+        self.assertEqual(normal_case_2d_batch.sample().size(), (3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2,)).size(), (2, 3, 2))
+        self.assertEqual(normal_case_2d_batch.sample((2, 7)).size(), (2, 7, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample().size(), (4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2,)).size(), (2, 4, 3, 2))
+        self.assertEqual(normal_case_2d_multi_batch.sample((2, 7)).size(), (2, 7, 4, 3, 2))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_log_prob(self):
+        probs = torch.rand(5, 5).softmax(dim=-1)
+        loc = torch.randn(5, 5)
+        scale = torch.rand(5, 5)
+
+        def ref_log_prob(idx, x, log_prob):
+            p = probs[idx].numpy()
+            m = loc[idx].numpy()
+            s = scale[idx].numpy()
+            mix = scipy.stats.multinomial(1, p)
+            comp = scipy.stats.norm(m, s)
+            expected = scipy.special.logsumexp(comp.logpdf(x) + np.log(mix.p))
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(
+            MixtureSameFamily(Categorical(probs=probs), 
+                              Normal(loc, scale)), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_mixture_same_family_sample(self):
+        probs = torch.rand(5).softmax(dim=-1)
+        loc = torch.randn(5)
+        scale = torch.rand(5)
+
+        class ScipyMixtureNormal(object):
+            def __init__(self, probs, mu, std):
+                self.probs = probs
+                self.mu = mu
+                self.std = std
+
+            def rvs(self, n_sample):
+                comp_samples = [scipy.stats.norm(m, s).rvs(n_sample) for m, s
+                                in zip(self.mu, self.std)]
+                mix_samples = scipy.stats.multinomial(1, self.probs).rvs(n_sample)
+                samples = []
+                for i in range(n_sample):
+                    samples.append(comp_samples[mix_samples[i].argmax()][i])
+                return np.asarray(samples)
+
+        self._check_sampler_sampler(
+            MixtureSameFamily(Categorical(probs=probs), Normal(loc, scale)),
+            ScipyMixtureNormal(probs.numpy(), loc.numpy(), scale.numpy()),
+            '''MixtureSameFamily(Categorical(probs={}), 
+            Normal(loc={}, scale={}))'''.format(probs, loc, scale))
 
     def test_normal(self):
         loc = torch.randn(5, 5, requires_grad=True)
@@ -2945,6 +3044,16 @@ class TestDistributionShapes(TestCase):
         simplex_sample = simplex_sample / simplex_sample.sum(-1).unsqueeze(-1)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
+    def test_mixture_same_family_shape(self):
+        dist = MixtureSameFamily(Categorical(torch.rand(5)),
+                                 Normal(torch.randn(5), torch.rand(5)))
+        self.assertEqual(dist._batch_shape, torch.Size())
+        self.assertEqual(dist._event_shape, torch.Size())
+        self.assertEqual(dist.sample().size(), torch.Size())
+        self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1)
         self.assertEqual(gamma._batch_shape, torch.Size())
@@ -3837,6 +3946,7 @@ class TestTransforms(TestCase):
                 PowerTransform(exponent=torch.tensor(5.).normal_(),
                                cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
+                TanhTransform(cache_size=cache_size),
                 AffineTransform(0, 1, cache_size=cache_size),
                 AffineTransform(1, -2, cache_size=cache_size),
                 AffineTransform(torch.randn(5),
@@ -3891,6 +4001,10 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif domain is constraints.unit_interval:
             return x.uniform_()
+        elif isinstance(domain, constraints.interval):
+            x = x.uniform_()
+            x = x.mul_(domain.upper_bound - domain.lower_bound).add_(domain.lower_bound)
+            return x
         elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)

@@ -5,6 +5,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+import gc
 from contextlib import contextmanager
 import threading
 if sys.version_info[0] == 3:
@@ -20,18 +21,18 @@ from torch._six import inf, nan
 
 from test_torch import _TestTorchMixin
 
-from common_methods_invocations import tri_tests_args, tri_large_tests_args, \
+from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
+from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
-# because if we do that, the TEST_CUDNN line from common_cuda will be executed
+# We cannot import TEST_CUDA and TEST_MULTIGPU from torch.testing._internal.common_cuda here,
+# because if we do that, the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed
 # multiple times as well during the execution of this test suite, and it will
 # cause CUDA OOM error on Windows.
 TEST_CUDA = torch.cuda.is_available()
@@ -274,6 +275,7 @@ class TestCuda(TestCase):
         assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
+        gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
@@ -982,10 +984,8 @@ class TestCuda(TestCase):
         with torch.cuda.stream(user_stream):
             self.assertEqual(torch.cuda.current_stream(), user_stream)
         self.assertTrue(user_stream.query())
-        # Operate on 10 MB tensor which should take some time
-        tensor1 = torch.ByteTensor(10000000).pin_memory()
+        tensor1 = torch.ByteTensor(5).pin_memory()
         tensor2 = tensor1.cuda(non_blocking=True) + 1
-        self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
@@ -1919,6 +1919,48 @@ class TestCuda(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x) * 5)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_streaming_backwards_device_transfer(self):
+        # This function must run with non-default current streams on all devices, otherwise it's meaningless.
+        # The intention is to test that to()'s backward (CopyBackward) interacts properly with the
+        # synchronization logic in torch/csrc/autograd/input_buffer.cpp.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
+
+        # Unfortunately I need to make the tensors largeish.
+        # Bigger tensors = longer D2D transfers = more likely to expose races.
+        size = 2**26
+
+        a = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
+        b = torch.full((size,), 1, device=dev1, dtype=torch.float64, requires_grad=True)
+
+        # Here to_backward_recipient = a*b is used only once, so MulBackward's InputBuffer slot only expects 1 input.
+        # This tests the situation where we don't call InputBuffer::accumulate for MulBackward's InputBuffer.
+        to_backward_recipient = a * b
+        s = to_backward_recipient.to(device="cuda:0").sum()
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s.backward()
+        self.assertTrue(a.grad.sum().item() == size)
+        self.assertTrue(b.grad.sum().item() == size)
+
+        # Here to_backward_recipient = a*b is used twice, so MulBackward's InputBuffer slot expects 2 inputs.
+        # This tests the situation where we do call InputBuffer::accumulate for MulBackward's InputBuffer.
+        a.grad = None
+        b.grad = None
+        to_backward_recipient = a * b
+        # Multiply by 2 here so to's backward creates gradient values that are different from the case above,
+        # to mitigate weirdness if the caching allocator happens to reuse memory regions that were populated
+        # with 1s by the case above
+        s0 = to_backward_recipient.to(device="cuda:0").sum() * 2.
+        s1 = to_backward_recipient.to(device="cuda:0").sum() * 2.
+        torch.cuda.synchronize(device=dev0)
+        torch.cuda.synchronize(device=dev1)
+        s0.backward(retain_graph=True)
+        s1.backward()
+        self.assertTrue(a.grad.sum().item() == 4 * size)
+        self.assertTrue(b.grad.sum().item() == 4 * size)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_cuda_init_race(self):
         # See https://github.com/pytorch/pytorch/issues/16559
         import subprocess
@@ -2096,6 +2138,20 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
+
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_to_numpy(self):
+        self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
 
 if __name__ == '__main__':
     run_tests()

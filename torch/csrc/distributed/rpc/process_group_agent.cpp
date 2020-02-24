@@ -26,11 +26,34 @@ std::vector<int64_t> ProcessGroupAgent::MessageCounter::snapshot() {
   return counters_;
 }
 
+//////////////////////////  MetricsTracker  /////////////////////////////////
+
+ProcessGroupAgent::AverageMetricsTracker::AverageMetricsTracker(
+    std::string key,
+    uint64_t currentSum,
+    uint64_t currentCount)
+    : key_(std::move(key)),
+      currentSum_(currentSum),
+      currentCount_(currentCount) {}
+
+void ProcessGroupAgent::AverageMetricsTracker::addData(uint64_t dataPoint) {
+  currentSum_ += dataPoint;
+  ++currentCount_;
+}
+
+double ProcessGroupAgent::AverageMetricsTracker::computeAverage() {
+  return currentCount_ == 0 ? 0 : currentSum_ / (double)currentCount_;
+}
+
 ////////////////////////  ProcessGroupAgent  /////////////////////////////////
 
 const ProcessGroupAgent::steady_clock_time_point
     ProcessGroupAgent::kInfiniteTimeoutTimePoint =
         std::chrono::time_point<std::chrono::steady_clock>::max();
+const std::string kNumPendingRequests = "agent.num_pending_requests";
+const std::string kThreadPoolSize = "agent.thread_pool_size";
+const std::string kNumIdleThreads = "agent.num_idle_threads";
+const std::string kGilAverageWaitTime = "agent.gil_average_wait_time_us";
 
 void ProcessGroupAgent::collectNames() {
   const std::string& workerName = workerInfo_.name_;
@@ -78,6 +101,10 @@ ProcessGroupAgent::ProcessGroupAgent(
       nextId_(0),
       sendMutexes_(pg_->getSize()),
       threadPool_(numSendRecvThreads) {
+  // initialize metric info counters
+  metrics_.resize(ProcessGroupAgentMetrics::N_METRICS);
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME] =
+      std::make_unique<AverageMetricsTracker>(kGilAverageWaitTime);
   collectNames();
   TORCH_CHECK(
       nameMap_.size() > 1,
@@ -215,7 +242,8 @@ void ProcessGroupAgent::start() {
 }
 
 void ProcessGroupAgent::shutdown() {
-  LOG(INFO) << "Shutting down ProcessGroupAgent.";
+  LOG(INFO) << "Shutting down ProcessGroupAgent on rank " << pg_->getRank()
+            << ".";
   std::unique_lock<std::mutex> lock{futureMutex_};
   if (!rpcRunning_.exchange(false)) {
     return;
@@ -236,6 +264,13 @@ void ProcessGroupAgent::shutdown() {
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message) {
+  // Throw if we previously encountered an exception in ::listenLoop.
+  {
+    std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
+    if (listenLoopException_) {
+      std::rethrow_exception(listenLoopException_);
+    }
+  }
   TORCH_CHECK(rpcRunning_.load(), "ProcessGroupAgent hasn't started.")
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),
@@ -506,6 +541,36 @@ void ProcessGroupAgent::markFutureWithError(Message& message) {
 }
 
 void ProcessGroupAgent::listenLoop() {
+  try {
+    listenLoopInternal();
+  } catch (const std::exception& e) {
+    // Error occured in listenLoop(). Stop receiving thread and store exception
+    // to indicate that the RPC agent is in an unhealthy state and we should
+    // shutdown.
+    LOG(ERROR) << "Encountered exception in ProcessGroupAgent::listenLoop(): "
+               << e.what()
+               << " RPC agent is in an unhealthy state and unusable.";
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      listenLoopException_ = std::current_exception();
+    }
+  } catch (...) {
+    {
+      // Lock write to listenLoopException_ since ::send() reads from it.
+      std::lock_guard<std::mutex> guard(listenLoopExceptionMutex_);
+      std::string unknownErrorMsg =
+          "Unknown exception occured in "
+          "ProcessGroupAgent::listenLoop. RPC Agent is in an unhealthy state and "
+          "unusable.";
+      LOG(ERROR) << unknownErrorMsg;
+      listenLoopException_ =
+          std::make_exception_ptr(std::runtime_error(unknownErrorMsg));
+    }
+  }
+}
+
+void ProcessGroupAgent::listenLoopInternal() {
   while (rpcRunning_.load()) {
     // rank, tensor size, message type
     std::vector<torch::Tensor> preamble = {torch::empty({4}, {torch::kInt64})};
@@ -588,8 +653,10 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->setError(std::string(
-          exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+      if (!timedOutFuture.future_->hasError()) {
+        timedOutFuture.future_->setError(std::string(
+            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+      }
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);
@@ -628,17 +695,29 @@ std::unordered_map<std::string, std::string> ProcessGroupAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   {
     std::unique_lock<std::mutex> lock(futureMutex_);
-    metrics["num_pending_requests"] = c10::to_string(futures_.size());
+    auto futuresSize = futures_.size();
+    lock.unlock();
+    metrics[kNumPendingRequests] = c10::to_string(futuresSize);
   }
-  metrics["thread_pool_size"] = c10::to_string(threadPool_.size());
-  metrics["num_idle_threads"] = c10::to_string(threadPool_.numAvailable());
+  metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
+  metrics[kNumIdleThreads] = c10::to_string(threadPool_.numAvailable());
+  if (isGILProfilingEnabled()) {
+    // Add time-series based metrics, just GIL wait times for now.
+    {
+      std::unique_lock<std::mutex> lock(metricsMutex_);
+      auto avgGilWaitTime = metrics_[GIL_WAIT_TIME]->computeAverage();
+      lock.unlock();
+      metrics[kGilAverageWaitTime] = c10::to_string(avgGilWaitTime);
+    }
+  }
   return metrics;
 }
 
-std::unordered_map<std::string, std::string> ProcessGroupAgent::getDebugInfo() {
-  /* This would later include more info other than metrics for eg: may include
-     stack traces for the threads owned by the agent */
-  return getMetrics();
+void ProcessGroupAgent::addGilWaitTime(
+    const std::chrono::microseconds gilWaitTime) {
+  std::lock_guard<std::mutex> lock(metricsMutex_);
+  metrics_[ProcessGroupAgentMetrics::GIL_WAIT_TIME]->addData(
+      gilWaitTime.count());
 }
 
 } // namespace rpc

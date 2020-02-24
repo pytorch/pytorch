@@ -59,6 +59,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
   }
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
+  ret->data_.setPoisoned();
   return ret;
 }
 
@@ -71,7 +72,7 @@ ConcreteModuleType::ConcreteModuleType(ConcreteModuleTypeBuilder data)
 bool operator==(
     const ConcreteModuleTypeBuilder::ModuleInfo& lhs,
     const ConcreteModuleTypeBuilder::ModuleInfo& rhs) {
-  return lhs.meta_->equals(*rhs.meta_);
+  return lhs.name_ == rhs.name_ && lhs.meta_->equals(*rhs.meta_);
 }
 
 bool ConcreteModuleTypeBuilder::equals(

@@ -144,6 +144,8 @@ using NodeKind = Symbol;
 using topo_position_t = int64_t;
 using ValueSet = std::unordered_set<const Value*>;
 
+struct OperatorSet;
+
 struct Value {
   TH_DISALLOW_COPY_AND_ASSIGN(Value);
   Value(Node* node_, size_t offset_);
@@ -636,14 +638,20 @@ struct TORCH_API Node {
     return static_cast<T*>(this);
   }
 
+  bool matches(const FunctionSchema& schema) const;
+
   // XXX: this function is meant to be used with string literals only!
   bool matches(
       const char* signature_literal,
       at::ArrayRef<Symbol> const_inputs = {}) const;
 
+  bool isMemberOf(const OperatorSet& os) const;
+
   const FunctionSchema& schema() const;
   const FunctionSchema* maybeSchema() const;
   const Operator& getOperator() const;
+  Operation getOperation() const;
+
   const Operator* maybeOperator() const;
 
   void dump() const;
@@ -727,6 +735,7 @@ struct TORCH_API Node {
   CREATE_ACCESSOR(Graphs, gs)
   CREATE_ACCESSOR(Type, ty)
   CREATE_ACCESSOR(Types, tys)
+  CREATE_ACCESSOR(IValue, ival)
 
 #undef CREATE_ACCESSOR
 
@@ -1102,23 +1111,20 @@ struct Graph {
       at::ArrayRef<Value*> keys,
       at::ArrayRef<Value*> values);
   TORCH_API Node* createNumToTensor(Value* value);
-  TORCH_API Node* createImplicitTensorToNum(const TypePtr& type, Value* value);
   TORCH_API Node* createObject(const ClassTypePtr& type);
   TORCH_API Node* createSetAttr(
       Value* obj,
       const std::string& field,
       Value* newValue);
   TORCH_API Node* createGetAttr(Value* obj, const std::string& field);
-  TORCH_API Value* insertGetAttr(Value* obj, const std::string& field) {
+  Value* insertGetAttr(Value* obj, const std::string& field) {
     return insertNode(createGetAttr(obj, field))->output();
   }
   TORCH_API Node* createStore(const std::string& name, Value* v);
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
   TORCH_API Node* createIsInstance(
       Value* v,
-      at::ArrayRef<TypePtr> types,
-      bool is_list,
-      bool is_tuple);
+      at::ArrayRef<TypePtr> types);
 
   TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 
@@ -1364,6 +1370,15 @@ TORCH_API std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee);
  * tuple unpack node and return the resulting values.
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
+
+
+struct OperatorSet {
+  OperatorSet(std::initializer_list<const char*> sig_literals);
+ private:
+  friend struct Node;
+  std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
+};
+
 
 } // namespace jit
 } // namespace torch

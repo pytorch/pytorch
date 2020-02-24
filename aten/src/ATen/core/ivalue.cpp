@@ -47,10 +47,14 @@ TypePtr IValue::type() const {
       return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    case Tag::RRef:
+      return toRRef()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
       return toObjectRef().type();
+    case Tag::PyObject:
+      return PyObjectType::get();
     case Tag::Uninitialized:
       return AnyType::get();
     case Tag::Capsule:
@@ -130,8 +134,9 @@ std::ostream& IValue::repr(
   }
 
   const IValue& v = *this;
-  auto formatter = [&](std::ostream& out, const IValue& v) {
-    v.repr(out, customFormatter);
+  // continue to use custom formatter in recursion
+  auto formatter = [&](std::ostream& out, const IValue& input) {
+    input.repr(out, customFormatter);
   };
   switch (v.tag) {
     case IValue::Tag::None:
@@ -162,9 +167,6 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, v.toStringRef());
       return out;
     case IValue::Tag::GenericList: {
-      auto formatter = [&](std::ostream& out, const IValue& v) {
-        v.repr(out, customFormatter);
-      };
       return printMaybeAnnotatedList(out, *this, formatter);
     }
     case IValue::Tag::Device: {
@@ -221,6 +223,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toList(), "[", "]", formatter);
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -229,11 +233,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toDevice();
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
-    case IValue::Tag::Object:
+    case IValue::Tag::PyObject: {
+      auto py_obj = v.toPyObject();
+      return out << "<PyObject at" << py_obj << ">";
+    }
+    case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
+    }
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
@@ -244,23 +253,26 @@ void IValue::dump() const {
   std::cout << *this << "\n";
 }
 
+std::shared_ptr<ClassType> ivalue::Object::type() const {
+  return type_.type_->expect<ClassType>();
+}
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  return type()->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   unsafeRemoveSlot(slot);
 }
 
@@ -293,6 +305,18 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   }
   std::sort(ordered.begin(), ordered.end(), CompareKeys);
   return ordered;
+}
+
+StrongTypePtr::StrongTypePtr(
+    std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+    std::shared_ptr<Type> type) {
+  cu_ = std::move(cu);
+  type_ = type;
+  TORCH_INTERNAL_ASSERT(type_);
+  if (type_->cast<ClassType>()) {
+    TORCH_INTERNAL_ASSERT(
+        cu_, "class type's owning compilation unit is nullptr");
+  }
 }
 
 std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {

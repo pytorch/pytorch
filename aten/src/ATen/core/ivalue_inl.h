@@ -10,6 +10,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/rref_interface.h>
 
 namespace torch {
 namespace jit {
@@ -58,6 +59,11 @@ intrusive_ptr<T> static_intrusive_pointer_cast(intrusive_ptr<U> r) {
   return intrusive_ptr<T>::reclaim(static_cast<T*>(r.release()));
 }
 
+template<class T, class U>
+intrusive_ptr<T> dynamic_intrusive_pointer_cast(intrusive_ptr<U> r) {
+  return intrusive_ptr<T>::reclaim(dynamic_cast<T*>(r.release()));
+}
+
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return moveToIntrusivePtr<ivalue::Future>();
@@ -65,6 +71,14 @@ inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() && {
 inline c10::intrusive_ptr<ivalue::Future> IValue::toFuture() const & {
   AT_ASSERT(isFuture(), "Expected Future but got ", tagKind());
   return toIntrusivePtr<ivalue::Future>();
+}
+inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() && {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return moveToIntrusivePtr<c10::RRefInterface>();
+}
+inline c10::intrusive_ptr<c10::RRefInterface> IValue::toRRef() const & {
+  AT_ASSERT(isRRef(), "Expected RRef but got ", tagKind());
+  return toIntrusivePtr<c10::RRefInterface>();
 }
 inline c10::intrusive_ptr<ivalue::ConstantString> IValue::toString() && {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
@@ -81,6 +95,14 @@ inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() && {
 inline c10::intrusive_ptr<ivalue::Object> IValue::toObject() const & {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   return toIntrusivePtr<ivalue::Object>();
+}
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() && {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return moveToIntrusivePtr<ivalue::PyObjectHolder>();
+}
+inline c10::intrusive_ptr<ivalue::PyObjectHolder> IValue::toPyObjectHolder() const & {
+  TORCH_INTERNAL_ASSERT(isPyObject(), "Expected PyObject but got", tagKind());
+  return toIntrusivePtr<ivalue::PyObjectHolder>();
 }
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
@@ -182,6 +204,7 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
 };
 
 struct Object;
+struct PyObjectHolder;
 }
 
 // Future
@@ -341,7 +364,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   }
 
   const IValue& getSlot(size_t slot) const {
-    return slots_.at(slot);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(slot < slots_.size());
+    // NOTE: This lookup is fairly hot, so we use unchecked access to the
+    // vector.  Errors should still be detectable with ASan.
+    return slots_[slot];
   }
 
   void unsafeRemoveSlot(size_t slot) {
@@ -376,9 +402,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const std::vector<IValue>& slots() const {
     return slots_;
   }
-  std::shared_ptr<ClassType> type() const {
-    return type_.type_;
-  }
+  std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
     return type_.cu_;
@@ -388,6 +412,15 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   void resizeObject(size_t slot);
   StrongTypePtr type_;
   std::vector<IValue> slots_;
+};
+
+// virtual ivalue PyObjectHolder that hold a py::object, we make this virtual
+// because the py::object and refcounting logic should happen in libtorch_python
+// see concrete implementation in python_ivalue.h
+struct ivalue::PyObjectHolder : c10::intrusive_ptr_target {
+ public:
+  virtual PyObject* getPyObject() = 0;
+  virtual ~PyObjectHolder() {};
 };
 
 std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IValue>& dict);
@@ -451,6 +484,7 @@ DEFINE_TO(c10::impl::GenericDict, toGenericDict)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Tuple>, toTuple)
 DEFINE_TO(std::string, toStringRef)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Future>, toFuture)
+DEFINE_TO(c10::intrusive_ptr<c10::RRefInterface>, toRRef)
 DEFINE_TO(IValue, toIValue)
 DEFINE_TO(c10::Device, toDevice)
 DEFINE_TO(at::ScalarType, toScalarType)
@@ -736,6 +770,10 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
 : tag(Tag::Object), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
 }
+inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
+: tag(Tag::PyObject), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline IValue::IValue(c10::intrusive_ptr<torch::jit::CustomClassHolder> v)
 : tag(Tag::Capsule), is_intrusive_ptr(true) {
   payload.as_intrusive_ptr = v.release();
@@ -745,10 +783,17 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
   payload.as_intrusive_ptr = v.release();
 }
 
+inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
+: tag(Tag::RRef), is_intrusive_ptr(true) {
+  payload.as_intrusive_ptr = v.release();
+}
 inline const std::string& IValue::toStringRef() const {
   return toString()->string();
 }
 
+inline PyObject* IValue::toPyObject() const {
+  return toPyObjectHolder()->getPyObject();
+}
 template<typename T>
 inline optional<T> IValue::toOptional() {
   if (this->isNone()) {

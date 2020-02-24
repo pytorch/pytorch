@@ -259,10 +259,22 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, int, bool>());
+      .def(
+          py::init<
+              const std::string&,
+              int,
+              int,
+              bool,
+              std::chrono::milliseconds>(),
+          py::arg("host_name"),
+          py::arg("port"),
+          py::arg("world_size"),
+          py::arg("is_master"),
+          py::arg("timeout") =
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
-      .def(py::init<const std::string&, ::c10d::Store&>());
+      .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());
 
   auto processGroup =
       shared_ptr_class_<::c10d::ProcessGroup>(module, "ProcessGroup")
@@ -470,12 +482,6 @@ They are used in specifying strategies for reduction collectives, e.g.,
           .def(
               "recv_anysource",
               &::c10d::ProcessGroup::recvAnysource,
-              py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "abort",
-              &::c10d::ProcessGroup::barrier,
-              py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

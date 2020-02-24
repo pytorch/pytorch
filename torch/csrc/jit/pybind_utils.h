@@ -11,15 +11,19 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/python_custom_class.h>
+#include <torch/csrc/jit/python_ivalue.h>
 #include <torch/csrc/jit/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/script/module.h>
 #include <torch/csrc/jit/script/module_python.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
-#include <torch/csrc/utils/auto_gil.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -150,6 +154,28 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
+  }
+
+  py::bool_ isClass =
+      py::module::import("inspect").attr("isclass")(input.get_type());
+  if (py::cast<bool>(isClass)) {
+    py::str qualifiedName = py::module::import("torch.jit")
+                                .attr("_qualified_name")(input.get_type());
+    auto pyClass = py::module::import("torch.jit")
+                       .attr("_get_script_class")(qualifiedName);
+    if (!pyClass.is_none()) {
+      auto cu = get_python_cu();
+      const auto classname =
+          c10::QualifiedName(py::cast<std::string>(qualifiedName));
+      auto class_type = cu->get_class(classname);
+      TORCH_INTERNAL_ASSERT(class_type);
+      return InferredType(class_type);
+    }
+  }
+
+  if (py::isinstance<script::Object>(input)) {
+    auto object = py::cast<script::Object>(input);
+    return InferredType(object.type());
   }
 
   // Try container types
@@ -298,7 +324,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
 
 inline Stack toTraceableStack(const py::tuple& inputs) {
   auto info = toTypeInferredIValue(inputs);
-  AT_CHECK(
+  TORCH_CHECK(
       isTraceableType(info.type()),
       "Type '",
       info.type()->python_str(),
@@ -537,24 +563,37 @@ inline IValue toIValue(
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else {
+        throw py::cast_error(
+            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
       }
     }
+    case TypeKind::RRefType: {
+#ifdef USE_DISTRIBUTED
+      return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
+#else
+      AT_ERROR("RRef is only supported with the distributed package");
+#endif
+    } break;
+    case TypeKind::PyObjectType:
+      // convert a py::handle to the IValue that holds the py::object
+      return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
+
+    case TypeKind::CapsuleType: {
+      return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
+    } break;
+    case TypeKind::AnyType:
+      return toTypeInferredIValue(obj);
+    case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
     case TypeKind::VarType:
     case TypeKind::FutureType:
     case TypeKind::QSchemeType:
+    case TypeKind::AnyListType:
+    case TypeKind::AnyTupleType:
       break;
-    case TypeKind::FunctionType:
-      AT_ERROR("Function Values aren't yet supported");
-    case TypeKind::CapsuleType:
-      AT_ERROR("Capsule Values aren't supported");
-    case TypeKind::AnyType:
-      return toTypeInferredIValue(obj);
   }
-  AT_ERROR(
-      "Missing cases in toIValue for type: ",
-      type->str(),
-      "! File a bug report.");
+  AT_ERROR("toIValue() cannot handle converting to type: ", type->python_str());
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -681,13 +720,20 @@ inline py::object toPyObject(IValue ivalue) {
     }
 
     auto pyCu = get_python_cu();
-    if (obj->name().find("torch.classes") == 0) {
+    if (obj->name().find("__torch__.torch.classes") == 0) {
       return py::cast(script::Object(obj));
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
     auto pyClass =
         py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    if (pyClass.is_none()) {
+      std::stringstream err;
+      err << "Unknown reference to ScriptClass ";
+      err << obj->name();
+      err << ". Did you forget to import it?)";
+      throw std::runtime_error(err.str());
+    }
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -698,6 +744,11 @@ inline py::object toPyObject(IValue ivalue) {
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
     }
     return pyObj;
+  } else if (ivalue.isPyObject()) {
+    // return borrowed reference to ensure it correctly incref the underlying PyObject
+    return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
+  } else if (ivalue.isCapsule()) {
+    return py::cast(ivalue.toCapsule());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -918,6 +969,17 @@ inline py::object invokeScriptMethodFromPython(
       [&](Graph& graph, const script::MatchedSchema& match) {
         return graph.insertMethodCall(callee.name(), match);
       });
+}
+
+inline py::object invokeScriptMethodFromPython(
+    script::Object& object,
+    const std::string& method_name,
+    tuple_slice args,
+    py::kwargs kwargs) {
+  auto type = object.type();
+  script::Method init_method(object._ivalue(), type->getMethod(method_name));
+  invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
+  return py::cast(script::Object(object));
 }
 
 inline py::object invokeOperatorFromPython(

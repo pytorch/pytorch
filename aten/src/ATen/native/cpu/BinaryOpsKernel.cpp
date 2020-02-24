@@ -67,6 +67,7 @@ void div_kernel(TensorIterator& iter) {
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
+        TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
       });
     });
@@ -414,6 +415,60 @@ void ne_kernel(TensorIterator& iter) {
   }
 }
 
+void max_elementwise_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a || b;
+      });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_lementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "max_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::max(a, b);
+          }
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
+    });
+  }
+}
+
+void min_elementwise_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    cpu_kernel(iter,
+      [](bool a, bool b) -> bool {
+        return a && b;
+      });
+  } else if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
+      cpu_kernel_vec(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::min(a, b);
+          }
+        },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
+    });
+  }
+}
+
 void smooth_l1_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "smooth_l1_cpu", [&]() {
     cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -424,7 +479,7 @@ void smooth_l1_kernel(TensorIterator& iter) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -437,7 +492,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -450,6 +505,11 @@ void tanh_backward_kernel(TensorIterator& iter) {
 }
 
 void mse_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Half) {
+    TORCH_WARN_ONCE("Applying the CPU mse kernel on half-type tensors. "
+                    "This may be slower than using float or double-type tensors.");
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -485,6 +545,8 @@ REGISTER_DISPATCH(gt_stub, &gt_kernel);
 REGISTER_DISPATCH(ge_stub, &ge_kernel);
 REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
+REGISTER_DISPATCH(max_elementwise_stub, &max_elementwise_kernel);
+REGISTER_DISPATCH(min_elementwise_stub, &min_elementwise_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);

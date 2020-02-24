@@ -9,6 +9,7 @@
 namespace torch {
 namespace jit {
 class CustomClassHolder : public c10::intrusive_ptr_target {};
+
 struct Function;
 namespace script {
 struct CompilationUnit;
@@ -22,6 +23,7 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
@@ -29,6 +31,7 @@ struct Future;
 struct ConstantString;
 struct GenericDict;
 struct Object;
+struct PyObjectHolder;
 }
 
 // IValue is the generic tagged union used by the interpreter to hold
@@ -52,8 +55,10 @@ struct Object;
   _(Future) \
   _(Device) \
   _(Object) \
+  _(PyObject) \
   _(Uninitialized) \
-  _(Capsule)
+  _(Capsule) \
+  _(RRef) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -241,6 +246,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const &;
 
+  // RRef
+  IValue(c10::intrusive_ptr<c10::RRefInterface> v);
+  bool isRRef() const { return Tag::RRef == tag; }
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
+
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), is_intrusive_ptr(false) {
@@ -343,6 +354,13 @@ struct CAFFE2_API IValue final {
 
   torch::jit::script::Module toModule() const;
   bool isModule() const;
+
+  // PyObject
+  IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v);
+  bool isPyObject() const { return tag == Tag::PyObject; }
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
+  c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
+  PyObject* toPyObject() const;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -632,19 +650,16 @@ private:
   bool is_intrusive_ptr;
 };
 
-// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
-// and its owning CU, so that the class type is guaranteed to stay alive as long
-// as we hold this object.
-struct StrongTypePtr {
+// An owning pointer to a type. When the type is class type, it requires a pair
+// of shared_ptrs to the class type and its owning CU, so that the class type is
+// guaranteed to stay alive as long as we hold this object.
+struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
+      std::shared_ptr<Type> type);
+
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+  std::shared_ptr<Type> type_;
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();

@@ -539,7 +539,7 @@ void cauchy_kernel(TensorIterator& iter, double median_, double sigma_, Generato
    });
 }
 
-void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* gen_) {
+void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);
@@ -550,6 +550,9 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     if (std::is_same<scalar_t, double>::value) {
       // define lambda for exponential transformation
       auto exponential_func = [lambda, nextafter_1_0_double] __device__ (accscalar_t rand) {
+        if (lambda == static_cast<accscalar_t>(0.0)) {
+          return static_cast<scalar_t>(0.0);
+        }
         accscalar_t sample;
         // curand_uniform has (0,1] bounds. log(1) is 0 and exponential excludes 0.
         // Hence, squash the 1 to just below 1.
@@ -567,6 +570,9 @@ void exponential_kernel_cuda(TensorIterator& iter, double lambda_, Generator* ge
     } else {
       // use __logf fast approximation for peak bandwidth
       auto exponential_func = [lambda, nextafter_1_0_float] __device__ (accscalar_t rand) {
+        if (lambda == static_cast<accscalar_t>(0.0)) {
+          return static_cast<scalar_t>(0.0);
+        }
         accscalar_t sample;
         if(rand == static_cast<accscalar_t>(1.0)) {
           sample = __logf(nextafter_1_0_float);
@@ -609,7 +615,7 @@ void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
    });
 }
 
-void log_normal_kernel_cuda(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
+void log_normal_kernel(TensorIterator& iter, double mean_, double std_, Generator* gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "log_normal_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -724,13 +730,19 @@ Tensor& normal_out_cuda(Tensor& output, double mean, const Tensor& std, Generato
 }
 
 Tensor& normal_out_cuda(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
+  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_cuda_(output, 0, 1, gen);
   // NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  output.mul_(std).add_(mean);
+  if (is_deprecated_th_impl) {
+    output.mul_(std.reshape(mean.sizes())).add_(mean);
+  }
+  else {
+    output.mul_(std).add_(mean);
+  }
   return output;
 }
 
@@ -747,22 +759,9 @@ Tensor normal_cuda(double mean, const Tensor& std, Generator* gen) {
 }
 
 Tensor normal_cuda(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor ret = at::empty({0}, mean.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   normal_out_cuda(ret, mean, std, gen);
   return ret;
-}
-
-Tensor& exponential_cuda_(Tensor& self, double lambda, Generator* gen) {
-  auto iter = TensorIterator::nullary_op(self);
-  exponential_kernel_cuda(iter, lambda, gen);
-  return self;
-}
-
-Tensor& log_normal_cuda_(Tensor& self, double mean, double std, Generator* gen) {
-  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
-  auto iter = TensorIterator::nullary_op(self);
-  log_normal_kernel_cuda(iter, mean, std, gen);
-  return self;
 }
 
 Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
@@ -773,6 +772,8 @@ Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
 }
 
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel_cuda);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
 
 }} // namespace at::native

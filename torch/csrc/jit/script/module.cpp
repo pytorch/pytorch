@@ -5,8 +5,8 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {
@@ -195,6 +195,9 @@ Module Module::clone_impl(
       type_remap[orig.type()] = cloned.type();
       r.register_module(type()->getAttributeName(i), cloned);
     } else {
+      // this adds new slot and creates a new attribute for the underlying type if
+      // the type is not already cloned, otherwise it will only
+      // add a new slot and typecheck
       r.register_attribute(
           type()->getAttributeName(i),
           type()->getAttribute(i),
@@ -205,7 +208,11 @@ Module Module::clone_impl(
 
   // only clone the methods if the ClassType is not cloned before
   if (!type_already_cloned) {
-    // Clone methods remapping the types to the cloned ones.
+    // clone constants
+    for (size_t i = 0; i < type()->numConstants(); ++i) {
+      r.type()->addConstant(type()->getConstantName(i), type()->getConstant(i));
+    }
+    // clone methods, remapping the types to the cloned ones.
     for (auto& fn : type()->methods()) {
       r.clone_method(*this, *fn, type_remap);
     }

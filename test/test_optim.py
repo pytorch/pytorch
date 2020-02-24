@@ -13,7 +13,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -324,6 +324,9 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+            optim.Adam(None, lr=1e-2, weight_decay=-1)
+
     def test_adamw(self):
         self._test_basic_cases(
             lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
@@ -333,6 +336,9 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+            optim.AdamW(None, lr=1e-2, weight_decay=-1)
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -508,6 +514,24 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+
+    def test_error_when_getlr_has_epoch(self):
+        class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
+            def __init__(self, optimizer, gamma, milestones, last_epoch=-1):
+                self.init_lr = [group['lr'] for group in optimizer.param_groups]
+                self.gamma = gamma
+                self.milestones = milestones
+                super().__init__(optimizer, last_epoch)
+
+            def get_lr(self, step):
+                global_step = self.last_epoch
+                gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m])[-1]
+                return [init_lr * (self.gamma ** gamma_power) for init_lr in self.init_lr]
+
+        optimizer = torch.optim.SGD([torch.rand(1)], lr=1)
+
+        with self.assertRaises(TypeError):
+            scheduler = MultiStepLR(optimizer, gamma=1, milestones=[10, 20])
 
     def test_no_cyclic_references(self):
         import gc

@@ -24,14 +24,9 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 #if defined(PYTORCH_MOBILE_OBSERVER)
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  debug_info->setModelName(name());
-  debug_info->setMethodName(method_name);
-  at::setThreadLocalDebugInfo(debug_info);
-
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
-    observer->onEnter();
+    observer->onEnter(name(), method_name);
   }
 #endif
 
@@ -57,6 +52,25 @@ Function* Module::find_method(const std::string& basename) const {
   return nullptr;
 }
 
+namespace {
+void slot_params_recurse(const c10::intrusive_ptr<c10::ivalue::Object>& obj,
+    std::vector<at::Tensor>& params) {
+  for (const auto& slot : obj->slots()) {
+    if (slot.isTensor()) {
+      params.emplace_back(slot.toTensor());
+    }
+    else if (slot.isObject()) {
+      slot_params_recurse(slot.toObject(), params);
+    }
+  }
+}
+}
+
+const std::vector<at::Tensor> Module::parameters() const {
+  std::vector<at::Tensor> params;
+  slot_params_recurse(object_, params);
+  return params;
+}
 } // namespace mobile
 } // namespace torch
 } // namespace jit

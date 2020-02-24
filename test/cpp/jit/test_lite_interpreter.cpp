@@ -11,6 +11,29 @@
 namespace torch {
 namespace jit {
 
+void testLiteInterpreterUpsampleNearest2d() {
+  script::Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  res = bc.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+}
+
 void testLiteInterpreterAdd() {
   script::Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -156,6 +179,20 @@ void testLiteInterpreterPrim() {
   AT_ASSERT(resi == refi);
 }
 
+void testLiteInterpreterLoadOrigJit() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m.save(ss);
+  ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+}
+
+
 void testLiteInterpreterParams() {
   script::Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -200,10 +237,7 @@ void testLiteInterpreterParams() {
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
-  std::vector<::at::Tensor> bc_parameters;
-  for (auto slot : bc.slots()) {
-    bc_parameters.emplace_back(slot.toTensor());
-  }
+  std::vector<::at::Tensor> bc_parameters = bc.parameters();
   ::torch::optim::SGD bc_optimizer(
       bc_parameters,
       ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
@@ -222,3 +256,4 @@ void testLiteInterpreterParams() {
 }
 } // namespace torch
 } // namespace jit
+} // namespace torch
