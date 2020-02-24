@@ -1021,9 +1021,11 @@ void initJitScriptBindings(PyObject* module) {
           "__call__",
           [](py::args args, py::kwargs kwargs) {
             // see: [pybind11 varargs]
+            HANDLE_TH_ERRORS
             Method& method = py::cast<Method&>(args[0]);
             return invokeScriptMethodFromPython(
                 method, tuple_slice(std::move(args), 1), std::move(kwargs));
+            END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)
       .def_property_readonly(
