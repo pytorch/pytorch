@@ -10,8 +10,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
 #include <ATen/native/SharedReduceOps.h>
-#include <ATen/native/cpu/Loops.h>
-#include <ATen/Parallel.h>
 
 #include <algorithm>
 #include <functional>
@@ -37,6 +35,8 @@ DEFINE_DISPATCH(min_values_stub);
 DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
+DEFINE_DISPATCH(cumsum_stub);
+DEFINE_DISPATCH(cumprod_stub);
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
 { \
@@ -186,82 +186,14 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
 }
 
-template<typename scalar_t, typename func_t>
-static void _cumop_out_cpu_template(Tensor& result, const Tensor& self,
-    int64_t dim, scalar_t init_v, func_t && op) {
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-  if (result.sizes() != self.sizes()) {
-    result.resize_as_(self);
-  }
-  if (self.numel() == 0) {
-    return;
-  }
-  const auto input_shape = self.sizes();
-  const auto input_ndim = self.dim();
-
-  if (input_ndim == 0) {
-    result.fill_(self);
-    return;
-  }
-
-  const auto n = input_shape[wrap_dim];
-  const int64_t M = std::accumulate(
-      input_shape.cbegin(),
-      input_shape.cbegin() + wrap_dim,
-      1LL,
-      std::multiplies<int64_t>()
-      );
-  const int64_t N = std::accumulate(
-      input_shape.cbegin() + wrap_dim + 1,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>()
-      );
-
-  auto self_ptr = self.data_ptr<scalar_t>();
-  auto out_ptr = result.data_ptr<scalar_t>();
-  const auto self_offset_h = self.stride(wrap_dim - 1);
-  const auto self_offset_l = self.stride(wrap_dim);
-  const auto out_offset_h = result.stride(wrap_dim - 1);
-  const auto out_offset_l = result.stride(wrap_dim);
-
-  parallel_for(0, M, internal::GRAIN_SIZE, [&](int64_t begin, int64_t end) {
-    auto s_index =  self_offset_h * begin;
-    auto o_index =  out_offset_h * begin;
-    for (int64_t f = begin; f < end; ++f) {
-      for (auto j = 0; j < N; j++ ) {
-        scalar_t cum_number = init_v;
-        auto self_index = s_index;
-	    auto out_index = o_index;
-        for (auto k =0; k < n; k++) {
-          cum_number = op(cum_number, self_ptr[self_index + j]);
-          out_ptr[out_index + j] = cum_number;
-          self_index += self_offset_l;
-	      out_index += out_offset_l;
-        }
-      }
-      s_index += self_offset_h;
-      o_index += out_offset_h;
-    }
-  });
-}
-
 Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return at::native::_cumsum_out_cpu(result, self, dim);
+  cumsum_stub(self.device().type(), result, self, dim);
+  return result;
 }
 
 Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumsum_out_cpu", [&] {
-    _cumop_out_cpu_template<scalar_t>(result,
-        self.contiguous(),
-        dim,
-        0,
-        [&](scalar_t a, scalar_t b) -> scalar_t {
-          return a + b;
-        }
-    );
-  });
+  cumsum_stub(self.device().type(), result, self, dim);
   return result;
 }
 
@@ -293,20 +225,12 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
 
 Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
   Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return at::native::_cumprod_out_cpu(result, self, dim);
+  cumprod_stub(self.device().type(), result, self, dim);
+  return result;
 }
 
 Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "_cumprod_out_cpu", [&] {
-    _cumop_out_cpu_template<scalar_t>(result,
-        self.contiguous(),
-        dim,
-        1,
-        [&](scalar_t a, scalar_t b) -> scalar_t {
-          return a * b;
-        }
-    );
-  });
+  cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }
 
