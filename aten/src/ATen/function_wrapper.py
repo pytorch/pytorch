@@ -109,30 +109,22 @@ ${return_type} ${type_wrapper_name}(${type_method_formals}) {
 # better to do it once at a schema registration so that we don't have to
 # repeat ourselves everywhere else.
 SCHEMA_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+.def("${schema_string}")
 """)
 
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyCatchAllKernel<decltype(TypeDefault::${type_wrapper_name}), &TypeDefault::${type_wrapper_name}>())
+.def("${schema_string}", CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}))
 """)
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<decltype(${Type}::${type_wrapper_name}), &${Type}::${type_wrapper_name}>(DispatchKey::${Backend}TensorId))
+.def("${schema_string}", torch::dispatch(
+    DispatchKey::${Backend}TensorId,
+    CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name})))
 """)
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .catchAllKernel(&TypeDefault::${type_wrapper_name}))
+.def("${schema_string}", &TypeDefault::${type_wrapper_name})
 """)
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-.op(torch::RegisterOperators::options()
-  .schema("${schema_string}")
-  .kernel(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
+.def("${schema_string}", torch::dispatch(DispatchKey::${Backend}TensorId, &${Type}::${type_wrapper_name}))
 """)
 
 # add non-virtual declaration to TensorBody.h
