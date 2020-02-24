@@ -3641,7 +3641,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length.
+          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor in
+          which True is filled with -inf while False is filled with 0.0.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3756,6 +3757,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
     q = q * scaling
 
     if attn_mask is not None:
+
+        # convert ByteTensor attn_mask to float
+        if attn_mask.dtype == torch.bool:
+            attn_mask = torch.zeros(attn_mask.size()).masked_fill(attn_mask, float('-inf'))
+
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
             if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:

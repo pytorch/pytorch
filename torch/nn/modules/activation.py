@@ -792,7 +792,8 @@ class MultiheadAttention(Module):
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length.
+          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor in
+          which True is filled with -inf while False is filled with 0.0.
 
         - Outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
