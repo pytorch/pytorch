@@ -471,7 +471,7 @@ static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& ind
 }
 
 // This mirrors `THPVariable_getitem` in torch/csrc/autograd/python_variable_indexing.cpp
-static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool is_tracing) {
+static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& indices, bool is_tracing_and_1d_slice_or_Nd = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
@@ -488,7 +488,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
         index.slice().stop(),
         index.slice().step(),
         /*ensure_view=*/true,
-        /*is_tracing=*/is_tracing,
+        /*is_tracing=*/is_tracing_and_1d_slice_or_Nd,
         self_device,
         self_sizes);
     } else if (index.is_none()) {
@@ -505,7 +505,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing_and_1d_slice_or_Nd, self_device, self_sizes);
   if (tensorIndices.empty()) {
     if (sliced.is_same(self)) {
       // ensure we return a shallow copy for things like x[...]
@@ -520,7 +520,7 @@ static inline Tensor get_item(const Tensor& self, const ArrayRef<TensorIndex>& i
 
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Tensor" case
-static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool is_tracing) {
+static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, const Tensor& value, bool is_tracing_and_1d_slice_or_Nd = false) {
   at::Device self_device = self.device();
   IntArrayRef self_sizes = self.sizes();
 
@@ -548,7 +548,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
         index.slice().stop(),
         index.slice().step(),
         /*ensure_view=*/false,
-        /*is_tracing=*/is_tracing,
+        /*is_tracing=*/is_tracing_and_1d_slice_or_Nd,
         self_device,
         self_sizes), value);
       return;
@@ -556,7 +556,7 @@ static inline void set_item(Tensor& self, const ArrayRef<TensorIndex>& indices, 
   }
 
   std::vector<Tensor> tensorIndices;
-  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing, self_device, self_sizes);
+  Tensor sliced = impl::applySlicing(self, indices, tensorIndices, is_tracing_and_1d_slice_or_Nd, self_device, self_sizes);
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;

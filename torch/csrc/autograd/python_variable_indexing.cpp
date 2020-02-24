@@ -245,8 +245,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // NOTE: Here is the dispatch structure for `THPVariable_getitem`:
 //
 // 1. Python 1-D getter calls C++ `at::indexing::get_item` after
-// converting Python index to C++ TensorIndex, except `t[...]` and `t[None]`
-// in which we perform direct operations on `t` instead.
+// converting Python index to C++ TensorIndex.
 //
 // 2. Python N-D getter calls C++ `at::indexing::handleDimInMultiDimIndexing`
 // for each dim, after converting Python index to C++ TensorIndex. If advanced
@@ -258,37 +257,36 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
 
   // handle simple types: none, ellipsis
   if (index == Py_None) {
-    return THPVariable_Wrap(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, /*is_tracing=*/false));
+    return THPVariable_Wrap(
+      at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::None)}));
   } else if (index == Py_Ellipsis) {
-    return THPVariable_Wrap(at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, /*is_tracing=*/false));
+    return THPVariable_Wrap(
+      at::indexing::get_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}));
   }
 
   bool is_tracing = torch::jit::tracer::isTracing();
-
-  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, bool release_gil) {
-    if (release_gil) {
-      pybind11::gil_scoped_release no_gil;
-      return THPVariable_Wrap(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
-    } else {
-      return THPVariable_Wrap(at::indexing::get_item(self_, {std::move(tensor_index)}, is_tracing));
-    }
-  };
 
   // handle simple types: integers, slices, bool
   if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    return handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), /*release_gil=*/false);
+    return THPVariable_Wrap(
+      at::indexing::get_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
     checkUnpackSlice(index, &start, &stop, &step);
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    return handle_simple_type(at::indexing::TensorIndex({start, stop, step}), /*release_gil=*/false);
+    return THPVariable_Wrap(
+      at::indexing::get_item(
+        self_, {at::indexing::TensorIndex({start, stop, step})}, /*is_tracing_and_1d_slice_or_Nd=*/is_tracing));
   } else if (index == Py_False || index == Py_True) {
-    return handle_simple_type(at::indexing::TensorIndex(index == Py_True), /*release_gil=*/true);
+    return THPVariable_Wrap(([&]() {
+      pybind11::gil_scoped_release no_gil;
+      return at::indexing::get_item(self_, {at::indexing::TensorIndex(index == Py_True)});
+    })());
   }
 
   // wrap index in a tuple if it's not already one
@@ -338,31 +336,31 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   } else {
     value = valueToTensor(self_.options(), py_value, self_device);
   }
-  bool is_tracing = torch::jit::tracer::isTracing();
 
-  auto handle_simple_type = [&](at::indexing::TensorIndex&& tensor_index, const Variable& value) {
-    at::indexing::set_item(self_, {std::move(tensor_index)}, value, is_tracing);
-  };
-
-  // handle simple types: integers, slices, ellipsis, none, bool
+  // handle simple types: ellipsis, none, bool
   if (index == Py_False) { // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
     // do nothing for false (technically we should check the size, but we don't have
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
-    handle_simple_type(at::indexing::TensorIndex(at::indexing::Ellipsis), value);
+    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
     return 0;
   } else if (index == Py_None) {
-    handle_simple_type(at::indexing::TensorIndex(at::indexing::None), value);
+    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
     return 0;
   } else if (index == Py_True) {
-    handle_simple_type(at::indexing::TensorIndex(true), value);
+    at::indexing::set_item(self_, {at::indexing::TensorIndex(true)}, value);
     return 0;
-  } else if (THPUtils_checkLong(index)) {
+  }
+
+  bool is_tracing = torch::jit::tracer::isTracing();
+
+  // handle simple types: integers, slices
+  if (THPUtils_checkLong(index)) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    handle_simple_type(at::indexing::TensorIndex(THPUtils_unpackLong(index)), value);
+    at::indexing::set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, step;
@@ -370,7 +368,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing) {
       recordSliceTrace(index);
     }
-    handle_simple_type(at::indexing::TensorIndex({start, stop, step}), value);
+    at::indexing::set_item(
+      self_, {at::indexing::TensorIndex({start, stop, step})}, value, /*is_tracing_and_1d_slice_or_Nd=*/is_tracing);
     return 0;
   }
 
