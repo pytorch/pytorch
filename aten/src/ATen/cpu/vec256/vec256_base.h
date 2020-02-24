@@ -383,10 +383,10 @@ public:
     }
     return ret;
   }
-  Vec256<T> fmod(const Vec256<T> &exp) const {
+  Vec256<T> fmod(const Vec256<T> &b) const {
     Vec256<T> ret;
     for (int64_t i = 0; i < size(); i++) {
-      ret[i] = std::fmod(values[i], exp[i]);
+      ret[i] = std::fmod(values[i], b[i]);
     }
     return ret;
   }
