@@ -249,11 +249,10 @@ TensorView* TensorView::cloneForOutput(DataType dtype) const {
     domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
   }
   TensorDomain *td = new TensorDomain(domain_copy);
-  return new TensorView(td, dtype);
+  return new TensorView(td, dtype);;
 };
 
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
-  std::cout<<"Calling TV"<<this->name()<<".computeAt(TV"<<consumer->name()<<")"<<std::endl;
   /*
    * Recursive compute_at:
    * Recurse backward from consumer, to this, make sure there's a dependency

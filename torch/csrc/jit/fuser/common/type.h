@@ -15,8 +15,8 @@ namespace fuser {
 //Order of strength
 enum class TORCH_API ValType {
   TensorDomain,
-  TensorView,
   IterDomain,
+  TensorView,
   Tensor,
   Scalar
 };
