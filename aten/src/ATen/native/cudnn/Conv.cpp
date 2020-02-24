@@ -612,6 +612,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
   {
+    
     AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
         args.idesc.desc(),
@@ -1122,8 +1123,9 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
   cudnnConvolutionBwdFilterAlgoPerf_t bwdFilterAlgPerf;
-  Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlgPerf);
 
+  try { Workspace workspace = chooseAlgorithm(args, benchmark, &bwdFilterAlgPerf); 
+  
   // update convDesc mathType since cudnn 7.4+ now requires both algo + mathType to figure out
   // whether to use Tensor core kernels or not
   // See Note [behavior of cudnnFind and cudnnGet]
@@ -1138,6 +1140,13 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
       args.odesc.desc(), grad_output.data_ptr(),
       args.cdesc.desc(), bwdFilterAlgPerf.algo, workspace.data, workspace.size,
       &zero, args.wdesc.desc(), grad_weight.data_ptr()));
+      } catch (...) { 
+    std::cout << "Exception inside of raw_cudnn_convolution_backward_weight_out_32bit\n";
+    std::cout << "grad_weight " << grad_weight.sizes() << " " << grad_weight.strides() << "\n";
+    std::cout << "grad_output " << grad_output.sizes() << " " << grad_output.strides() << "\n";
+    std::cout << "input " << input.sizes() << " " << input.strides() << "\n";
+  
+    throw; };
 }
 
 void raw_cudnn_convolution_backward_weight_out(
