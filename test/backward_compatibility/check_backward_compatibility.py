@@ -53,6 +53,10 @@ white_list = [
     ('prim::Constant', datetime.date(2020, 3, 1)),
     ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
     ('_aten::format', datetime.date(2020, 3, 1)),
+    ('aten::random_', datetime.date(2020, 3, 1)),
+    ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
 ]
 
 
