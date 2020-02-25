@@ -1405,7 +1405,19 @@ static bool hastensor(script::Module& m, const char* name) {
 
 class FoldConvBatchNorm2dHelper {
  public:
-  void run(const script::Module& module);
+  /**
+   * In this step we find all Conv2d - BatchNorm2d patterns in the graph
+   * and extract the corresponding parameters for these two modules,
+   * and record informations for the modifications of the graph without
+   * actually performing these modifications.
+   */
+  void analyze(script::Module& module);
+  /**
+   * In this step we perform all the modifications including
+   * setting the attributes for conv module, rewriting values
+   * and deleting nodes in the graph
+   */
+  void transform();
 
  private:
   bool tryExtractingConvBNParameters(
@@ -1422,6 +1434,13 @@ class FoldConvBatchNorm2dHelper {
    */
   std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
       const ConvBNParameters& p);
+
+  std::unordered_map<script::ModulePtr,
+                     std::tuple<at::Tensor, at::Tensor>> conv_module_and_params_;
+  std::unordered_map<Graph*, std::vector<std::tuple<std::string, std::string>>> conv_bn_names_;
+  std::unordered_map<Value*, Value*> rewrite_map_;
+  std::vector<Value*> values_to_rewrite_;
+  std::unordered_set<Node*> nodes_to_delete_;
 };
 
 std::tuple<at::Tensor, at::Tensor> FoldConvBatchNorm2dHelper::
@@ -1436,9 +1455,10 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
     script::Module& conv,
     script::Module& bn,
     ConvBNParameters& r) {
-  if (!hastensor(conv, "weight") || !hastensor(bn, "weight") ||
-      !hastensor(bn, "bias") || !hastensor(bn, "running_mean") ||
-      !hastensor(bn, "running_var") || !bn.hasattr("eps")) {
+  if (!hastensor(conv, "weight") || !conv.hasattr("bias") ||
+      !hastensor(bn, "weight") || !hastensor(bn, "bias") ||
+      !hastensor(bn, "running_mean") || !hastensor(bn, "running_var") ||
+      !bn.hasattr("eps")) {
     return false;
   }
 
@@ -1449,16 +1469,16 @@ bool FoldConvBatchNorm2dHelper::tryExtractingConvBNParameters(
   r.bn_b = bn.attr("bias").toTensor();
 
   r.conv_w = conv.attr("weight").toTensor();
-  if (hastensor(conv, "bias")) {
-    r.conv_b = conv.attr("bias").toTensor();
-  } else {
-    r.conv_b = at::zeros_like(r.bn_rm);
+  r.conv_b = at::zeros_like(r.bn_rm);
+  auto bias_opt = conv.attr("bias").toOptional<at::Tensor>();
+  if (bias_opt) {
+    r.conv_b = *bias_opt;
   }
 
   return true;
 }
 
-void FoldConvBatchNorm2dHelper::run(const script::Module& module) {
+void FoldConvBatchNorm2dHelper::analyze(script::Module& module) {
   const PatternInfo pattern = PatternInfo::parse_from_str(R"IR(
 graph(%self, %x):
     %conv_submodule = match::module[name="Conv2d"](%self)
@@ -1488,96 +1508,109 @@ graph(%self, %x):
       worklist.push(submodule);
     }
 
-    // Process forward method of the current module
-    std::unordered_map<Value*, Value*> rewrite_map;
-    std::vector<Value*> values_to_rewrite;
-    std::unordered_set<Node*> nodes_to_delete;
+    // Process all method of the current module
+    for (auto& method : current.get_methods()) {
+      GRAPH_DUMP(
+          current.type()->name()->name() + "::" + method.name() +
+          "() before Conv2d-BatchNorm2d folding",
+          method.graph());
+      const auto& matches = findPatternMatches(pattern_graph, *method.graph());
 
-    script::Method method = current.get_method("forward");
-    GRAPH_DUMP(
-        current.type()->name()->name() +
-            "::forward() before Conv2d-BatchNorm2d folding",
-        method.graph());
-    const auto& matches = findPatternMatches(pattern_graph, *method.graph());
+      GRAPH_DEBUG("number of Conv2d-BatchNorm2d matches: ", matches.size());
+      Graph* g = method.graph().get();
+      if (!conv_bn_names_.count(g)) {
+        // This is to make sure we don't visit one graph multiple times
+        conv_bn_names_[g] = {};
+        for (const Match& match : matches) {
+          GRAPH_DEBUG("Checking next match...");
+          Node* matched_conv = match.nodes_map.at(pattern_conv);
+          Node* matched_bn = match.nodes_map.at(pattern_bn);
+          Node* matched_conv_submodule =
+            match.values_map.at(pattern_conv_submodule)->node();
+          Node* matched_bn_submodule =
+            match.values_map.at(pattern_bn_submodule)->node();
 
-    for (const Match& match : matches) {
-      GRAPH_DEBUG("Checking next match...");
-      Node* matched_conv = match.nodes_map.at(pattern_conv);
-      Node* matched_bn = match.nodes_map.at(pattern_bn);
-      Node* matched_conv_submodule =
-          match.values_map.at(pattern_conv_submodule)->node();
-      Node* matched_bn_submodule =
-          match.values_map.at(pattern_bn_submodule)->node();
+          TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
+          TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
 
-      TORCH_INTERNAL_ASSERT(matched_conv_submodule->kind() == prim::GetAttr);
-      TORCH_INTERNAL_ASSERT(matched_bn_submodule->kind() == prim::GetAttr);
+          const auto& conv_module_name = matched_conv_submodule->s(Symbol::attr("name"));
+          const auto& bn_module_name = matched_bn_submodule->s(Symbol::attr("name"));
 
-      script::Module conv_submodule =
-          current.attr(matched_conv_submodule->s(Symbol::attr("name")))
-              .toModule();
-      script::Module bn_submodule =
-          current.attr(matched_bn_submodule->s(Symbol::attr("name")))
-              .toModule();
+          script::Module conv_submodule =
+            current.attr(conv_module_name).toModule();
+          script::Module bn_submodule =
+            current.attr(bn_module_name).toModule();
 
-      ConvBNParameters params;
-      if (!tryExtractingConvBNParameters(
-              conv_submodule, bn_submodule, params)) {
-        GRAPH_DEBUG(
-            "Conv and BN modules didn't have all required parameters or attributes...");
-        continue;
-      }
-
-      // We are using a separate vector for saving Values we want to rewrite to
-      // make sure that the order in which we perform these transformations is
-      // deterministic. Iterating through keys of rewrite_map would result in
-      // non-determinism that might not manifest as a bug now, but can bite us
-      // later.
-      values_to_rewrite.push_back(matched_bn->output());
-      rewrite_map[matched_bn->output()] = matched_conv->output();
-      GRAPH_UPDATE(
-          "Rewriting %",
-          matched_bn->output()->debugName(),
-          " with %",
-          matched_conv->output()->debugName());
-
-      nodes_to_delete.insert(matched_bn);
-      GRAPH_UPDATE("Deleting ", *matched_bn);
-
-      auto new_w_b = computeUpdatedConvWeightAndBias(params);
-      conv_submodule.setattr("weight", std::get<0>(new_w_b));
-      if (hastensor(conv_submodule, "bias")) {
-        conv_submodule.setattr("bias", std::get<1>(new_w_b));
-      } else {
-        // conv module has an existing non-Tensor bias
-        if (conv_submodule.hasattr("bias")) {
-          if (conv_submodule._ivalue()->type()->hasConstant("bias")) {
-            GRAPH_UPDATE("Removing bias constant from conv module");
-            conv_submodule.type()->unsafeRemoveConstant("bias");
-          } else {
-            TORCH_CHECK(
-                conv_submodule.type()->findAttributeSlot("bias").has_value());
-            GRAPH_UPDATE(
-                "Removing existing non-Tensor bias attribute from conv module");
-            conv_submodule._ivalue()->unsafeRemoveAttr("bias");
-            conv_submodule.type()->unsafeRemoveAttribute("bias");
+          ConvBNParameters params;
+          if (!tryExtractingConvBNParameters(
+                  conv_submodule, bn_submodule, params)) {
+            GRAPH_DEBUG(
+                "Conv and BN modules didn't have all required parameters or attributes...");
+            continue;
           }
-        }
-        conv_submodule.register_parameter("bias", std::get<1>(new_w_b), false);
+          conv_bn_names_[g].push_back(
+              std::make_tuple(conv_module_name, bn_module_name));
+          // We are using a separate vector for saving Values we want to rewrite to
+          // make sure that the order in which we perform these transformations is
+          // deterministic. Iterating through keys of rewrite_map would result in
+          // non-determinism that might not manifest as a bug now, but can bite us
+          // later.
+          values_to_rewrite_.push_back(matched_bn->output());
+          rewrite_map_[matched_bn->output()] = matched_conv->output();
+          GRAPH_UPDATE(
+              "Rewriting %",
+              matched_bn->output()->debugName(),
+              " with %",
+              matched_conv->output()->debugName());
+
+          nodes_to_delete_.insert(matched_bn);
+          nodes_to_delete_.insert(matched_bn_submodule);
+          GRAPH_UPDATE("Deleting ", *matched_bn);
+          GRAPH_UPDATE("Deleting ", *matched_bn_submodule);
+
+          auto slot = conv_submodule.type()->getAttributeSlot("bias");
+          TORCH_CHECK(conv_submodule.type()->is_parameter(slot),
+                      "Expected conv module to have a bias parameter");
+        } // matches
       }
-    }
 
-    // Perform planned rewritings
-    for (auto v : values_to_rewrite) {
-      v->replaceAllUsesWith(rewrite_map.at(v));
-    }
+      for (const auto& conv_bn : conv_bn_names_.at(g)) {
+        script::Module conv_submodule =
+          current.attr(std::get<0>(conv_bn))
+          .toModule();
+        script::Module bn_submodule =
+          current.attr(std::get<1>(conv_bn))
+          .toModule();
 
-    // Perform planned deletions
-    for (auto n : nodes_to_delete) {
-      n->removeAllInputs();
-    }
-    for (auto n : nodes_to_delete) {
-      n->destroy();
-    }
+        ConvBNParameters params;
+        TORCH_INTERNAL_ASSERT(tryExtractingConvBNParameters(
+                                  conv_submodule, bn_submodule, params));
+        auto new_w_b = computeUpdatedConvWeightAndBias(params);
+        conv_module_and_params_[conv_submodule._ivalue()] = new_w_b;
+      } // conv_bn module
+    } // methods
+  } // while
+}
+
+void FoldConvBatchNorm2dHelper::transform() {
+  for (const auto& item : conv_module_and_params_) {
+    script::Module conv(item.first);
+    auto w_b = item.second;
+    conv.setattr("weight", std::get<0>(w_b));
+    conv.setattr("bias", std::get<1>(w_b));
+  }
+
+  // Perform planned rewritings
+  for (auto v : values_to_rewrite_) {
+    v->replaceAllUsesWith(rewrite_map_.at(v));
+  }
+
+  // Perform planned deletions
+  for (auto n : nodes_to_delete_) {
+    n->removeAllInputs();
+  }
+  for (auto n : nodes_to_delete_) {
+    n->destroy();
   }
 }
 
@@ -1627,8 +1660,10 @@ void QuantFusion(std::shared_ptr<Graph>& graph) {
 
 script::Module FoldConvBatchNorm2d(const script::Module& module) {
   FoldConvBatchNorm2dHelper h;
-  h.run(module);
-  return module;
+  script::Module m = module.clone();
+  h.analyze(m);
+  h.transform();
+  return m;
 }
 
 void FoldQuantizeCallIntoBuffer(
