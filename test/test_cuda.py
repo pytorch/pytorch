@@ -2223,8 +2223,9 @@ t2.start()
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_torch_fp16(self):
-        for op, args in self.autocast_lists.torch_fp16:
-            self._run_autocast_outofplace(op, args, torch.float16)
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.torch_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2248,8 +2249,9 @@ t2.start()
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_fp16(self):
-        for op, args in self.autocast_lists.nn_fp16:
-            self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.nn_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2260,8 +2262,9 @@ t2.start()
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_methods_fp16(self):
-        for op, args in self.autocast_lists.methods_fp16:
-            self._run_autocast_outofplace(op, args, torch.float16, module=None)
+        with torch.backends.cudnn.flags(deterministic=True):
+            for op, args in self.autocast_lists.methods_fp16:
+                self._run_autocast_outofplace(op, args, torch.float16, module=None)
 
     @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
