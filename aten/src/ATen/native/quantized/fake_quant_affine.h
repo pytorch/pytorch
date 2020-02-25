@@ -3,9 +3,9 @@
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
 
-class TensorIterator;
-
 namespace at {
+
+class TensorIterator;
 
 namespace native {
 
