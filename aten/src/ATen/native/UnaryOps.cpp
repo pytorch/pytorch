@@ -123,6 +123,7 @@ namespace {
     }
     return ScalarType::Undefined;
   }
+} // end anonymous namespace
 
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
