@@ -27,7 +27,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     at::Tensor variable_grad,
     const at::Tensor& new_grad,
     size_t num_expected_refs,
-    const std::function<void(at::Tensor&&)>& update_grad_fn) {
+    const std::function<void(at::Tensor&&)>& update_grad) {
   // Copy since we need to work with non-const Tensor. Grab the original
   // use_count beforehand though.
   size_t new_grad_use_count = new_grad.use_count();
@@ -49,12 +49,12 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // of references we expect before grabbing it. The number of references we
       // expect is basically internal structures that are holding references to
       // the Tensor and that is fine since these are not exposed to the user.
-      update_grad_fn(new_grad_copy.detach());
+      update_grad(new_grad_copy.detach());
     } else {
       if (new_grad_copy.is_sparse()) {
-        update_grad_fn(new_grad_copy.clone());
+        update_grad(new_grad_copy.clone());
       } else {
-        update_grad_fn(new_grad_copy.clone(at::MemoryFormat::Contiguous));
+        update_grad(new_grad_copy.clone(at::MemoryFormat::Contiguous));
       }
     }
   } else if (!GradMode::is_enabled()) {
@@ -66,7 +66,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // `grad_variable` for it to store the result. However, changing the
       // TensorImpl type of a tensor requires changing the tensor itself, and
       // thus in this case we have to change the grad tensor.
-      update_grad_fn(new_grad_copy + variable_grad);
+      update_grad(new_grad_copy + variable_grad);
     } else {
       // In this case we can avoid changing the grad tensor. There are three
       // scenarios when we'll hit this case:
@@ -82,7 +82,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       variable_grad += new_grad_copy;
     }
   } else {
-    update_grad_fn(variable_grad + new_grad_copy);
+    update_grad(variable_grad + new_grad_copy);
   }
 }
 
