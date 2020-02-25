@@ -1427,7 +1427,7 @@ the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
