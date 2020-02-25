@@ -37,12 +37,12 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     if ((operator_def.type().substr(0, 9) == "MaxPool") ||
         (operator_def.type().substr(0, 17) == "MaxPoolGradient") ||
         (operator_def.type().substr(0, 9) == "MaxPool3D") ||
-        (operator_def.type().substr(0, 17) == "MaxPool3DGradient")) {
+        (operator_def.type().substr(0, 17) == "MaxPool3DGradient"))  {
       mode_ = miopenPoolingMax;
     } else if (
         (operator_def.type().substr(0, 13) == "AveragePool") ||
         (operator_def.type().substr(0, 21) == "AveragePoolGradient") ||
-        (operator_def.type().substr(0, 13) == "AveragePool3D") || 
+        (operator_def.type().substr(0, 13) == "AveragePool3D") ||
         (operator_def.type().substr(0, 21) == "AveragePool3DGradient")) {
       mode_ = miopenPoolingAverage;
     } else {
@@ -72,7 +72,7 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     C = X.dim32(1);
     H = X.dim32(2);
     W = X.ndim() > 3 ? X.dim32(3) : 1;
-    auto sizes = ConvPoolOpBase::GetOutputSize(X, C);
+    auto sizes = ConvPoolOpBase<HIPContext>::GetOutputSize(X, C);
     auto* Y = Output(0, sizes, at::dtype<T>());
 
     N_out = Y->dim32(0);
@@ -81,33 +81,27 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
     W_out = Y->ndim() > 3 ? Y->dim32(3) : 1;
 
     CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
-    vector<int> pads (pads_.data(), pads_.data() + (kernel_.size()));    
-
     MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
         mode_,
         kernel_.size(),
         kernel_.data(),
-        pads.data(),
-        stride_.data()
-    ));
+        pads_.data(),
+        stride_.data()));
+
+    miopenIndexType_t index_type = miopenIndexUint64;
+    MIOPEN_ENFORCE(miopenSetPoolingIndexType(
+        pooling_desc_, index_type));
 
     mio_input_dims = X.sizes().vec();
-    vector<int> input_dims(begin(mio_input_dims), end(mio_input_dims));
+    std::vector<int> input_dims(begin(mio_input_dims), end(mio_input_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
         bottom_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
 
     mio_output_dims = Y->sizes().vec();
-    vector<int> output_dims(begin(mio_output_dims), end(mio_output_dims));
+    std::vector<int> output_dims(begin(mio_output_dims), end(mio_output_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
         top_desc_, miopenTypeWrapper<T>::type, output_dims.size(), output_dims.data(), nullptr));
-
-    miopenIndexType_t index_type = miopenIndexUint64;
-    MIOPEN_ENFORCE(miopenSetPoolingIndexType(pooling_desc_, index_type));
-    MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSizeV2(pooling_desc_, top_desc_, &poolWsSize_));
-    if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
-      HIP_CHECK(hipMalloc(&poolWs_, poolWsSize_));
-    }
 
     const T* Xdata = X.template data<T>();
     T* Ydata = Y->template mutable_data<T>();
@@ -121,8 +115,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
         top_desc_,
         Ydata,
         false,
-        poolWs_,
-        poolWsSize_));
+        nullptr,
+        0));
 
     return true;
   }
@@ -151,8 +145,8 @@ class MIOPENPoolOp : public ConvPoolOpBase<HIPContext> {
   miopenPoolingMode_t mode_;
   const float alpha_;
   const float beta_;
-  vector<int64_t> mio_input_dims;
-  vector<int64_t> mio_output_dims;
+  std::vector<int64_t> mio_input_dims;
+  std::vector<int64_t> mio_output_dims;
 };
 
 class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
@@ -169,10 +163,10 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&top_desc_));
     MIOPEN_ENFORCE(miopenCreatePoolingDescriptor(&pooling_desc_));
 
-    if (operator_def.type().substr(0, 7) == "MaxPool" || 
+    if ((operator_def.type().substr(0, 7) == "MaxPool") ||
        (operator_def.type().substr(0, 7) == "MaxPool3D")) {
       mode_ = miopenPoolingMax;
-    } else if (operator_def.type().substr(0, 11) == "AveragePool" ||
+    } else if ((operator_def.type().substr(0, 11) == "AveragePool") ||
               (operator_def.type().substr(0, 11) == "AveragePool3D")) {
       mode_ = miopenPoolingAverage;
     } else {
@@ -202,12 +196,11 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     auto& X = Input(0);
     auto& Y = Input(1);
     auto& dY = Input(2);
-    auto* dX = Output(0);
+    auto* dX = Output(0, X.sizes(), at::dtype<T>());
 
     // MIOpen pooling support only 2 and 3 spatial dimensions.
     CAFFE_ENFORCE(X.ndim() >= 4 && X.ndim() <= 5);
 
-    dX->ResizeLike(X);
     int N = 0, C = 0, H = 0, W = 0, D = 0;
     int N_out = 0, C_out = 0, H_out = 0, W_out = 0, D_out = 0;
     N = X.dim32(0);
@@ -221,38 +214,29 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     W_out = Y.ndim() > 3 ? Y.dim32(3) : 1;
     D_out = Y.ndim() > 4 ? Y.dim32(4) : 1;
 
-    switch (kernel_.size())
-    {
-      case 1:
-        ConvPoolOpBase<HIPContext>::ComputePads({H});
-        break;
-      case 2:
-        ConvPoolOpBase<HIPContext>::ComputePads({H, W});
-        break;
-      case 3:
-        ConvPoolOpBase<HIPContext>::ComputePads({H, W, D});
-        break;
-      default:
-        CAFFE_THROW("Unsupported kernel size :", kernel_.size());
-    }
+    const std::vector<int> X_HW_dims = GetDims(X);
+    ConvPoolOpBase<HIPContext>::ComputePads(X_HW_dims);
 
     CAFFE_ENFORCE(kernel_.size() == 2 || kernel_.size() == 3, "MIOpen supports only 2D and 3D pooling");
-    vector<int> pads (pads_.data(), pads_.data() + (kernel_.size()));
     MIOPEN_ENFORCE(miopenSetNdPoolingDescriptor(
         pooling_desc_,
         mode_,
         kernel_.size(),
         kernel_.data(),
-        pads.data(),
+        pads_.data(),
         stride_.data()));
-
+    
+    miopenIndexType_t index_type = miopenIndexUint64;
+    MIOPEN_ENFORCE(miopenSetPoolingIndexType(
+        pooling_desc_, index_type));
+    
     mio_input_dims = X.sizes().vec();
-    vector<int> input_dims(begin(mio_input_dims), end(mio_input_dims));
+    std::vector<int> input_dims (begin(mio_input_dims), end(mio_input_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
         bottom_desc_, miopenTypeWrapper<T>::type, input_dims.size(), input_dims.data(), nullptr));
-    
+
     mio_output_dims = Y.sizes().vec();
-    vector<int> output_dims(begin(mio_output_dims), end(mio_output_dims));
+    std::vector<int> output_dims (begin(mio_output_dims), end(mio_output_dims));
     MIOPEN_ENFORCE(miopenSetTensorDescriptor(
         top_desc_, miopenTypeWrapper<T>::type, output_dims.size(), output_dims.data(), nullptr));
 
@@ -263,8 +247,6 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
     T* dXdata = dX->template mutable_data<T>();
 
     if (mode_ == miopenPoolingMax) {
-      miopenIndexType_t index_type = miopenIndexUint64;
-      MIOPEN_ENFORCE(miopenSetPoolingIndexType(pooling_desc_, index_type));
       MIOPEN_ENFORCE(miopenPoolingGetWorkSpaceSizeV2(pooling_desc_, top_desc_, &poolWsSize_));
 
       if ((poolWsSize_ > 0) && (poolWs_ == nullptr)) {
@@ -335,8 +317,8 @@ class MIOPENPoolGradientOp : public ConvPoolOpBase<HIPContext> {
   const float alpha_;
   const float beta_;
   float* bwdPoolScratch_;
-  vector<int64_t> mio_input_dims;
-  vector<int64_t> mio_output_dims;
+  std::vector<int64_t> mio_input_dims;
+  std::vector<int64_t> mio_output_dims;
 };
 
 namespace {
@@ -350,6 +332,6 @@ REGISTER_MIOPEN_OPERATOR(MaxPool3D, MIOPENPoolOp);
 REGISTER_MIOPEN_OPERATOR(MaxPool3DGradient, MIOPENPoolGradientOp);
 
 REGISTER_MIOPEN_OPERATOR(AveragePool3D, MIOPENPoolOp);
-REGISTER_MIOPEN_OPERATOR(AveragePool3DGradient, MIOPENPoolOp);
+REGISTER_MIOPEN_OPERATOR(AveragePool3DGradient, MIOPENPoolGradientOp);
 } // namespace
 } // namespace caffe2
