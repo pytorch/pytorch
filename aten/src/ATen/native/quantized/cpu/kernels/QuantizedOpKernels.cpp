@@ -1117,7 +1117,7 @@ void fake_quantize_grad_tensor_kernel(
   });
 }
 
-void fake_quant_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
+void fake_quant_by_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   cpu_kernel(iter,
     [=](float self, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
@@ -1132,7 +1132,7 @@ void fake_quant_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t
     });
 }
 
-void fake_quant_grad_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
+void fake_quant_grad_by_channel_cpu(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   cpu_kernel(iter,
     [=](float x, float dy, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
