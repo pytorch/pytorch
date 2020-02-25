@@ -56,11 +56,37 @@ class PairwiseSimilarity(ModelLayer):
         self.y_embeddings = y_embeddings
 
         dtype = x_embeddings.field_types()[0].base
-
+        n = x_embeddings.field_type().shape[0]
         self.output_schema = schema.Scalar(
             (dtype, (output_dim,)),
             self.get_next_blob_reference('output')
         )
+
+        if self.pairwise_similarity_func == "mahalanobis":
+            assert 'inv_cov' in input_record, "inverse covariance expected for mahalanobis"
+            inv_cov = input_record['inv_cov']
+            assert 'x_diag' in input_record, "x embeddings diag indexes expected for mahalanobis"
+            x_diag = input_record['x_diag']
+            assert 'y_diag' in input_record, "y embeddings diag indexes expected for mahalanobis"
+            y_diag = input_record['y_diag']
+        else:
+            inv_cov = None
+            x_diag = None
+            y_diag = None
+
+        self.inv_cov = inv_cov
+        self.x_diag = x_diag
+        self.y_diag = y_diag
+        self.output_dim = output_dim
+
+        self.my_const = self.model.maybe_add_global_constant('MAHALANOBIS_CONST_TERM', -2.0)
+
+    def _diag(self, net, X, diag_indexes):
+        x2 = net.FlattenToVec(X)
+        x3 = net.ExpandDims(x2, dims=[1])
+        x4 = net.EnsureDense(x3)
+        x5 = net.Gather([x4, diag_indexes])  # (n, 1)
+        return x5
 
     def add_ops(self, net):
         if self.pairwise_similarity_func == "cosine_similarity":
@@ -77,6 +103,23 @@ class PairwiseSimilarity(ModelLayer):
                 [self.get_next_blob_reference(self.x_embeddings() + '_matmul')],
                 trans_b=1,
             )
+        elif self.pairwise_similarity_func == "mahalanobis":
+            x_inv_cov = net.BatchMatMul(
+                [self.x_embeddings(), self.inv_cov()]
+            )
+            y_inv_cov = net.BatchMatMul(
+                [self.y_embeddings(), self.inv_cov()]
+            )
+            x_inv_cov_xT = net.BatchMatMul([x_inv_cov, self.x_embeddings()], trans_b=1)
+            y_inv_cov_yT = net.BatchMatMul([y_inv_cov, self.y_embeddings()], trans_b=1)
+            x_inv_cov_yT = net.BatchMatMul([x_inv_cov, self.y_embeddings()], trans_b=1)
+            diag_xx = self._diag(net, x_inv_cov_xT, self.x_diag())
+            diag_yy = self._diag(net, y_inv_cov_yT, self.y_diag())
+            diag_yyT = net.Transpose(diag_yy, axes=(1, 0))
+            xy = net.Mul([self.my_const, x_inv_cov_yT])
+            d_xy = net.Add([xy, diag_xx], broadcast=1, axes=1)
+            d_xy_d = net.Add([d_xy, diag_yyT], broadcast=1, axes=0)
+            Y = net.Sqrt(d_xy_d)
         else:
             raise NotImplementedError(
                 "pairwise_similarity_func={} is not valid".format(
