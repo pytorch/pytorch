@@ -449,6 +449,7 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
+        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
     })
     for binop in ['add', 'sub', 'mul', 'div']:
         unsorted_function_hints[binop].append(
