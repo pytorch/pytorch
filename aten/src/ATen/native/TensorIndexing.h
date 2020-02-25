@@ -461,11 +461,11 @@ static inline Tensor applySlicing(
 } // namespace impl
 
 static inline Tensor dispatch_index(const Tensor& self, std::vector<Tensor>&& indices) {
-  return self.index(impl::typeConvertIndices(self, std::move(indices)));
+  return self.advanced_index(impl::typeConvertIndices(self, std::move(indices)));
 }
 
 static inline Tensor dispatch_index_put_(Tensor& self, std::vector<Tensor>&& indices, const Tensor& value) {
-  return self.index_put_(impl::typeConvertIndices(self, std::move(indices)), value);
+  return self.advanced_index_put_(impl::typeConvertIndices(self, std::move(indices)), value);
 }
 
 // NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
