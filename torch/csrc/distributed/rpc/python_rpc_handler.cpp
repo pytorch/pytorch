@@ -1,12 +1,29 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
 namespace {
+
+// A macro that grabs the GIL, profiling the acquisition time. The average GIL
+// acquisition time will be recorded in RpcAgent's getMetrics().
+#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
+  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
+  auto shouldProfileGIL =                                                \
+      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
+  if (shouldProfileGIL) {                                                \
+    startTime = std::chrono::high_resolution_clock::now();               \
+  }                                                                      \
+  pybind11::gil_scoped_acquire ag;                                       \
+  if (shouldProfileGIL) {                                                \
+    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
+        std::chrono::high_resolution_clock::now() - startTime);          \
+    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
+  }
 
 // PythonTypeResolver that inherits from Script::Resolver to
 // support resolving types together with ScriptTypeParser.
@@ -25,8 +42,7 @@ struct PythonTypeResolver : public jit::script::Resolver {
     if (name == "PyObject") {
       return PyObjectType::get();
     }
-    auto python_cu = torch::jit::get_python_cu();
-    return python_cu->get_type(name);
+    return PythonRpcHandler::getInstance().jitCompilationUnit()->get_type(name);
   }
 };
 
@@ -61,11 +77,13 @@ void PythonRpcHandler::cleanup() {
   pySerialize_ = py::none();
   pyHandleException_ = py::none();
   jitCompilationUnit_ = nullptr;
+  typeParser_ = nullptr;
 }
 
 PythonRpcHandler& PythonRpcHandler::getInstance() {
-  static PythonRpcHandler handler;
-  return handler;
+  // Leaky singleton to avoid module destructor race.
+  static PythonRpcHandler* handler = new PythonRpcHandler();
+  return *handler;
 }
 
 std::shared_ptr<torch::jit::script::CompilationUnit> PythonRpcHandler::
@@ -116,6 +134,11 @@ py::object PythonRpcHandler::deserialize(const SerializedPyObj& serializedObj) {
 
 void PythonRpcHandler::handleException(const py::object& obj) {
   PROFILE_GIL_SCOPED_ACQUIRE;
+  pyHandleException_(obj);
+}
+
+void PythonRpcHandler::handleExceptionGILHeld(const py::object& obj) {
+  TORCH_CHECK(PyGILState_Check(), "GIL should be held");
   pyHandleException_(obj);
 }
 

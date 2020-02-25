@@ -82,6 +82,7 @@ def pool_output_shape(input_size, kernel_size, padding, stride,
         output_size += 1
     return output_size
 
+
 class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
@@ -117,34 +118,6 @@ class TestQuantizedOps(TestCase):
             op_(qY_hat)
             self.assertEqual(qY, qY_hat, message="{} relu failed".format(name))
 
-    """Tests the correctness of the quantized::qnnpack_tanh op."""
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qtanh(self, X):
-        # Note: QNNPACK is tested separately in TestQNNPackOps
-        X, (scale, zero_point, torch_type) = X
-
-        X = torch.from_numpy(X)
-        Y = torch.tanh(X)
-
-        qX = torch.quantize_per_tensor(X, scale=scale,
-                                       zero_point=zero_point,
-                                       dtype=torch_type)
-
-        # Quantize the reference to account for max error.
-        # Note that the output scale has +1, because we use scale of 2.0/2^BITS
-        # in the implementations.
-        f_min, f_max = -1.0, 1.0
-        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
-        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
-        output_zero_point = int(round((q_max + q_min) / 2.0))
-        qY = torch.quantize_per_tensor(Y, scale=output_scale,
-                                       zero_point=output_zero_point,
-                                       dtype=torch_type)
-        qY_hat = torch.tanh(qX)
-        self.assertEqual(qY, qY_hat,
-                         message="TanH failed: {} vs. {}".format(qY, qY_hat))
-
     """Tests the correctness of the quantized::relu op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        qparams=hu.qparams()))
@@ -174,6 +147,83 @@ class TestQuantizedOps(TestCase):
                     qY_hat = op(qX, inplace=inplace)
                 self.assertEqual(qY, qY_hat,
                                  message="{} relu failed".format(name))
+
+    """Tests the correctness of the quantized::relu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
+    def test_qrelu_leaky(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        dqX = qX.dequantize()
+
+        # torch.nn.functional
+        op = torch.nn.functional.leaky_relu
+        dqY = op(dqX, negative_slope=alpha)
+        qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+        qY_hat = op(qX, negative_slope=alpha)
+        self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                         message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+
+    """Tests the correctness of the quantized::qnnpack_sigmoid op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qsigmoid(self, X):
+        # Note: QNNPACK is tested separately in TestQNNPackOps
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        Y = torch.sigmoid(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 1.0/2^BITS
+        # in the implementations.
+        f_min, f_max = 0.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = output_zero_point = 0 if torch_type == torch.qint32 else q_min
+        qY = torch.quantize_per_tensor(Y, scale=output_scale,
+                                       zero_point=output_zero_point,
+                                       dtype=torch_type)
+        qY_hat = torch.sigmoid(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="Sigmoid failed: {} vs. {}".format(qY, qY_hat))
+
+    """Tests the correctness of the quantized::qnnpack_tanh op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()))
+    def test_qtanh(self, X):
+        # Note: QNNPACK is tested separately in TestQNNPackOps
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        Y = torch.tanh(X)
+
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Quantize the reference to account for max error.
+        # Note that the output scale has +1, because we use scale of 2.0/2^BITS
+        # in the implementations.
+        f_min, f_max = -1.0, 1.0
+        q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
+        output_scale = (f_max - f_min) / (q_max - q_min + 1.0)
+        output_zero_point = int(round((q_max + q_min) / 2.0))
+        qY = torch.quantize_per_tensor(Y, scale=output_scale,
+                                       zero_point=output_zero_point,
+                                       dtype=torch_type)
+        qY_hat = torch.tanh(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="TanH failed: {} vs. {}".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::clamp op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
@@ -454,6 +504,37 @@ class TestQuantizedOps(TestCase):
         mul_relu_out(qA, qB, out=qCrelu_out_hat)
         self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                          message="mulReLU.out failed")
+
+    """Tests the correctness of the mul and mul_relu op."""
+    def test_qmul_broadcast(self):
+        mul_relu = torch.ops.quantized.mul_relu
+        mul = torch.ops.quantized.mul
+        mul_out = torch.ops.quantized.mul_out
+        mul_relu_out = torch.ops.quantized.mul_relu_out
+
+        # A = torch.arange(-25, 25, dtype=torch.float)
+        # B = torch.arange(-25, 25, dtype=torch.float)
+        A = torch.randn(8, 1, 6, 1)
+        B = torch.randn(7, 1, 5)
+        scale_A = 3.0
+        zero_point_A = 7
+        scale_B = 5.0
+        zero_point_B = 127
+
+        scale_C = 0.5
+        zero_point_C = 5
+
+        qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point_A,
+                                       dtype=torch.quint8)
+        qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point_B,
+                                       dtype=torch.quint8)
+
+        # mul ground truth
+        C = (qA.dequantize() * qB.dequantize()).numpy()
+        qC = _quantize(C, scale_C, zero_point_C)
+        qC_hat = mul(qA, qB, scale=scale_C, zero_point=zero_point_C)
+        np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                "Quantized multiplication failed.")
 
     """Tests max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
@@ -1042,6 +1123,35 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
+
+    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
+                                              min_side=1, max_side=32),
+                       qparams=hu.qparams()),
+           Y_scale=st.floats(0.2, 2.6),
+           Y_zero_point=st.integers(0, 5),
+           qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_batch_norm(self, X, Y_scale, Y_zero_point, qengine):
+        if qengine not in torch.backends.quantized.supported_engines:
+            return
+
+        with override_quantized_engine(qengine):
+            X, (scale_x, zero_point_x, dtype_x) = X
+
+            X = torch.from_numpy(X)
+            c = X.shape[1]
+
+            mean = torch.rand(c).float()
+            var = torch.rand(c).float()
+            weight = torch.rand(c).float()
+            bias = torch.rand(c).float()
+            eps = 0.001
+            qx = torch.quantize_per_tensor(X, scale_x, zero_point_x, dtype_x)
+            qy = torch.ops.quantized.batch_norm(qx, weight, bias, mean, var, eps, Y_scale, Y_zero_point)
+
+            float_ref = F.batch_norm(qx.dequantize(), weight=weight, bias=bias,
+                                     running_mean=mean, running_var=var, training=False, momentum=0, eps=eps)
+            quantize_ref = torch.quantize_per_tensor(float_ref, Y_scale, Y_zero_point, dtype_x)
+            self.assertEqual(qy.int_repr().numpy(), quantize_ref.int_repr().numpy())
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -1877,6 +1987,59 @@ class TestQNNPackOps(TestCase):
             self.assertEqual(qYserver, qY_hat,
                              message="QNNPACK TanH failed (FBGEMM ref)!")
 
+    """Tests the correctness of the quantized::qnnpack_sigmoid op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_qnnpack_sigmoid(self, X):
+        # Note: In QNNPACK the output scale and zero_point can only be
+        #       1.0/256, 0 respectively, as it uses a LUT with 256 bins.
+        X, (scale, zero_point, torch_type) = X
+        X = torch.from_numpy(X).to(torch.float32)
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # Floating point reference
+        Y = torch.sigmoid(X)
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 256, zero_point=0,
+                                       dtype=torch.quint8)
+        with override_quantized_engine('fbgemm'):
+            qYserver = torch.sigmoid(qX)
+        with override_quantized_engine('qnnpack'):
+            qY_hat = torch.sigmoid(qX)
+            self.assertEqual(qY, qY_hat,
+                             message="QNNPACK Sigmoid failed (FP ref)!")
+            self.assertEqual(qYserver, qY_hat,
+                             message="QNNPACK Sigmoid failed (FBGEMM ref)!")
+
+    def test_qnnpack_sigmoid_sweep(self):
+        # Input parameters
+        f_min = -4.0
+        f_max = 4.0
+        scale = (f_max - f_min) / 256.0
+        zero_point = 128
+        dtype = torch.quint8
+
+        step = scale / 2.0
+        x = np.arange(f_min, f_max + step, step)
+        X = torch.from_numpy(x).to(torch.float32)
+        qX = torch.quantize_per_tensor(X, scale=scale,
+                                       zero_point=zero_point,
+                                       dtype=dtype)
+
+        dqX = qX.dequantize()
+        # Floating point reference
+        Y = torch.sigmoid(dqX)
+        qY = torch.quantize_per_tensor(Y, scale=1.0 / 256, zero_point=0,
+                                       dtype=torch.quint8)
+        with override_quantized_engine('fbgemm'):
+            qYserver = torch.sigmoid(qX)
+        with override_quantized_engine('qnnpack'):
+            qY_hat = torch.sigmoid(qX)
+            self.assertEqual(qY, qY_hat,
+                             message="QNNPACK Sigmoid failed (FP ref)!")
+            self.assertEqual(qYserver, qY_hat,
+                             message="QNNPACK Sigmoid failed (FBGEMM ref)!")
 
     """Tests the correctness of the quantized::add (qnnpack) op."""
     @settings(suppress_health_check=(HealthCheck.filter_too_much,))

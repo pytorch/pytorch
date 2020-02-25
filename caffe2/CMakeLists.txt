@@ -275,10 +275,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_H_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions_dispatch.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
     )
 
   set(TORCH_GENERATED_CODE
@@ -307,12 +303,8 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
     "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_variable_methods_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_torch_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
-    "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
@@ -373,6 +365,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
     ${TORCH_SRC_DIR}/csrc/jit/node_hashing.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/type_hashing.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/irparser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/jit_log.cpp
@@ -431,7 +424,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/register_string_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/register_special_ops.cpp
     ${TORCH_SRC_DIR}/csrc/jit/scope.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/script/ir_emitter.cpp
     ${TORCH_SRC_DIR}/csrc/jit/testing/file_check.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/convert_to_ssa.cpp
     ${TORCH_SRC_DIR}/csrc/jit/script/exit_transforms.cpp
@@ -461,6 +454,17 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/fallback.cpp
     ${TORCH_SRC_DIR}/csrc/jit/function.cpp
     ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
+
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/codegen.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/expr.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/eval.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/types.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -510,9 +514,12 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/python_resp.cpp
-        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/request_callback.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rpc_agent.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_context.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_proto.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/rref_impl.cpp
+        ${TORCH_SRC_DIR}/csrc/distributed/rpc/torchscript_functions.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_remote_call.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/rpc/script_resp.cpp
@@ -759,6 +766,7 @@ ENDIF()
 
   if (BUILD_TEST AND NOT MSVC AND NOT USE_ROCM)
     add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+    add_subdirectory(${TORCH_ROOT}/test/cpp/tensorexpr ${CMAKE_BINARY_DIR}/test_tensorexpr)
     if (USE_DISTRIBUTED)
       add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
     endif()
@@ -875,6 +883,14 @@ if(USE_ROCM)
     /opt/rocm/rocblas/include
     /opt/rocm/hipsparse/include
     )
+endif()
+
+# Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
+# jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
+if (USE_DISTRIBUTED)
+  target_compile_definitions(torch_cpu PRIVATE
+    USE_DISTRIBUTED
+  )
 endif()
 
 if (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)

@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     simple_sparse_reduce_tests
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_address_already_in_use_error, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -330,7 +330,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
@@ -422,7 +422,7 @@ class RendezvousEnvTest(TestCase):
             self.assertEqual(rank, 0)
             self.assertEqual(size, 1)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
         os.environ['WORLD_SIZE'] = '1'
         os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -475,6 +475,13 @@ class RendezvousFileTest(TestCase):
 
 
 class RendezvousTCPTest(TestCase):
+
+    def create_tcp_url(self):
+        addr = "localhost"
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        return url
+
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
@@ -486,11 +493,9 @@ class RendezvousTCPTest(TestCase):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
             next(gen)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
-        addr = 'localhost'
-        port = common.find_free_port()
-        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        url = self.create_tcp_url()
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -501,6 +506,22 @@ class RendezvousTCPTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
+    def test_tcp_store_timeout_set(self):
+        url = self.create_tcp_url()
+        test_store_timeout = timedelta(seconds=10)
+        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        store0, rank0, size0 = next(gen0)
+        # this should time out in 10s. If the timeout passed into rendezvous was
+        # not respected, it will take much longer to timeout.
+        start = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            store0.get("nonexistant key")
+
+        end = time.time()
+        time_diff = end - start
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class TimeoutTest(TestCase):
@@ -542,18 +563,18 @@ class TimeoutTest(TestCase):
                 # waiting time should be 1s, use 3s to rule out false alarm
                 self.assertGreater(3, c2p[0])
             elif isinstance(c2p[0], RuntimeError):
-                # let @retry_on_address_already_in_use_error handle the error
+                # let @retry_on_connect_failures handle the error
                 raise c2p[0]
             else:
                 raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
     @requires_nccl()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_nccl(self):
         self._test_default_store_timeout('nccl')
 
     @requires_gloo()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
         self._test_default_store_timeout('gloo')
 
@@ -3155,7 +3176,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return 2
+        return 3
 
     def _get_wrapped_func(self, func):
         # Get the original function which was wrapped in the decorator.
@@ -3171,7 +3192,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3210,36 +3231,42 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # run new events. It was observed cuda could stuck if not
             # aborting nccl communicators before throwing Operation timed out
             a = torch.rand(10).cuda(self.rank)
-        else:
+        elif self.rank == 1:
             func()
+        else:
+            # Wait for timeout
+            time.sleep(2 * self.op_timeout_sec)
+
+            # Now verify communicators on this rank have been aborted by the watchdog thread.
+            self._wait_for_comm_abort(process_group)
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_clean_exit(self):
         self._test_nccl_errors_blocking(lambda : sys.exit(0))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_nonzero_exit(self):
         self._test_nccl_errors_blocking(lambda : sys.exit(1))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda : os.abort())
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigkill(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigterm(self):
         self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
 
@@ -3250,15 +3277,29 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     def test_invalid_nccl_blocking_wait_env(self):
         self._run_invalid_nccl_blocking_wait_env('abc')
         self._run_invalid_nccl_blocking_wait_env('-1')
         self._run_invalid_nccl_blocking_wait_env('2147483647')
         self._run_invalid_nccl_blocking_wait_env('4294967295')
 
+    def _wait_for_comm_abort(self, process_group):
+        '''
+        Waits for the watchdog thread to abort communicators for the process group.
+        '''
+        while True:
+            try:
+                process_group.allreduce(torch.rand(10).cuda(self.rank))
+            except Exception as e:
+                if "NCCL communicator was aborted" in str(e):
+                    return
+                else:
+                    raise e
+            time.sleep(1)
+
     @requires_nccl()
-    @skip_if_not_multigpu
+    @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3266,20 +3307,20 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
         # Initialize process_group.
         timeout = 1
-        c10d.distributed_c10d.init_process_group(
-            backend=dist.Backend.NCCL, store=store, world_size=2, rank=self.rank,
-            timeout=timedelta(seconds=timeout))
-        c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=timeout))
+        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
-            with self.assertRaisesRegex(RuntimeError, "(Operation timed out!)|(NCCL error: unhandled system error)"):
-                c10d.distributed_c10d.all_reduce(torch.rand(10).cuda(self.rank))
+            with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
         else:
-            # Ensure the other rank sleeps to trigger timeout.
+            # Sleep to ensure timeout.
             time.sleep(2 * timeout)
+
+            self._wait_for_comm_abort(process_group)
 
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
@@ -3333,6 +3374,7 @@ class CommTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
+    @skip_if_rocm
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

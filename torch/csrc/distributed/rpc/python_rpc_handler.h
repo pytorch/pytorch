@@ -42,6 +42,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Check if obj is RemoteException, then throw it
   void handleException(const py::object& obj);
+  // Alternative if the caller is already holding the GIL.
+  void handleExceptionGILHeld(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
@@ -74,22 +76,6 @@ class PYBIND11_EXPORT PythonRpcHandler {
  private:
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
-
-// A macro that grabs the GIL, profiling the acquisition time. The average GIL
-// acquisition time will be recorded in RpcAgent's getMetrics().
-#define PROFILE_GIL_SCOPED_ACQUIRE                                       \
-  std::chrono::time_point<std::chrono::high_resolution_clock> startTime; \
-  auto shouldProfileGIL =                                                \
-      RpcAgent::getCurrentRpcAgent()->isGILProfilingEnabled();           \
-  if (shouldProfileGIL) {                                                \
-    startTime = std::chrono::high_resolution_clock::now();               \
-  }                                                                      \
-  pybind11::gil_scoped_acquire ag;                                       \
-  if (shouldProfileGIL) {                                                \
-    auto dur = std::chrono::duration_cast<std::chrono::microseconds>(    \
-        std::chrono::high_resolution_clock::now() - startTime);          \
-    RpcAgent::getCurrentRpcAgent()->addGilWaitTime(dur);                 \
-  }
 
   PythonRpcHandler(const PythonRpcHandler&) = delete;
   PythonRpcHandler& operator=(const PythonRpcHandler&) = delete;
