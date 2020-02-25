@@ -1,8 +1,5 @@
 #include <gtest/gtest.h>
 
-// TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
-// is ready to ship.
-#include <ATen/native/TensorIndexing.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
