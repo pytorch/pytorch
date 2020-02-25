@@ -118,7 +118,7 @@ public:
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
 
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const;
+  Return callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const;
 
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
@@ -137,15 +137,17 @@ private:
 
   void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
-  [[noreturn]] static void reportError(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey);
+  [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 
-  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatch_key) const;
+  const KernelFunction& dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatch_key) const;
 
   std::list<OperatorDef> operators_;
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
   impl::KernelFunctionTable backendFallbackKernels_;
-  // Set of backends which have specified they want fallthrough behavior
-  DispatchKeySet backendFallbackNonFallthroughSet_;
+  // Set of backends which have specified they do NOT want fallthrough behavior
+  // (we store the inverse because it avoids a negation when we use this for
+  // masking)
+  DispatchKeySet backendsWithoutFallthrough_;
   std::unique_ptr<detail::RegistrationListenerList> listeners_;
   std::mutex mutex_;
 };
@@ -176,7 +178,7 @@ public:
   }
 
   template<class Return, class... Args>
-  Return callUnboxedWithDispatchKey(c10::optional<DispatchKey> dispatchKey, Args... args) const {
+  Return callUnboxedWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
     return c10::Dispatcher::singleton().callUnboxedWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
@@ -197,7 +199,7 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, c10::optional<DispatchKey> dispatchKey, Args... args) const {
+inline Return Dispatcher::callUnboxedWithDispatchKey(const OperatorHandle& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
@@ -208,31 +210,28 @@ template<class Return, class... Args>
 inline Return Dispatcher::callUnboxed(const OperatorHandle& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendFallbackNonFallthroughSet_, args...);
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyUnboxed<Args...>(backendsWithoutFallthrough_, args...);
   return callUnboxedWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& dispatchTable = op.operatorIterator_->op.dispatch_table();
-  c10::optional<DispatchKey> dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(backendFallbackNonFallthroughSet_, stack);
+  auto dispatchKey = dispatchTable.dispatchKeyExtractor().getDispatchKeyBoxed(backendsWithoutFallthrough_, stack);
   const KernelFunction& kernel = dispatch_(dispatchTable, dispatchKey);
   kernel.callBoxed(op, stack);
 }
 
-inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, c10::optional<DispatchKey> dispatchKey) const {
-  if (C10_LIKELY(dispatchKey.has_value())) {
+inline const KernelFunction& Dispatcher::dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatchKey) const {
+  const KernelFunction* backendKernel = dispatchTable.lookup(dispatchKey);
 
-    const KernelFunction* backendKernel = dispatchTable.lookup(*dispatchKey);
+  if (nullptr != backendKernel) {
+    return *backendKernel;
+  }
 
-    if (nullptr != backendKernel) {
-      return *backendKernel;
-    }
-
-    const auto& backendFallbackKernel = backendFallbackKernels_[*dispatchKey];
-    if (backendFallbackKernel.isValid()) {
-      return backendFallbackKernel;
-    }
+  const auto& backendFallbackKernel = backendFallbackKernels_[dispatchKey];
+  if (backendFallbackKernel.isValid()) {
+    return backendFallbackKernel;
   }
 
   const KernelFunction* catchallKernel = dispatchTable.lookupCatchallKernel();
