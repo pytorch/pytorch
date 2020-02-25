@@ -534,15 +534,15 @@ def gen_pyi(declarations_path, out):
         for inplace in [True, False]:
             out_suffix = ', *, out: Optional[Tensor]=None'
             if inplace:
-                name += '_'
+                binop += '_'
                 out_suffix = ''
-            unsorted_tensor_method_hints[name].append(
+            unsorted_tensor_method_hints[binop].append(
                 'def {}(self, other: Union[Tensor, Number]{})'
-                ' -> Tensor: ...'.format(name, out_suffix))
-            unsorted_tensor_method_hints[name].append(
+                ' -> Tensor: ...'.format(binop, out_suffix))
+            unsorted_tensor_method_hints[binop].append(
                 'def {}(self, value: Number,'
                 ' other: Union[Tensor, Number]{})'
-                ' -> Tensor: ...'.format(name, out_suffix))
+                ' -> Tensor: ...'.format(binop, out_suffix))
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
                           'half', 'int', 'long', 'short', 'bool']
     for name in simple_conversions:
