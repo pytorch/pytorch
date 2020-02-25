@@ -9,6 +9,10 @@
 namespace at {
 namespace native {
 
+// Use REGISTER_DISPATCH to run CPU and CUDA backend.
+DEFINE_DISPATCH(fake_quant_per_channel_stub);
+DEFINE_DISPATCH(fake_quant_grad_per_channel_stub);
+
 /* Per channel fake-quantizes the 'inputs' tensor.
 Args:
   X: Forward input tensor.
@@ -67,7 +71,7 @@ Tensor fake_quantize_per_channel_affine(
   iter.add_input(zero_point.reshape(expected_shape));
   iter.build();
 
-  fake_quant_by_channel_stub(iter.device_type(), iter, quant_min, quant_max);
+  fake_quant_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return Y;
 }
@@ -144,7 +148,7 @@ Tensor fake_quantize_per_channel_affine_backward(
   iter.add_input(zero_point.reshape(expected_shape));
   iter.build();
 
-  fake_quant_grad_by_channel_stub(iter.device_type(), iter, quant_min, quant_max);
+  fake_quant_grad_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return dX;
 }

@@ -74,7 +74,7 @@ REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel
 
 // Fake quantize by channel
 
-void fake_quant_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
+void fake_quant_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float input_val, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
@@ -89,7 +89,7 @@ void fake_quant_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t
     });
 }
 
-void fake_quant_grad_by_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
+void fake_quant_grad_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float x, float dy, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
@@ -98,8 +98,8 @@ void fake_quant_grad_by_channel_cuda(TensorIterator &iter, int64_t quant_min, in
     });
 }
 
-REGISTER_DISPATCH(fake_quant_by_channel_stub, &fake_quant_by_channel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_by_channel_stub, &fake_quant_grad_by_channel_cuda);
+REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cuda);
+REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cuda);
 
 } // namespace native
 } // namespace at
