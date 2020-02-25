@@ -438,7 +438,7 @@ static inline Tensor applySlicing(
   TORCH_CHECK_INDEX(specified_dims <= self_sizes.size(), "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (int64_t i = 0; i < indices.size(); i++) {
+  for (size_t i = 0; i < indices.size(); i++) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,
