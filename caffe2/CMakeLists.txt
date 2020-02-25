@@ -411,6 +411,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/requires_grad_analysis.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_autogradzero.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/subgraph_rewrite.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/tensorexpr_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/python_print.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/subgraph_utils.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/utils/check_alias_annotation.cpp
