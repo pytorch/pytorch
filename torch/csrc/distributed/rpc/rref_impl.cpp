@@ -6,6 +6,25 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+namespace {
+// If the type is subtype of named type, return its qualifiedname, otherwise
+// return its type str.
+std::string getTypeStr(const c10::TypePtr& type) {
+  switch (type->kind()) {
+    case c10::TypeKind::FunctionType:
+      return type->cast<c10::FunctionType>()->name()->qualifiedName();
+    case c10::TypeKind::TupleType:
+      return type->cast<c10::TupleType>()->name()->qualifiedName();
+    case c10::TypeKind::ClassType:
+      return type->cast<c10::ClassType>()->name()->qualifiedName();
+    case c10::TypeKind::InterfaceType:
+      return type->cast<c10::InterfaceType>()->name()->qualifiedName();
+    default:
+      return type->str();
+  }
+}
+} // namespace
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -41,7 +60,7 @@ RRefForkData RRef::fork() const {
       rrefId_,
       ctx.genGloballyUniqueId(),
       ctx.getWorkerId(),
-      type_->str());
+      getTypeStr(type_));
 }
 
 //////////////////////////  UserRRef  /////////////////////////////////////
@@ -77,7 +96,7 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-std::vector<IValue> UserRRef::toHere() {
+IValue UserRRef::toHere() {
   auto agent = RpcAgent::getCurrentRpcAgent();
 
   // ScriptRRefFetchCall message always carries autograd context id even if
@@ -107,7 +126,13 @@ std::vector<IValue> UserRRef::toHere() {
       "or PYTHON_RREF_FETCH_RET");
   RpcCommandBase& rpc = *response;
   auto& rrefFetchRet = static_cast<RRefFetchRet&>(rpc);
-  return rrefFetchRet.values();
+  if (isPyObj()) {
+    // wrap python serialized vector of ivalues into tuple, this
+    // made the C++ toHere interface to return single IValue
+    return ivalue::Tuple::create(rrefFetchRet.values());
+  } else {
+    return rrefFetchRet.values().front();
+  }
 }
 
 //////////////////////////  OwnerRRef  /////////////////////////////////////

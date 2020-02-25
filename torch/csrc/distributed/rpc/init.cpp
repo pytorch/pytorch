@@ -100,10 +100,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
               &RpcAgent::getDebugInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
-              "enable_gil_profiling",
-              &RpcAgent::enableGILProfiling,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
               "get_metrics",
               &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
@@ -263,8 +259,21 @@ If the future completes with an error, an exception is thrown.
       "_set_and_start_rpc_agent",
       [](const std::shared_ptr<RpcAgent>& rpcAgent) {
         RpcAgent::setCurrentRpcAgent(rpcAgent);
+        // Initializing typeResolver inside RpcAgent constructor will make
+        // RpcAgent have python dependency. To avoid RpcAgent to have python
+        // dependency, setTypeResolver() here.
+        std::shared_ptr<TypeResolver> typeResolver =
+            std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+              auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+                  qn.qualifiedName());
+              return c10::StrongTypePtr(
+                  PythonRpcHandler::getInstance().jitCompilationUnit(),
+                  std::move(typePtr));
+            });
+        rpcAgent->setTypeResolver(typeResolver);
         rpcAgent->start();
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);
@@ -385,9 +394,9 @@ If the future completes with an error, an exception is thrown.
                                   .getSchema();
         auto stack = torch::jit::createStackForSchema(
             functionSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(
+        auto rrefPtr = remoteTorchscript(
             dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(userRRefPtr);
+        return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -412,6 +421,19 @@ If the future completes with an error, an exception is thrown.
 
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "enable_gil_profiling",
+      [](bool flag) {
+        RpcAgent::getCurrentRpcAgent()->enableGILProfiling(flag);
+      },
+      R"(
+    Set whether GIL wait times should be enabled or not. This incurs a slight
+    overhead cost. Default is disabled for performance reasons.
+
+    Arguments:
+        flag (bool): True to set GIL profiling, False to disable.
       )");
 
   module.def(

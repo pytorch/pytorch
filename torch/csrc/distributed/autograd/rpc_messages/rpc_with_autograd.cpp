@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <c10/util/C++17.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/pickle.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -117,7 +118,10 @@ std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
       autogradPayLoadSize;
   std::vector<torch::Tensor> tensorTable;
   IValue tuple = jit::unpickle(
-      autogradPayLoadBegin, autogradPayLoadSize, nullptr, &tensorTable);
+      autogradPayLoadBegin,
+      autogradPayLoadSize,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &tensorTable);
   std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
 
   // Gather all the fields.

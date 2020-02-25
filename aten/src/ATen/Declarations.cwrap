@@ -10,10 +10,6 @@
   device_guard: False
   return: argument 0
   options:
-    - cname: set
-      arguments:
-        - THTensor* self
-        - THTensor* source
     - cname: setStorage
       arguments:
         - THTensor* self
@@ -220,7 +216,8 @@
 [[
   name: _th_scatter_
   return: argument 0
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   options:
@@ -263,7 +260,6 @@
   arguments:
     - arg: THTensor* result
       output: True
-      resize: index
     - THTensor* self
     - long dim
     - THIndexTensor* index
@@ -564,24 +560,6 @@
     - real p
     - long dim
     - real maxnorm
-]]
-[[
-  name: _th_dist
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  options:
-    - cname: dist
-      return: accreal
-      arguments:
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
-        - real p
 ]]
 [[
   name: _th_histc
@@ -907,16 +885,16 @@
 ]]
 [[
   name: _th_mv
-  cpu_bfloat16: True
   cuda_bfloat16: True
   cname: addmv
+  backends:
+    - CUDA
   variants: function
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
       resize: [ [self, 0] ]
-      cpu_zero: True
     - argument 0
     - THTensor* self
     - THTensor* vec
@@ -925,9 +903,10 @@
 ]]
 [[
   name: _th_mm
-  cpu_bfloat16: True
   cuda_bfloat16: True
   variants: function
+  backends:
+    - CUDA
   return: argument 0
   options:
     - cname: addmm
@@ -935,7 +914,6 @@
         - arg: THTensor* result
           output: True
           resize: [ [self, 0], [mat2,1] ]
-          cpu_zero: True
         - argument 0
         - THTensor* self
         - THTensor* mat2
@@ -955,7 +933,6 @@
     - arg: THTensor* result
       output: True
       resize: [ [self,0], [self,1], [mat2,2] ]
-      cpu_zero: True
     - argument 0
     - THTensor* self
     - THTensor* mat2
@@ -1219,10 +1196,9 @@
   name: _th_cat
   cname: catArray
   variants: [function]
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   return: self
   arguments:

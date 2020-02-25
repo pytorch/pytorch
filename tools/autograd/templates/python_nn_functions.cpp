@@ -53,13 +53,17 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   END_HANDLE_TH_ERRORS
 }
 
-${py_methods}
+// generated forward declarations start here
+
+${py_forwards}
 
 static PyMethodDef nn_functions[] = {
   {"_parse_to", (PyCFunction)(void(*)(void))THPVariable__parse_to, METH_VARARGS | METH_KEYWORDS, nullptr},
   ${py_method_defs}
   {NULL}
 };
+
+static PyObject* THPNNVariableFunctionsModule = NULL;
 
 void initNNFunctions(PyObject* module) {
 #if PY_MAJOR_VERSION == 2
@@ -75,6 +79,7 @@ void initNNFunctions(PyObject* module) {
   };
   PyObject* nn = PyModule_Create(&def);
 #endif
+  THPNNVariableFunctionsModule = nn;
   if (!nn) {
     throw python_error();
   }
@@ -83,5 +88,9 @@ void initNNFunctions(PyObject* module) {
     throw python_error();
   }
 }
+
+// generated methods start here
+
+${py_methods}
 
 }} // namespace torch::autograd
