@@ -542,7 +542,8 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
   output_type operator()(
       const Tensor& inputs,
       const hidden_type& input_hidden,
-      const cell_params& params) const override {
+      const cell_params& params,
+      const bool& type_2) const override {
     if (inputs.device().is_cpu()) {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
@@ -626,7 +627,8 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   output_type operator()(
       const PackedSequence& input,
       const hidden_type& input_hidden,
-      const cell_params& params) const override {
+      const cell_params& params,
+      const bool& type_2) const override {
 
     std::vector<at::Tensor> step_outputs;
     std::vector<hidden_type> hiddens;
@@ -687,7 +689,8 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   output_type operator()(
       const PackedSequence& input,
       const hidden_type& input_hidden,
-      const cell_params& params) const override {
+      const cell_params& params,
+      const bool& type_2) const override {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
@@ -744,7 +747,8 @@ struct PackedBidirectionalLayer
   output_type operator()(
       const PackedSequence& input,
       const hidden_type& input_hidden,
-      const param_type& params) const override {
+      const param_type& params,
+      const bool& type_2) const override {
     auto fw_result = layer_(input, input_hidden.first, params.first);
     auto rev_result = rev_layer_(input, input_hidden.second, params.second);
     PackedSequence output{
