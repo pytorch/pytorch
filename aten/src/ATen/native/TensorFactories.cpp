@@ -491,7 +491,7 @@ Tensor randint(
     IntArrayRef size,
     Generator* generator,
     const TensorOptions& options) {
-  auto result = at::empty(size, options);
+  auto result = at::empty(size, at::dtype(at::kLong).merge_in(options));
   return result.random_(low, high, generator);
 }
 
