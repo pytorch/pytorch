@@ -72,7 +72,7 @@ void fake_quantize_grad_tensor_kernel_cuda(
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel_cuda);
 
-// Fake quantize by channel
+// Fake quantize per channel
 
 void fake_quant_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   gpu_kernel(iter,
