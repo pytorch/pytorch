@@ -132,6 +132,11 @@ bool InterpreterState::run(Stack& stack) {
         tupleConstruct(stack, inst.X);
         ++pc;
       } break;
+      case WARN: {
+        drop(stack, 1);
+        AT_WARN(pop(stack).toStringRef());
+        ++pc;
+      } break;
       default:
         AT_ERROR(toString(inst.op), " is invalid.");
     }

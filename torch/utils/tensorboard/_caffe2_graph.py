@@ -446,7 +446,7 @@ def _operator_to_node_simp(op, inter_blobs, seen):
         if op.name:
             name = op.name
         else:
-            name_list = [name for name in outputs]
+            name_list = list(outputs)
             scope = os.path.commonprefix(name_list)
             name = os.path.join(scope, op.type)
         assert(name)
