@@ -207,7 +207,16 @@ struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& field) override {
-    if (field == "named_modules") {
+    if (field == "keys") {
+      return std::make_shared<ModuleDictMethod>(keys_, "keys");
+    } else if (field == "values") {
+      return std::make_shared<ModuleDictMethod>(modules_, "values");
+    } else if (field == "items") {
+      auto iterator = std::make_shared<IterableTree>();
+      iterator->addChild(loc, m, keys_);
+      iterator->addChild(loc, m, modules_);
+      return std::make_shared<ModuleDictMethod>(iterator, "items");
+    } else if (field == "named_modules") {
       auto iterator = std::make_shared<IterableTree>();
       std::vector<SugaredValuePtr> keys;
       std::vector<SugaredValuePtr> values;

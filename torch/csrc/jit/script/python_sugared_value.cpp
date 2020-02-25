@@ -334,9 +334,10 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
-  // TODO: These could be represented as first class methods probably.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
-    return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+    if (field == "items" || field == "keys" || field != "values") {
+      return getSugaredModuleDict(loc, m)->attr(loc, m, field);
+    }
   }
 
   if (field == "named_modules") {
