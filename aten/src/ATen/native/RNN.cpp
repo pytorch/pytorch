@@ -1213,18 +1213,18 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       auto params = gather_quantized_params_dynamic(_params);
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          dropout_p, train, bidirectional, type_2);
     } else {
       auto params = gather_quantized_params(_params);
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          dropout_p, train, bidirectional, type_2);
     }
   } else {
     auto params = gather_quantized_params_fp16(_params);
     results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
-        dropout_p, train, bidirectional);
+        dropout_p, train, bidirectional, type_2);
   }
 
   if (batch_first) {
