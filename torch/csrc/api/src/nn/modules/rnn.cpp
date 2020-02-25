@@ -38,7 +38,7 @@ void RNNImplBase<Derived>::reset() {
   // If bidirectional mode and type 2 RNN is enabled, then the input
   // size to any hidden layer should be 2 * hidden_size
   const auto hidden_switch = (options.bidirectional() &&
-                              !options.cat_layer_fwd_bwd_states());
+                              options.cat_layer_fwd_bwd_states());
   const auto bidirectional_size = options.hidden_size() * num_directions;
   const auto actual_hidden_size = (hidden_switch ? bidirectional_size :
                                    options.hidden_size());
