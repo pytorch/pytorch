@@ -5390,14 +5390,22 @@ def foo(x):
 
         def fn():
             a = SomeClass()
+            a_copy = a
             a += 20
+            assert a is a_copy
             b = SomeOutOfPlaceClass()
+            b_copy = b
             b += 99
+            assert b is b_copy
             c = [1, 2, 3]
+            c_copy = c
             c *= 2
+            assert c is c_copy
             c += [4, 5, 6]
             d = torch.ones(2, 2)
+            d_copy = d
             d += torch.ones(2, 2)
+            assert d is d_copy
             return a, b, c, d
 
         self.checkScript(fn, [])
