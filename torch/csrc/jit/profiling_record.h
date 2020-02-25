@@ -16,6 +16,13 @@ namespace jit {
 
 using ::c10::TensorTypePtr;
 
+struct ProfilingRunRecord {
+  std::map<int64_t, int64_t> dims2symbols_;
+  std::map<int64_t, int64_t> symbols2dims_;
+  std::map<Value*, c10::TensorTypePtr> symbolic_shapes_;
+  std::map<int64_t, std::map<int64_t, int64_t>> split_symbols_;
+};
+
 struct ProfilingRecord {
   // N.B. ProfilingRecord's copy and move c-tor are disabled, so we won't
   // end up accidentally copying or moving ProfilingRecords whose addresses
@@ -28,11 +35,7 @@ struct ProfilingRecord {
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
-  std::map<size_t, int64_t> dims2symbols_;
-  // figure out concurrency and data races
-  std::map<int64_t, size_t> symbols2dims_;
-  std::map<int64_t, c10::optional<size_t>> static_sizes_;
-  std::map<int64_t, std::map<size_t, int64_t>> split_symbols_;
+  std::map<int64_t, ProfilingRunRecord> profiling_records_;
   size_t num_symbols = 0;
 
   int64_t getNewSymbol() {
@@ -42,13 +45,11 @@ struct ProfilingRecord {
 
   std::vector<int64_t> mergeSymbolicShapes(
       at::IntArrayRef sizes,
-      c10::VaryingShape sym_shapes);
-  void convertToStaticShapes(Block* b);
-  void updateStaticSizes(int64_t key, size_t dim);
-  int64_t toSymbol(size_t val);
-  // size_t toDimension(int64_t symbol, size_t);
-  // std::vector<c10::optional<int64_t>> mergeSymbolicShapes(VaryingShape& vs,
-  // at::IntArrayRef sizes)
+      c10::VaryingShape sym_shapes,
+      std::map<int64_t, int64_t>& dims2symbols,
+      std::map<int64_t, int64_t>& symbols2dims,
+      std::map<int64_t, std::map<int64_t, int64_t>> split_symbols);
+  int64_t toSymbol(int64_t val, std::map<int64_t, int64_t>& dims2symbols);
   bool ready() const {
     return profiling_count_ == 0;
   }

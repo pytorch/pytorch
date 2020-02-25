@@ -4077,17 +4077,6 @@ class TestScript(JitTestCase):
 
 
             # case 4
-            a = torch.ones(7, 1)
-            b = torch.ones(7, 5)
-            c = torch.ones(5)
-            c2 = torch.ones(777)
-            j (c, b, a)
-            j (c2, b, a)
-            j (c, b, a)
-
-            # case 5 impossible (*, a) + (*, a) = (x, a)
-
-            #case 6
             # a = torch.ones(7, 1)
             # b = torch.ones(7, 5)
             # c = torch.ones(5)
@@ -4095,6 +4084,17 @@ class TestScript(JitTestCase):
             # j (c, b, a)
             # j (c2, b, a)
             # j (c, b, a)
+
+            # case 5 impossible (*, a) + (*, a) = (x, a)
+
+            #case 6
+            a = torch.ones(7, 1)
+            b = torch.ones(7, 5)
+            c = torch.ones(5)
+            c2 = torch.ones(777)
+            j (c, b, a)
+            j (c2, a, b)
+            j (c, b, a)
 
             # a = torch.ones(7)
             # b = torch.ones(8)

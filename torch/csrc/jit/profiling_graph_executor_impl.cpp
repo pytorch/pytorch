@@ -176,7 +176,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   auto copy = pr_->graph()->copy();
-  pr_->convertToStaticShapes(copy->block());
   runProfilingOptimizations(copy);
   // cache
   optimized_plan_ = ExecutionPlan(copy, remaining_bailout_depth);

@@ -899,9 +899,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           TORCH_INTERNAL_ASSERT("shouldn't be dynamic");
           new_symbols.push_back(c10::nullopt);
         } else {
-          // refactor into bind
-          // TORCH_INTERNAL_ASSERT(*symbol < 0);
-          if (af.symbols2dims.count(symbol.value()) == 0) {
+          if (*symbol > 0) {
+            new_symbols.push_back(
+                *symbol == new_sizes[i] ? symbol : c10::nullopt);
+          } else if (af.symbols2dims.count(symbol.value()) == 0) {
             af.symbols2dims[*symbol] = new_sizes[i];
             new_symbols.push_back(*symbol);
           } else {
@@ -1118,7 +1119,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } break;
           case PROFILE: {
             auto callback = af.profile_functions[inst.X];
-            std::cout << "PROFILE : " << &stack << std::endl;
             push(stack, c10::IValue{static_cast<int64_t>(af.id)});
             callback(stack);
             ++af.pc;
@@ -1138,10 +1138,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto pttp = tensorTypeInCurrentExecutionContext(t);
             const TypePtr& expected = af.types[inst.X];
             auto expected_type = expected->cast<TensorType>();
-            auto bound_symbols =
-                bindSymbolicShapes(af, t.sizes(), expected_type->sizes());
-            auto bound_type =
-                pttp->withSymbolicShapes(c10::VaryingShape{bound_symbols});
+            auto bound_type = pttp;
+            if (t.defined()) {
+              auto bound_symbols =
+                  bindSymbolicShapes(af, t.sizes(), expected_type->sizes());
+              auto bound_type =
+                  pttp->withSymbolicShapes(c10::VaryingShape{bound_symbols});
+            }
             // auto bound_type = expected_type->merge(t, af.symbols2dims);
             push(stack, *expected_type == *bound_type);
             ++af.pc;
