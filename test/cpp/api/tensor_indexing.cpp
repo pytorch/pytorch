@@ -211,7 +211,7 @@ TEST(TensorIndexingTest, TestBoolIndices) {
 TEST(TensorIndexingTest, TestBoolIndicesAccumulate) {
   auto mask = torch::zeros({10}, torch::kBool);
   auto y = torch::ones({10, 10});
-  y.index_put_({mask}, y(mask), /*accumulate=*/true);
+  y.index_put_({mask}, y.index({mask}), /*accumulate=*/true);
   assert_tensor_equal(y, torch::ones({10, 10}));
 }
 
@@ -221,7 +221,7 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   // note: these broadcast together and are transposed to the first dim
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
   auto mask2 = torch::tensor({1, 1, 1}, torch::kBool);
-  assert_tensor_equal(v.index({mask1, {}, mask2}).sizes(), {3, 7});
+  ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
 TEST(TensorIndexingTest, TestByteMask) {
@@ -232,7 +232,7 @@ TEST(TensorIndexingTest, TestByteMask) {
       std::stringstream buffer;
       CerrRedirect cerr_redirect(buffer.rdbuf());
 
-      assert_tensor_equal(v.index({mask}).sizes(), {3, 7, 3});
+      ASSERT_EQ(v.index({mask}).sizes(), torch::IntArrayRef({3, 7, 3}));
       assert_tensor_equal(v.index({mask}), torch::stack({v[0], v[2], v[3]}));
 
       ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
@@ -267,7 +267,7 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    assert_tensor_equal(v.index({mask1, {}, mask2}).sizes(), {3, 7});
+    ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
@@ -278,14 +278,14 @@ TEST(TensorIndexingTest, TestByteMask2d) {
   auto c = torch::randn({5, 7});
   int64_t num_ones = (c > 0).sum().item().to<int64_t>();
   auto r = v.index({c > 0});
-  assert_tensor_equal(r.sizes(), {num_ones, 3});
+  ASSERT_EQ(r.sizes(), torch::IntArrayRef({num_ones, 3}));
 }
 
 TEST(TensorIndexingTest, TestIntIndices) {
   auto v = torch::randn({5, 7, 3});
-  assert_tensor_equal(v.index({torch::tensor({0, 4, 2})}).sizes(), {3, 7, 3});
-  assert_tensor_equal(v.index({{}, torch::tensor({0, 4, 2})}).sizes(), {5, 3, 3});
-  assert_tensor_equal(v.index({{}, torch::tensor({{0, 1}, {4, 3}})}).sizes(), {5, 2, 2, 3});
+  ASSERT_EQ(v.index({torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({3, 7, 3}));
+  ASSERT_EQ(v.index({{}, torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
+  ASSERT_EQ(v.index({{}, torch::tensor({{0, 1}, {4, 3}})}).sizes(), torch::IntArrayRef({5, 2, 2, 3}));
 }
 
 
@@ -337,8 +337,8 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
   }
   {
     auto x = torch::empty({10, 0});
-    assert_tensor_equal(x.index({torch::tensor({1, 2})}).sizes(), {2, 0});
-    assert_tensor_equal(x.index(torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)).sizes(), {0});
+    ASSERT_EQ(x.index({torch::tensor({1, 2})}).sizes(), torch::IntArrayRef({2, 0}));
+    ASSERT_EQ(x.index({torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)}).sizes(), torch::IntArrayRef({0}));
     ASSERT_THROWS_WITH(x.index({{}, torch::tensor({0, 1})}), "for dimension with size 0");
   }
 }
@@ -376,9 +376,9 @@ TEST(TensorIndexingTest, TestEmptySlice) {
   auto x = torch::randn({2, 3, 4, 5}, device);
   auto y = x.index({{}, {}, {}, 1});
   auto z = y.index({{}, {1, 1}, {}});
-  assert_tensor_equal({2, 0, 4}, z.sizes());
+  ASSERT_EQ(z.sizes(), torch::IntArrayRef({2, 0, 4}));
   // this isn't technically necessary, but matches NumPy stride calculations.
-  assert_tensor_equal({60, 20, 5}, z.strides());
+  ASSERT_EQ(z.strides(), torch::IntArrayRef({60, 20, 5}));
   ASSERT_TRUE(z.is_contiguous());
 }
 
@@ -387,9 +387,9 @@ TEST(TensorIndexingTest, TestEmptySlice_CUDA) {
   auto x = torch::randn({2, 3, 4, 5}, device);
   auto y = x.index({{}, {}, {}, 1});
   auto z = y.index({{}, {1, 1}, {}});
-  assert_tensor_equal({2, 0, 4}, z.sizes());
+  ASSERT_EQ(z.sizes(), torch::IntArrayRef({2, 0, 4}));
   // this isn't technically necessary, but matches NumPy stride calculations.
-  assert_tensor_equal({60, 20, 5}, z.strides());
+  ASSERT_EQ(z.strides(), torch::IntArrayRef({60, 20, 5}));
   ASSERT_TRUE(z.is_contiguous());
 }
 
@@ -525,20 +525,20 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
   a_set_with_scalar.index_put_({zero}, b);
   assert_tensor_equal(a_set_with_number, a_set_with_scalar);
   a.index_put_({1, zero}, 7.7);
-  ASSERT_TRUE(almost_equal(a.index({1, 0}), 7.7));
+  ASSERT_TRUE(a.index({1, 0}).allclose(torch::tensor(7.7)));
 
   // scalar indexed with scalars
   auto r = torch::randn({});
   ASSERT_THROW(r.index_put_({{}}, 8.8), c10::Error);
   ASSERT_THROW(r.index_put_({zero}, 8.8), c10::Error);
   r.index_put_({"..."}, 9.9);
-  ASSERT_TRUE(almost_equal(r, 9.9));
+  ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
 }
 
 TEST(TensorIndexingTest, TestBasicAdvancedCombined) {
   // From the NumPy indexing example
   auto x = torch::arange(0, 12).to(torch::kLong).view({4, 3});
-  assert_tensor_equal(x.index({{1, 2}, {1, 3}}), x.index({{1, 2}, torch::tensor({1, 2}})));
+  assert_tensor_equal(x.index({{1, 2}, {1, 3}}), x.index({{1, 2}, torch::tensor({1, 2})}));
   assert_tensor_equal(x.index({{1, 2}, {1, 3}}), torch::tensor({{4, 5}}));
 
   // Check that it is a copy
@@ -618,7 +618,6 @@ TEST(TensorIndexingTest, TestOutOfBoundIndex) {
 
 TEST(TensorIndexingTest, TestZeroDimIndex) {
   auto x = torch::tensor(10);
-  ASSERT_TRUE(exactly_equal(x, x.item<int64_t>()));
 
   auto runner = [&]() -> torch::Tensor {
     std::cout << x.index({0}) << std::endl;
@@ -701,7 +700,7 @@ TEST(NumpyTests, TestEllipsisIndex) {
 
   // Assignment with `Ellipsis` on 0-d arrays
   auto b = torch::tensor(1);
-  b.index({Ellipsis}) = 2;
+  b.index_put_({Ellipsis}, 2);
   ASSERT_EQ(b.item<int64_t>(), 2);
 }
 
@@ -771,7 +770,7 @@ TEST(NumpyTests, TestBooleanAssignmentValueMismatch) {
   auto a = torch::arange(0, 4);
 
   auto f = [](torch::Tensor a, std::vector<int64_t> v) -> void {
-    a.index({a > -1}) = torch::tensor(v);
+    a.index_put_({a > -1}, torch::tensor(v));
   };
 
   ASSERT_THROWS_WITH(f(a, {}), "shape mismatch");
@@ -793,7 +792,7 @@ TEST(NumpyTests, TestBooleanIndexingTwodim) {
   assert_tensor_equal(a.index({b.index({0})}), a.index({b.index({2})}));
 
   // boolean assignment
-  a.index({b}) = 0;
+  a.index_put_({b}, 0);
   assert_tensor_equal(a, torch::tensor({{0, 2, 0},
                                  {4, 0, 6},
                                  {0, 8, 0}}));
@@ -802,7 +801,7 @@ TEST(NumpyTests, TestBooleanIndexingTwodim) {
 TEST(NumpyTests, TestBooleanIndexingWeirdness) {
   // Weird boolean indexing things
   auto a = torch::ones({2, 3, 4});
-  assert_tensor_equal(a.index({false, true, "..."}).sizes(), {0, 2, 3, 4});
+  ASSERT_EQ(a.index({false, true, "..."}).sizes(), torch::IntArrayRef({0, 2, 3, 4}));
   assert_tensor_equal(torch::ones({1, 2}), a.index({true, torch::tensor({0, 1}), true, true, torch::tensor({1}), torch::tensor({{2}})}));
   ASSERT_THROW(a.index({false, torch::tensor({0, 1}), "..."}), c10::Error);
 }
@@ -812,7 +811,7 @@ TEST(NumpyTests, TestBooleanIndexingWeirdnessTensors) {
   auto false_tensor = torch::tensor(false);
   auto true_tensor = torch::tensor(true);
   auto a = torch::ones({2, 3, 4});
-  assert_tensor_equal(a.index({false, true, "..."}).sizes(), {0, 2, 3, 4});
+  ASSERT_EQ(a.index({false, true, "..."}).sizes(), torch::IntArrayRef({0, 2, 3, 4}));
   assert_tensor_equal(torch::ones({1, 2}), a.index({true_tensor, torch::tensor({0, 1}), true_tensor, true_tensor, torch::tensor({1}), torch::tensor({{2}})}));
   ASSERT_THROW(a.index({false_tensor, torch::tensor({0, 1}), "..."}), c10::Error);
 }
@@ -820,8 +819,8 @@ TEST(NumpyTests, TestBooleanIndexingWeirdnessTensors) {
 TEST(NumpyTests, TestBooleanIndexingAlldims) {
   auto true_tensor = torch::tensor(true);
   auto a = torch::ones({2, 3});
-  assert_tensor_equal(a.index({true, true}).sizes(), {1, 2, 3});
-  assert_tensor_equal(a.index({true_tensor, true_tensor}).sizes(), {1, 2, 3});
+  ASSERT_EQ(a.index({true, true}).sizes(), torch::IntArrayRef({1, 2, 3}));
+  ASSERT_EQ(a.index({true_tensor, true_tensor}).sizes(), torch::IntArrayRef({1, 2, 3}));
 }
 
 TEST(NumpyTests, TestBooleanListIndexing) {
