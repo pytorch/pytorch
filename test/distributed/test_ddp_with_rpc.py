@@ -7,24 +7,26 @@ from typing import Callable, List, NamedTuple
 
 import torch.distributed.autograd as dist_autograd
 from torch.distributed import rpc
-from torch.distributed.optim import DistributedOptimizer
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
 )
 import torch
+from torch import optim
 import torch.distributed.distributed_c10d as dist_c10d
 import torch.distributed as c10d
 import torch.distributed as dist
 import torch.nn as nn
 import torch.multiprocessing as multiprocessing
+from torch.distributed.optim import DistributedOptimizer
 
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 
 
 NUM_EM_ROW = 2
+NUM_CATEGORIES = 2
 D_SPARSE = 3
 D_DENSE = 2
 D_HID = 3
@@ -58,11 +60,18 @@ def init_logger():
     # add the handlers to the logger
     logger.addHandler(console)
     logger.propagate = False
-    logger.info("Set up a logger.")
     return logger
 
 
 gLogger = init_logger()
+
+
+class FeatureSet(NamedTuple):
+    """ A feature set has 2 types of features"""
+
+    dense_features: torch.Tensor
+    sparse_features: torch.LongTensor
+    labels: torch.LongTensor
 
 
 def _call_method(method, rref, *args, **kwargs):
@@ -83,13 +92,6 @@ def _remote_method_async(method, rref, *args, **kwargs):
     )
 
 
-class FeatureSet(NamedTuple):
-    """ A feature set has 2 types of features"""
-
-    dense_features: torch.Tensor
-    sparse_features: torch.Tensor
-
-
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
         gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
@@ -103,7 +105,7 @@ class RemoteEM(nn.Module):
 
     def forward(self, input: torch.Tensor):
         gLogger.info(f"Running RemoteEM.forward() on: {input}")
-        return self.em(input)
+        return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 
     def print_parameters(self):
         gLogger.info(f"RemoteEM params: {self.parameters}")
@@ -234,9 +236,12 @@ class Trainer:
             f"Initing a trainer with process group {process_group_for_ddp} ..."
         )
 
+        self.criterion = torch.nn.CrossEntropyLoss()
+        self.remote_em_rref = remote_em_rref
+        self.remote_net_rref = remote_net_rref
         self.hybrid_module = HybridModel(
-            remote_em_rref,
-            remote_net_rref,
+            self.remote_em_rref,
+            self.remote_net_rref,
             process_group_for_ddp if ddp_mode in (DdpMode.INSIDE,) else None,
         )
         if ddp_mode == DdpMode.OUTSIDE:
@@ -251,10 +256,48 @@ class Trainer:
     def do_forward_without_grad(self, input: FeatureSet):
         gLogger.info(f"Doing a forward pass on {input}")
         with torch.no_grad():
-            return self.hybrid_module(input)
+            output = self.hybrid_module(input)
+            return self.criterion(output, input.labels)
 
     def do_mini_batch(self, mini_batch: FeatureSet):
-        pass
+        gLogger.info(f"Doing a mini batch on {mini_batch}")
+        loss = 0
+
+        def optimize_remote_parameters():
+            gLogger.info(f"Optimizing the remote parameters.")
+            dist_optim = DistributedOptimizer(
+                optim.SGD, [self.remote_em_rref, self.remote_net_rref], lr=0.05,
+            )
+            dist_optim.step()
+
+        with dist_autograd.context() as context_id:
+            local_optim = optim.SGD(self.hybrid_module.parameters(), lr=0.05)
+            local_optim.zero_grad()
+
+            output = self.hybrid_module.forward(mini_batch)
+            loss = self.criterion(output, mini_batch.labels)
+            dist_autograd.backward([loss])
+            grads_for_local_params = dist_autograd.get_gradients(context_id)
+            gLogger.info(f"Distributed grads: {grads_for_local_params}")
+            # TODO: use the local optimize to update local parameters
+            with torch.no_grad():
+                for param in self.hybrid_module.parameters():
+                    if param in grads_for_local_params:
+                        param += 0.05 * grads_for_local_params[param]
+                    else:
+                        gLogger.error(
+                            f"Param not in distributed autograd: {param}"
+                        )
+
+            gLogger.info(
+                f"Optimizing the {len(list(self.hybrid_module.parameters()))} local parameters"
+            )
+            local_optim.step()
+
+        gLogger.info(
+            f"Local parameters: {list(self.hybrid_module.parameters())}"
+        )
+        return loss
 
 
 class TestDdpWithRpc(TestCase):
@@ -282,7 +325,7 @@ class TestDdpWithRpc(TestCase):
                     process_group.barrier().wait()
                 else:
                     gLogger.error(
-                        f"The process group in the remote worker is type of {type(process_group)}"
+                        f"The process group in the remote worker is of type {type(process_group)}"
                     )
                 gLogger.info(f"The remote worker is running.")
 
@@ -347,6 +390,22 @@ class TestDdpWithRpc(TestCase):
         self.remote_net_rref: rpc.RRef = None
         self.trainer_names = []
         self.trainer_rrefs = []
+        n = 8
+        self.training_examples = FeatureSet(
+            dense_features=torch.zeros((n, D_DENSE)),
+            sparse_features=torch.zeros(n, dtype=torch.long),
+            labels=torch.zeros(n, dtype=torch.long),
+        )
+        idx = 0
+        for x in range(2):
+            for y in range(2):
+                for z in range(2):
+                    self.training_examples.dense_features[
+                        idx, :
+                    ] = torch.Tensor((x, y))
+                    self.training_examples.sparse_features[idx] = z
+                    self.training_examples.labels[idx] = x ^ y ^ z
+                    idx += 1
 
         self.spawn_remote_worker()
         self.spawn_trainers()
@@ -389,7 +448,7 @@ class TestDdpWithRpc(TestCase):
             self.process_group.barrier().wait()
         else:
             gLogger.error(
-                f"The process group in the master process is type of {type(self.process_group)}"
+                f"The process group in the master process is of type {type(self.process_group)}"
             )
         for rank, trainer in enumerate(self.trainer_names):
             self.trainer_rrefs.append(
@@ -405,30 +464,31 @@ class TestDdpWithRpc(TestCase):
                 )
             )
 
-    def do_test_setup(self, ddp_mode: DdpMode):
+    def do_test(
+        self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
+    ):
         self.create_trainers(ddp_mode)
-        futures = []
-        for trainer_rref in self.trainer_rrefs:
-            futures.append(
-                _remote_method_async(
-                    Trainer.do_forward_without_grad,
-                    trainer_rref,
-                    FeatureSet(
-                        sparse_features=torch.LongTensor(
-                            [[0, NUM_EM_ROW - 1], [NUM_EM_ROW - 1, 0]]
-                        ),
-                        dense_features=torch.randn((2, D_DENSE)),
-                    ),
+        for epoch in range(3):
+            futures = []
+            for trainer_rref in self.trainer_rrefs:
+                futures.append(
+                    _remote_method_async(
+                        trainer_method, trainer_rref, self.training_examples,
+                    )
                 )
-            )
-        for future in futures:
-            future.wait()
+            log_loss = 0
+            for future in futures:
+                log_loss += future.wait()
+            gLogger.info(f"Log loss at epoch #{epoch}: {log_loss}")
 
-    def test_setup_no_ddp(self):
-        self.do_test_setup(DdpMode.NONE)
+    def test_forward_no_ddp(self):
+        self.do_test(DdpMode.NONE, Trainer.do_forward_without_grad)
 
-    def test_setup_ddp_outside(self):
-        self.do_test_setup(DdpMode.OUTSIDE)
+    def test_forward_ddp_outside(self):
+        self.do_test(DdpMode.OUTSIDE, Trainer.do_forward_without_grad)
+
+    def test_training_no_ddp(self):
+        self.do_test(DdpMode.NONE, Trainer.do_mini_batch)
 
 
 if __name__ == "__main__":
