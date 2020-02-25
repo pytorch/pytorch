@@ -53,6 +53,13 @@ using c10::Stack;
 
 namespace {
 
+template<class Return, class... Args>
+Return callUnboxedKernel(OperatorKernel* unboxedKernel, Args... args) {
+  using FuncType = Return (Args...);
+  auto* typedUnboxedKernel = static_cast<c10::detail::WrapRuntimeKernelFunctor<FuncType*>*>(unboxedKernel);
+  return (*typedUnboxedKernel)(std::forward<Args>(args)...);
+}
+
 // TODO: remove the toOptionalTensor and toListOfOptionalTensor
 // when we remove the undefined tensor semantic from TH
 

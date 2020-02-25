@@ -11,6 +11,7 @@ namespace jit {
 
 namespace {
 
+// custom ops don't do tracing/autograd in VariableType yet, we need to handle tracing here.
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
 Operator createOperatorFromC10_withTracingHandledHere(const c10::OperatorHandle& op) {

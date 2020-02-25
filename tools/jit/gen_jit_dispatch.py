@@ -139,11 +139,7 @@ def from_ivalue(arg, value):
 
 
 CALL_UNBOXED_KERNEL = CodeTemplate("""\
-using FuncType = ${return_type} (${formals_types});
-auto* typedUnboxedKernel = static_cast<c10::detail::WrapRuntimeKernelFunctor<FuncType*>*>(unboxedKernel);
-auto result_ =  (*typedUnboxedKernel)(
-    ${args}
-);
+auto result_ = callUnboxedKernel<${return_type}${formals_types_with_leading_comma}>(unboxedKernel${args_with_leading_comma});
 """)
 CALL_NAMESPACE = CodeTemplate("""\
 auto result_ = at::${name}(
@@ -327,6 +323,12 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
                     device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
+        # The use_c10_dispatcher setting in native_functions.yaml now has a new option
+        # 'with_codegenerated_unboxing_wrapper' which means we take the codegened unboxing wrapper from
+        # register_aten_ops.cpp and stuff it into c10. This new argument is the default, 'unboxed_only' is not the
+        # default anymore. For the (very few) ops that don't support boxed dispatch yet (i.e. ops taking TensorOptions
+        # arguments), we set them to 'unboxed_only' and they follow the old behavior of having register_aten_ops.cpp
+        # register the jit op.
         elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
             if len(decl['returns']) == 0:
                 return_type = "void"
@@ -337,12 +339,17 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             for a in decl['arguments']:
                 if 'type' not in a:
                     raise Exception(decl)
-            argument_types = ", ".join([a['type'] for a in decl['arguments']])
+            argument_types_with_leading_comma = ", ".join([a['type'] for a in decl['arguments']])
+            if argument_types_with_leading_comma != "":
+                argument_types_with_leading_comma = ", " + argument_types_with_leading_comma
+            args_with_leading_comma = pack_arguments(args)
+            if args_with_leading_comma != "":
+                args_with_leading_comma = ", " + args_with_leading_comma
             return CALL_UNBOXED_KERNEL.substitute(name=decl['name'],
-                                                  args=pack_arguments(args),
+                                                  args_with_leading_comma=args_with_leading_comma,
                                                   num_inputs=num_inputs,
                                                   return_type=return_type,
-                                                  formals_types=argument_types)
+                                                  formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
             assert decl['use_c10_dispatcher'] in ['unboxed_only', 'full']
             if is_namespace_function:
@@ -384,6 +391,9 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         returns = decl['returns']
 
         if decl['use_c10_dispatcher'] == 'unboxed_only':
+            # Ops taking TensorOptions aren't supported in this mechanism yet because boxed dispatch doesn't
+            # work for them. They use the old mechanism of registering a jitonly op for now.
+            # TODO We should get rid of this once TensorOptions are supported.
             constructor = CONSTRUCTOR_JITONLY.substitute(name=decl['name'],
                                                          call=call,
                                                          kw_assignments=kw_assignments,
@@ -571,15 +581,19 @@ def needs_hacked_twin(decl):
 
 def hacked_twin(decl):
     decl_copy = copy.deepcopy(decl)
-    decl_copy['schema_string'] = decl['schema_string'].replace('Tensor?[]', 'Tensor[]')
-    if decl['overload_name']:
-        decl_copy['overload_name'] = decl['overload_name'] + "_hacked_twin"
-        decl_copy['schema_string'] = decl_copy['schema_string'].replace(decl['name'] + "." + \
-                decl['overload_name'], decl_copy['name'] + "." + decl_copy['overload_name'])
+    old_overload_name = decl['overload_name']
+    schema_string = decl['schema_string']
+    name = decl['name']
+    schema_string = schema_string.replace('Tensor?[]', 'Tensor[]')
+    if old_overload_name:
+        new_overload_name = old_overload_name + "_hacked_twin"
+        decl_copy['overload_name'] = new_overload_name
+        decl_copy['schema_string'] = schema_string.replace(name + "." + old_overload_name,
+                                                           name + "." + new_overload_name)
     else:
-        decl_copy['overload_name'] = "hacked_twin"
-        decl_copy['schema_string'] = decl_copy['schema_string']
-                .replace(decl['name'], decl_copy['name'] + "." + decl_copy['overload_name'])
+        new_overload_name = "hacked_twin"
+        decl_copy['overload_name'] = new_overload_name
+        decl_copy['schema_string'] = schema_string.replace(name, name + "." + new_overload_name)
     for arg in decl_copy['arguments']:
         if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
             arg['is_nullable'] = False
