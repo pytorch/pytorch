@@ -45,7 +45,7 @@ def crossentropyloss(g, input, target, weight, reduction, ignore_index):
             weight = reshape_as(g, weight, target)
 
             nb_elem = g.op("Mul", nb_elem, weight)
-        
+
         nb_elem = g.op("ReduceSum", nb_elem)
         loss = g.op("ReduceSum", nllloss)
 

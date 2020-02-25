@@ -2623,7 +2623,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, input, target):
                 loss = torch.nn.CrossEntropyLoss(reduction='none')
                 return loss(input, target)
-            
+
         x = torch.randn(3, 5)
         y = torch.empty(3, dtype=torch.long).random_(5)
         self.run_test(CrossEntropyLossNone(), input=(x, y))
