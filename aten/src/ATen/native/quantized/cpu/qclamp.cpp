@@ -52,8 +52,9 @@ class QClamp final : public c10::OperatorKernel {
 
 static auto registry = c10::RegisterOperators().op(
     "quantized::clamp(Tensor qx, Scalar? min, Scalar? max) -> Tensor qy",
-    c10::RegisterOperators::options().kernel<QClamp>(
-        DispatchKey::QuantizedCPUTensorId));
+    c10::RegisterOperators::options()
+        .aliasAnalysis(at::AliasAnalysisKind::FROM_SCHEMA)
+        .kernel<QClamp>(DispatchKey::QuantizedCPUTensorId));
 } // namespace
 
 } // namespace native
