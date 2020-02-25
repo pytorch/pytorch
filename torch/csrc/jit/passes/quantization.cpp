@@ -130,6 +130,7 @@ bool isFunctionNode(Node* n,
 
 bool nodeQuantizable(Node* n) {
   return isFunctionNode(
+      n,
       /* call_funcs = */ {
       "conv2d",
       "linear",
