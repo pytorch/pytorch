@@ -15,7 +15,7 @@ Args:
   quant_min: minimum quantized value
   quant_max: maximum quantized value
 Returns:
-  Fake quantized tensor (double dtype).
+  Fake quantized tensor (float dtype).
 */
 namespace at {
 namespace native {
@@ -26,6 +26,7 @@ void fake_quantize_slice_kernel_cuda(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
+  // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
@@ -53,6 +54,7 @@ void fake_quantize_grad_slice_kernel_cuda(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
+  // scalar type of this function is guaranteed to be float
   float inv_scale = 1.0f / scale;
   auto iter = TensorIterator();
   iter.dont_compute_common_dtype();
