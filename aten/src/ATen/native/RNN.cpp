@@ -826,8 +826,8 @@ std::tuple<io_type, Tensor> _rnn_impl_with_concat(
       const io_type& input,
       const std::vector<cell_params>& params,
       const std::vector<typename CellType::hidden_type>& hiddens,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  auto result = _rnn_impl<CellType, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2) {
+  auto result = _rnn_impl<CellType, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional, type_2);
   return std::make_tuple(std::move(result.outputs), at::stack(result.final_hidden, 0));
 }
 
