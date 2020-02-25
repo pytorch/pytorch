@@ -1182,12 +1182,12 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
+      bool type_2, bool batch_first, c10::optional<ScalarType> dtype, bool use_dynamic) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                    num_layers, dropout_p, train, bidirectional, batch_first);
+                    num_layers, dropout_p, train, bidirectional, type_2, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
