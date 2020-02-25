@@ -365,6 +365,11 @@ class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
+
+  void preprocess(
+    script::Module& module,
+    const std::string& method_name);
+
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
@@ -671,6 +676,28 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
+void InsertObserversHelper::preprocess(
+    script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+  // To cleanup traced graph
+  ConstantPooling(graph);
+  ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+  // We need to call this before calling insertObservers for
+  // invoked methods
+  addIntermediateValuesToSkipObserver(module, method_name);
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    preprocess(invoked_module, invoked_method_name);
+  }
+}
+
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -693,14 +720,6 @@ void InsertObserversHelper::insertObservers(
     return;
   }
 
-  // To cleanup traced graph
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
-  // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
-  // fuse decomposed linear into aten::linear
-  FuseLinear(graph);
-  addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -1613,6 +1632,7 @@ TORCH_API script::Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
+  helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name);
   return module;
 }
