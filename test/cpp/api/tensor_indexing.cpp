@@ -1,8 +1,5 @@
 #include <gtest/gtest.h>
 
-// TODO: Move the include into `ATen/ATen.h`, once C++ tensor indexing
-// is ready to ship.
-#include <ATen/native/TensorIndexing.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -11,7 +8,7 @@ using namespace torch::indexing;
 using namespace torch::test;
 
 TEST(TensorIndexingTest, Slice) {
-  torch::indexing::impl::Slice slice(1, 2, 3);
+  Slice slice(1, 2, 3);
   ASSERT_EQ(slice.start(), 1);
   ASSERT_EQ(slice.stop(), 2);
   ASSERT_EQ(slice.step(), 3);
@@ -691,7 +688,11 @@ TEST(NumpyTests, TestEllipsisIndex) {
   // Slicing with ellipsis can skip an
   // arbitrary number of dimensions
   assert_tensor_equal(a.index({0, "..."}), a.index({0}));
+#if defined(__clang__)
+  assert_tensor_equal(a.index({0, "..."}), a.index({0, Slice()}));
+#else
   assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
+#endif
   assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
 
   // In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch

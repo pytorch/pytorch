@@ -25,3 +25,4 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/UnsafeFromTH.h>
+#include <ATen/native/TensorIndexing.h>
