@@ -25,7 +25,6 @@ are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
   * :func:`torch.cdist`
-  * :func:`torch.lu`
   * :func:`torch.lu_unpack`
   * :func:`torch.norm`
   * :func:`torch.tensordot`
