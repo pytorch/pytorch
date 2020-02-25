@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/rref_context.h>
+#endif
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
-#include "unpickler.h"
 #include <string>
+#include "unpickler.h"
 
 namespace torch {
 namespace jit {
@@ -133,7 +136,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case ClassType::Kind: {
         auto obj = w.value.toObject();
         auto typ = obj->type(); // note: intentionally using the dynamic type,
-            // the static type is potentially less accurate
+                                // the static type is potentially less accurate
         for (size_t i = 0; i < typ->numAttributes(); ++i) {
           Work elem = {typ->getAttribute(i), obj->getSlot(i)};
           to_process.emplace_back(std::move(elem));
@@ -174,7 +177,8 @@ void Unpickler::run() {
   TORCH_CHECK(
       opcode == PickleOpCode::PROTO,
       "Expected PROTO opcode at the start"
-      " of pickle archive, found ", int(static_cast<uint8_t>(opcode)));
+      " of pickle archive, found ",
+      int(static_cast<uint8_t>(opcode)));
   uint8_t protocol = read<uint8_t>();
   TORCH_CHECK(
       protocol == 2,
@@ -220,8 +224,7 @@ static std::vector<int64_t> tupleToIntList(const IValue& v) {
 // lists are not yet tagged
 template <typename T>
 static std::vector<T> convertList(const IValue& v) {
-  return fmap(
-      v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
+  return fmap(v.toListRef(), [](const IValue& elem) { return elem.to<T>(); });
 }
 
 PickleOpCode Unpickler::readInstruction() {
@@ -453,11 +456,11 @@ void Unpickler::readGlobal(
         // Pop reduce arg off the stack
         auto data = stack_.back().toTuple()->elements().at(0);
         stack_.pop_back();
-            TORCH_CHECK(
-                tensor_table_,
-                "Found a tensor table reference but Unpickler"
-                " has no tensor table\n");
-            stack_.emplace_back(tensor_table_->at(data.toInt()));
+        TORCH_CHECK(
+            tensor_table_,
+            "Found a tensor table reference but Unpickler"
+            " has no tensor table\n");
+        stack_.emplace_back(tensor_table_->at(data.toInt()));
       });
     } else {
       TypePtr elem_type = nullptr;
@@ -498,13 +501,21 @@ void Unpickler::readGlobal(
       stack_.back() = IValue();
     });
   } else if (module_name == "torch" && class_name == "device") {
-      globals_.emplace_back([this] {
-        auto device_string = stack_.back().toTuple()->elements().at(0);
-        stack_.pop_back();
-        stack_.emplace_back(c10::Device(device_string.toStringRef()));
-      });
-      stack_.emplace_back(int64_t(globals_.size() - 1));
-      return;
+    globals_.emplace_back([this] {
+      auto device_string = stack_.back().toTuple()->elements().at(0);
+      stack_.pop_back();
+      stack_.emplace_back(c10::Device(device_string.toStringRef()));
+    });
+    stack_.emplace_back(int64_t(globals_.size() - 1));
+    return;
+  } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
+#ifdef USE_DISTRIBUTED
+    return rebuildRRef();
+#else
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "RRef unpickling is only supported with the distributed package");
+#endif
   } else if (module_name == "torch") {
     // Try to manually resolve several global enums
     // NOTE: this does not put a global into the global table,
@@ -577,7 +588,7 @@ void Unpickler::rebuildTensor(bool quantized) {
           const auto& scales = qparams.at(1).toTensor();
           const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
-          result = _empty_per_channel_affine_quantized(
+          result = at::_empty_per_channel_affine_quantized(
               {0},
               scales,
               zero_points,
@@ -605,7 +616,48 @@ void Unpickler::rebuildTensor(bool quantized) {
   });
 }
 
-void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
+#ifdef USE_DISTRIBUTED
+void Unpickler::rebuildRRef() {
+  globals_.emplace_back([this] {
+    // It is the same as how rref is unpickled in python,
+    // see PyRRef::unpickle
+    auto args = stack_.back().toTuple()->elements();
+    stack_.pop_back();
+    TORCH_INTERNAL_ASSERT(
+        args.size() == distributed::rpc::RFD_TUPLE_SIZE,
+        "Pickled RRefForkData must contain 7 numbers.");
+    auto ownerId =
+        static_cast<int16_t>(args.at(distributed::rpc::OWNER_IDX).toInt());
+    // const reference will extend the lifetime of the temporary variable
+    const auto& rrefId = distributed::rpc::RRefId(
+        static_cast<int16_t>(args.at(distributed::rpc::RREFID_ON_IDX).toInt()),
+        static_cast<int64_t>(args.at(distributed::rpc::RREFID_ID_IDX).toInt()));
+    const auto& forkId = distributed::rpc::RRefId(
+        static_cast<int16_t>(args.at(distributed::rpc::FORKID_ON_IDX).toInt()),
+        static_cast<int64_t>(args.at(distributed::rpc::FORKID_ID_IDX).toInt()));
+    auto parent =
+        static_cast<int16_t>(args.at(distributed::rpc::PARENT_IDX).toInt());
+    const auto& typeStr = static_cast<std::string>(
+        args.at(distributed::rpc::TYPE_IDX).toStringRef());
+    auto rrefForkData = distributed::rpc::RRefForkData(
+        ownerId, rrefId, forkId, parent, typeStr);
+    auto& ctx = distributed::rpc::RRefContext::getInstance();
+    c10::intrusive_ptr<distributed::rpc::RRef> rref;
+    TORCH_INTERNAL_ASSERT(
+        type_resolver_ != nullptr, "type_resolver_ is nullptr.");
+    at::StrongTypePtr type = type_resolver_(c10::QualifiedName(typeStr));
+    rref = ctx.getOrCreateRRef(rrefForkData, type.type_);
+    ctx.notifyOwnerAndParentOfFork(
+        rrefForkData.forkId_, rrefForkData.parent_, rref);
+    stack_.emplace_back(
+        c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref));
+  });
+  stack_.emplace_back(int64_t(globals_.size() - 1));
+  return;
+}
+#endif
+
+void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
   // First, read any partial from buffer (may be 0).
   // We explicitly assume that sz > buffer_remaining_,
   // and that sz is never bigger than buffer_.size().
@@ -623,7 +675,7 @@ void Unpickler::readSlowWithBuffer(char *dest, size_t sz) {
     AT_ERROR("Unexpected end of pickler archive.");
   }
   memcpy(dest + from_old_buf, buffer_.data(), needed);
-  buffer_pos_ = needed;  // assignment (0'ed from read)
+  buffer_pos_ = needed; // assignment (0'ed from read)
   buffer_remaining_ -= needed;
 }
 
