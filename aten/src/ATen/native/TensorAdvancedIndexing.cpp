@@ -236,7 +236,7 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   return iter;
 }
 
-Tensor index(const Tensor & self, TensorList indices) {
+Tensor advanced_index(const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
 
   auto info = make_info(self, indices);
@@ -245,11 +245,11 @@ Tensor index(const Tensor & self, TensorList indices) {
   return iter.output();
 }
 
-Tensor index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
-  return self.clone(at::MemoryFormat::Preserve).index_put_(indices, value, accumulate);
+Tensor advanced_index_put(const Tensor & self, TensorList indices, const Tensor & value, bool accumulate) {
+  return self.clone(at::MemoryFormat::Preserve).advanced_index_put_(indices, value, accumulate);
 }
 
-Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor & _advanced_index_put_impl_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate, const bool unsafe) {
     TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (accumulate && self.device().type() == kCUDA) {
       TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
@@ -264,8 +264,8 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
 }
 
 
-Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate) {
-  return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
+Tensor & advanced_index_put_(Tensor & self, TensorList indices, const Tensor & value, const bool accumulate) {
+  return at::_advanced_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
 Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
