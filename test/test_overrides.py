@@ -3,10 +3,13 @@ import numpy as np
 import unittest
 import inspect
 import functools
+import pprint
+import types
 
-Tensor = torch.Tensor
 from torch.testing._internal.common_utils import TestCase
 from torch._overrides import handle_torch_function, has_torch_function
+
+Tensor = torch.Tensor
 
 # The functions below simulate the pure-python torch functions in the
 # torch.functional namespace. We use examples local to this file rather
@@ -363,6 +366,14 @@ IGNORED_TORCH_FUNCTIONS = (
     torch.range,
     torch.sparse_coo_tensor,
     torch.zeros,
+    torch.nn.functional.assert_int_or_pair,
+    torch.nn.functional.boolean_dispatch,
+    torch.nn.functional.division,
+    torch.nn.functional.upsample,
+    torch.nn.functional.upsample_bilinear,
+    torch.nn.functional.upsample_nearest,
+    torch.nn.functional.has_torch_function,
+    torch.nn.functional.handle_torch_function,
 )
 
 # Every function in the torch API that can be overriden needs an entry
@@ -384,8 +395,8 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.acos, lambda input, out=None: -1),
     (torch.add, lambda input, other, out=None: -1),
     (torch.addbmm, lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1),
-    (torch.addcdiv, lambda input, value, tensor1, tensor2, out=None: -1),
-    (torch.addcmul, lambda input, value, tensor1, tensor2, out=None: -1),
+    (torch.addcdiv, lambda input, tensor1, tensor2, value=1, out=None: -1),
+    (torch.addcmul, lambda input, tensor1, tensor2, value=1, out=None: -1),
     (torch.addmm, lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1),
     (torch.addmv, lambda input, mat, vec, beta=1, alpha=1, out=None: -1),
     (torch.addr, lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1),
@@ -416,7 +427,9 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.binary_cross_entropy_with_logits, lambda input, target, weight=None, size_average=None, reduce=None, reduction='mean',
      pos_weight=None: -1),
     (torch.bincount, lambda input, weights=None, minlength=0: -1),
+    (torch.bitwise_and, lambda input, other, out=None: -1),
     (torch.bitwise_not, lambda input, out=None: -1),
+    (torch.bitwise_or, lambda input, other, out=None: -1),
     (torch.bitwise_xor, lambda input, other, out=None: -1),
     (torch.bmm, lambda input, mat2, out=None: -1),
     (torch.broadcast_tensors, lambda *tensors: -1),
@@ -451,6 +464,8 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.cosine_similarity, lambda x1, x2, dim=1, eps=1e-8: -1),
     (torch.cross, lambda input, other, dim=-1, out=None: -1),
     (torch.ctc_loss, lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean', zero_infinity=False: -1),
+    (torch.cummax, lambda input, dim, out=None: -1),
+    (torch.cummin, lambda input, dim, out=None: -1),
     (torch.cumprod, lambda input, dim, out=None, dtype=None: -1),
     (torch.cumsum, lambda input, dim, out=None, dtype=None: -1),
     (torch.dequantize, lambda input: -1),
@@ -499,9 +514,11 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.flip, lambda input, dims: -1),
     (torch.frobenius_norm, lambda input, dim=None, keepdim=False, out=None: -1),
     (torch.floor, lambda input, out=None: -1),
+    (torch.floor_divide, lambda input, other: -1),
     (torch.fmod, lambda input, other, out=None: -1),
     (torch.frac, lambda input, out=None: -1),
     (torch.full_like, lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1),
+    (torch.functional.lu_unpack, lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1),
     (torch.gather, lambda input, dim, index, out=None, sparse_grad=False: -1),
     (torch.ge, lambda input, other, out=None: -1),
     (torch.geqrf, lambda input, out=None: -1),
@@ -509,7 +526,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.grid_sampler, lambda input, grid, interpolation_mode, padding_mode, align_corners: -1),
     (torch.grid_sampler_2d, lambda input, grid, interpolation_mode, padding_mode, align_corners: -1),
     (torch.grid_sampler_3d, lambda input, grid, interpolation_mode, padding_mode, align_corners: -1),
-    (torch.group_norm, lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1),
+    (torch.group_norm, lambda input, num_groups, weight=None, bias=None, eps=1e-05, cudnn_enabled=True: -1),
     (torch.gru, lambda input, hx, params, has_biases, num_layers, gropout, train, bidirectional, batch_first: -1),
     (torch.gru_cell, lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1),
     (torch.gt, lambda input, other, out=None: -1),
@@ -540,7 +557,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.isnan, lambda input: -1),
     (torch.kl_div, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
     (torch.kthvalue, lambda input, k, dim=None, keepdim=False, out=None: -1),
-    (torch.layer_norm, lambda input, normalized_shape, weight=None, bias=None, esp=1e-05: -1),
+    (torch.layer_norm, lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1),
     (torch.le, lambda input, other, out=None: -1),
     (torch.lerp, lambda input, end, weight, out=None: -1),
     (torch.lgamma, lambda input, out=None: -1),
@@ -550,7 +567,9 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.log1p, lambda input, out=None: -1),
     (torch.log2, lambda input, out=None: -1),
     (torch.logdet, lambda input: -1),
+    (torch.logical_and, lambda input, other, out=None: -1),
     (torch.logical_not, lambda input, out=None: -1),
+    (torch.logical_or, lambda input, other, out=None: -1),
     (torch.logical_xor, lambda input, other, out=None: -1),
     (torch.logsumexp, lambda input, names, keepdim, out=None: -1),
     (torch.lstm, lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1),
@@ -597,7 +616,130 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.native_norm, lambda input, p=2: -1),
     (torch.ne, lambda input, other, out=None: -1),
     (torch.neg, lambda input, out=None: -1),
-    (torch.nonzero, lambda input, out=None, as_tuple=False: -1),
+    (torch.nn.functional.adaptive_avg_pool2d, lambda input, output_size: -1),
+    (torch.nn.functional.adaptive_avg_pool3d, lambda input, output_size: -1),
+    (torch.nn.functional.adaptive_max_pool1d, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.adaptive_max_pool1d_with_indices, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.adaptive_max_pool2d, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.adaptive_max_pool2d_with_indices, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.adaptive_max_pool3d, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.adaptive_max_pool3d_with_indices, lambda input, output_size, return_indices=False: -1),
+    (torch.nn.functional.affine_grid, lambda theta, size, align_corners=None: -1),
+    (torch.nn.functional.alpha_dropout, lambda input, p=0.5, training=False, inplace=False: -1),
+    (torch.nn.functional.avg_pool2d, lambda input, kernel_size, stride=None, padding=0, ceil_mode=False,
+     count_include_pad=True, divisor_override=None: -1),
+    (torch.nn.functional.avg_pool3d, lambda input, kernel_size, stride=None, padding=0, ceil_mode=False,
+     count_include_pad=True, divisor_override=None: -1),
+    (torch.nn.functional.batch_norm, lambda input, running_mean, running_var, weight=None, bias=None, training=False,
+     momentum=0.1, eps=1e-05: -1),
+    (torch.nn.functional.bilinear, lambda input1, input2, weight, bias=None: -1),
+    (torch.nn.functional.binary_cross_entropy, lambda input, target, weight=None, size_average=None, reduce=None,
+     reduction="mean": -1),
+    (torch.nn.functional.binary_cross_entropy_with_logits, lambda input, target, weight=None, size_average=None,
+     reduce=None, reduction="mean", pos_weight=None: -1),
+    (torch.nn.functional.celu, lambda input, alpha=1.0, inplace=False: -1),
+    (torch.nn.functional.cosine_embedding_loss, lambda input1, input2, target, margin=0, size_average=None,
+     reduce=None, reduction='mean': -1),
+    (torch.nn.functional.cross_entropy, lambda input, target, weight=None, size_average=None, ignore_index=-100,
+     reduce=None, reduction="mean": -1),
+    (torch.nn.functional.ctc_loss, lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean',
+     zero_infinity=False: -1),
+    (torch.nn.functional.dropout, lambda input, p=0.5, training=True, inplace=False: -1),
+    (torch.nn.functional.dropout2d, lambda input, p=0.5, training=True, inplace=False: -1),
+    (torch.nn.functional.dropout3d, lambda input, p=0.5, training=True, inplace=False: -1),
+    (torch.nn.functional.elu, lambda input, alpha=1.0, inplace=False: -1),
+    (torch.nn.functional.embedding, lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0,
+     scale_grad_by_freq=False, sparse=False: -1),
+    (torch.nn.functional.embedding_bag, lambda input, weight, offsets=None, max_norm=None, norm_type=2,
+     scale_grad_by_freq=False, mode='mean', sparse=False, per_sample_weights=None, include_last_offset=False: -1),
+    (torch.nn.functional.feature_alpha_dropout, lambda input, p=0.5, training=False, inplace=False: -1),
+    (torch.nn.functional.fold, lambda input, output_size, kernel_size, dilation=1, padding=0, stride=1: -1),
+    (torch.nn.functional.fractional_max_pool2d, lambda input, kernel_size, output_size=None, output_ratio=None,
+     return_indices=False, _random_samples=None: -1),
+    (torch.nn.functional.fractional_max_pool2d_with_indices, lambda input, kernel_size, output_size=None, output_ratio=None,
+     return_indices=False, _random_samples=None: -1),
+    (torch.nn.functional.fractional_max_pool3d, lambda input, kernel_size, output_size=None, output_ratio=None,
+     return_indices=False, _random_samples=None: -1),
+    (torch.nn.functional.fractional_max_pool3d_with_indices, lambda input, kernel_size, output_size=None, output_ratio=None,
+     return_indices=False, _random_samples=None: -1),
+    (torch.nn.functional.gelu, lambda input: -1),
+    (torch.nn.functional.glu, lambda input, dim=-1: -1),
+    (torch.nn.functional.grid_sample, lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1),
+    (torch.nn.functional.group_norm, lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1),
+    (torch.nn.functional.gumbel_softmax, lambda logits, tau=1, hard=False, eps=1e-10, dim=-1: -1),
+    (torch.nn.functional.hardshrink, lambda input, lambd=0.5: -1),
+    (torch.nn.functional.hardtanh, lambda input, min_val=-1., max_val=1., inplace=False: -1),
+    (torch.nn.functional.hinge_embedding_loss, lambda input, target, margin=1.0, size_average=None, reduce=None,
+     reduction='mean': -1),
+    (torch.nn.functional.instance_norm, lambda input, running_mean=None, running_var=None, weight=None, bias=None,
+     use_input_stats=True, momentum=0.1, eps=1e-05: -1),
+    (torch.nn.functional.interpolate, lambda input, size=None, scale_factor=None, mode='nearest', align_corners=None,
+     recompute_scale_factor=None: -1),
+    (torch.nn.functional.kl_div, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.l1_loss, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.layer_norm, lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1),
+    (torch.nn.functional.leaky_relu, lambda input, negative_slope=0.01, inplace=False: -1),
+    (torch.nn.functional.linear, lambda input, weight, bias=None: -1),
+    (torch.nn.functional.local_response_norm, lambda input, size, alpha=0.0001, beta=0.75, k=1.0: -1),
+    (torch.nn.functional.log_softmax, lambda input, dim=None, _stacklevel=3, dtype=None: -1),
+    (torch.nn.functional.logsigmoid, lambda input: -1),
+    (torch.nn.functional.lp_pool1d, lambda input, norm_type, kernel_size, stride=None, ceil_mode=False: -1),
+    (torch.nn.functional.lp_pool2d, lambda input, norm_type, kernel_size, stride=None, ceil_mode=False: -1),
+    (torch.nn.functional.margin_ranking_loss, lambda input1, input2, target, margin=0, size_average=None, reduce=None,
+     reduction='mean': -1),
+    (torch.nn.functional.max_pool1d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
+     ceil_mode=False: -1),
+    (torch.nn.functional.max_pool1d_with_indices, lambda input, kernel_size, stride=None, padding=0, dilation=1,
+     return_indices=False, ceil_mode=False: -1),
+    (torch.nn.functional.max_pool2d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
+     ceil_mode=False: -1),
+    (torch.nn.functional.max_pool2d_with_indices, lambda input, kernel_size, stride=None, padding=0, dilation=1,
+     return_indices=False, ceil_mode=False: -1),
+    (torch.nn.functional.max_pool3d, lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False,
+     ceil_mode=False: -1),
+    (torch.nn.functional.max_pool3d_with_indices, lambda input, kernel_size, stride=None, padding=0, dilation=1,
+     return_indices=False, ceil_mode=False: -1),
+    (torch.nn.functional.max_unpool1d, lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1),
+    (torch.nn.functional.max_unpool2d, lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1),
+    (torch.nn.functional.max_unpool3d, lambda input, indices, kernel_size, stride=None, padding=0, output_size=None: -1),
+    (torch.nn.functional.mse_loss, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.multi_head_attention_forward, lambda query, key, value, embed_dim_to_check, num_heads,
+     in_proj_weight, in_proj_bias, bias_k, bias_v, add_zero_attn, dropout_p, out_proj_weight, out_proj_bias,
+     training=True, key_padding_mask=None, need_weights=True, attn_mask=None, use_separate_proj_weight=False,
+     q_proj_weight=None, k_proj_weight=None, v_proj_weight=None, static_k=None, static_v=None: -1),
+    (torch.nn.functional.multi_margin_loss, lambda input, target, p=1, margin=1.0, weight=None, size_average=None,
+     reduce=None, reduction='mean': -1),
+    (torch.nn.functional.multilabel_margin_loss, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.multilabel_soft_margin_loss, lambda input, target, weight=None, size_average=None, reduce=None,
+     reduction='mean': -1),
+    (torch.nn.functional.nll_loss, lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None,
+     reduction='mean': -1),
+    (torch.nn.functional.normalize, lambda input, p=2, dim=1, eps=1e-12, out=None: -1),
+    (torch.nn.functional.one_hot, lambda tensor, num_classes=-1: -1),
+    (torch.nn.functional.pad, lambda input, pad, mode='constant', value=0: -1),
+    (torch.nn.functional.pairwise_distance, lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1),
+    (torch.nn.functional.poisson_nll_loss, lambda input, target, log_input=True, full=False, size_average=None, eps=1e-08,
+     reduce=None, reduction='mean': -1),
+    (torch.nn.functional.prelu, lambda input, weight: -1),
+    (torch.nn.functional.relu, lambda input, inplace=False: -1),
+    (torch.nn.functional.relu6, lambda input, inplace=False: -1),
+    (torch.nn.functional.rrelu, lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1),
+    (torch.nn.functional.selu, lambda input, inplace=False: -1),
+    (torch.nn.functional.sigmoid, lambda input: -1),
+    (torch.nn.functional.smooth_l1_loss, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.soft_margin_loss, lambda input, target, size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.softmax, lambda input, dim=None, _stacklevel=3, dtype=None: -1),
+    (torch.nn.functional.softmin, lambda input, dim=None, _stacklevel=3, dtype=None: -1),
+    (torch.nn.functional.softplus, lambda input, beta=1, threshold=20: -1),
+    (torch.nn.functional.softshrink, lambda input, lambd=0.5: -1),
+    (torch.nn.functional.softsign, lambda input: -1),
+    (torch.nn.functional.tanh, lambda input: -1),
+    (torch.nn.functional.tanhshrink, lambda input: -1),
+    (torch.nn.functional.threshold, lambda input, threshold, value, inplace=False: -1),
+    (torch.nn.functional.triplet_margin_loss, lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False,
+     size_average=None, reduce=None, reduction='mean': -1),
+    (torch.nn.functional.unfold, lambda input, kernel_size, dilation=1, padding=0, stride=1: -1),
+    (torch.nonzero, lambda input, as_tuple=False: -1),
     (torch.norm, lambda input, p='fro', dim=None, keepdim=False, out=None, dtype=None: -1),
     (torch.norm_except_dim, lambda v, pow=2, dim=0: -1),
     (torch.normal, lambda mean, std, out=None: -1),
@@ -624,6 +766,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.qr, lambda input, some=True, out=None: -1),
     (torch.quantize_per_channel, lambda input, scales, zero_points, axis, dtype: -1),
     (torch.quantize_per_tensor, lambda input, scale, zero_point, dtype: -1),
+    (torch.quantized_batch_norm, lambda input, weight, bias, mean, var, eps, output_scale, output_zero_point: -1),
     (torch.quantized_gru, lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1),
     (torch.quantized_gru_cell, lambda input, hx, w_ih, w_hh, b_ih, b_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh,
      scale_ih, scale_hh, zero_point_ih, zero_point_hh: -1),
@@ -658,7 +801,7 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.rrelu, lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1),
     (torch.rsqrt, lambda input, out=None: -1),
     (torch.rsub, lambda input, other, alpha=1: -1),
-    (torch.saddmm, lambda input, mat1, mat2, beta, alpha, out=None: -1),
+    (torch.saddmm, lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1),
     (torch.scalar_tensor, lambda s, dtype=None, layour=None, device=None, pin_memory=None: -1),
     (torch.scatter, lambda input, dim, index, src: -1),
     (torch.scatter_add, lambda input, dim, index, src: -1),
@@ -677,8 +820,9 @@ TENSOR_LIKE_TORCH_IMPLEMENTATIONS = (
     (torch.split, lambda tensor, split_size_or_sections, dim=0: -1),
     (torch.split_with_sizes, lambda tensor, split_size_or_sections, dim=0: -1),
     (torch.sqrt, lambda input, out=None: -1),
+    (torch.square, lambda input, out=None: -1),
     (torch.squeeze, lambda input, dim=None, out=None: -1),
-    (torch.sspaddmm, lambda input, mat1, mat2, beta, alpha, out=None: -1),
+    (torch.sspaddmm, lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1),
     (torch.stack, lambda tensors, dim=0, out=None: -1),
     (torch.std, lambda input: -1),
     (torch.std_mean, lambda input: -1),
@@ -721,25 +865,35 @@ TENSOR_LIKE_OVERRIDES = tuple(t[0] for t in TENSOR_LIKE_TORCH_IMPLEMENTATIONS)
 def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
-    for func_name in torch.__all__ + dir(torch._C._VariableFunctions):
-        # ignore private functions or functions that are deleted in torch.__init__
-        if func_name.startswith('_') or func_name == 'unique_dim':
-            continue
-        func = getattr(torch, func_name)
-        # IGNORED_TORCH_FUNCTIONS are functions that are public but cannot be
-        # overriden by __torch_function__
-        if func in IGNORED_TORCH_FUNCTIONS:
-            msg = "torch.{} is in IGNORED_TORCH_FUNCTIONS but still has an explicit override"
-            assert func not in TENSOR_LIKE_OVERRIDES, msg.format(func.__name__)
-            continue
-        # ignore in-place operators
-        if func_name.endswith('_'):
-            continue
-        # only consider objects with lowercase names
-        if not func_name.islower():
-            continue
-        if func not in TENSOR_LIKE_OVERRIDES:
-            untested_funcs.append("torch.{}".format(func.__name__))
+    tested_namespaces = [
+        (torch, torch.__all__ + dir(torch._C._VariableFunctions)),
+        (torch.functional, torch.functional.__all__),
+        (torch.nn.functional, dir(torch.nn.functional)),
+    ]
+    for namespace, ns_funcs in tested_namespaces:
+        for func_name in ns_funcs:
+            # ignore private functions or functions that are deleted in torch.__init__
+            if func_name.startswith('_') or func_name == 'unique_dim':
+                continue
+            # ignore in-place operators
+            if func_name.endswith('_'):
+                continue
+            # only consider objects with lowercase names
+            if not func_name.islower():
+                continue
+            func = getattr(namespace, func_name)
+            # ignore re-exported modules
+            if isinstance(func, types.ModuleType):
+                continue
+            qualname = "{}.{}".format(namespace.__name__, func_name)
+            # IGNORED_TORCH_FUNCTIONS are functions that are public but cannot be
+            # overriden by __torch_function__
+            if func in IGNORED_TORCH_FUNCTIONS:
+                msg = "{} is in IGNORED_TORCH_FUNCTIONS but still has an explicit override"
+                assert func not in TENSOR_LIKE_OVERRIDES, msg.format(qualname)
+                continue
+            if func not in TENSOR_LIKE_OVERRIDES:
+                untested_funcs.append(qualname)
     msg = (
         "The following functions are not tested for __torch_function__ "
         "support, please either add an entry in "
@@ -747,13 +901,7 @@ def generate_tensor_like_torch_implementations():
         "__torch_function__ override does not make sense, add an entry to "
         "IGNORED_TORCH_FUNCTIONS.\n\n{}"
     )
-
-    # The assertion below is disabled temporarily while we land the rest
-    # of this functionality, it will be re-enabled later when there is a
-    # smaller chance that enabling this test will land simultaneously
-    # with a new operator being added to the torch namespace.
-
-    # assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
+    assert len(untested_funcs) == 0, msg.format(pprint.pformat(untested_funcs))
     for func, override in TENSOR_LIKE_TORCH_IMPLEMENTATIONS:
         # decorate the overrides with implements_tensor_like
         implements_tensor_like(func)(override)

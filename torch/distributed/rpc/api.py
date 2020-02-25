@@ -455,9 +455,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None):
     if qualified_name is not None:
         fut = _invoke_rpc_builtin(dst_worker_info, qualified_name, rf, *args, **kwargs)
     elif isinstance(func, torch.jit.ScriptFunction):
-        fut = _invoke_rpc_torchscript(
-            dst_worker_info.name, func, args, kwargs
-        )
+        fut = _invoke_rpc_torchscript(dst_worker_info.name, func, args, kwargs)
     else:
         (pickled_python_udf, tensors) = _default_pickler.serialize(
             PythonUDF(func, args, kwargs)
@@ -608,7 +606,7 @@ def rpc_async(to, func, args=None, kwargs=None):
 # torchscript function, they do not accept annotated torchscript class name or
 # script module class name or their class method name right now.
 @_require_initialized
-def _rpc_sync_torchscript(to, user_func, args=None, kwargs=None):
+def _rpc_sync_torchscript(to, user_callable, args=None, kwargs=None):
     r"""
     Make a blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -616,7 +614,7 @@ def _rpc_sync_torchscript(to, user_func, args=None, kwargs=None):
 
     Arguments:
         to (str): name of the destination worker.
-        user_func (object): the function being called remotely.
+        user_callable (object): the callable being called remotely.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -648,12 +646,12 @@ def _rpc_sync_torchscript(to, user_func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    fut = _rpc_async_torchscript(to, qualified_name, args, kwargs)
+    fut = _rpc_async_torchscript(to, user_callable, args, kwargs)
     return fut.wait()
 
 
 @_require_initialized
-def _rpc_async_torchscript(to, user_func, args=None, kwargs=None):
+def _rpc_async_torchscript(to, user_callable, args=None, kwargs=None):
     r"""
     Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -662,7 +660,7 @@ def _rpc_async_torchscript(to, user_func, args=None, kwargs=None):
 
     Arguments:
         to (str): name of the destination worker.
-        user_func (object): the function being called remotely.
+        user_callable (object): the callable being called remotely.
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
@@ -699,7 +697,7 @@ def _rpc_async_torchscript(to, user_func, args=None, kwargs=None):
     """
     args = args if args else ()
     kwargs = kwargs if kwargs else {}
-    fut = _invoke_rpc_torchscript(to, user_func, args, kwargs)
+    fut = _invoke_rpc_torchscript(to, user_callable, args, kwargs)
     return fut
 
 

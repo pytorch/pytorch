@@ -378,7 +378,7 @@ struct FunctionValue : public SugaredValue {
     return std::make_shared<SimpleValue>(output);
   }
 
- const std::vector<Function*>& functions() {
+ const std::vector<Function*>& callees() {
    return callees_;
  }
 

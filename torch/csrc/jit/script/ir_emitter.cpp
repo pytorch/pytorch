@@ -1780,22 +1780,37 @@ struct to_ir {
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
   Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
-    if (type->cast<ListType>()) { // Lists also have in-place ops.
-      switch (stmt.aug_op()) {
-        case '+':
-          return aten::add_;
-      }
-    }
-    bool isTensor = type->isSubtypeOf(TensorType::get());
+    bool use_inplace_op = type->isSubtypeOf(TensorType::get()) ||
+        type->kind() == TypeKind::ListType;
     switch (stmt.aug_op()) {
       case '+':
-        return isTensor ? aten::add_ : aten::add;
+        return use_inplace_op ? aten::add_ : aten::add;
       case '-':
-        return isTensor ? aten::sub_ : aten::sub;
+        return use_inplace_op ? aten::sub_ : aten::sub;
       case '/':
-        return isTensor ? aten::div_ : aten::div;
+        return use_inplace_op ? aten::div_ : aten::div;
       case '*':
-        return isTensor ? aten::mul_ : aten::mul;
+        return use_inplace_op ? aten::mul_ : aten::mul;
+      default:
+        throw ErrorReport(stmt)
+            << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
+    }
+  }
+
+  // Get a pair of <in place magic method name, out of place magic method name>
+  // since the out of place method is called if the in place method is not
+  // present
+  std::pair<std::string, std::string> getAugMagicMethod(const AugAssign& stmt) {
+    switch (stmt.aug_op()) {
+      case '+':
+        return std::make_pair(std::string("__iadd__"), std::string("__add__"));
+      case '-':
+        return std::make_pair(std::string("__isub__"), std::string("__sub__"));
+      case '/':
+        return std::make_pair(
+            std::string("__itruediv__"), std::string("__truediv__"));
+      case '*':
+        return std::make_pair(std::string("__imul__"), std::string("__mul__"));
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1831,36 +1846,60 @@ struct to_ir {
   //
   //  def forward():
   //    self.num_batches += 1
-  //
-  // In this case we will only consider the scenario that the module
-  // buffer type is a tensor, and we emit the corresponding tensor
-  // in place op, and throw error for other unsupported types
   void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
     const auto lhs = Select(stmt.lhs());
-    const auto lhsSugaredVar =
-        environment_stack->getSugaredVar(Var(lhs.value()).name());
+    auto lhsSugaredVar = emitSugaredExpr(lhs.value(), 1);
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
-      // for module parameter/buffer assignment, only consider tensor types,
-      // emit the corresponding in-place op
-      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
-      emitBuiltinCall(
-          stmt.range(),
-          *method.graph(),
-          getAugOp(stmt, lhsValue->type()),
-          {rhs},
-          {},
-          self);
+    if (lhsValue->type()->kind() == TypeKind::ClassType) {
+        // Call `__iadd__` so updates happen in place on class types
+        // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
+        std::string in_place_method_name;
+        std::string out_of_place_method_name;
+        std::tie(in_place_method_name, out_of_place_method_name) =
+            getAugMagicMethod(stmt);
+        const auto rhs = emitExpr(stmt.rhs());
 
-    } else {
-      throw ErrorReport(stmt.lhs())
-          << "left-hand side of augmented assignment to module "
-          << "parameters/buffers can only be tensor types";
+        // Determine whether to use __iadd__ or __add__ (use __add__ only if
+        // __iadd__ is not present)
+        auto type = lhsValue->type()->expect<ClassType>();
+        std::string magic_method_name;
+        if (type->getMethod(in_place_method_name)) {
+          magic_method_name = in_place_method_name;
+        } else if (type->getMethod(out_of_place_method_name)) {
+          magic_method_name = out_of_place_method_name;
+        } else {
+          throw ErrorReport(stmt.range())
+              << "Cannot emit inplace op on " << type->python_str()
+              << " since it does not define an " << in_place_method_name << " or "
+              << out_of_place_method_name << " method";
+        }
+
+        // Insert call to the magic method
+        MethodValue method_value(lhsValue, magic_method_name);
+        auto result = method_value.call(stmt.range(), method, {rhs}, {}, 0)
+                          ->asValue(stmt.range(), method);
+
+        // x += y is equivalent to x = x.__iadd__(y) or x = x.__add__(y) if
+        // __iadd__ is not present, so set the value to the function's return
+        // value
+        lhsSugaredVar->setAttr(
+            stmt.range(), method, lhs.selector().name(), result);
+      } else {
+        const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()))
+                             .value(*method.graph());
+        auto rhsValue = emitBuiltinCall(
+            stmt.range(),
+            *method.graph(),
+            getAugOp(stmt, lhsValue->type()),
+            {lhsValue, rhs},
+            {},
+            /*self=*/c10::nullopt);
+        lhsSugaredVar->setAttr(
+            stmt.range(), method, lhs.selector().name(), rhsValue);
+      }
     }
-  }
 
   void emitAugAssignmentToVar(const AugAssign& stmt) {
     const auto lhs = Var(stmt.lhs());
@@ -2438,24 +2477,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(expr);
       }
       case prim::rpc_async: {
-        auto& inputs_trees = apply.inputs().tree()->trees();
-        if (inputs_trees.size() < 2) {
-          throw ErrorReport(apply)
-              << "Expected at least 3 arguments to "
-              << "rpc_async(dst_worker_name, user_func_qual_name, user_func, *args, **kwargs)";
-        }
-        auto dst_worker_name = emitSugaredExpr(Expr(inputs_trees[0]), 1);
-        auto user_func = emitSugaredExpr(Expr(inputs_trees[1]), 1);
-        TreeList args_trees(inputs_trees.begin() + 2, inputs_trees.end());
-        auto inputs = getNamedValues(args_trees, true);
-        auto attributes = emitAttributes(apply.attributes());
-        return emitRpcAsyncExpr(
-            apply.range(),
-            dst_worker_name,
-            user_func,
-            args_trees,
-            inputs,
-            attributes);
+        return emitRpcAsyncExpr(apply);
       }
       case prim::unchecked_cast: {
         checkApplyNumInputs(apply, 2);
@@ -2716,75 +2738,100 @@ struct to_ir {
     return std::make_shared<SimpleValue>(node_output);
   }
 
-  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(
-      const SourceRange& loc,
-      const std::shared_ptr<SugaredValue>& dst_worker_name,
-      const std::shared_ptr<SugaredValue>& user_func,
-      TreeList args_trees,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes) {
-    auto graphPtr = method.graph();
-
+  std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
     // through RPC in TorchScript,
     // Ideadlly, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
+    if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
+      throw ErrorReport(apply)
+          << "Possible forms of call to rpc_async(..) are\n"
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)\n"
+          << "rpc_async(dst_worker_name, user_callable, args)\n"
+          << "rpc_async(dst_worker_name, user_callable)\n"
+          << "Now the number of arguments is " << apply.inputs().size();
+    }
+    if (apply.attributes().size() != 0) {
+      throw ErrorReport(apply)
+          << "rpc_async(dst_worker_name, user_callable, args, kwargs)"
+          << "does not support kwargs yet";
+    }
+    // TODO: Make rpc_async(..) support taking kwargs,
+    // like rpc_async(to=, dst_worker_name="", args=(), kwargs={})
 
-    // Get user function qualified name as an IR Value.
-    std::shared_ptr<FunctionValue> user_func_sugared_value =
-        std::dynamic_pointer_cast<FunctionValue>(user_func);
-    auto& functionPtrs = user_func_sugared_value->functions();
+    auto& input_trees = apply.inputs().tree()->trees();
+    Value* dst_worker_name_value = emitExpr(Expr(input_trees[0]));
+    std::shared_ptr<FunctionValue> user_callable_sugared_value =
+        std::dynamic_pointer_cast<FunctionValue>(
+            emitSugaredExpr(Expr(input_trees[1]), 1));
+    // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
+    // If `args` and `kwargs` are an empty tuple and an empty dict,
+    // respectively, users are allowed to not pass `args` and `kwargs`.
+    TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
+
+    // Get user function.
+    auto& callablePtrs = user_callable_sugared_value->callees();
     TORCH_INTERNAL_ASSERT(
-        functionPtrs.size() == 1,
-        "User-provided functions size should be 1. Now it's", functionPtrs.size())
-    Function* functionPtr = functionPtrs.at(0);
-    const auto& qual_name = functionPtr->qualname();
-    IValue userFunctionQualNameIValue(qual_name.qualifiedName());
-    Value* userFunctionQualNameValue =
-        graphPtr->insertConstant(userFunctionQualNameIValue, loc);
+        callablePtrs.size() == 1,
+        "User-provided callable size should be 1. Now it's",
+        callablePtrs.size())
+    Function* callablePtr = callablePtrs.at(0);
 
-    // Insert a jit::Operator, prim::rpc_async.
-    Node* rpc_async_node = graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
-                    ->setSourceRange(loc);
+    const SourceRange& loc = apply.range();
+    auto graphPtr = method.graph();
+
+    // Graph insert the QualifiedName as an constant input IR Value.
+    const auto& qualname = callablePtr->qualname();
+    IValue userCallableQualNameIValue(qualname.qualifiedName());
+    Value* userCallableQualNameValue =
+        graphPtr->insertConstant(userCallableQualNameIValue, loc);
+
+    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
+    Node* rpc_async_node =
+        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
+            ->setSourceRange(loc);
     {
       WithInsertPoint insert(rpc_async_node);
-      rpc_async_node->addInput(dst_worker_name->asValue(loc, method));
-      rpc_async_node->addInput(userFunctionQualNameValue);
-      // The call is _invoke_rpc_torchscript(dstWorkerName, qualifiedName,
-      // args, kwargs), so only 2 inputs are added, no attributes.
-      for (auto& input : inputs) {
-        rpc_async_node->addInput(input.value(*graphPtr));
+      rpc_async_node->addInput(dst_worker_name_value);
+      rpc_async_node->addInput(userCallableQualNameValue);
+
+      for (const auto& tree : args_kwargs_trees) {
+        rpc_async_node->addInput(emitExpr(Expr(tree)));
       }
     }
-    Value* rpc_async_node_output =
-        rpc_async_node->output();
+    Value* rpc_async_node_output = rpc_async_node->output();
 
-    // Build a temporary sub-block to get output type.
-    auto sub_block = rpc_async_node->addBlock();
+    // Set output type from FunctionSchema.
+    const auto& functionSchema = callablePtr->getSchema();
+    const std::vector<Argument>& returns = functionSchema.returns();
+    TORCH_INTERNAL_ASSERT(returns.size() == 1);
+    auto output_type = returns[0].type();
+    rpc_async_node_output->setType(FutureType::create(output_type));
 
-    Value *node_output;
-    {
-      WithInsertPoint guard(sub_block);
-
-      // Do similar work in getNamedValues(),
-      // from a Var that is known to be a Tuple.
-      std::vector<NamedValue> inputValues;
-      // If `args` is an empty tuple, users are allowed to not pass `args`.
-      if (args_trees.size() > 0) {
-        auto entries = emitSugaredExpr(Expr(args_trees[0]), 1)
-                           ->asTuple(args_trees[0]->range(), method);
-        inputValues.reserve(entries.size());
-        for (const auto& entry : entries) {
-          inputValues.emplace_back(
-              args_trees[0]->range(), entry->asValue(args_trees[0]->range(), method));
-        }
+    // Match FunctionSchema.
+    std::vector<NamedValue> args;
+    std::vector<NamedValue> kwargs;
+    // Get args and kwargs as `NamedValue`s.
+    // Similar to getNamedValues(..) and emitAttributes(..).
+    if (args_kwargs_trees.size() >= 1) {
+      // Unroll args from a Var that is known to be a Tuple.
+      auto& args_tree = args_kwargs_trees[0];
+      auto entry_sugared_values = emitSugaredExpr(Expr(args_tree), 1)
+                                       ->asTuple(args_tree->range(), method);
+      args.reserve(entry_sugared_values.size());
+      for (const auto& entrie_sugared_value : entry_sugared_values) {
+        args.emplace_back(
+            args_tree->range(),
+            entrie_sugared_value->asValue(args_tree->range(), method));
       }
-
-      auto output_sugared_value = user_func->call(loc, method, inputValues, attributes, 1);
-      auto output_value = output_sugared_value->asValue(loc, method);
-      rpc_async_node_output->setType(FutureType::create(output_value->type()));
+      // NB: Can't do schema check on kwargs, given the async RPC API is
+      // rpc_async(to, user_callable, args, kwargs),
+      // users can construct kwargs = {"first" + "_arg" : 1}.
+      // Notice the key is determined at run time.
+      // We can do it at compile time, unless one day the RPC API is
+      // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
     }
-    rpc_async_node->eraseBlock(0);
+    matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
 
     return std::make_shared<SimpleValue>(rpc_async_node_output);
   }

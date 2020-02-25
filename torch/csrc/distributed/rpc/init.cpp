@@ -259,8 +259,21 @@ If the future completes with an error, an exception is thrown.
       "_set_and_start_rpc_agent",
       [](const std::shared_ptr<RpcAgent>& rpcAgent) {
         RpcAgent::setCurrentRpcAgent(rpcAgent);
+        // Initializing typeResolver inside RpcAgent constructor will make
+        // RpcAgent have python dependency. To avoid RpcAgent to have python
+        // dependency, setTypeResolver() here.
+        std::shared_ptr<TypeResolver> typeResolver =
+            std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+              auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+                  qn.qualifiedName());
+              return c10::StrongTypePtr(
+                  PythonRpcHandler::getInstance().jitCompilationUnit(),
+                  std::move(typePtr));
+            });
+        rpcAgent->setTypeResolver(typeResolver);
         rpcAgent->start();
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);
@@ -338,22 +351,18 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const py::object& userFunctionPyObj,
+         const py::object& userCallable,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict) {
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
-        std::string qualifiedNameStr;
-        {
-          py::gil_scoped_acquire acquire;
-          py::function pyQualifiedNameFunction = py::module::import("torch.jit")
-                                                     .attr("_qualified_name")
-                                                     .cast<py::function>();
-          qualifiedNameStr =
-              pyQualifiedNameFunction(userFunctionPyObj).cast<std::string>();
-        }
+        py::function pyQualifiedNameFunction = py::module::import("torch.jit")
+                                                   .attr("_qualified_name")
+                                                   .cast<py::function>();
+        std::string qualifiedNameStr =
+            pyQualifiedNameFunction(userCallable).cast<std::string>();
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
@@ -364,11 +373,14 @@ If the future completes with an error, an exception is thrown.
             argsTuple.cast<py::args>(),
             kwargsDict.cast<py::dict>(),
             c10::nullopt);
-        auto fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
-        return PythonFutureWrapper(fut);
+        {
+          py::gil_scoped_release release;
+          c10::intrusive_ptr<c10::ivalue::Future> fut = rpcTorchscript(
+              dstWorkerName, qualifiedName, functionSchema, stack);
+          return PythonFutureWrapper(fut);
+        }
       },
-      py::call_guard<py::gil_scoped_release>());
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_builtin",

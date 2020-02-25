@@ -44,30 +44,30 @@ c10::OperatorOptions aliasAnalysisSpecialCase() {
 
 RegisterOperators reg_rpc_ops({
     Operator(
-        "aten::to_here(RRef(t) self) -> t",
-        [](Stack& stack) {
-          auto rref = pop(stack).toRRef();
-          IValue res;
-          if (rref->isOwner()) {
-            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
-                      ->getValue();
-          } else {
-            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
-                      ->toHere();
-          }
-          push(stack, std::move(res));
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::is_owner(RRef(t) self) -> bool",
-        [](Stack& stack) {
-          auto rref = pop(stack).toRRef();
-          push(stack, rref->isOwner());
-          return 0;
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
+         "aten::to_here(RRef(t) self) -> t",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           IValue res;
+           if (rref->isOwner()) {
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                       ->getValue();
+           } else {
+             res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                       ->toHere();
+           }
+           push(stack, std::move(res));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::is_owner(RRef(t) self) -> bool",
+         [](Stack& stack) {
+           auto rref = pop(stack).toRRef();
+           push(stack, rref->isOwner());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
            int num_inputs = node->inputs().size();
@@ -77,49 +77,57 @@ RegisterOperators reg_rpc_ops({
              auto& dstWorkerNameIValue = *stackIter++;
              auto& qualifiedNameIValue = *stackIter++;
              IValue emptyTuple(c10::ivalue::Tuple::create({}));
-             IValue emptyDict{c10::impl::GenericDict(AnyType::get(), AnyType::get())};
+             IValue emptyDict{
+                 c10::impl::GenericDict(AnyType::get(), AnyType::get())};
              // Equavalent to Python statment
              // `args = args if args is not None else ()`.
-             auto& argsTupleIValue = num_inputs >= 3 ? *stackIter++ : emptyTuple;
+             auto& argsTupleIValue =
+                 num_inputs >= 3 ? *stackIter++ : emptyTuple;
              // `kwargs = kwargs if kwargs is not None else {}`.
-             auto& kwargsDictIValue = num_inputs >= 4 ? *stackIter++ : emptyDict;
+             auto& kwargsDictIValue =
+                 num_inputs >= 4 ? *stackIter++ : emptyDict;
              TORCH_INTERNAL_ASSERT(dstWorkerNameIValue.isString());
              TORCH_INTERNAL_ASSERT(qualifiedNameIValue.isString());
              TORCH_INTERNAL_ASSERT(argsTupleIValue.isTuple());
              TORCH_INTERNAL_ASSERT(kwargsDictIValue.isGenericDict());
 
              // Get FunctionSchema for qualifiedName.
-             auto qualifiedName = c10::QualifiedName(qualifiedNameIValue.toStringRef());
+             auto qualifiedName =
+                 c10::QualifiedName(qualifiedNameIValue.toStringRef());
              std::shared_ptr<script::CompilationUnit> cuPtr;
              {
                py::gil_scoped_acquire acquire;
                cuPtr = get_python_cu();
              }
-             auto& functionSchema = cuPtr->get_function(qualifiedName).getSchema();
+             auto& functionSchema =
+                 cuPtr->get_function(qualifiedName).getSchema();
 
              // Build stack for the user function.
-             // It's the same logic as createStackForSchema.
-             Stack userFuncStack;
-             auto argsTuplePtr = argsTupleIValue.toTuple();
-             auto kwargsDict = kwargsDictIValue.toGenericDict();
-             auto numArgsAndKwargs = argsTuplePtr->elements().size() + kwargsDict.size();
-             userFuncStack.reserve(numArgsAndKwargs);
+             // It's the similar logic as
+             // Stack createStackForSchema(FunctionSchema, py::args, py::kwargs).
+             // It's actually
+             // Stack createStackForSchema(FunctionSchema, IValue<Tuple>, IValue<Dict>).
+             Stack userCallableStack;
+             userCallableStack.reserve(functionSchema.arguments().size());
 
-             // Push args.
+             // Move args from Tuple IValue to Stack.
              for (auto& elem : argsTupleIValue.toTuple()->elements()) {
-               push(userFuncStack, std::move(elem));
+               push(userCallableStack, std::move(elem));
              }
 
-             // Push kwargs.
+             // Move kwargs from Dict IValue to Stack.
              size_t consumed_kwargs = 0;
-             for (size_t i = userFuncStack.size(); i < functionSchema.arguments().size(); ++i) {
+             auto kwargsDict = kwargsDictIValue.toGenericDict();
+             for (size_t i = userCallableStack.size();
+                  i < functionSchema.arguments().size();
+                  ++i) {
                const auto& arg = functionSchema.arguments()[i];
                const auto& argName = arg.name();
                if (kwargsDict.contains(argName)) {
-                 push(userFuncStack, kwargsDict.at(argName));
+                 push(userCallableStack, kwargsDict.at(argName));
                  consumed_kwargs += 1;
                } else if (arg.default_value()) {
-                 push(userFuncStack, *arg.default_value());
+                 push(userCallableStack, *arg.default_value());
                } else {
                  throw std::runtime_error(c10::str(
                      functionSchema.name(),
@@ -129,21 +137,27 @@ RegisterOperators reg_rpc_ops({
                      functionSchema));
                }
              }
-             TORCH_INTERNAL_ASSERT(
-                 kwargsDict.size() == consumed_kwargs,
-                 "There is unknown kwarg given.");
+             // Raise exception showing the unexpected kwargs.
+             if (consumed_kwargs != kwargsDict.size()) {
+               std::vector<std::string> names;
+               for (const auto& entry : kwargsDict) {
+                 const IValue& keyIValue = entry.key();
+                 const string& keyStr = keyIValue.toStringRef();
+                 names.emplace_back(keyStr);
+               }
+               functionSchema.findErrorInKwargs(names);
+             }
 
              // Send RPC request.
              auto futureIValuePtr = rpcTorchscript(
-                dstWorkerNameIValue.toStringRef(),
-                qualifiedName,
-                functionSchema,
-                userFuncStack
-             );
+                 dstWorkerNameIValue.toStringRef(),
+                 qualifiedName,
+                 functionSchema,
+                 userCallableStack);
 
              // Push output to the stack.
              drop(stack, num_inputs);
-             stack.push_back(futureIValuePtr);
+             stack.emplace_back(std::move(futureIValuePtr));
              return 0;
            };
          },

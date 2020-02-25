@@ -546,7 +546,8 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
-      obj.ptr() == py::module::import("torch.distributed.rpc.api").attr("rpc_async").ptr()) {
+      obj.ptr() ==
+      py::module::import("torch.distributed.rpc.api").attr("rpc_async").ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {
@@ -577,7 +578,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::isinstance<ScriptClass>(obj)) {
     auto script_class = py::cast<ScriptClass>(obj);
     return std::make_shared<PythonClassValue>(
-        script_class.class_type_.type_, obj);
+        script_class.class_type_.type_->expect<ClassType>(), obj);
   }
 
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
