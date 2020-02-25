@@ -1221,7 +1221,7 @@ template<typename hidden_type>
 std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
       TensorList params, bool has_biases, cudnnRNNMode_t mode,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
@@ -1251,7 +1251,7 @@ template<typename hidden_type>
 std::pair<Tensor, hidden_type> _cudnn_impl(
       const Tensor& input, const hidden_type& hidden,
       TensorList params, bool has_biases, cudnnRNNMode_t mode,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2, bool batch_first) {
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
@@ -1278,17 +1278,17 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 void NAME##_cudnn(Tensor& output, Tensor& hy,                                  \
       const Tensor& input, const Tensor& hx,                                   \
       TensorList params, bool has_biases,                                      \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) { \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2, bool batch_first) { \
   std::tie(output, hy) = _cudnn_impl(input, hx, params, has_biases,            \
-      MODE, num_layers, dropout_p, train, bidirectional, batch_first);         \
+      MODE, num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
 }                                                                              \
                                                                                \
 void NAME##_packed_cudnn(Tensor& output, Tensor& hy,                           \
       const Tensor& data, const Tensor& batch_sizes, const Tensor& hx,         \
       TensorList params, bool has_biases,                                      \
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {  \
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2) {  \
   std::tie(output, hy) = _cudnn_impl(data, batch_sizes, hx, params,            \
-      has_biases, MODE, num_layers, dropout_p, train, bidirectional);          \
+      has_biases, MODE, num_layers, dropout_p, train, bidirectional, type_2);          \
 }                                                                              \
                                                                                \
 REGISTER_CUDA_DISPATCH(NAME##_cudnn_stub, &NAME##_cudnn);                      \
