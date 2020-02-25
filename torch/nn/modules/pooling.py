@@ -791,8 +791,7 @@ class LPPool1d(_LPPoolNd):
         - Output: :math:`(N, C, L_{out})`, where
 
           .. math::
-              L_{out} = \left\lfloor\frac{L_{in} +
-              2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor\frac{L_{in} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
