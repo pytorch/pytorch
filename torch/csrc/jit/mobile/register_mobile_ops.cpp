@@ -133,7 +133,6 @@ void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pop(*stack);
 }
 
-<<<<<<< HEAD
 void tupleunpack_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto tuple = pop(*stack).toTuple();
   stack->insert(
@@ -163,17 +162,17 @@ void format_kernel(const c10::OperatorHandle& op, Stack* stack) {
 
   drop(*stack, num_inputs);
   push(*stack, ss.str());
-=======
+}
+
 void to_dtype_kernal(const c10::OperatorHandle& op, Stack* stack) {
-   auto result_ = ((std::move(peek(*stack, 0, 5))).toTensor()).to(
-       (std::move(peek(*stack, 1, 5))).toScalarType(),
-       (std::move(peek(*stack, 2, 5))).toBool(),
-       (std::move(peek(*stack, 3, 5))).toBool(),
-       (std::move(peek(*stack, 4, 5))).toOptional<c10::MemoryFormat>()
-   );
-   drop(*stack, 5);
-   pack(*stack, std::move(result_));
->>>>>>> register ops for quantized linear.
+  auto result_ = ((std::move(peek(*stack, 0, 5))).toTensor()).to(
+     (std::move(peek(*stack, 1, 5))).toScalarType(),
+     (std::move(peek(*stack, 2, 5))).toBool(),
+     (std::move(peek(*stack, 3, 5))).toBool(),
+     (std::move(peek(*stack, 4, 5))).toOptional<c10::MemoryFormat>()
+  );
+  drop(*stack, 5);
+  pack(*stack, std::move(result_));
 }
 
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
@@ -497,7 +496,6 @@ static auto registry = torch::RegisterOperators().op(
   [](const Tensor & self) {
      return at::sigmoid(self);
   })
-);
 ).op(torch::RegisterOperators::options()
     .schema("_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
     .kernel<&to_dtype_kernal>(c10::DispatchKey::CPUTensorId)

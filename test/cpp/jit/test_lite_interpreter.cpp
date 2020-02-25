@@ -210,6 +210,5 @@ void testLiteInterpreterQuant() {
 
   AT_ASSERT(ref.toTensor().item().toFloat() == res.toTensor().item().toFloat());
 }
-} // namespace torch
 } // namespace jit
 } // namespace torch
