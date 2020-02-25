@@ -29,7 +29,7 @@ class TreeConfigNode(ConfigNode):
 
     def is_build_only(self):
         if (str(self.find_prop("language_version")) == "onnx_py3.6_part1") or \
-                (str(self.find_prop("language_version")) == "onnx_py3.6_part2")):
+                (str(self.find_prop("language_version")) == "onnx_py3.6_part2"):
             return False
         if str(self.find_prop("language_version")) == "onnx_py3.6":
             return True
