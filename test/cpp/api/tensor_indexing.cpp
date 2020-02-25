@@ -684,7 +684,7 @@ TEST(NumpyTests, TestEllipsisIndex) {
   auto a = torch::tensor({{1, 2, 3},
                           {4, 5, 6},
                           {7, 8, 9}});
-  assert_is_not(a.index({"..."}), a);
+  ASSERT_FALSE(a.index({"..."}).is_same(a));
   assert_tensor_equal(a.index({"..."}), a);
   // `a[...]` was `a` in numpy <1.9.
   ASSERT_EQ(a.index({"..."}).data_ptr(), a.data_ptr());
@@ -842,8 +842,8 @@ TEST(NumpyTests, TestEverythingReturnsViews) {
   // Before `...` would return a itself.
   auto a = torch::tensor({5});
 
-  assert_is_not(a, a.index({"..."}));
-  assert_is_not(a, a.index({{}}));
+  ASSERT_FALSE(a.is_same(a.index({"..."})));
+  ASSERT_FALSE(a.is_same(a.index({{}})));
 }
 
 TEST(NumpyTests, TestBroaderrorsIndexing) {
