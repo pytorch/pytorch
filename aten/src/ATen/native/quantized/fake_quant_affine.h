@@ -1,13 +1,13 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <cmath>
+#include <ATen/native/DispatchStub.h>
 
-/* FakeQuantize Op for PerChannelAffine quantization scheme */
 namespace at {
+
 namespace native {
-void fake_quantize_slice_cuda(
+
+using fake_quant_slice_fn = void (*)(
     Tensor& output,
     const Tensor& input,
     float sc,
@@ -15,14 +15,17 @@ void fake_quantize_slice_cuda(
     int64_t quant_min,
     int64_t quant_max);
 
-void fake_quantize_grad_slice_cuda(
+using fake_quant_grad_slice_fn = void (*)(
     Tensor& input_grad,
-    const Tensor& output_grad,
     const Tensor& input,
+    const Tensor& output_grad,
     float sc,
     int64_t z_point,
     int64_t quant_min,
     int64_t quant_max);
+
+DECLARE_DISPATCH(fake_quant_slice_fn, fake_quant_slice_stub);
+DECLARE_DISPATCH(fake_quant_grad_slice_fn, fake_quant_grad_slice_stub);
 
 } // namespace native
 } // namespace at
