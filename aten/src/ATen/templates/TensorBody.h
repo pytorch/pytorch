@@ -30,6 +30,11 @@ struct Type;
 class DeprecatedTypeProperties;
 class Tensor;
 } // namespace at
+namespace at {
+namespace indexing {
+struct TensorIndex;
+} // namespace indexing
+} // namespace at
 
 namespace torch { namespace autograd {
 
@@ -391,6 +396,14 @@ class CAFFE2_API Tensor {
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
 
+  Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
+  Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
+
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs);
+  Tensor & index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs);
+  Tensor & index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v);
+
   Tensor cpu() const;
   Tensor cuda() const;
   Tensor hip() const;
@@ -503,7 +516,7 @@ public:
 
   /// Returns the `Variable` that this `Variable` is a view of. If this
   /// `Variable` is not a view, throw a `std::runtime_error`.
-  const Tensor& base() const;
+  const Tensor& _base() const;
 
   // Miscellaneous
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -1,6 +1,7 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
+#include <torch/csrc/jit/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/autograd/record_function.h>
@@ -14,17 +15,6 @@ std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
   registers_.resize(code_->register_size_);
-}
-
-namespace {
-template <typename dtype> // int64_t, bool, double
-void listConstruct(Stack& stack, int num_inputs) {
-  auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-  c10::List<dtype> vals(
-      fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
-  drop(stack, num_inputs);
-  push(stack, std::move(vals));
-}
 }
 
 bool InterpreterState::run(Stack& stack) {
@@ -56,12 +46,12 @@ bool InterpreterState::run(Stack& stack) {
         }
         RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
 #endif
-
-        c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
+        code_->operators_[inst.X](stack);
         ++pc;
       } break;
       case OPN: {
-        code_->vararg_operators_[inst.X](inst.N, stack);
+        stack.push_back(inst.N);
+        code_->operators_[inst.X](stack);
         ++pc;
       } break;
       case LOAD:
@@ -133,6 +123,20 @@ bool InterpreterState::run(Stack& stack) {
       } break;
       case RET:
         return false;
+      case LIST_CONSTRUCT: {
+        auto type = code_->types_[inst.X]->expect<at::ListType>();
+        listConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case TUPLE_CONSTRUCT: {
+        tupleConstruct(stack, inst.X);
+        ++pc;
+      } break;
+      case WARN: {
+        drop(stack, 1);
+        AT_WARN(pop(stack).toStringRef());
+        ++pc;
+      } break;
       default:
         AT_ERROR(toString(inst.op), " is invalid.");
     }

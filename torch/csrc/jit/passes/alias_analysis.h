@@ -217,7 +217,5 @@ class AliasDb {
   std::string getElementName(const Element* e) const;
 };
 
-// Used to assert that unschematized operators have an analysis method written
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit
 } // namespace torch

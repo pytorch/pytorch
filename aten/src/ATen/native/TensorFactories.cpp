@@ -1,6 +1,8 @@
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 
@@ -675,7 +677,10 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
+
+  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
+
   check_args(row, col, options);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -720,7 +725,10 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
+
+  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
+
   check_args(row, col, options);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

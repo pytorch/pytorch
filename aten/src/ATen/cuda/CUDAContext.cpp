@@ -1,5 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCGeneral.hpp>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/cuda/CUDAConfig.h>
 #include <mutex>
@@ -48,7 +48,7 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
 }
 
 Allocator* getCUDADeviceAllocator() {
-  return at::globalContext().getTHCState()->cudaDeviceAllocator;
+  return c10::cuda::CUDACachingAllocator::get();
 }
 
 } // namespace cuda

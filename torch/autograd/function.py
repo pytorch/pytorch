@@ -157,7 +157,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the forward function for custom"
+                                  " autograd.Function.")
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -178,7 +179,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         first input to :func:`forward` needs gradient computated w.r.t. the
         output.
         """
-        raise NotImplementedError
+        raise NotImplementedError("You must implement the backward function for custom"
+                                  " autograd.Function.")
 
 
 def once_differentiable(fn):
