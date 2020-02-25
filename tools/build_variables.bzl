@@ -190,9 +190,29 @@ libtorch_sources = [
     "torch/csrc/jit/mobile/register_mobile_ops.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
+    "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/eval.cpp",
+    "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/ir.cpp",
+    "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/types.cpp",
+    "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
+    "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/eval.cpp",
+    "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/ir.cpp",
+    "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
+    "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/tensorexpr/ir_visitor.cpp",
+    "torch/csrc/jit/tensorexpr/mem_arena.cpp",
+    "torch/csrc/jit/tensorexpr/types.cpp",
+    "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
 ]
 
 libtorch_cuda_sources = [
@@ -531,6 +551,7 @@ def add_torch_libs():
             ("python", None),
         ],
         compiler_flags = compiler_flags_cpu,
+        propagated_pp_flags = ["-DUSE_DISTRIBUTED"],
         **common_flags
     )
 
@@ -550,6 +571,7 @@ def add_torch_libs():
             ("python", None),
         ],
         compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
+        propagated_pp_flags = ["-DUSE_DISTRIBUTED"],
         **common_flags
     )
 
