@@ -120,7 +120,7 @@ class TestUnsupportedOps(JitTestCase):
             return torch.nn.init.orthogonal_(torch.empty(3, 5))
 
         def sparse():
-            return torch.nn.init.sparse(torch.empty(3, 5), sparsity=.1)
+            return torch.nn.init.sparse_(torch.empty(3, 5), sparsity=.1)
 
         for func in [calculate_gain, eye_, dirac_, kaiming_uniform_, orthogonal_, sparse]:
             # doesn't error in eager
