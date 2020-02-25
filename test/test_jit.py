@@ -10221,6 +10221,12 @@ a")
 
         self.checkScript(cdist_fn, ())
 
+        def norm():
+            c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
+            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
+
+        self.checkScript(norm, ())
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):
