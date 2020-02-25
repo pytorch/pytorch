@@ -92,14 +92,6 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
   at::native::resize_impl_cpu_(self, sizes, strides);
 }
 
-// See ATen/TensorUtils.cpp
-c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntArrayRef oldshape,
-    at::IntArrayRef oldstride,
-    at::IntArrayRef newshape) {
-    return at::detail::computeStride(oldshape, oldstride, newshape);
-}
-
 // NB: Steals ownership of storage
 void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   // Caffe2 might have tensors whose storages are null, but we

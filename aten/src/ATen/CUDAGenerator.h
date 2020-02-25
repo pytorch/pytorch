@@ -2,9 +2,11 @@
 
 #include <ATen/core/Generator.h>
 
+// TODO: this file should be in ATen/cuda, not top level
+
 namespace at {
 
-struct CAFFE2_API CUDAGenerator : public Generator {
+struct TORCH_CUDA_API CUDAGenerator : public Generator {
   // Constructors
   CUDAGenerator(DeviceIndex device_index = -1);
   ~CUDAGenerator() = default;
@@ -28,8 +30,8 @@ private:
 namespace cuda {
 namespace detail {
 
-  CAFFE2_API CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index = -1);
-  CAFFE2_API std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index = -1);
+  TORCH_CUDA_API CUDAGenerator* getDefaultCUDAGenerator(DeviceIndex device_index = -1);
+  TORCH_CUDA_API std::shared_ptr<CUDAGenerator> createCUDAGenerator(DeviceIndex device_index = -1);
 
 } // namespace detail
 } // namespace cuda

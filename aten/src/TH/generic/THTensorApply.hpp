@@ -61,7 +61,11 @@ if (std::isnan(val)) break;
 #define th_isnan_break(val)
 #endif
 
-#ifdef _MSC_VER
+#if defined(__clang__)
+#define PRAGMA(P) _Pragma(#P)
+#define PRAGMA_IVDEP      // Noop
+#define PRAGMA_SIMD       // Noop
+#elif defined(_MSC_VER)
 #define PRAGMA(P)         __pragma(P)
 # if _MSC_VER < 1920
 // MSVC < 2019 doesn't support loop pragmas.

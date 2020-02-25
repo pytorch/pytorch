@@ -265,8 +265,8 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
     return grad_weight;
   }
 
-  auto sorted_indices = at::empty_like(indices, at::MemoryFormat::Contiguous);
-  auto orig_indices = at::empty_like(indices, at::MemoryFormat::Contiguous);
+  auto sorted_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto orig_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   using device_ptr = thrust::device_ptr<int64_t>;
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -291,7 +291,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
   Tensor count;
   if (scale_grad_by_freq) {
-    count = at::empty_like(indices, at::MemoryFormat::Contiguous);
+    count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
     auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     auto policy = thrust::cuda::par(allocator).on(stream);

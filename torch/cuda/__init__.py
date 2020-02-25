@@ -33,7 +33,7 @@ _cudart = None
 def find_cuda_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
+    # The library selection will be done in these directories one by one
     # 1. [Package Root]\Lib
     #    That's where our libraries are in, which should be loaded first.
     # 2. [Python Root]\Library\bin
@@ -53,9 +53,7 @@ def find_cuda_windows_lib():
     if len(out) > 0:
         if out.find('\r\n') != -1:
             out = out.split('\r\n')[0]
-        cuda_lib_name = os.path.basename(out)
-        cuda_lib = os.path.splitext(cuda_lib_name)[0]
-        cuda_lib = str(cuda_lib)
+        cuda_lib = str(out)
         return ctypes.cdll.LoadLibrary(cuda_lib)
     else:
         return None

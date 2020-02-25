@@ -174,7 +174,7 @@ std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 
 // Data structures for optional memory tracking. Access to these structures
-// is garded by the CUDAContext::mutex.
+// is guarded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
 static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
@@ -294,7 +294,7 @@ static void Caffe2SetCUDAMemoryPool() {
  * GPU present during runtime, at global initialization time we will set
  * the CPU memory allocator to allocate pinned memory.
  *
- * NB: This behavior is probably too agressive. We should consider asking users
+ * NB: This behavior is probably too aggressive. We should consider asking users
  * to do on-demand memory pinning (like exposed in PyTorch APIs) instead.
  */
 struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {

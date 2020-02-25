@@ -200,7 +200,7 @@ class TileGradientOp final : public Operator<Context> {
      * This is equivalent to multiplying by a vector of 1s transposed.
      * The gradient of this is all 1s in the shape of the input matrix
      * (call it X).
-     * So the output gradient should be the matrix multipication result
+     * So the output gradient should be the matrix multiplication result
      * of input gradient (gradient of tiled tensor output) and X.
      */
     const T* dY_data = dY.template data<T>();

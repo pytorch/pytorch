@@ -28,7 +28,7 @@ class NormalizerContext(ModifierContext):
 class UseNormalizer(UseModifierBase):
     '''
     context class to allow setting the current context.
-    Example useage with layer:
+    Example usage with layer:
         normalizers = {'norm1': norm1, 'norm2': norm2}
         with UseNormalizer(normalizers):
             norm = NormalizerContext.current().get_normalizer('norm1')

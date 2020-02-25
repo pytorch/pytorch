@@ -35,18 +35,24 @@ void ConstantPooling(
     // Check whether the same constant already exists.
     auto subit = constants.insert(node);
     if (!subit.second) {
-      // constant exists, replace the uses of node, and destroy it.
       auto existing = *subit.first;
 
-      // since the graph outputs may be mutated after they are returned,
-      // don't introduce new aliasing among graph outputs
-      if (aliasDb.mayContainAlias(
-              node->outputs(), node->owningGraph()->outputs()) &&
-          aliasDb.mayContainAlias(
-              existing->outputs(), node->owningGraph()->outputs())) {
+      auto old_ivalue = toIValue(existing->output());
+      auto new_ivalue = toIValue(node->output());
+
+      // if both values are the same object, we do not need to worry about
+      // changing the aliasing relationship
+      bool same_identity =
+          (old_ivalue && new_ivalue &&
+           (old_ivalue->isSameIdentity(new_ivalue)));
+
+      if (!same_identity &&
+          !aliasDb.safeToChangeAliasingRelationship(
+              node->outputs(), existing->outputs())) {
         continue;
       }
 
+      // constant exists, replace the uses of node, and destroy it.
       node->replaceAllUsesWith(existing);
       node->destroy();
       continue;

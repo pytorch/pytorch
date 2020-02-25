@@ -34,12 +34,12 @@ repositories {
 
 dependencies {
     ...
-    implementation 'org.pytorch:pytorch_android:1.4.0-SNAPSHOT'
-    implementation 'org.pytorch:pytorch_android_torchvision:1.4.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android:1.5.0-SNAPSHOT'
+    implementation 'org.pytorch:pytorch_android_torchvision:1.5.0-SNAPSHOT'
     ...
 }
 ```
-The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.4.0-SNAPSHOT`.
+The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle.properties` in current folder, at this moment it is `1.5.0-SNAPSHOT`.
 
 ## Building PyTorch Android from Source
 
@@ -49,6 +49,7 @@ For this you can use `./scripts/build_pytorch_android.sh` script.
 ```
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
+git submodule update --init --recursive
 sh ./scripts/build_pytorch_android.sh
 ```
 
@@ -59,7 +60,7 @@ The workflow contains several steps:
 2\. Create symbolic links to the results of those builds:
 `android/pytorch_android/src/main/jniLibs/${abi}` to the directory with output libraries
 `android/pytorch_android/src/main/cpp/libtorch_include/${abi}` to the directory with headers. These directories are used to build `libpytorch.so` library that will be loaded on android device.
- 
+
 3\. And finally run `gradle` in `android/pytorch_android` directory with task `assembleRelease`
 
 Script requires that Android SDK, Android NDK and gradle are installed.
@@ -103,8 +104,15 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     implementation(name:'pytorch_android_fbjni', ext:'aar')
+    ...
+    implementation 'com.android.support:appcompat-v7:28.0.0'
+    implementation 'com.facebook.soloader:nativeloader:0.8.0'
 }
 ```
+We also have to add all transitive dependencies of our aars.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L62-L63) on `'com.android.support:appcompat-v7:28.0.0'` and `'com.facebook.soloader:nativeloader:0.8.0'`, we need to add them.
+(In case of using maven dependencies they are added automatically from `pom.xml`).
+
 
 At the moment for the case of using aar files directly we need additional configuration due to packaging specific (`libfbjni.so` is packaged in both `pytorch_android_fbjni.aar` and `pytorch_android.aar`).
 ```

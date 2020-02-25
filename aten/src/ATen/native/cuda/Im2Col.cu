@@ -172,7 +172,7 @@ Tensor im2col_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor output = at::empty_like(input, at::MemoryFormat::Contiguous);
+  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   im2col_out_cuda_template(
       output, input, kernel_size, dilation, padding, stride);
   return output;
@@ -204,7 +204,7 @@ Tensor im2col_backward_cuda(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, at::MemoryFormat::Contiguous);
+  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   im2col_backward_out_cuda_template(
       grad_input,
       grad_output,

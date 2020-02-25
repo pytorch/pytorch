@@ -1,6 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 
+// The stubs in here are only used for static dispatch.
+// Dynamic dispatch doesn't ever see those but directly goes to the kernels in VariableTypeManual.cpp.
+// TODO Since the plan is to remove static dispatch, we should then also remove this file here.
+
 namespace at {
 namespace native {
 

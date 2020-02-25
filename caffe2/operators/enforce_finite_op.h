@@ -32,7 +32,7 @@ class EnforceFiniteOp final : public Operator<Context> {
     auto size = input.numel();
 
     for (auto i = 0; i < size; i++) {
-      CAFFE_ENFORCE(
+      CAFFE_ENFORCE_FINITE(
           std::isfinite(input_data[i]),
           "Index ",
           i,

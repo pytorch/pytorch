@@ -150,7 +150,7 @@ class MPSImageWrapper {
      * it is still in use. If the parent wrapper contains a static image, we
      * should create a new command buffer because we use static image so it can
      * survive synchronization(commit of the command buffer), which means if we
-     * pass on the command buffer the command buffer will be commited in
+     * pass on the command buffer the command buffer will be committed in
      * multiple places in the graph. Also since we don't pass on parent's
      * command buffer,we need to synchronize(commit) it since it won't be used
      * in the future.
@@ -2347,10 +2347,6 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
   bool legacy_plus_one_{true};
   // threads per thread group, used in nms
   ushort maxThreadsPerThreadgroup{32};
-
- private:
-  id<MTLBuffer> out_rois_{nullptr};
-  id<MTLBuffer> out_rois_probs_{nullptr};
 };
 
 REGISTER_CPU_OPERATOR(MPSCNNGenerateProposalsCPP, MPSCNNGenerateProposalsCPPOp);

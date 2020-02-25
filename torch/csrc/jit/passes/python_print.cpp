@@ -188,7 +188,7 @@ struct PythonPrintImpl {
   //     and would appear in the same order when the expression tree is
   //     reparsed.
   // The last case can be checked
-  // becuase when we emit a expresion tree in the parser,
+  // because when we emit a expresion tree in the parser,
   // we do a left-to-right postorder traversal of the expression tree (emit
   // children, then emit op). The reverse of this is a right-to-left preorder
   // traversal of the tree. By doing a right-to-left preorder traversal of the
@@ -296,11 +296,10 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
         return i;
       }
     }
-    AT_ASSERT(t.is_variable());
     tensor_table_.emplace_back(std::move(t));
     return tensor_table_.size() - 1;
   }
@@ -778,48 +777,22 @@ struct PythonPrintImpl {
     }
   }
 
-  void printMaybeAnnotatedConstantList(
-      std::ostream& stmt,
-      const char* the_type,
-      size_t list_size,
-      const IValue& the_list) {
-    if (list_size == 0) {
-      stmt << "annotate(List[" << the_type << "], [])";
-    } else {
-      stmt << the_list;
-    }
-  }
-
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
-    std::stringstream ss;
-    if (v.isTensor()) {
-      ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
-    } else if (v.isString()) {
-      c10::printQuotedString(ss, v.toStringRef());
-    } else if (v.isDevice()) {
-      std::stringstream device_stream;
-      device_stream << v.toDevice();
-      ss << "torch.device(";
-      c10::printQuotedString(ss, device_stream.str());
-      ss << ")";
-    } else if (v.isTensorList()) {
-      ss << "[";
-      const char* delim = "";
-      for (const at::Tensor& t : v.toTensorListRef()) {
-        ss << delim << "CONSTANTS.c" << getOrAddTensorConstant(t);
-        delim = ", ";
+    const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isTensor()) {
+        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+        return true;
       }
-      ss << "]";
-    } else if (v.isBoolList()) {
-      printMaybeAnnotatedConstantList(ss, "bool", v.toBoolList().size(), v);
-    } else if (v.isIntList()) {
-      printMaybeAnnotatedConstantList(ss, "int", v.toIntListRef().size(), v);
-    } else if (v.isDoubleList()) {
-      printMaybeAnnotatedConstantList(
-          ss, "float", v.toDoubleListRef().size(), v);
-    } else {
-      ss << v;
-    }
+      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+        // print the namedtuple constructor and let rest of tuple printing
+        // continue
+        ss << v.type()->expect<TupleType>()->python_str();
+      }
+      return false;
+    };
+
+    std::stringstream ss;
+    v.repr(ss, customFormatter);
     stmt << ss.str();
   }
 
@@ -894,7 +867,9 @@ struct PythonPrintImpl {
           stmt << "None";
         }
       } break;
-      case prim::ImplicitTensorToNum: {
+      case aten::ScalarImplicit:
+      case aten::FloatImplicit:
+      case aten::IntImplicit: {
         stmt << "annotate(" << node->output()->type()->python_str() << ", "
              << useOf(node->input()) << ")";
       } break;
@@ -938,32 +913,38 @@ struct PythonPrintImpl {
       case prim::ListConstruct: {
         ListTypePtr list_type = node->output()->type()->expect<ListType>();
         TypePtr elem_type = list_type->getElementType();
-        if (!elem_type->isSubtypeOf(TensorType::get())) {
-          // when the list is empty and is not a list of tensors,
-          // we need to annotate it, otherwise it won't be possible
-          // to infer the type on import
-          if (node->inputs().size() == 0) {
-            stmt << "annotate(" << node->output()->type()->python_str()
-                 << ", [])";
-          } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
-            stmt << "annotate(" << node->output()->type()->python_str() << ",";
-            printValueList(stmt, node->inputs(), "[", "]");
-            stmt << ")";
-          } else {
-            printValueList(stmt, node->inputs(), "[", "]");
-          }
+        // Empty lists must be annotated with their type so the compiler knows
+        // what type is supposed to be inside them
+        if (node->inputs().size() == 0) {
+          stmt << "annotate(" << node->output()->type()->python_str()
+               << ", [])";
+          // If we can't infer the type based on what's inside, explicitly
+          // annotate it to disambiguate.
+          // This happens for List[Tensor] vs. List[Optional[Tensor]]
+        } else if (!elementTypeCanBeInferredFromMembers(elem_type)) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printValueList(stmt, node->inputs(), "[", "]");
+          stmt << ")";
+          // Otherwise just print a list
         } else {
           printValueList(stmt, node->inputs(), "[", "]");
         }
       } break;
       case prim::DictConstruct: {
         auto dict_type = node->output()->type()->expect<DictType>();
-        bool is_default_type =
-            dict_type->getKeyType()->isSubtypeOf(StringType::get()) &&
-            dict_type->getKeyType()->isSubtypeOf(TensorType::get());
-        if (node->inputs().size() == 0 && !is_default_type) {
-          stmt << "annotate(" << node->output()->type()->python_str()
-               << ", {})";
+        // There are cases where we must annotate the dict with an explicit type
+        // to help the compiler out:
+        //   - the dict is empty
+        //   - the dict has potentially ambiguous element types
+        //       (e.g. Tensor vs. Optional[Tensor])
+        if (
+            node->inputs().size() == 0 ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getKeyType()) ||
+            !elementTypeCanBeInferredFromMembers(dict_type->getValueType())) {
+          stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+          printDict(stmt, node->inputs());
+          stmt << ")";
+          // Otherwise just print a dict
         } else {
           printDict(stmt, node->inputs());
         }
@@ -1114,22 +1095,38 @@ struct PythonPrintImpl {
     return body_;
   }
 
+  template <typename dtype>
+  IValue createBroadList(dtype value, const int64_t& N) {
+    c10::List<dtype> repeated;
+    repeated.reserve(N);
+    for (int i = 0; i < N; ++i) {
+      repeated.push_back(value);
+    }
+    return repeated;
+  }
+
   void printDefaultValue(
-      const TypePtr& typ,
+      const Argument& arg,
       TaggedStringStream& stmt,
       const IValue& value) {
-    // xxx - many weak script modules store default values for broadcasting
-    // lists that are not actually the same type as the argument. We can only
-    // serialize default values that will implicitly convert to their declared
-    // return type since we do not need to serialize these built-in modules with
-    // their defaults, we just drop them for now.
-    if (typ->kind() == ListType::Kind &&
-        (value.isInt() || value.isDouble() || value.isBool())) {
-      return;
-    }
     stmt << "=";
-    printConstant(stmt, value);
+    // handle broadcasting lists
+    if (arg.type()->kind() == ListType::Kind &&
+        (value.isInt() || value.isDouble() || value.isBool())) {
+      TORCH_INTERNAL_ASSERT(arg.N(), "expected broadcastinglist");
+      if (value.isInt()) {
+        printConstant(stmt, createBroadList<int64_t>(value.toInt(), *arg.N()));
+      } else if (value.isBool()) {
+        printConstant(stmt, createBroadList<bool>(value.toBool(), *arg.N()));
+      } else if (value.isDouble()) {
+        printConstant(
+            stmt, createBroadList<double>(value.toDouble(), *arg.N()));
+      }
+    } else {
+      printConstant(stmt, value);
+    }
   }
+
   void printBody(Block* body) {
     // we always print constants at the top of the function, in the order
     // in which they are used.
@@ -1177,7 +1174,7 @@ struct PythonPrintImpl {
         body_ << ",\n    " << arg_name << ": " << arg.type()->python_str();
       }
       if (arg.default_value()) {
-        printDefaultValue(arg.type(), body_, *arg.default_value());
+        printDefaultValue(arg, body_, *arg.default_value());
       }
       assignValue(*param_it++, arg_name);
     }
@@ -1199,46 +1196,78 @@ struct PythonPrintImpl {
         deps_table_(deps_table),
         enforce_importable_(enforce_importable) {}
 
-  void printModuleMetadata(const ClassTypePtr& moduleType) {
-    std::vector<std::string> params;
-    size_t numAttrs = moduleType->numAttributes();
-    // Populate the __parameters__ field. This tells the importer which
-    // attributes are parameters.
-    for (size_t i = 0; i < numAttrs; i++) {
-      if (moduleType->is_parameter(i)) {
-        params.push_back(moduleType->getAttributeName(i));
-      }
+  void printClass(const ClassTypePtr& classType) {
+    bool is_module = classType->is_module();
+    body_ << "class " << classType->name()->name();
+    if (is_module) {
+      body_ << "(Module)";
     }
-    indent();
-    body_ << "__parameters__ = [";
-    for (const auto& param : params) {
-      body_ << "\"" << param << "\", ";
-    }
-    body_ << "]\n";
 
-    for (size_t i = 0; i < numAttrs; i++) {
-      const auto& name = moduleType->getAttributeName(i);
-      const auto& type = moduleType->getAttribute(name);
-      registerClassDependencies(type);
-
-      indent();
-
-      // Handling for when the attribute name is not a valid Python identifier.
-      // This happens for, e.g. ModuleList.
-      if (!isValidIdentifier(name)) {
-        if (i == 0) {
-          // Initialize the annotations dict if necessary.
-          body_ << "__annotations__ = []\n";
-          indent();
+    body_ << ":\n";
+    {
+      const auto guard = WithIndented();
+      size_t numAttrs = classType->numAttributes();
+      // For modules, we need to print special information about the module's
+      // attributes and parameters.
+      if (is_module) {
+        std::vector<std::string> params;
+        // Populate the __parameters__ field. This tells the importer which
+        // attributes are parameters.
+        for (size_t i = 0; i < numAttrs; i++) {
+          if (classType->is_parameter(i)) {
+            params.push_back(classType->getAttributeName(i));
+          }
         }
-        // Print out a direct manipulation of the annotations dict, like:
-        //   __annotations__["0"] = SomeType
-        body_ << "__annotations__["
-              << "\"" << name << "\"] = " << type->python_str() << "\n";
-      } else {
-        // Otherwise: just emit a python 3 attribute annotation, like:
-        //   foo : SomeType
-        body_ << name << " : " << type->python_str() << "\n";
+        indent();
+        body_ << "__parameters__ = [";
+        for (const auto& param : params) {
+          body_ << "\"" << param << "\", ";
+        }
+        body_ << "]\n";
+      }
+
+      for (size_t i = 0; i < numAttrs; i++) {
+        const auto& name = classType->getAttributeName(i);
+        const auto& type = classType->getAttribute(i);
+        registerClassDependencies(type);
+
+        indent();
+
+        // Handling for when the attribute name is not a valid Python
+        // identifier. This happens for, e.g. ModuleList.
+        if (!isValidIdentifier(name)) {
+          if (i == 0) {
+            // Initialize the annotations dict if necessary.
+            body_ << "__annotations__ = []\n";
+            indent();
+          }
+          // Print out a direct manipulation of the annotations dict, like:
+          //   __annotations__["0"] = SomeType
+          body_ << "__annotations__["
+                << "\"" << name << "\"] = " << type->python_str() << "\n";
+        } else {
+          // Otherwise: just emit a python 3 attribute annotation, like:
+          //   foo : SomeType
+          body_ << name << " : " << type->python_str() << "\n";
+        }
+      }
+
+      size_t numConstants = classType->numConstants();
+      for (size_t i = 0; i < numConstants; i++) {
+        const auto& name = classType->getConstantName(i);
+        IValue v = classType->getConstant(i);
+
+        indent();
+        body_ << name << " : "
+              << "Final[" << v.type()->python_str() << "] = ";
+        auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
+        printConstant(*ss, v);
+        body_ << ss->str() << "\n";
+      }
+
+      // TODO fields
+      for (auto& method : classType->methods()) {
+        printFunction(*method);
       }
     }
   }
@@ -1247,25 +1276,7 @@ struct PythonPrintImpl {
     if (auto functionType = type->cast<FunctionType>()) {
       printFunction(*functionType->function());
     } else if (auto classType = type->cast<ClassType>()) {
-      bool is_module = classType->is_module();
-      body_ << "class " << classType->name()->name();
-      if (is_module) {
-        body_ << "(Module)";
-      }
-
-      body_ << ":\n";
-      {
-        const auto guard = WithIndented();
-        // For modules, we need to print special information about the module's
-        // attributes and parameters.
-        if (is_module) {
-          printModuleMetadata(classType);
-        }
-        // TODO fields
-        for (auto& method : classType->methods()) {
-          printFunction(*method);
-        }
-      }
+      printClass(classType);
     } else if (auto tupleType = type->cast<TupleType>()) {
       TORCH_INTERNAL_ASSERT(tupleType->schema());
       body_ << "class " << tupleType->name()->name();
@@ -1363,76 +1374,7 @@ const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
 }
 
-void PythonPrint::LEGACY_printOpVersion() {
-  pImpl->body_ << "op_version_set = 1\n";
-}
-
 PythonPrint::~PythonPrint() = default;
 
-bool printerHasSpecialCaseFor(Symbol sym) {
-  // WARNING: by adding a value to this set, you are asserting
-  // that you have also added special handling of this symbol to
-  // the printer above. Not adding handling will cause import and export
-  // of modules with this new operator to fail. This is only required
-  // for operators without schema. Prefer registering your operator with
-  // schema to editing this list here. These cases should only be things
-  // that require special handling because they do not fit normal schema
-  const static std::unordered_set<Symbol> handled = {
-      prim::Constant,
-      prim::Uninitialized,
-      prim::fork,
-      prim::ListConstruct,
-      prim::DictConstruct,
-      prim::ListUnpack,
-      prim::Print,
-      prim::PythonOp,
-      prim::TupleConstruct,
-      prim::TupleIndex,
-      prim::TupleSlice,
-      prim::TupleUnpack,
-      prim::CreateObject,
-      prim::GetAttr,
-      prim::SetAttr,
-      prim::CallFunction,
-      prim::isinstance,
-      prim::unchecked_cast,
-  };
-
-  // WARNING: by adding a value to this set, you are asserting that your
-  // primitive is only ever added during optimization and does not need
-  // to be correctly printed for export (a process that happens before
-  // optimization passes run)
-  const static std::unordered_set<Symbol> unneeded = {
-      c10::onnx::Reshape, // only used in onnx
-      c10::onnx::Shape, // only used in onnx
-      prim::AutogradZero, // temporarily inserted by autograd
-      prim::AutogradAnyNonZero, // temporarily inserted by autograd
-      prim::AutogradAdd, // temporarily inserted by autograd
-      prim::ConstantChunk, // optimization pass adds it
-      prim::DifferentiableGraph, // optimization pass adds it
-      prim::BroadcastSizes, // optimization pass (fuser) adds it
-      prim::ChunkSizes, // optimization pass (fuser) adds it
-      prim::Drop, // used in interpreter only
-      prim::FusedConcat, // optimization pass adds it
-      prim::FusionGroup, // optimization pass adds it
-      prim::Load, // used in interpreter only
-      prim::MMTreeReduce, // used as an optimization
-      prim::MMBatchSide, // used as an optimization
-      prim::Store, // used in interpreter only
-      prim::profile, // used in interpreter only
-
-  };
-
-  // These namespaces are required to have Python printers unless
-  // otherwise noted in unneeded.
-  const static std::unordered_set<Symbol> required_namespaces = {
-      c10::namespaces::prim,
-      c10::namespaces::aten,
-      c10::namespaces::onnx,
-  };
-
-  return handled.count(sym) || unneeded.count(sym) ||
-      !required_namespaces.count(sym.ns());
-}
 } // namespace jit
 } // namespace torch

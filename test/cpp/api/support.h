@@ -46,7 +46,7 @@ private:
 };
 
 inline bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data_ptr<float>() == second.data_ptr<float>();
+  return first.data_ptr() == second.data_ptr();
 }
 
 inline int count_substr_occurrences(const std::string& str, const std::string& substr) {
@@ -60,6 +60,25 @@ inline int count_substr_occurrences(const std::string& str, const std::string& s
 
   return count;
 }
+
+// A RAII, thread local (!) guard that changes default dtype upon
+// construction, and sets it back to the original dtype upon destruction.
+//
+// Usage of this guard is synchronized across threads, so that at any given time,
+// only one guard can take effect.
+struct AutoDefaultDtypeMode {
+  static std::mutex default_dtype_mutex;
+
+  AutoDefaultDtypeMode(c10::ScalarType default_dtype) : prev_default_dtype(torch::typeMetaToScalarType(torch::get_default_dtype())) {
+    default_dtype_mutex.lock();
+    torch::set_default_dtype(torch::scalarTypeToTypeMeta(default_dtype));
+  }
+  ~AutoDefaultDtypeMode() {
+    default_dtype_mutex.unlock();
+    torch::set_default_dtype(torch::scalarTypeToTypeMeta(prev_default_dtype));
+  }
+  c10::ScalarType prev_default_dtype;
+};
 
 } // namespace test
 } // namespace torch

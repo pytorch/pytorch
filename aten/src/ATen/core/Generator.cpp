@@ -12,7 +12,8 @@ namespace at {
 /**
  * Generator class implementation
  */
-Generator::Generator(Device device_in) : device_{device_in} {}
+Generator::Generator(Device device_in, DispatchKeySet key_set)
+ : device_{device_in}, key_set_(key_set) {}
 
 /**
  * Clone this generator. Note that clone() is the only

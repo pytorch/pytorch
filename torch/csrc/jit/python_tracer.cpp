@@ -28,7 +28,7 @@ SourceRange getPythonInterpreterSourceRange() {
   size_t source_line = 0;
   std::stringstream stack_trace;
 
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   PyFrameObject* frame = PyEval_GetFrame();
 
   while (nullptr != frame) {
@@ -57,9 +57,10 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     script::Module* self) {
   C10_LOG_API_USAGE_ONCE("torch.tracer");
 
-  auto lookup_fn_adapter = [var_name_lookup_fn](const Variable& var) -> std::string {
-      AutoGIL ag;
-      return py::cast<std::string>(var_name_lookup_fn(var));
+  auto lookup_fn_adapter =
+      [var_name_lookup_fn](const Variable& var) -> std::string {
+    pybind11::gil_scoped_acquire ag;
+    return py::cast<std::string>(var_name_lookup_fn(var));
   };
 
   auto outs = tracer::trace(
@@ -104,8 +105,7 @@ Node* preRecordPythonTrace(
     n->addInput(getValueTrace(input));
   }
 
-  // NB: Order matters. This must append after inputs but before outputs.
-  graph->appendNode(n);
+  graph->insertNode(n);
 
   return n;
 }
@@ -115,7 +115,7 @@ void pythonRecordSourceLocation(Node* n) {
 }
 
 void pythonWarn(const std::string& reason) {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   auto warn_class = py::module::import("torch.jit").attr("TracerWarning");
   PyErr_WarnEx(warn_class.ptr(), reason.c_str(), 1);
 }
@@ -176,7 +176,7 @@ void initPythonTracerBindings(PyObject* module) {
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =
         [func](const Variable& var) -> std::string {
-      AutoGIL ag;
+      pybind11::gil_scoped_acquire ag;
       return py::cast<std::string>(func(var));
     };
   });

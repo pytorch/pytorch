@@ -31,7 +31,7 @@ struct CAFFE2_API SparseTensorImpl : public TensorImpl {
 
 public:
   // Public for now...
-  explicit SparseTensorImpl(at::TensorTypeSet, const caffe2::TypeMeta&);
+  explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   int64_t nnz() const { return values_.size(0); }
   int64_t sparse_dim() const { return sparse_dim_; }
@@ -43,13 +43,11 @@ public:
   IntArrayRef strides() const override;
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
   int64_t stride(int64_t d) const override;
-  void resize_dim(int64_t ndim) override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 
   int64_t dim() const override;
-  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;
@@ -192,7 +190,7 @@ public:
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<SparseTensorImpl>(type_set(), dtype());
+    auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -209,7 +207,7 @@ public:
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
-    AT_ASSERT(has_compatible_shallow_copy_type(impl->type_set()));
+    AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
       /*src_impl=*/sparse_impl,
@@ -219,7 +217,7 @@ public:
     refresh_numel();
   }
 private:
-    explicit SparseTensorImpl(at::TensorTypeSet, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
+    explicit SparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&, at::Tensor indices, at::Tensor values);
 
   /**
    * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer / storage_offset)

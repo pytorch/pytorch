@@ -82,7 +82,7 @@ inline Tensor pad(const Tensor& input,
 }
 } // namespace detail
 
-inline Tensor pad(const Tensor& input, PadFuncOptions options) {
+inline Tensor pad(const Tensor& input, const PadFuncOptions& options) {
   return detail::pad(input, options.pad(), options.mode(), options.value());
 }
 

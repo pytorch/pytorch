@@ -111,7 +111,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
     # logic of this function.
 
     try:
-        # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+        # Initialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
         # module's handlers are executed after Python returns from C low-level
         # handlers, likely when the same fatal signal had already happened
         # again.

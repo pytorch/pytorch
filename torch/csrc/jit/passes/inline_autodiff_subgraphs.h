@@ -5,6 +5,8 @@
 namespace torch {
 namespace jit {
 
+TORCH_API bool canRunWithAutograd(Node* node);
+
 TORCH_API void InlineAutodiffSubgraphs(
     std::shared_ptr<Graph>& graph,
     size_t threshold = 5);

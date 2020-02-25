@@ -244,7 +244,7 @@ TensorQuantizationParams QuantizationFactory::ChooseQuantizationParams(
       return ChooseQuantizationParams(min, max, precision, preserve_sparsity);
     }
 
-    /** Ajust the granularity of histogram collection to
+    /** Adjust the granularity of histogram collection to
      * the quantization precision. Use 8x more number of bins
      * in the histogram should be sufficient for linear quantization.
      */

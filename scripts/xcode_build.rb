@@ -16,7 +16,7 @@ option_parser = OptionParser.new do |opts|
  opts.on('-c', '--provisioning_profile ', 'provisioning profile for code signing') { |value|
     options[:profile] = value
  }
- opts.on('-t', '--team_id ', 'developemnt team ID') { |value|
+ opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
 end.parse!
@@ -51,7 +51,7 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch.a']
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
 for lib in libs do 
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)

@@ -1,5 +1,6 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
+#include <c10/cuda/CUDAStream.h>
 
 namespace at { namespace native {
 namespace {
@@ -40,7 +41,9 @@ cudnnHandle_t getCudnnHandle()
   if (!myPoolWindow)
     myPoolWindow.reset(pool.newPoolWindow());
 
-  return myPoolWindow->reserve(device);
+  auto handle = myPoolWindow->reserve(device);
+  AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));
+  return handle;
 }
 
 }} // namespace at::native

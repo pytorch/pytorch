@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 #endif
 
-// A utility class to implement integer division by muliplication, given a fixed
+// A utility class to implement integer division by multiplication, given a fixed
 // divisor.
 //
 // WARNING: The fast divider algorithm is only implemented for unsigned int;

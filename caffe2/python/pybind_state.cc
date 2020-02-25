@@ -26,6 +26,7 @@
 #include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
+#include "caffe2/opt/shape_info.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -93,12 +94,12 @@ REGISTER_BLOB_FETCHER((TypeMeta::Id<string>()), StringFetcher);
 class ScriptModuleFetcher : public BlobFetcherBase {
  public:
   pybind11::object Fetch(const Blob& blob) override {
-    return py::cast(blob.Get<torch::jit::script::Module>());
+    return py::cast(*blob.Get<std::unique_ptr<torch::jit::script::Module>>());
   }
 };
 
 REGISTER_BLOB_FETCHER(
-    (TypeMeta::Id<torch::jit::script::Module>()),
+    (TypeMeta::Id<std::unique_ptr<torch::jit::script::Module>>()),
     caffe2::python::ScriptModuleFetcher);
 #endif
 
@@ -247,7 +248,8 @@ bool feedBlob(
   }
 #ifdef FBCODE_CAFFE2
   if (auto module = torch::jit::script::as_module(arg)) {
-    *blob->GetMutable<torch::jit::script::Module>() = *module;
+    blob->GetMutable<std::unique_ptr<torch::jit::script::Module>>()->reset(
+        new torch::jit::script::Module(*module));
     return true;
   }
 #endif
@@ -1527,6 +1529,12 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));
     return true;
   });
+  m.def("reset_blob", [](const std::string& name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* b = gWorkspace->GetBlob(name);
+    CAFFE_ENFORCE(b);
+    b->Reset();
+  });
   m.def("fetch_blob", [](const std::string& name) -> py::object {
     return python_detail::fetchBlob(gWorkspace, name);
   });
@@ -1708,22 +1716,26 @@ void addGlobalMethods(py::module& m) {
          int max_seq_size,
          bool adjust_batch,
          bool debug_builder,
+         bool merge_fp32_inputs_into_fp16,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
             ParseProtoFromLargeString(
                 pred_net_str.cast<std::string>(), &pred_net),
             "broken pred_net protobuf");
-        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        ShapeInfoMap shape_map;
         for (const auto& it : shapes) {
-          tensor_shapes.emplace(
-              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+          shape_map.emplace(
+              it.first,
+              constructShapeInfoWithDefaultDimType(
+                  CreateTensorShape(it.second, TensorProto::FLOAT)));
         }
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
+        opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
         Workspace* curr_ws = GetCurrentWorkspace();
@@ -1739,7 +1751,7 @@ void addGlobalMethods(py::module& m) {
             curr_ws,
             &pred_net,
             weight_names_overwrite,
-            tensor_shapes,
+            shape_map,
             blacklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);

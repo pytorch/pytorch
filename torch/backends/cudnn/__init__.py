@@ -21,7 +21,7 @@ __cudnn_version = None
 def find_cudnn_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
+    # The library selection will be done in these directories one by one
     # 1. [Package Root]\Lib 
     #    That's where our libraries are in, which should be loaded first.
     # 2. Default directories
@@ -38,9 +38,7 @@ def find_cudnn_windows_lib():
     if len(out) > 0:
         if out.find('\r\n') != -1:
             out = out.split('\r\n')[0]
-        cudnn_lib_name = os.path.basename(out)
-        cudnn_lib = os.path.splitext(cudnn_lib_name)[0]
-        cudnn_lib = str(cudnn_lib)
+        cudnn_lib = str(out)
         return ctypes.cdll.LoadLibrary(cudnn_lib)
     else:
         return None

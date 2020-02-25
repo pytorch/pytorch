@@ -229,8 +229,12 @@ void OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     for (const auto d : dim0) {
       shape.add_dims(d);
     }
-    input_shape_info_[input_names_[i]] =
-        ShapeInfo(ShapeInfo::DimType::BATCH, std::move(shape));
+    std::vector<TensorBoundShape::DimType> dim_type(
+        shape.dims_size(), TensorBoundShape_DimType_CONSTANT);
+    if (dim_type.size()) {
+      dim_type[0] = TensorBoundShape_DimType_BATCH;
+    }
+    input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
   }
   bound_shape_inferencer->InferBoundShapeAndType(
       netdef_, input_shape_info_, nullptr);

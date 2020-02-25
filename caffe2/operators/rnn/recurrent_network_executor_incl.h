@@ -8,7 +8,7 @@
 namespace caffe2 {
 
 /**
- * Struct for operator in a timestep and its dependenceis.
+ * Struct for operator in a timestep and its dependencies.
  */
 struct RNNNetOperator {
   int order; // Position in the step net (i.e nth operator)

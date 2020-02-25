@@ -22,7 +22,7 @@ namespace caffe2 {
  *
  * pos = 0
  * fused_block_size = block_size + 8B // quantized values and scale and bias
- * for (i = 0..index_size-1)
+ * for (i = 0..output_size-1)
  *   for (k = 0..block_size-1)
  *     out[i*block_size + k] = 0
  *   for (j = 0..lengths[i]-1)

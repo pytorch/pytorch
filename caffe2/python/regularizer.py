@@ -150,7 +150,7 @@ class L0ApproxNorm(Regularizer):
         reg_lambda: parameter to scale regularization by
 
         alpha:      hyper parameter to tune that is only used in the calculation
-                    of approxiamte L0 norm
+                    of approximate L0 norm
 
         budget:     desired number of features. If the number of features is greater
                     than the budget amount, then the least important features will
@@ -348,7 +348,7 @@ class LogBarrier(Regularizer):
             **self.discount_options
         )
         # TODO(xlwang): param might still be negative at the initialization time or
-        # slighly negative due to the distributed training. Enforce it's non-negativity
+        # slightly negative due to the distributed training. Enforce it's non-negativity
         # for now (at least above machine epsilon)
         param_non_neg = net.NextScopedBlob(param + "_non_neg")
         net.Clip([param], [param_non_neg], min=self.kEpsilon)

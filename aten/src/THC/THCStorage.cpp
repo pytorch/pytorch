@@ -59,7 +59,7 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->device().index();
 }
 
-THC_API THCStorage* THCStorage_new(
+THCStorage* THCStorage_new(
     THCState* state,
     caffe2::TypeMeta data_type) {
   THStorage* storage = c10::make_intrusive<at::StorageImpl>(

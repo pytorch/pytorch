@@ -34,7 +34,7 @@ std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto payload_size = message.payload().size();
   auto value =
       jit::unpickle(payload, payload_size, nullptr, &message.tensors());
-  return c10::guts::make_unique<ScriptResp>(std::move(value));
+  return std::make_unique<ScriptResp>(std::move(value));
 }
 
 } // namespace rpc

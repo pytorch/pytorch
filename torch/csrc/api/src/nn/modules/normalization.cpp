@@ -24,6 +24,10 @@ void LayerNormImpl::reset() {
     weight = register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
     bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
   }
+  reset_parameters();
+}
+
+void LayerNormImpl::reset_parameters() {
   if (options.elementwise_affine()) {
     torch::nn::init::ones_(weight);
     torch::nn::init::zeros_(bias);
@@ -62,6 +66,8 @@ void LocalResponseNormImpl::pretty_print(std::ostream& stream) const {
          << ")";
 }
 
+// ============================================================================
+
 void CrossMapLRN2dImpl::reset() {}
 
 void CrossMapLRN2dImpl::pretty_print(std::ostream& stream) const {
@@ -75,6 +81,43 @@ void CrossMapLRN2dImpl::pretty_print(std::ostream& stream) const {
 
 torch::Tensor CrossMapLRN2dImpl::forward(const torch::Tensor& input) {
   return functions::CrossMapLRN2d::apply(input, options);
+}
+
+// ============================================================================
+
+GroupNormImpl::GroupNormImpl(const GroupNormOptions& options_) : options(options_) { // NOLINT(modernize-pass-by-value)
+  reset();
+}
+
+void GroupNormImpl::reset() {
+  if (options.affine()) {
+    weight = register_parameter("weight", torch::empty(options.num_channels()));
+    bias = register_parameter("bias", torch::empty(options.num_channels()));
+  } else {
+    weight = register_parameter("weight", torch::Tensor(), /*requires_grad=*/false);
+    bias = register_parameter("bias", torch::Tensor(), /*requires_grad=*/false);
+  }
+  reset_parameters();
+}
+
+void GroupNormImpl::reset_parameters() {
+  if (options.affine()) {
+    torch::nn::init::ones_(weight);
+    torch::nn::init::zeros_(bias);
+  }
+}
+
+torch::Tensor GroupNormImpl::forward(const Tensor& input) {
+  return F::detail::group_norm(input, options.num_groups(), weight, bias, options.eps());
+}
+
+void GroupNormImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::GroupNorm(" << options.num_groups()
+         << ", " << options.num_channels()
+         << ", eps=" << options.eps()
+         << ", affine=" << options.affine()
+         << ")";
 }
 
 } // namespace nn

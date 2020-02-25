@@ -24,8 +24,8 @@ public:
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(std::complex<float> val) {
-    float real_value = std::real(val);
-    float imag_value = std::imag(val);
+    float real_value = val.real();
+    float imag_value = val.imag();
     values = _mm256_setr_ps(real_value, imag_value,
                             real_value, imag_value,
                             real_value, imag_value,
@@ -33,10 +33,10 @@ public:
                             );
   }
   Vec256(std::complex<float> val1, std::complex<float> val2, std::complex<float> val3, std::complex<float> val4) {
-    values = _mm256_setr_ps(std::real(val1), std::imag(val1),
-                            std::real(val2), std::imag(val2),
-                            std::real(val3), std::imag(val3),
-                            std::real(val4), std::imag(val4)
+    values = _mm256_setr_ps(val1.real(), val1.imag(),
+                            val2.real(), val2.imag(),
+                            val3.real(), val3.imag(),
+                            val4.real(), val4.imag()
                             );
   }
   operator __m256() const {
@@ -111,6 +111,11 @@ public:
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
 
     __at_align32__ float tmp_values[2*size()];
+    // Ensure uninitialized memory does not change the output value
+    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    for (auto i = 0; i < 2*size(); ++i) {
+      tmp_values[i] = 0.0;
+    }
     std::memcpy(
         tmp_values,
         reinterpret_cast<const float*>(ptr),
@@ -235,7 +240,14 @@ public:
     AT_ERROR("not supported for complex numbers");
   }
   Vec256<std::complex<float>> exp() const {
-    return map(std::exp);
+    //exp(a + bi)
+    // = exp(a)*(cos(b) + sin(b)i)
+    auto exp = Sleef_expf8_u10(values);                               //exp(a)           exp(b)
+    exp = _mm256_blend_ps(exp, _mm256_permute_ps(exp, 0xB1), 0xAA);   //exp(a)           exp(a)
+
+    auto sin_cos = Sleef_sincosf8_u10(values);                        //[sin(a), cos(a)] [sin(b), cos(b)]
+    auto cos_sin = _mm256_blend_ps(sin_cos.y, sin_cos.x, 0xAA);       //cos(b)           sin(b)
+    return _mm256_mul_ps(exp, cos_sin);
   }
   Vec256<std::complex<float>> expm1() const {
     AT_ERROR("not supported for complex numbers");

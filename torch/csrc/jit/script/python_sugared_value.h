@@ -127,49 +127,12 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   const std::string name_;
 };
 
-// Used to support mod._modules
-struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
-  explicit SugaredModuleDict(
-      std::shared_ptr<SugaredValue> keys,
-      std::shared_ptr<SugaredValue> modules) {
-    keys_ = std::move(keys);
-    modules_ = std::move(modules);
-  }
-
-  std::string kind() const override {
-    return "ModuleDict";
-  }
-
-  std::shared_ptr<SugaredValue> attr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field) override {
-    if (field == "keys") {
-      return std::make_shared<ModuleDictMethod>(keys_, "keys");
-    } else if (field == "values") {
-      return std::make_shared<ModuleDictMethod>(modules_, "values");
-    } else if (field == "items") {
-      auto iterator = std::make_shared<IterableTree>();
-      iterator->addChild(loc, m, keys_);
-      iterator->addChild(loc, m, modules_);
-      return std::make_shared<ModuleDictMethod>(iterator, "items");
-    } else {
-      throw ErrorReport(loc) << "_Modules only supports keys, values, or items";
-    }
-  }
-
-  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
-    return keys_;
-  };
-
-  std::shared_ptr<SugaredValue> keys_;
-  std::shared_ptr<SugaredValue> modules_;
-};
+struct SugaredModuleDict;
 
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
-// {functions, modules, contants} so this SugaredValue is defined here
+// {functions, modules, constants} so this SugaredValue is defined here
 // anticipating we will eventually need to replace Module with a py::object
 // holding the actual nn.Module class.
 
@@ -215,6 +178,59 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
+};
+
+void recurseThroughNestedModules(
+    const SourceRange& loc,
+    Function& m,
+    std::vector<SugaredValuePtr>& keys,
+    std::vector<SugaredValuePtr>& values,
+    std::shared_ptr<ModuleValue> self,
+    const std::string& prefix);
+
+// Used to support named_modules()
+struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
+  explicit SugaredModuleDict(
+      std::shared_ptr<ModuleValue> self,
+      std::shared_ptr<SugaredTupleValue> keys,
+      std::shared_ptr<SugaredTupleValue> modules) {
+    self_ = std::move(self);
+    keys_ = std::move(keys);
+    modules_ = std::move(modules);
+  }
+
+  std::string kind() const override {
+    return "ModuleDict";
+  }
+
+  std::shared_ptr<SugaredValue> attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override {
+    if (field == "named_modules") {
+      auto iterator = std::make_shared<IterableTree>();
+      std::vector<SugaredValuePtr> keys;
+      std::vector<SugaredValuePtr> values;
+
+      auto key_tuple = std::dynamic_pointer_cast<SugaredTupleValue>(keys_);
+      auto values_tuple =
+          std::dynamic_pointer_cast<SugaredTupleValue>(modules_);
+
+      recurseThroughNestedModules(loc, m, keys, values, self_, "");
+      iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(keys));
+      iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(values));
+      return std::make_shared<ModuleDictMethod>(iterator, "named_modules");
+    };
+    TORCH_INTERNAL_ASSERT(false);
+  }
+
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
+    return keys_;
+  };
+
+  std::shared_ptr<ModuleValue> self_;
+  std::shared_ptr<SugaredTupleValue> keys_;
+  std::shared_ptr<SugaredTupleValue> modules_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {

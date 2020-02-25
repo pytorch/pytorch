@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 
 namespace torch {
 namespace jit {
