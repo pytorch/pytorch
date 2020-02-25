@@ -317,68 +317,6 @@ void bernoulli_mkl_kernel(Tensor &self, const double p, Generator gen) {
 }
 #endif
 
-#if !AT_MKL_ENABLED()
-void uniform_mkl_kernel(Tensor & self, const double from, const double to, Generator* gen) {
-  // Use AT_ASSERTM because this should never be reached, and AT_ASSERTM tells
-  // users to report this as a bug.
-  AT_ASSERTM(false, "ATen not compiled with MKL");
-}
-#else
-
-static inline void vslRngUniform(const int method, VSLStreamStatePtr stream,
-    const int n, float* r, const float a, const float b) {
-  vsRngUniform( method, stream, n, r, a, b );
-}
-
-static inline void vslRngUniform(const int method, VSLStreamStatePtr stream,
-    const int n, double* r, const double a, const double b) {
-  vdRngUniform( method, stream, n, r, a, b );
-}
-
-void uniform_mkl_kernel(Tensor & self, const double from, const double to, Generator* gen) {
-  CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
-  int64_t seed;
-  {
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(generator->mutex_);
-    seed = generator->random();
-  }
-  int64_t n = self.numel();
-  bool contig = self.is_contiguous();
-
-  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "uniform_cpu_", [&] {
-    Tensor tmp_tensor;
-    if (contig) {
-      tmp_tensor = self;
-    } else {
-      tmp_tensor = at::empty(self.sizes(), self.options());
-    }
-
-    scalar_t *self_ptr = self.data_ptr<scalar_t>();
-    scalar_t *sample_ptr = tmp_tensor.data_ptr<scalar_t>();
-
-    auto sample = [&](int64_t begin, int64_t end) {
-      int64_t len = end - begin;
-      if (len > 0) {
-        VSLStreamStatePtr stream;
-        vslNewStream(&stream, VSL_BRNG_MCG31, seed);
-        vslSkipAheadStream(stream, begin);
-        vslRngUniform(VSL_RNG_METHOD_UNIFORM_STD, stream, len,
-            sample_ptr + begin, static_cast<scalar_t>(from), static_cast<scalar_t>(to));
-        vslDeleteStream(&stream);
-      }
-    };
-
-    parallel_for(0, n, /* grain_size= */ 800, sample);
-
-    // copy_ if using buffer and non contiguous
-    if (!contig) {
-      self.copy_(tmp_tensor);
-    }
-  });
-}
-#endif
-
 static void uniform_cpu_kernel(TensorIterator& iter, const double from, const double to, Generator gen) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "uniform_cpu", [&]() {
     CPUGenerator* generator = at::get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
@@ -526,7 +464,6 @@ static void rsqrt_kernel(TensorIterator& iter) {
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
 REGISTER_DISPATCH(bernoulli_mkl_stub, &bernoulli_mkl_kernel);
-REGISTER_DISPATCH(uniform_mkl_stub, &uniform_mkl_kernel);
 REGISTER_DISPATCH(uniform_cpu_stub, &uniform_cpu_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
 REGISTER_DISPATCH(exponential_stub, &exponential_kernel);

@@ -115,7 +115,6 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(bernoulli_mkl_stub);
-DEFINE_DISPATCH(uniform_mkl_stub);
 DEFINE_DISPATCH(uniform_cpu_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
@@ -195,12 +194,6 @@ Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator gen) {
 }
 
 Tensor& uniform_cpu_(Tensor& self, double from, double to, Generator* gen) {
-#if AT_MKL_ENABLED()
-  if (cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
-    uniform_mkl_stub(kCPU, self, from, to, gen);
-    return self;
-  }
-#endif
   auto iter = TensorIterator::nullary_op(self);
   uniform_cpu_stub(iter.device_type(), iter, from, to, gen);
   return self;
