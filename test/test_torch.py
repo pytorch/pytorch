@@ -14003,6 +14003,11 @@ class TestTorchDeviceType(TestCase):
         range_ = to_inc_ - from_ + 1
 
         t.random_(from_, None)
+
+        # TODO: remove it!
+        if device.startswith('cuda') and dtype == torch.bfloat16:
+            torch.cuda.synchronize()
+
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
         self.assertTrue((to_inc_ - alpha * range_) < t.to(torch.double).max() <= to_inc_)
 
@@ -14043,6 +14048,11 @@ class TestTorchDeviceType(TestCase):
                     range_ = to_ - from_
                     t = torch.empty(size, dtype=dtype, device=device)
                     t.random_(from_, to_)
+
+                    # TODO: remove it!
+                    if device.startswith('cuda') and dtype == torch.bfloat16:
+                        torch.cuda.synchronize()
+
                     self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
                     self.assertTrue((to_ - alpha * range_) < t.to(torch.double).max() < to_)
 
@@ -14070,6 +14080,11 @@ class TestTorchDeviceType(TestCase):
         for to_ in tos:
             t = torch.empty(size, dtype=dtype, device=device)
             t.random_(to_)
+
+            # TODO: remove it!
+            if device.startswith('cuda') and dtype == torch.bfloat16:
+                torch.cuda.synchronize()
+
             self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_)
             self.assertTrue((to_ - alpha * to_) < t.to(torch.double).max() < to_)
 
@@ -14098,6 +14113,11 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.empty(size, dtype=dtype, device=device)
         t.random_()
+
+        # TODO: remove it!
+        if device.startswith('cuda') and dtype == torch.bfloat16:
+            torch.cuda.synchronize()
+
         self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_inc)
         self.assertTrue((to_inc - alpha * to_inc) < t.to(torch.double).max() <= to_inc)
 
