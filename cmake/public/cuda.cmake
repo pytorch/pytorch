@@ -396,6 +396,26 @@ elseif(CUDA_VERSION VERSION_EQUAL   10.0)
   endif()
 endif()
 
+# Don't activate VC env again for Ninja generators with MSVC on Windows if CUDAHOSTCXX is not defined
+# by adding --use-local-env.
+if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja" AND NOT DEFINED ENV{CUDAHOSTCXX})
+  list(APPEND CUDA_NVCC_FLAGS "--use-local-env")
+  # For CUDA < 9.2, --cl-version xxx is also required.
+  # We could detect cl version according to the following variable
+  # https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html#variable:MSVC_TOOLSET_VERSION.
+  # 140       = VS 2015 (14.0)
+  # 141       = VS 2017 (15.0)
+  if(CUDA_VERSION VERSION_LESS 9.2)
+    if(MSVC_TOOLSET_VERSION EQUAL 140)
+      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2015")
+    elseif(MSVC_TOOLSET_VERSION EQUAL 141)
+      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2017")
+    else()
+      message(STATUS "We could not auto-detect the cl-version for MSVC_TOOLSET_VERSION=${MSVC_TOOLSET_VERSION}")
+    endif()
+  endif()
+endif()
+
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})

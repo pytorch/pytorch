@@ -21,8 +21,9 @@ PY36 = sys.version_info >= (3, 6)
 
 TESTS = [
     'test_autograd',
-    'test_cpp_extensions_aot',
+    'test_complex',
     'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
     'distributed/test_c10d',
     'distributed/test_c10d_spawn',
@@ -76,6 +77,8 @@ if PY33:
         'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
+        'distributed/rpc/jit/test_rpc_spawn',
+        'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -89,15 +92,19 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
-    'test_cpp_extensions_aot',
-    'test_cpp_extensions_aot_no_ninja',
+    'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
     'test_multiprocessing',
     'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
@@ -128,7 +135,7 @@ CPP_EXTENSIONS_ERROR = """
 Ninja (https://ninja-build.org) is required for some of the C++ extensions
 tests, but it could not be found. Install ninja with `pip install ninja`
 or `conda install ninja`. Alternatively, disable said tests with
-`run_test.py --exclude test_cpp_extensions_aot test_cpp_extensions_jit`.
+`run_test.py --exclude test_cpp_extensions_aot_ninja test_cpp_extensions_jit`.
 """
 
 
@@ -198,8 +205,8 @@ def _test_cpp_extensions_aot(executable, test_module, test_directory, options, u
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_cpp_extensions_aot(executable, test_module, test_directory, options):
-    return _test_cpp_extensions_aot(executable, test_module, test_directory,
+def test_cpp_extensions_aot_ninja(executable, test_module, test_directory, options):
+    return _test_cpp_extensions_aot(executable, 'test_cpp_extensions_aot', test_directory,
                                     options, use_ninja=True)
 
 
@@ -260,8 +267,8 @@ def test_distributed(executable, test_module, test_directory, options):
 
 CUSTOM_HANDLERS = {
     'test_cuda_primary_ctx': test_cuda_primary_ctx,
-    'test_cpp_extensions_aot': test_cpp_extensions_aot,
     'test_cpp_extensions_aot_no_ninja': test_cpp_extensions_aot_no_ninja,
+    'test_cpp_extensions_aot_ninja': test_cpp_extensions_aot_ninja,
     'distributed/test_distributed': test_distributed,
 }
 
@@ -429,8 +436,8 @@ def get_selected_tests(options):
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
         target_arch = os.environ.get('VSCMD_ARG_TGT_ARCH')
         if target_arch != 'x64':
-            WINDOWS_BLACKLIST.append('cpp_extensions_aot')
             WINDOWS_BLACKLIST.append('cpp_extensions_aot_no_ninja')
+            WINDOWS_BLACKLIST.append('cpp_extensions_aot_ninja')
             WINDOWS_BLACKLIST.append('cpp_extensions_jit')
             WINDOWS_BLACKLIST.append('jit')
             WINDOWS_BLACKLIST.append('jit_fuser')

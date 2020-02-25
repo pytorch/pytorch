@@ -8,6 +8,7 @@ using torch::jit::drop;
 using torch::jit::pack;
 using torch::jit::push;
 using torch::jit::pop;
+using torch::jit::last;
 using at::Tensor;
 using at::Scalar;
 
@@ -130,6 +131,37 @@ void upsample_nearest2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
 void warn_kernel(const c10::OperatorHandle& op, Stack* stack) {
   drop(*stack, 1);
   pop(*stack);
+}
+
+void tupleunpack_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  auto tuple = pop(*stack).toTuple();
+  stack->insert(
+     stack->end(),
+     tuple->elements().begin(),
+     tuple->elements().end());
+}
+
+void format_kernel(const c10::OperatorHandle& op, Stack* stack) {
+  size_t num_inputs = pop(*stack).toInt();
+  auto format = peek(*stack, 0, num_inputs).toStringRef();
+  auto args = last(*stack, num_inputs - 1);
+  std::stringstream ss;
+  for (size_t begin = 0, used_args = 0; true; ++used_args) {
+    size_t loc = format.find("{}", begin);
+    if (loc == std::string::npos) {
+      ss << format.substr(begin);
+      break;
+    }
+    ss << format.substr(begin, loc - begin);
+    if (used_args >= args.size()) {
+      AT_ERROR("Too few arguments for format string: ", format);
+    }
+    ss << args[used_args];
+    begin = loc + 2;
+  }
+
+  drop(*stack, num_inputs);
+  push(*stack, ss.str());
 }
 
 template <typename T>
@@ -411,21 +443,25 @@ static auto registry = torch::RegisterOperators().op(
   []() {
   })
 ).op(
-  "_prim::TupleUnpack",
-  torch::RegisterOperators::options().catchAllKernel(
-  []() {
-  })
+  "_prim::TupleUnpack(any self) -> any",
+  torch::RegisterOperators::options().catchAllKernel<&tupleunpack_kernel>()
 ).op(
-  "_aten::format",
-  torch::RegisterOperators::options().catchAllKernel(
-  []() {
-  })
+  "_aten::format(str self, ...) -> str",
+  torch::RegisterOperators::options().catchAllKernel<&format_kernel>()
+      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::append.Tensor(Tensor self) -> void",
   torch::RegisterOperators::options().kernel<&listAppend<at::Tensor>>(c10::DispatchKey::CPUTensorId)
 ).op(
   "_aten::append.int(int self) -> void",
   torch::RegisterOperators::options().catchAllKernel<&listAppend<int64_t>>()
+  // Segmentation
+).op(
+  "_aten::sigmoid(Tensor self) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & self) {
+     return at::sigmoid(self);
+  })
 );
 
 }

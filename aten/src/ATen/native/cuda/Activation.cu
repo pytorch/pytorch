@@ -333,21 +333,7 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
       auto poscoef = scale.to<scalar_t>();
       auto negiptcoef = input_scale.to<scalar_t>();
       gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a) -> scalar_t {
-        // WARNING (@zasdfgbnm, 2020-01-16): This is very fragile!
-        //
-        // The code below does not look like a great implementation because both positive
-        // and negative case are computed regardless of the condition, and you might want
-        // to optimize this. But this implementation is due to a compiler bug in handling
-        // branch. If we implement it in a correct way, the generated code will produce
-        // wrong result. This bug should be fixed in future CUDA, but we will need this
-        // workaround for maybe years until all the current CUDAs become obsolete.
-        //
-        // TODO: this workaround might become no longer necessary if the implementation of
-        // GPU loop in `Loops.cuh` is changed. We should make this great again once that
-        // change happens.
-        scalar_t positive_case = a * poscoef;
-        scalar_t negative_case = (static_cast<scalar_t>(std::exp(a * negiptcoef)) - scalar_t(1.)) * negcoef;
-        return a > scalar_t(0) ? positive_case : negative_case;
+        return a > scalar_t(0) ? a * poscoef : (static_cast<scalar_t>(std::exp(a * negiptcoef)) - scalar_t(1.)) * negcoef;
       });
     });
   });

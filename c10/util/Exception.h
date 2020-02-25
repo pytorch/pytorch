@@ -114,6 +114,11 @@ class C10_API IndexError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for invalid values.  These turn into
+// ValueError when they cross to Python.
+class C10_API ValueError : public Error {
+  using Error::Error;
+};
 
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
@@ -306,6 +311,28 @@ inline std::string if_empty_then(std::string x, std::string y) {
   }
 #endif
 
+// Like TORCH_CHECK, but raises ValueErrors instead of Errors.
+#ifdef STRIP_ERROR_MESSAGES
+#define TORCH_CHECK_VALUE(cond, ...)          \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
+    C10_THROW_ERROR(Error,                    \
+        #cond " VALUE CHECK FAILED at "       \
+        __FILE__                              \
+    );                                        \
+  }
+#else
+#define TORCH_CHECK_VALUE(cond, ...)                        \
+  if (C10_UNLIKELY_OR_CONST(!(cond))) {                     \
+    C10_THROW_ERROR(ValueError,                             \
+      ::c10::detail::if_empty_then(                         \
+        ::c10::str(__VA_ARGS__),                            \
+        "Expected " #cond " to be true, but got false.  "   \
+        "(Could this error message be improved?  If so, "   \
+        "please report an enhancement request to PyTorch.)" \
+      )                                                     \
+    );                                                      \
+  }
+#endif
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
