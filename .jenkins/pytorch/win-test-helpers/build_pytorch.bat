@@ -85,8 +85,8 @@ if "%TORCH_CUDA_ARCH_LIST%" == "" set TORCH_CUDA_ARCH_LIST=5.2
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache cl
-set CXX=sccache cl
+set CC=sccache-cl
+set CXX=sccache-cl
 
 set CMAKE_GENERATOR=Ninja
 
