@@ -10204,7 +10204,15 @@ a")
             # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
             return torch.lu(x, get_infos=True)
 
-        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
+        self.checkScript(lu, (torch.randn(2, 3, 3),))
+
+        def lu_unpack(x):
+            A_LU, pivots = torch.lu(x)
+            return torch.lu_unpack(A_LU, pivots)
+
+        for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
+            a = torch.randn(*shape)
+            self.checkScript(lu_unpack, (a,))
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):

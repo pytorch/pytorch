@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from itertools import product
 
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch
@@ -87,8 +86,28 @@ def split(tensor, split_size_or_sections, dim=0):
     # call here.
     return tensor.split(split_size_or_sections, dim)
 
+# equivalent to itertools.product(indices)
+def indices_product(indices):
+    # type: (List[int]) -> (List[List[int]])
+    empty_list : List[int] = []
+    result = [empty_list]
+    for idx in indices:
+        result_temp : List[List[int]] = []
+        for res in result:
+            for i in range(idx):
+                result_temp.append(res + [i])
+        result = result_temp
+    return result
+
+def index_tensor_with_indices_list(tensor, indices):
+    # type: (Tensor, List[int]) -> Tensor
+    out = tensor
+    for index in indices:
+        out = out[index]
+    return out
 
 def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
+    # type: (Tensor, Tensor, bool, bool)
     r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
@@ -140,7 +159,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     """
     if not torch.jit.is_scripting():
         tens_ops = (LU_data, LU_pivots)
-        if any(type(t) is not Tensor for t in tens_ops) and has_torch_function(tens_ops):
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(
                 lu_unpack, tens_ops, LU_data, LU_pivots, unpack_data=unpack_data,
                 unpack_pivots=unpack_pivots)
@@ -170,14 +189,20 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype) \
                      .expand(shape[:-1] + (m,)) \
                      .clone(memory_format=torch.contiguous_format)
-            for idx in product(*map(lambda x: list(range(x)), shape[:-2])):
-                final_order = list(range(m))
-                for k, j in enumerate(LU_pivots_zero_idx[idx]):
+
+            # TODO: rewrite when TorchScript supports product and map as
+            # product(*map(lambda x: list(range(x)), shape[:-2]))
+            indices = indices_product(shape[:-2])
+            for idx in indices:
+                final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
+                for k, j in enumerate(index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
-                P[idx] = P[idx].index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
+                # TODO: remove index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
+                p_idx = index_tensor_with_indices_list(P, idx)
+                p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
-            final_order = list(range(m))
+            final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
             for k, j, in enumerate(LU_pivots_zero_idx):
                 final_order[k], final_order[j] = final_order[j], final_order[k]
             P = P.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device))
