@@ -1166,19 +1166,3 @@
     - THTensor* self
     - THTensor* src
 ]]
-
-[[
-  name: _th_cat
-  cname: catArray
-  variants: [function]
-  backends:
-    - CUDA
-  cuda_bool: True
-  cuda_bfloat16: True
-  return: self
-  arguments:
-    - arg: THTensor* self
-      output: True
-    - TensorList tensors
-    - int64_t dim
-]]
