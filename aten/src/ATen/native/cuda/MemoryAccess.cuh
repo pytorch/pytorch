@@ -24,6 +24,10 @@ struct checked_unroll {
 
   __device__ checked_unroll(int remaining): remaining(remaining) {}
 
+  __device__ inline bool check_inbounds(int thread_work_elem) {
+    return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
+  }
+
   template<typename accessor_t, typename scalar_t>
   __device__ inline void load(accessor_t to, scalar_t *from) {
     int thread_idx = threadIdx.x;
@@ -60,6 +64,10 @@ struct vectorized {
 
   static_assert(thread_work_size % vec_size == 0, "The workload per thread must be a multiple of vec_size");
   static constexpr int loop_size = thread_work_size / vec_size;
+
+  __device__ inline constexpr bool check_inbounds(int thread_work_elem) {
+    return true;
+  }
 
   template<typename accessor_t, typename scalar_t>
   __device__ inline void load(accessor_t to, scalar_t *from) {
