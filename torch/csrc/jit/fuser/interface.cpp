@@ -93,11 +93,12 @@ RegisterFusionBackendEx::RegisterFusionBackendEx(
 
 // Returns true iff the node is fusible
 bool isFusible(const Node* const node) {
-  if (!validateNode(node)) {
-    return false;
-  }
+  //if (!validateNode(node)) {
+    //return false;
+  //}
 
-  const auto device_type = getFusionDeviceType(node);
+  //const auto device_type = getFusionDeviceType(node);
+  const auto device_type = c10::kCUDA;
 
   switch (device_type) {
     case c10::kCPU:

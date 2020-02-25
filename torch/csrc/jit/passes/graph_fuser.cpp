@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <queue>
 #include <unordered_map>
@@ -18,132 +18,9 @@
 namespace torch {
 namespace jit {
 
-// Replaces given Node n with a fusion group.
-// Notes:
-//  - The fusion node has the same inputs and outputs.
-//  - The fusion node contains a subgraph consisting of the original node.
-Node* makeFusionNode(
-  const int fusion_key
-, std::shared_ptr<Graph>& graph
-, Node* n) {
-  // Creates and inserts fusion node (with its key)
-  auto fusion = graph->createWithSubgraph(prim::FusionGroup);
-  fusion->insertBefore(n);
-  fusion->i_(attr::value, fusion_key);
-
-  // Grabs fusion node's subgraph (as a shorthand)
-  auto& subgraph = *(fusion->g(attr::Subgraph));
-
-  // Adds n's inputs to the fusion and its subgraph
-  for (auto input : n->inputs()) {
-    fusion->addInput(input);
-    subgraph.addInput()->setType(input->type());
-  }
-
-  // Creates the fusion group's output
-  auto new_output = fusion->addOutput();
-  new_output->copyMetadata(n->output());
-
-  // Copies n to the subgraph and adds creates the subgraph output
-  {
-    WithInsertPoint guard(*subgraph.nodes().begin());
-    auto* copy = subgraph.create(n->kind(), subgraph.inputs(), n->outputs().size());
-    auto* out = subgraph.insertNode(copy)->output();
-    out->copyMetadata(n->output());
-    subgraph.registerOutput(out);
-  }
-
-  // Replaces n with the fusion and destroys n
-  n->replaceAllUsesWith(fusion);
-  n->destroy();
-
-  return fusion;
-}
-
-std::unordered_set<Symbol> neverFusibleNodes{
-  prim::BailOut
-, prim::BailoutTemplate
-};
-
-bool FuseBlockHelper(std::shared_ptr<Graph>& graph, Block* block) {
-  bool has_changed = false;
-
-  // Enumerates nodes in reverse topological order
-  auto it = block->nodes().rbegin();
-  while (it != block->nodes().rend()) {
-    auto* node = *it;
-
-    // Skips nonfusible nodes
-    const auto nf_it = neverFusibleNodes.find(node->kind());
-    if (nf_it != neverFusibleNodes.end()) {
-      ++it;
-      continue;
-    }
-
-    // Skips nodes with (sub)blocks
-    if (node->blocks().size() > 0) {
-      ++it;
-      continue;
-    }
-
-    if (node->kind() == prim::FusionGroup) {
-      // TODO
-    } else if (isFusible(node)) {
-      const auto fusion_key = fuse(node);
-      auto* fusion = makeFusionNode(fusion_key, graph, node);
-      it = fusion->reverseIterator();
-      has_changed = true;
-    }
-
-    ++it;
-  }
-
-  return has_changed;
-}
-
-void FuseBlock(std::shared_ptr<Graph>& graph, Block* block) {
-  while (FuseBlockHelper(graph, block));
-
-  // Signals fusions to compile and fuses (sub)blocks
-  for (auto* node : block->nodes()) {
-    if (node->kind() == prim::FusionGroup) {
-      compileFusion(node);
-    }
-
-    for (auto* block : node->blocks()) {
-      FuseBlock(graph, block);
-    }
-  }
-}
-
-// TODO: make fusions inplace operations (pre-allocate inputs)
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  #if FUSER_DEBUG
-    std::cout << "graph_fuser.cpp: FuseGraph() (reverse iteration)" << std::endl;
-    std::cout << "pre-fusion graph: " << std::endl;
-    std::cout << *graph << std::endl << std::endl;
-  #endif // FUSER_DEBUG
-
-  // Creates fusions
-  FuseBlock(graph, graph->block());
-
-  // Runs clean-up passes
-  EliminateCommonSubexpression(graph);
-  EliminateDeadCode(graph);
-  // TODO: review the following -- remove it?
-  // PeepholeOptimizeShapeExpressions(graph->block());
-
-  #if FUSER_DEBUG
-    std::cout << std::endl;
-    std::cout << "post-fusion graph: " << std::endl;
-    std::cout << *graph << std::endl;
-  #endif // FUSER_DEBUG
-}
-
-// OLD CODE BELOW
-
 namespace {
 
+/*
 // What is a simple mappable operator?  It:
 //    - Has a single tensor output
 //    - Output and all tensor inputs have the same shape
@@ -228,7 +105,7 @@ bool isSimpleMap(Node* node) {
 
       "aten::type_as(Tensor self, Tensor other) -> Tensor",
   }};
-  if (!simple_mappable.find(node)) {
+  if (!node->isMemberOf(simple_mappable)) {
     return false;
   }
   for (Value* input : node->inputs()) {
@@ -242,6 +119,7 @@ bool isSimpleMap(Node* node) {
   }
   return true;
 }
+*/
 
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   AT_ASSERT(!sizes.empty());
@@ -258,8 +136,12 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
+  FusionCallback callback_ = [&](Node* n) {
+    return isFusible(n);
+    //return isFusableDefault(n, this->strict_fuser_check_);
+  };
   Symbol kind_ = prim::FusionGroup;
+  bool strict_fuser_check_;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -269,8 +151,11 @@ struct GraphFuser {
   // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
-      : block_(block), graph_(std::move(graph)) {}
+  GraphFuser(
+      Block* block,
+      std::shared_ptr<Graph> graph)
+      : block_(block),
+        graph_(std::move(graph)) {}
 
   // Custom passes require kind to specified
   GraphFuser(
@@ -297,36 +182,39 @@ struct GraphFuser {
     return callback_(node);
   }
 
-  bool isFusableDevice(Value *v) {
-    return false;
-    // if (!v->type()->isSubtypeOf(TensorType::get())) {
-    //   return true;
-    // }
-    // auto device = v->type()->expect<TensorType>()->device();
-    // if (!device) {
-    //   return true;
-    // }
-    // if ((*device).is_cpu()) {
-    //   return canFuseOnCPU();
-    // } else if ((*device).is_cuda()) {
-    //   return canFuseOnGPU();
-    // }
-    // throw std::runtime_error("Unknown device");
+  /*
+  bool isFusableDevice(Value* v, bool strict_fuser_check) {
+    if (!v->type()->isSubtypeOf(TensorType::get())) {
+      return true;
+    }
+    auto device = v->type()->expect<TensorType>()->device();
+    if (!device) {
+      return !strict_fuser_check;
+    }
+    if ((*device).is_cpu()) {
+      return canFuseOnCPU();
+    } else if ((*device).is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
   }
-
+  */
 
   // Default fusability check - used when the user doesn't pass in
   // a callback.
-  bool isFusableDefault(Node* node) {
+  /*
+  bool isFusableDefault(Node* node, bool strict_fuser_check) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
       if (output->uses().size() > 0) {
-        fusableDevice &= isFusableDevice(output);
+        fusableDevice &= isFusableDevice(output, strict_fuser_check);
       }
     }
     return fusableDevice && isFusableMap(node);
   }
+  */
 
+  /*
   bool isFusableMap(Node* node) {
     // We don't want to bother with cross-block node movements, as they
     // are not necessarily correct.
@@ -334,7 +222,9 @@ struct GraphFuser {
       return false;
     return node->kind() == prim::FusionGroup || isSimpleMap(node);
   }
+  */
 
+  /*
   bool isFusableCatNode(Node* node) {
     if (node->kind() != aten::cat)
       return false;
@@ -357,6 +247,7 @@ struct GraphFuser {
       return false;
     return true;
   }
+  */ 
 
   bool calculatesSize(Node* node) {
     return node->matches("aten::size(Tensor self) -> int[]");
@@ -440,6 +331,7 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Node* mergeNodeIntoGroup(Node* group, Node* n) {
+    AT_ASSERT(n->kind() != kind_);
     auto& subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -580,6 +472,7 @@ struct GraphFuser {
     return group;
   }
 
+  /*
   bool canFuseChunk(Node* consumer, Value* producer) {
     if (consumer->kind() != prim::FusionGroup) {
       return false;
@@ -603,6 +496,7 @@ struct GraphFuser {
     }
     return true;
   }
+  */
 
   c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
     AT_ASSERT(group->kind() == prim::FusionGroup);
@@ -652,6 +546,7 @@ struct GraphFuser {
   // (1) the tensor input to prim::ConstantChunk must be an input to the fusion
   // group (2) no two ConstantChunks in the same FusionGroup can share a tensor
   // input.
+  /*
   graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
     auto* chunk = producer->node();
     AT_ASSERT(consumer->kind() == prim::FusionGroup);
@@ -671,6 +566,7 @@ struct GraphFuser {
     chunk->destroy();
     return consumer->reverseIterator();
   }
+  */
 
   value_list sortReverseTopological(ArrayRef<Value*> inputs) {
     value_list result;
@@ -686,6 +582,7 @@ struct GraphFuser {
     return result;
   }
 
+  /*
   graph_node_list::iterator scanNodeForChunks(Node* consumer) {
     if (consumer->kind() == prim::FusionGroup) {
       auto inputs = sortReverseTopological(consumer->inputs());
@@ -698,6 +595,7 @@ struct GraphFuser {
     }
     return ++consumer->reverseIterator();
   }
+  */
 
   at::ArrayRef<Value*> broadcast_tensors(value_list inputs) {
     AT_ASSERT(inputs.size() > 0);
@@ -823,7 +721,7 @@ struct GraphFuser {
         chunk->inputs().begin(),
         chunk->inputs().end(),
         [&](Value* producer_for_chunk) {
-          return isFusableMap(producer_for_chunk->node()) &&
+          return isFusable(producer_for_chunk->node()) &&
               allUsersAreThisConsumerOrCalcSizes(chunk, producer_for_chunk);
         });
     if (it == chunk->inputs().end()) {
@@ -1023,6 +921,7 @@ struct GraphFuser {
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
   // DCE to remove those that you end up not using.
+  /*
   std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
     WithInsertPoint insert_guard{fusion_group->next()};
     std::unordered_map<Value*, Value*> shape_of;
@@ -1119,11 +1018,13 @@ struct GraphFuser {
       }
     }
   }
+  */
 
   void refreshAliasDb() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
 
+  /*
   bool canFuseWithConcat(Value* producer, Node* before_check) {
     if (!isFusable(producer->node())) {
       return false;
@@ -1207,22 +1108,23 @@ struct GraphFuser {
       }
     }
   }
+  */
 
   void optimizeFusedGraphs() {
-    // for (Node* node : block_->nodes()) {
-    //   if (node->kind() != prim::FusionGroup) {
-    //     continue;
-    //   }
-    //   auto subgraph = node->g(attr::Subgraph);
-    //   EliminateDeadCode(subgraph);
-    //   EliminateCommonSubexpression(subgraph);
-    //   ConstantPooling(subgraph);
-    // }
+    for (Node* node : block_->nodes()) {
+      if (node->kind() != prim::FusionGroup) {
+        continue;
+      }
+      auto subgraph = node->g(attr::Subgraph);
+      EliminateDeadCode(subgraph);
+      EliminateCommonSubexpression(subgraph);
+      ConstantPooling(subgraph);
+    }
   }
 
   void run() {
     // Run the pass until no changes are made.
-    // This is neccessary, because the algorithm can miss out on certain fusion
+    // This is necessary, because the algorithm can miss out on certain fusion
     // opportunities if ran only once. Consider this graph:
     //
     // %1 = f(...)
@@ -1247,10 +1149,9 @@ struct GraphFuser {
         any_changed |= changed;
       }
     }
-
     refreshAliasDb();
 
-    fuseConcats();
+    //fuseConcats();
 
     optimizeFusedGraphs();
 
@@ -1259,14 +1160,14 @@ struct GraphFuser {
     replaceIntermediateBroadcastingChunks();
 
     // Fuse starting chunks into the group.
-    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-      it = scanNodeForChunks(*it);
-    }
+    //for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+    //  it = scanNodeForChunks(*it);
+    //}
 
     // Remove outputs that have been added only because we need their size
-    for (Node* n : block_->nodes()) {
-      removeOutputsUsedOnlyInSize(n);
-    }
+    //for (Node* n : block_->nodes()) {
+    //  removeOutputsUsedOnlyInSize(n);
+    //}
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
@@ -1329,6 +1230,24 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 }
 
 } // anonymous namespace
+
+void FuseGraph(std::shared_ptr<Graph>& graph) {
+  std::cout << (*graph) << std::endl;
+  std::cout << "----started fusion" << std::endl;
+  GraphFuser(graph->block(), graph).run();
+  std::cout << "----fused graph" << std::endl;
+  // After FuseGraph some common subexpressions may come back
+  EliminateCommonSubexpression(graph);
+  std::cout << "----cse" << std::endl;
+  // We might have emitted a fair amount of useless shape propagating code, so
+  // remove it
+  EliminateDeadCode(graph);
+  std::cout << "----dead code" << std::endl;
+  // Improve the quality of shape propagation code that was left
+  PeepholeOptimizeShapeExpressions(graph->block());
+  std::cout << "----finished fusion" << std::endl;
+  std::cout << (*graph) << std::endl;
+}
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
