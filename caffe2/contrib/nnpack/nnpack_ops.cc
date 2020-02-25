@@ -85,7 +85,7 @@ pthreadpool_t nnpack_threadpool() {
                  "Caffe2 is not built with MKL. Skipping.";
 #endif
     }
-    nnpack_threadpool_ = pthreadpool_create(num_threads);
+    nnpack_threadpool_ = pthreadpool_create_c2(num_threads);
   }
   return nnpack_threadpool_;
 }

@@ -17,4 +17,11 @@ caffe2::ThreadPool* mobile_threadpool() {
 pthreadpool_t mobile_pthreadpool() {
   return reinterpret_cast<pthreadpool_t>(mobile_threadpool());
 }
+
+// Will be unified.
+pthreadpool_t xnnpack_threadpool() {
+  static std::unique_ptr<pthreadpool, decltype(&pthreadpool_destroy)>
+      threadpool(pthreadpool_create(getDefaultNumThreads()), pthreadpool_destroy);
+  return threadpool.get();
+}
 } // namespace caffe2

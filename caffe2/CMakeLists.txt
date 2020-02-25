@@ -911,6 +911,17 @@ if (USE_OPENMP AND OPENMP_FOUND)
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
 endif()
 
+if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
+  IF(NOT TARGET fxdiv)
+    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${FXDIV_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/FXdiv")
+  ENDIF()
+  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
+endif()
+
 target_link_libraries(torch_cpu PUBLIC c10)
 target_link_libraries(torch_cpu PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(torch_cpu PRIVATE ${Caffe2_DEPENDENCY_LIBS})
