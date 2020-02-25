@@ -1105,30 +1105,6 @@
     - bool transpose
 ]]
 [[
-  name: _th_random_
-  backends:
-    - CPU
-  return: self
-  variants: function
-  cpu_bool: True
-  options:
-    - cname: random
-      arguments:
-        - THTensor* self
-        - THGenerator* generator
-    - cname: cappedRandom
-      arguments:
-        - THTensor* self
-        - int64_t to
-        - THGenerator* generator
-    - cname: clampedRandom
-      arguments:
-        - THTensor* self
-        - int64_t from
-        - int64_t to
-        - THGenerator* generator
-]]
-[[
   name: _th_multinomial_alias_setup
   cname: multinomialAliasSetup
   variants:
