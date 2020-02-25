@@ -579,7 +579,7 @@ struct FullBidirectionalLayer
       auto actual_input = input;
       if(!type_2) {
         std::cout << std::to_string(input.dim()) << "\n";
-        std::cout << std.to_string(input.size(input.dim() - 1)) << "\n";
+        std::cout << std::to_string(input.size(input.dim() - 1)) << "\n";
         std::cout << std::to_string(params.first.b_ih.size(params.first.b_ih.dim() - 1)) << "\n";
         // at::print(std::cout, input, 80);
       }
