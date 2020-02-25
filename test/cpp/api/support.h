@@ -64,20 +64,20 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false) {
   ASSERT_TRUE(a.sizes() == b.sizes());
   if (a.numel() > 0) {
-    if (a.device().type() == torch::kCPU && (a.dtype() == torch::kFloat16 || a.dtype() == torch::kBFloat16)) {
+    if (a.device().type() == torch::kCPU && (a.scalar_type() == torch::kFloat16 || a.scalar_type() == torch::kBFloat16)) {
       // CPU half and bfloat16 tensors don't have the methods we need below
       a = a.to(torch::kFloat32);
     }
-    if (a.device().type() == torch::kCUDA && a.dtype() == torch::kBFloat16) {
+    if (a.device().type() == torch::kCUDA && a.scalar_type() == torch::kBFloat16) {
       // CUDA bfloat16 tensors don't have the methods we need below
       a = a.to(torch::kFloat32);
     }
     b = b.to(a);
 
-    if ((a.dtype() == torch::kBool) != (b.dtype() == torch::kBool)) {
+    if ((a.scalar_type() == torch::kBool) != (b.scalar_type() == torch::kBool)) {
       TORCH_CHECK(false, "Was expecting both tensors to be bool type.");
     } else {
-      if (a.dtype() == torch::kBool && b.dtype() == torch::kBool) {
+      if (a.scalar_type() == torch::kBool && b.scalar_type() == torch::kBool) {
         // we want to respect precision but as bool doesn't support subtraction,
         // boolean tensor has to be converted to int
         a = a.to(torch::kInt);
@@ -99,7 +99,7 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
         }
       }
       // TODO: implement abs on CharTensor (int8)
-      if (diff.is_signed() && diff.dtype() != torch::kInt8) {
+      if (diff.is_signed() && diff.scalar_type() != torch::kInt8) {
         diff = diff.abs();
       }
       auto max_err = diff.max().item<double>();
