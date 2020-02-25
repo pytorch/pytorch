@@ -153,6 +153,7 @@ struct PythonArgs {
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline c10::optional<std::vector<int64_t>> intlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline at::Storage storage(int i);
@@ -241,6 +242,7 @@ inline std::string PythonArgs::get_func_name(){
 }
 
 inline at::Tensor PythonArgs::tensor(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::TENSOR);
   if (args[i] && THPVariable_CheckExact(args[i])) {
     return reinterpret_cast<THPVariable*>(args[i])->cdata;
   }
@@ -248,22 +250,30 @@ inline at::Tensor PythonArgs::tensor(int i) {
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
-  if (!args[i]) return signature.params[i].default_scalar;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALAR);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return signature.params[i].default_scalar;
+  }
   return scalar_slow(i);
 }
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALAR);
   if (!args[i]) return default_scalar;
   return scalar_slow(i);
 }
 
 inline c10::optional<at::Scalar> PythonArgs::scalarOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALAR);
   if (!args[i]) return c10::nullopt;
   return scalar_slow(i);
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
-  if (!args[i]) return std::vector<at::Tensor>();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::TENSOR_LIST);
+  // TODO: support this, if someone needs it
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted TensorList parameters not currently supported");
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
@@ -281,8 +291,10 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 
 template<int N>
 inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::TENSOR_LIST);
   auto res = std::array<at::Tensor, N>();
-  if (!args[i]) return res;
+  // TODO: support this, if someone needs it
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted out= parameters not currently supported");
   auto tuple = six::isTuple(args[i]);
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
@@ -300,12 +312,9 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   return res;
 }
 
-inline std::vector<int64_t> PythonArgs::intlist(int i) {
-  return intlistWithDefault(i, signature.params[i].default_intlist);
-}
-
-inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
-  if (!args[i]) return default_intlist;
+inline c10::optional<std::vector<int64_t>> PythonArgs::intlistOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT_LIST);
+  if (!args[i]) return c10::nullopt;
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
@@ -337,17 +346,31 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
+inline std::vector<int64_t> PythonArgs::intlist(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT_LIST);
+  auto r = intlistOptional(i);
+  if (r.has_value()) {
+    return *r;
+  } else {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return  signature.params[i].default_intlist;
+  }
+}
+
+inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT_LIST);
+  return intlistOptional(i).value_or(default_intlist);
+}
+
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALARTYPE);
   if (!args[i]) return default_scalartype;
   return scalartype(i);
 }
 
 inline at::ScalarType PythonArgs::scalartype(int i) {
-  if (!args[i]) {
-    auto scalartype = signature.params[i].default_scalartype;
-    return (scalartype == at::ScalarType::Undefined) ?
-            torch::tensors::get_default_scalar_type() : scalartype;
-  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALARTYPE);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted ScalarType parameters not currently supported");
   PyObject *obj = args[i];
   if (obj == (PyObject*)&PyFloat_Type) {
     return at::ScalarType::Double;
@@ -366,30 +389,36 @@ inline at::ScalarType PythonArgs::scalartype(int i) {
 }
 
 inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::SCALARTYPE);
   if (!args[i])
     return c10::nullopt;
   return scalartype(i);
 }
 
 inline at::Layout PythonArgs::layout(int i) {
-  if (!args[i]) return signature.params[i].default_layout;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::LAYOUT);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return signature.params[i].default_layout;
+  }
   return reinterpret_cast<THPLayout*>(args[i])->layout;
 }
 
 inline at::Layout PythonArgs::layoutWithDefault(int i, at::Layout default_layout) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::LAYOUT);
   if (!args[i]) return default_layout;
   return layout(i);
 }
 
 inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::LAYOUT);
   if (!args[i]) return c10::nullopt;
   return layout(i);
 }
 
 inline at::Device PythonArgs::device(int i) {
-  if (!args[i]) {
-    return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
-  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DEVICE);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted Device not currently supported");
   if (THPDevice_Check(args[i])) {
     const auto device = reinterpret_cast<THPDevice*>(args[i]);
     return device->device;
@@ -404,18 +433,21 @@ inline at::Device PythonArgs::device(int i) {
 }
 
 inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DEVICE);
   if (!args[i]) return default_device;
   return device(i);
 }
 
 inline c10::optional<at::Device> PythonArgs::deviceOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DEVICE);
   if (!args[i])
     return c10::nullopt;
   return device(i);
 }
 
 inline at::Dimname PythonArgs::dimname(int i) {
-  TORCH_INTERNAL_ASSERT(args[i] != nullptr);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DIMNAME);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted Dimname not currently supported");
   return THPDimname_parse(args[i]);
 }
 
@@ -432,15 +464,17 @@ inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
 }
 
 inline c10::optional<std::vector<at::Dimname>> PythonArgs::toDimnameListOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DIMNAME_LIST);
   if (!args[i]) return c10::nullopt;
   return parseDimnameList(args[i]);
 }
 
 inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
-  TORCH_INTERNAL_ASSERT(args[i]);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DIMNAME_LIST);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(args[i] != nullptr, "defaulted Dimname[] not currently supported");
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
-  TORCH_INTERNAL_ASSERT(size == 0 || size == 1);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(size == 0 || size == 1);
   if (size == 1 && THPUtils_checkDimname(arg)) {
     return { THPDimname_parse(arg) };
   }
@@ -448,6 +482,8 @@ inline std::vector<at::Dimname> PythonArgs::dimnamelist(int i) {
 }
 
 inline at::MemoryFormat PythonArgs::memoryformat(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::MEMORY_FORMAT);
+  // TODO: This is probably wrong (ONLY fill default if schema string specifies)
   if (!args[i]) return at::MemoryFormat::Contiguous;
   TORCH_CHECK(THPMemoryFormat_Check(args[i]), "memory_format arg must be an instance of the torch.memory_format");
   const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
@@ -455,12 +491,15 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
 }
 
 inline c10::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::MEMORY_FORMAT);
   if (!args[i])
     return c10::nullopt;
   return memoryformat(i);
 }
 
 inline at::QScheme PythonArgs::toQScheme(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::QSCHEME);
+  // TODO: This is probably wrong (ONLY fill default if schema string specifies)
   if (!args[i]) return at::kPerTensorAffine;
   TORCH_CHECK(THPQScheme_Check(args[i]), "qscheme arg must be an instance of the torch.qscheme");
   const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
@@ -468,12 +507,18 @@ inline at::QScheme PythonArgs::toQScheme(int i) {
 }
 
 inline std::string PythonArgs::string(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::STRING);
+  // TODO: This is probably wrong (ONLY fill default if schema string specifies)
   if (!args[i]) return "";
   return THPUtils_unpackString(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
-  if (!args[i]) return signature.params[i].default_int;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT64);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return signature.params[i].default_int;
+  }
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto & var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
@@ -483,17 +528,20 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT64);
   if (!args[i]) return default_int;
   return toInt64(i);
 }
 
 inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::INT64);
   if (!args[i])
     return c10::nullopt;
   return toInt64(i);
 }
 
 inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::BOOL);
   if (!args[i]) {
     return c10::nullopt;
   }
@@ -501,6 +549,7 @@ inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {
 }
 
 inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DOUBLE);
   if (!args[i]) {
     return c10::nullopt;
   }
@@ -508,33 +557,48 @@ inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
 }
 
 inline double PythonArgs::toDouble(int i) {
-  if (!args[i]) return signature.params[i].default_double;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DOUBLE);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return signature.params[i].default_double;
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::DOUBLE);
   if (!args[i]) return default_double;
   return toDouble(i);
 }
 
 inline std::complex<double> PythonArgs::toComplex(int i) {
-  std::complex<double> default_value = *const_cast<std::complex<double> *>(
-    reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
-  if (!args[i]) return default_value;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::COMPLEX);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    std::complex<double> default_value = *const_cast<std::complex<double> *>(
+      reinterpret_cast<const std::complex<double> *>(signature.params[i].default_complex));
+    return default_value;
+  }
   return THPUtils_unpackComplexDouble(args[i]);
 }
 
 inline std::complex<double> PythonArgs::toComplexWithDefault(int i, std::complex<double> default_value) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::COMPLEX);
   if (!args[i]) return default_value;
   return toDouble(i);
 }
 
 inline bool PythonArgs::toBool(int i) {
-  if (!args[i]) return signature.params[i].default_bool;
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::BOOL);
+  if (!args[i]) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].optional);
+    return signature.params[i].default_bool;
+  }
   return args[i] == Py_True;
 }
 
 inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::BOOL);
   if (!args[i]) return default_bool;
   return toBool(i);
 }
@@ -544,12 +608,15 @@ inline bool PythonArgs::isNone(int i) {
 }
 
 inline at::Generator* PythonArgs::generator(int i) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::GENERATOR);
+  // TODO: this is really generatorOptional per schema stirng
   if (!args[i]) return nullptr;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
 inline at::Storage PythonArgs::storage(int i) {
-  if (!args[i]) return at::Storage();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(signature.params[i].type_ == ParameterType::STORAGE);
+  TORCH_INTERNAL_ASSERT(args[i] != nullptr, "defaulted Storage not supported");
   return createStorage(args[i]);
 }
 
