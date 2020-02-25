@@ -60,7 +60,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 #undef TENSOR
 
 // This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
-// in `TestCase.assertEqual` in test/common_utils.py
+// in `TestCase.assertEqual` in torch/testing/_internal/common_utils.py
 inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false) {
   ASSERT_TRUE(a.sizes() == b.sizes());
   if (a.numel() > 0) {
@@ -99,7 +99,7 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
         }
       }
       // TODO: implement abs on CharTensor (int8)
-      if (diff.is_signed() && diff.scalar_type() != torch::kInt8) {
+      if (diff.is_signed() && diff.dtype() != torch::kInt8) {
         diff = diff.abs();
       }
       auto max_err = diff.max().item<double>();
@@ -109,7 +109,7 @@ inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false
 }
 
 // This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
-// in `TestCase.assertNotEqual` in test/common_utils.py
+// in `TestCase.assertNotEqual` in torch/testing/_internal/common_utils.py
 inline void assert_tensor_not_equal(at::Tensor x, at::Tensor y) {
   if (x.sizes() != y.sizes()) {
     return;

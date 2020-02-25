@@ -80,6 +80,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     }
     case MessageType::SCRIPT_REMOTE_CALL: {
       auto& scriptRemoteCall = static_cast<ScriptRemoteCall&>(rpc);
+      auto rrefId = scriptRemoteCall.retRRefId();
+      auto forkId = scriptRemoteCall.retForkId();
       auto& ctx = RRefContext::getInstance();
 
       TypePtr returnType;
@@ -95,8 +97,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
                          .type();
       }
 
-      auto ownerRRef =
-          ctx.getOrCreateOwnerRRef(scriptRemoteCall.retRRefId(), returnType);
+      auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
 
       // TODO: make this asynchronous
       // scriptRemoteCall is only alive within this block, use reference to
@@ -119,11 +120,18 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
           stack.size());
 
       ownerRRef->setValue(std::move(stack.front()));
-      ctx.addForkOfOwner(
-          scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId());
-      return wrap(
-          RemoteRet(scriptRemoteCall.retRRefId(), scriptRemoteCall.retForkId())
-              .toMessage());
+      if (rrefId != forkId) {
+        // Caller is a user and callee is the owner, add fork
+        //
+        // NB: rrefId == forkId is true if and only if calling remote to self.
+        // In that case both the caller and the callee will access the
+        // OwnerRRef. Hence, on the callee side (here), it should not call
+        // addForkOfOwner as it is not a fork. To allow callee to distinguish
+        // when this request is sent to self, the caller will set forkId using
+        // rrefId (OwnerRRef does not have a forkId anyway).
+        ctx.addForkOfOwner(rrefId, forkId);
+      }
+      return wrap(RemoteRet(rrefId, forkId).toMessage());
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -156,7 +164,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref =
+          ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -181,10 +190,17 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      std::shared_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref =
+          ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
-        SerializedPyObj result = PythonRpcHandler::getInstance().serialize(
-            jit::toPyObject(rref->getValue()));
+        auto value = rref->getValue();
+        py::object pyValue;
+        {
+          pybind11::gil_scoped_acquire ag;
+          pyValue = torch::jit::toPyObject(std::move(value));
+        }
+        SerializedPyObj result =
+            PythonRpcHandler::getInstance().serialize(pyValue);
         return wrap(PythonRRefFetchRet(result.toIValues()).toMessage());
       }
 
@@ -197,9 +213,14 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
               const rpc::Message& /* unused */,
               const c10::optional<utils::FutureError>& error) {
             if (!error) {
+              auto value = rref->getValue();
+              py::object pyValue;
+              {
+                pybind11::gil_scoped_acquire ag;
+                pyValue = torch::jit::toPyObject(std::move(value));
+              }
               SerializedPyObj result =
-                  PythonRpcHandler::getInstance().serialize(
-                      jit::toPyObject(rref->getValue()));
+                  PythonRpcHandler::getInstance().serialize(pyValue);
               Message m = PythonRRefFetchRet(result.toIValues()).toMessage();
               m.setId(messageId);
               responseFuture->markCompleted(std::move(m));
@@ -212,7 +233,11 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::RREF_USER_DELETE: {
       auto& rud = static_cast<RRefUserDelete&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
       return wrap(std::move(RRefAck()).toMessage());
     }
     case MessageType::RREF_CHILD_ACCEPT: {
@@ -297,7 +322,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // Now execute the autograd graph using the "distributed engine."
       auto execFuture = DistEngine::getInstance().executeSendFunctionAsync(
-          autogradContext, sendFunction);
+          autogradContext, sendFunction, gradientsCall.retainGraph());
 
       // Our response is satisfied when the rpcs come back.
       execFuture->addCallback(

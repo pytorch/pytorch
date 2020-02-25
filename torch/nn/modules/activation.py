@@ -597,7 +597,7 @@ class Softplus(Module):
     to constrain the output of a machine to always be positive.
 
     For numerical stability the implementation reverts to the linear function
-    for inputs above :attr:`threshold` (default ``20``).
+    when :math:`input \times \beta > threshold`.
 
     Args:
         beta: the :math:`\beta` value for the Softplus formulation. Default: 1
@@ -642,7 +642,7 @@ class Softshrink(Module):
         \end{cases}
 
     Args:
-        lambd: the :math:`\lambda` value for the Softshrink formulation. Default: 0.5
+        lambd: the :math:`\lambda` (must be no less than zero) value for the Softshrink formulation. Default: 0.5
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional

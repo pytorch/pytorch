@@ -11,40 +11,12 @@ using namespace torch::indexing;
 using namespace torch::test;
 
 TEST(TensorIndexingTest, Slice) {
-  {
-    Slice slice(1, 2, 3, {}, {}, {});
+  Slice slice(1, 2, 3);
+  ASSERT_EQ(slice.start(), 1);
+  ASSERT_EQ(slice.stop(), 2);
+  ASSERT_EQ(slice.step(), 3);
 
-    ASSERT_EQ(slice.start(), 1);
-    ASSERT_EQ(slice.stop(), 2);
-    ASSERT_EQ(slice.step(), 3);
-
-    ASSERT_FALSE(slice.has_start_tensor());
-    ASSERT_FALSE(slice.has_stop_tensor());
-    ASSERT_FALSE(slice.has_step_tensor());
-
-    ASSERT_EQ(c10::str(slice), "1:2:3");
-  }
-  {
-    auto start_tensor = torch::tensor(1);
-    auto stop_tensor = torch::tensor(2);
-    auto step_tensor = torch::tensor(3);
-
-    Slice slice(
-      1, 2, 3,
-      start_tensor,
-      stop_tensor,
-      step_tensor);
-
-    ASSERT_TRUE(slice.has_start_tensor());
-    ASSERT_TRUE(slice.has_stop_tensor());
-    ASSERT_TRUE(slice.has_step_tensor());
-
-    ASSERT_TRUE(torch::equal(slice.start_tensor(), start_tensor));
-    ASSERT_TRUE(torch::equal(slice.stop_tensor(), stop_tensor));
-    ASSERT_TRUE(torch::equal(slice.step_tensor(), step_tensor));
-
-    ASSERT_EQ(c10::str(slice), "1:2:3");
-  }
+  ASSERT_EQ(c10::str(slice), "1:2:3");
 }
 
 TEST(TensorIndexingTest, TensorIndex) {
