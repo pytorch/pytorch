@@ -10214,6 +10214,13 @@ a")
             a = torch.randn(*shape)
             self.checkScript(lu_unpack, (a,))
 
+        def cdist_fn():
+            a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
+            b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
+            return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
+
+        self.checkScript(cdist_fn, ())
+
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
             def __init__(self):

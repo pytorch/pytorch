@@ -83,7 +83,8 @@ _builtin_ops = [
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
-    (torch._VF.stft, "aten::stft")
+    (torch._VF.stft, "aten::stft"),
+    (torch._VF.cdist, "aten::cdist")
 ]
 
 # ops in torch.functional are bound to torch 
@@ -95,7 +96,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally, 
     # some functions directly map to their aten:: implementations. 
     # TODO: add support for more ops
-    ops = ["stft", "lu", "lu_unpack"]
+    ops = ["stft", "lu", "lu_unpack", "cdist"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
