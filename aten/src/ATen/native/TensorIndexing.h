@@ -307,7 +307,6 @@ static inline std::vector<Tensor> typeConvertIndices(const Tensor& self, std::ve
 static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& indices) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
-  size_t size = indices.size();
   for (auto& obj : indices) {
     if (obj.is_tensor()) {
       auto& tensor = obj.tensor();
