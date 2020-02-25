@@ -259,8 +259,21 @@ If the future completes with an error, an exception is thrown.
       "_set_and_start_rpc_agent",
       [](const std::shared_ptr<RpcAgent>& rpcAgent) {
         RpcAgent::setCurrentRpcAgent(rpcAgent);
+        // Initializing typeResolver inside RpcAgent constructor will make
+        // RpcAgent have python dependency. To avoid RpcAgent to have python
+        // dependency, setTypeResolver() here.
+        std::shared_ptr<TypeResolver> typeResolver =
+            std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+              auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+                  qn.qualifiedName());
+              return c10::StrongTypePtr(
+                  PythonRpcHandler::getInstance().jitCompilationUnit(),
+                  std::move(typePtr));
+            });
+        rpcAgent->setTypeResolver(typeResolver);
         rpcAgent->start();
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);

@@ -77,6 +77,8 @@ if PY33:
         'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
+        'distributed/rpc/jit/test_rpc_spawn',
+        'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
 # skip < 3.6 b/c fstrings added in 3.6
@@ -90,6 +92,8 @@ WINDOWS_BLACKLIST = [
     'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
     'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
 ]
 
 ROCM_BLACKLIST = [
@@ -98,6 +102,9 @@ ROCM_BLACKLIST = [
     'test_multiprocessing',
     'distributed/rpc/test_rpc_spawn',
     'distributed/rpc/test_dist_autograd_spawn',
+    'distributed/rpc/test_dist_optimizer_spawn',
+    'distributed/rpc/jit/test_rpc_spawn',
+    'distributed/rpc/jit/test_dist_autograd_spawn',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {}
