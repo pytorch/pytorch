@@ -88,6 +88,7 @@ std::vector<bool> canCollapseDimsDown(const std::shared_ptr<c10::TensorType> ten
 
 // Returns true if the node is added to the fusion group, false o.w.
 bool CUDAFusionBackend::isFusible(const Node* const node) {
+  /*
 
   int64_t ndims = *(node->inputs()[0]->type()->expect<TensorType>()->dim());
   std::vector< std::vector<bool> > collapse_vecs;
@@ -137,9 +138,10 @@ bool CUDAFusionBackend::isFusible(const Node* const node) {
     }
   }
   if(!first) std::cout<<")"<<std::endl;
+  */
 
 
-  if(node->kind() ==  aten::add){
+  if(node->kind() == aten::add || node->kind() == prim::FusionGroup){
     std::cout<<"Can fuse node!"<<std::endl;
     return true;
   }

@@ -84,6 +84,6 @@ void CPUFusionBackend::callFusion(
 
 static CPUFusionBackend cpu_backend;
 
-RegisterFusionBackendEx reg_ex(at::DeviceType::CPU, &cpu_backend);
+//RegisterFusionBackendEx reg_ex(at::DeviceType::CPU, &cpu_backend);
 
 }}}} // namespace torch::jit::fuser::cpu
