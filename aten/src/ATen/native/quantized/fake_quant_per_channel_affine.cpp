@@ -67,8 +67,8 @@ Tensor fake_quantize_per_channel_affine(
   iter.dont_compute_common_dtype();
   iter.add_output(Y);
   iter.add_input(self);
-  iter.add_input(scale.reshape(expected_shape));
-  iter.add_input(zero_point.reshape(expected_shape));
+  iter.add_input(native::_unsafe_view(scale, expected_shape));
+  iter.add_input(native::_unsafe_view(zero_point, expected_shape));
   iter.build();
 
   fake_quant_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
@@ -144,8 +144,8 @@ Tensor fake_quantize_per_channel_affine_backward(
   iter.add_output(dX);
   iter.add_input(X);
   iter.add_input(dY);
-  iter.add_input(scale.reshape(expected_shape));
-  iter.add_input(zero_point.reshape(expected_shape));
+  iter.add_input(native::_unsafe_view(scale, expected_shape));
+  iter.add_input(native::_unsafe_view(zero_point, expected_shape));
   iter.build();
 
   fake_quant_grad_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
