@@ -9,23 +9,29 @@ using namespace torch::jit::script;
 
 void testClassTypeAddRemoveAttr() {
   auto cu = std::make_shared<CompilationUnit>();
-  auto cls = ClassType::create("foo.bar", cu);
-  cls->addAttribute("attr1", TensorType::get());
+  auto cls = ClassType::create("foo.bar", cu, true);
+  cls->addAttribute("attr1", TensorType::get(), true);
   cls->addAttribute("attr2", TensorType::get());
   cls->addAttribute("attr3", TensorType::get());
   ASSERT_TRUE(cls->hasAttribute("attr1"));
   ASSERT_TRUE(cls->hasAttribute("attr2"));
   ASSERT_TRUE(cls->hasAttribute("attr3"));
 
+  // removing attribute attr2
   cls->unsafeRemoveAttribute("attr2");
   ASSERT_TRUE(cls->hasAttribute("attr1"));
   ASSERT_FALSE(cls->hasAttribute("attr2"));
   ASSERT_TRUE(cls->hasAttribute("attr3"));
 
+  // removing parameter attr1
   cls->unsafeRemoveAttribute("attr1");
   ASSERT_FALSE(cls->hasAttribute("attr1"));
   ASSERT_FALSE(cls->hasAttribute("attr2"));
   ASSERT_TRUE(cls->hasAttribute("attr3"));
+
+  // check that we can still add a non-parameter attr1 with
+  // different type
+  cls->addAttribute("attr1", IntType::get());
 }
 
 void testClassTypeAddRemoveConstant() {

@@ -5,8 +5,8 @@
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <torch/csrc/jit/script/schema_matching.h>
 
 namespace torch {

@@ -123,6 +123,32 @@ TEST(AutogradAPITests, GradUnreachableTest) {
   ASSERT_FALSE(grad_res[1].defined());
 }
 
+TEST(AutogradAPITests, RetainGrad) {
+  auto input = torch::rand({1, 3}, torch::requires_grad());
+  auto h1 = input * 3;
+  auto out = (h1 * h1).sum();
+
+  // It should be possible to call retain_grad() multiple times
+  h1.retain_grad();
+  h1.retain_grad();
+
+  // Gradient should be accumulated
+  out.backward({}, /*keep_graph=*/true);
+  ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
+  out.backward({}, /*keep_graph=*/true);
+  ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
+
+  {
+    torch::NoGradGuard no_grad;
+    input.grad().zero_();
+  }
+  // It should be a no-op for leaves
+  input.retain_grad();
+  input.retain_grad();
+  out.backward();
+  ASSERT_VARIABLE_EQ(input * 18, input.grad());
+}
+
 TEST(CustomAutogradTest, CustomFunction) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable var1, int mul, Variable var2) {

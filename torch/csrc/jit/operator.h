@@ -69,13 +69,15 @@ struct TORCH_API Operator {
         c10Handle_(opHandle),
         options_(c10Handle_->options()) {}
 
+
   Operator(
-      FunctionSchema schema,
-      OperationCreator op_creator,
+      const std::string& schema,
+      int(*op)(Stack&),
       c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_creator_(std::move(op_creator)),
+      : schema_string_(schema),
+        op_(std::make_shared<Operation>(std::move(op))),
         options_(std::move(options)) {}
+
 
   Operator(
       const std::string& schema,
@@ -88,43 +90,14 @@ struct TORCH_API Operator {
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
   // This is accomplished by marking the schema varargs and having no required
-  // arguments. This is used for things like prim::While or prim::If that can
-  // take a number of different valid input types and lengths.
+  // arguments.
   Operator(
       Symbol name,
       OperationCreator op_creator,
       c10::OperatorOptions options = c10::OperatorOptions())
-      : Operator(
-            varArgSchemaWithName(name),
-            std::move(op_creator),
-            std::move(options)) {}
-
-  Operator(
-      Symbol name,
-      Operation op,
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : Operator(
-            varArgSchemaWithName(name),
-            std::move(op),
-            std::move(options)) {}
-
-  Operator(
-      FunctionSchema schema,
-      Operation op,
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_(std::make_shared<FunctionSchema>(std::move(schema))),
-        op_(std::make_shared<Operation>(std::move(op))),
+      : schema_(std::make_shared<FunctionSchema>(varArgSchemaWithName(name))),
+        op_creator_(std::move(op_creator)),
         options_(std::move(options)) {}
-
-  Operator(
-      const std::string& schema,
-      int(*op)(Stack&),
-      c10::OperatorOptions options = c10::OperatorOptions())
-      : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))),
-        options_(std::move(options)) {}
-
-  bool matches(const Node* node) const;
 
   Operation getOperation(const Node* node = nullptr) const {
     if (op_) {
@@ -161,7 +134,9 @@ struct TORCH_API Operator {
     }
     return options_.aliasAnalysis();
   }
-
+  bool hasOperation() const {
+    return op_ != nullptr;
+  }
  private:
   static FunctionSchema varArgSchemaWithName(Symbol name) {
     return FunctionSchema(
@@ -192,31 +167,16 @@ TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
 TORCH_API const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(
     Symbol name);
 
-std::shared_ptr<Operator> findOperatorFor(const Node* node);
-const Operator& getOperatorFor(const Node* node);
-
-inline Operation getOperation(const Node* node) {
-  // note: getOperatorFor ensures that getOperatorFor(node).matches(node) ==
-  // true so the call to selectVariant is always valid.
-  return getOperatorFor(node).getOperation(node);
-}
-
+// given a operator with an overload name, find the specific operator related to it,
+// may return nullptr if no operator exists.
+TORCH_API std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name);
 
 TORCH_API std::vector<Symbol> findSimilarOperators(Symbol input_op);
 
 TORCH_API void registerOperator(Operator&& op);
 
 // XXX: this function is meant to be used with string literals only!
-Operator& sig(const char* signature_literal);
-
-struct OperatorSet {
-  OperatorSet(std::initializer_list<const char*> sig_literals);
-  // XXX: Returns a nullptr if no Operator in the set matches n
-  Operator* find(const Node* n) const;
-
- private:
-  std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
-};
+std::shared_ptr<Operator> getOperatorForLiteral(const char* signature);
 
 // Ensure the thing that registers c10 ops is defined.
 // Otherwise, our registry will not have c10 ops. You can run into this
@@ -224,6 +184,9 @@ struct OperatorSet {
 //
 // This fn is defined in register_c10_ops.cpp
 TORCH_API void ensure_c10_registerer_defined();
+
+// Used to assert that unschematized operators have an analysis method written
+TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 
 } // namespace jit
 } // namespace torch
