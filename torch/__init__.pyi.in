@@ -26,6 +26,17 @@ from . import autograd as autograd
 from . import cuda as cuda
 from . import optim as optim
 from . import nn as nn
+from . import multiprocessing as multiprocessing
+from . import sparse as sparse
+from . import onnx as onnx
+from . import jit as jit
+from . import hub as hub
+from . import random as random
+from . import distributions as distributions
+from . import testing as testing
+from . import quantization as quantization
+from . import __config__ as __config__
+from . import __future__ as __future__
 
 class dtype: ...
 
