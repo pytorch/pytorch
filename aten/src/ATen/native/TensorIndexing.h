@@ -435,7 +435,9 @@ static inline Tensor applySlicing(
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
-  TORCH_CHECK_INDEX(specified_dims <= self_sizes.size(), "too many indices for tensor of dimension ", (int)self_sizes.size());
+  TORCH_CHECK_INDEX(
+    specified_dims <= (int64_t)self_sizes.size(),
+    "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
   for (size_t i = 0; i < indices.size(); i++) {
