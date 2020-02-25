@@ -577,7 +577,7 @@ struct FullBidirectionalLayer
     if (input.device().is_cpu()) {
       auto actual_input = input;
       if(type_2) {
-        at::print(std::cerr, input)
+        at::print(std::cerr, input, 80);
       }
       auto input_w = params.first.linear_ih(input);
       step_inputs = input_w.unbind(0);
