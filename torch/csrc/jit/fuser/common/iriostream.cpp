@@ -106,7 +106,7 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv)
       os << "%T" << tv->getComputeAtView()->tensor()->name();
     os << "[" << tv->getComputeAtAxis() << "] )";
   }
-    
+  return os;
 }
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){
