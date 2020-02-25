@@ -333,7 +333,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
             elif len(decl['returns']) == 1:
                 return_type = decl['returns'][0]['type']
             else:
-                return_type = "std::tuple<" + ", ".join([r['type'] for r in decl['returns']]) + ">"
+                return_type = "std::tuple<{}>".format(", ".join([r['type'] for r in decl['returns']]))
             for a in decl['arguments']:
                 if 'type' not in a:
                     raise Exception(decl)

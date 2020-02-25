@@ -226,19 +226,6 @@ def parse_arguments(args, func_variants, declaration, func_return):
     supported_topt_arguments.append(copy.deepcopy(supported_topt_arguments[1]))
     for arg in supported_topt_arguments[2]:
         arg.update({'default': 'c10::nullopt', 'is_nullable': True})
-    # add explicit support for what is needed for tril_indices / triu_indices
-    supported_topt_arguments.append(
-        [
-            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
-             'default': 'long', 'is_nullable': True},
-            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
-             'default': 'c10::nullopt', 'is_nullable': True},
-            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
-             'default': 'c10::nullopt', 'is_nullable': True},
-            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
-             'default': 'c10::nullopt', 'is_nullable': True},
-        ]
-    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},

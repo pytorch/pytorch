@@ -24,7 +24,6 @@ FunctionSchema defaultSchemaFor(const Function& function) {
 }
 } // namespace
 
-struct RecursiveMethodCallError : public std::exception {};
 void placeholderCreator(Function&) {
   throw RecursiveMethodCallError();
 }
@@ -46,19 +45,11 @@ IValue Function::operator()(
 }
 
 void Function::ensure_defined() {
-  try {
-    if (function_creator_) {
-      auto creator = function_creator_;
-      function_creator_ = placeholderCreator;
-      creator(*this);
-      function_creator_ = nullptr;
-    }
-  } catch (RecursiveMethodCallError&) {
-    throw script::ErrorReport() // TODO: once lower_first_class methods is
-                                // removed re-establish callsite info for
-                                // debugging
-        << " method '" << name() << "' is called recursively. "
-        << "Recursive calls are not supported";
+  if (function_creator_) {
+    auto creator = function_creator_;
+    function_creator_ = placeholderCreator;
+    creator(*this);
+    function_creator_ = nullptr;
   }
   check_single_output();
 }

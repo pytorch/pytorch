@@ -8,6 +8,12 @@
 #include <ATen/native/SortingUtils.h>
 
 #include <cmath>
+#ifdef USE_FBGEMM
+#include "fbgemm/QuantUtils.h"
+#endif
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace at {
 namespace native {
@@ -190,6 +196,57 @@ void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
           return scalar_t(std::min<underlying_t>(relu_val, six.val_));
         },
         [&](Vec val) -> Vec { return val.relu6(zero_point_vec, six_vec); });
+  });
+}
+
+static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
+                                   Scalar negval_) {
+  int64_t i_zp = qx.q_zero_point();
+  float i_scale = qx.q_scale();
+
+  int64_t o_zp = out.q_zero_point();
+  float o_scale = out.q_scale();
+  float o_inv_scale = 1.0f / o_scale;
+
+  float negval = negval_.to<float>();
+
+  AT_DISPATCH_QINT_TYPES(out.scalar_type(), "leaky_qrelu", [&] {
+    using Vec = Vec256<float>;  // Naïve implementation uses dequant/quant loop.
+    using qVec = Vec256<scalar_t>;
+    Vec zero_vec = Vec(0.0f);
+    Vec one_vec = Vec(1.0f);
+
+    Vec i_scale_vec = Vec((float)i_scale);
+    Vec i_zp_vec = Vec((float)i_zp);
+    Vec i_scale_zp_neg_premul_vec = i_scale_vec * i_zp_vec.neg();
+
+    Vec negval_vec = Vec(negval);
+
+    auto iter = TensorIterator::unary_op(out, qx);
+
+    cpu_kernel_vec(
+        iter,
+        [&](scalar_t value_qx) -> scalar_t {
+          auto value_dx = at::dequantize_val(i_scale, i_zp, value_qx);
+          auto value_dy = value_dx > 0 ? value_dx : value_dx * negval;
+          return at::quantize_val<scalar_t>(o_scale, o_zp, value_dy);
+        },
+        [&](qVec qx_vec) -> qVec {
+          /* Vectorized implementation creates a multiplicand vector, which has
+           * "alpha" for all negative dx values and ones-vector for all
+           * positive values of dx. The multiplicand then is multiplied by the
+           * input.
+           */
+          auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
+                                              i_scale_zp_neg_premul_vec);
+          for (int idx = 0; idx < dx_vec_vec.size(); ++idx) {
+            const auto dx_vec = dx_vec_vec[idx];
+            const auto multiplicand = Vec::blendv(negval_vec, one_vec,
+                                                  dx_vec > zero_vec);
+            dx_vec_vec[idx] = dx_vec * multiplicand;
+          }
+          return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
+        });
   });
 }
 
@@ -955,10 +1012,79 @@ void qtopk_kernel(Tensor& values,
   });
 }
 
+template <bool ReluFused>
+void q_batch_norm_kernel(
+    int64_t N,
+    int64_t C,
+    int64_t HxW,
+    const int64_t in_zero_point,
+    const int64_t out_zero_point,
+    const Tensor& input,
+    const Tensor& a,
+    const Tensor& b,
+    Tensor& output) {
+
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qbatch_norm", [&]() {
+    float* alpha = a.data_ptr<float>();
+    float* beta = b.data_ptr<float>();
+    scalar_t::underlying* X =
+        reinterpret_cast<scalar_t::underlying*>(input.data_ptr());
+    scalar_t::underlying* Y = reinterpret_cast<scalar_t::underlying*>(output.data_ptr());
+
+    constexpr int kVLen = 8;
+    const int64_t outer_size = N * HxW;
+    using Vec = Vec256<scalar_t>;
+    // Hoisted variables
+    auto in_zp_vec = Vec256<float>(static_cast<float>(in_zero_point));
+    auto fake_scale = Vec256<float>(1.0f);
+    auto scale_neg_zp_premul = fake_scale * in_zp_vec.neg();
+    auto out_zero_point_v = Vec(scalar_t(out_zero_point));
+
+    // TODO replace with TensorIterator implementation once #33166 is fixed.
+    for (int64_t i = 0; i < outer_size; ++i) {
+      int64_t n = C / (Vec::float_num_vecs() * kVLen) * (Vec::float_num_vecs() * kVLen);
+      int64_t r = C % (Vec::float_num_vecs() * kVLen);
+      auto* X_ptr = reinterpret_cast<typename scalar_t::underlying*>(X + i * C);
+      auto* Y_ptr = reinterpret_cast<typename scalar_t::underlying*>(Y + i * C);
+
+      for (int64_t j = 0; j < n; j += Vec::float_num_vecs() * kVLen) {
+        auto vals_q = Vec::loadu(X_ptr + j);
+        // Fake scale of 1.0 here, should not affect performance (FMA in place of sub)
+        auto vals_dq = vals_q.dequantize(fake_scale, in_zp_vec, scale_neg_zp_premul);
+        for (size_t idx = 0; idx < vals_dq.size(); ++idx) {
+          auto alpha_v = Vec256<float>::loadu(alpha + j + idx * kVLen);
+          auto beta_v = Vec256<float>::loadu(beta + j + idx * kVLen);
+          vals_dq[idx] = vec256::fmadd(alpha_v, vals_dq[idx], beta_v);
+        }
+        // Fake scale again
+        auto outputs_q = Vec::quantize(vals_dq, /*output_scale=*/1.0f, out_zero_point, /*inv_output_scale=*/1.0f);
+        if (ReluFused) {
+          outputs_q = outputs_q.relu(out_zero_point_v);
+        }
+        outputs_q.store(Y_ptr + j);
+      }
+
+      for (int64_t j = 0; j < r; ++j) {
+        long quantized_down = out_zero_point +
+            lrintf(alpha[n + j] * (X_ptr[n + j] - in_zero_point) +
+                        beta[n + j]);
+        if (ReluFused) { // static if
+          quantized_down = std::max<long>(quantized_down, out_zero_point);
+        }
+        Y_ptr[n + j] = std::min<long>(
+            std::max<long>(quantized_down, std::numeric_limits<scalar_t::underlying>::min()),
+            std::numeric_limits<scalar_t::underlying>::max());
+      }
+    }
+});
+
+}
+
 } // namespace
 
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
@@ -975,6 +1101,7 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
+REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 
 } // namespace native
 } // namespace at

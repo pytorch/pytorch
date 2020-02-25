@@ -7,19 +7,6 @@
 namespace torch{
 namespace jit{
 
-namespace {
-
-// Different from the implementation in register_prim_ops.cpp,
-// where named tuple is not supported yet.
-void tupleConstructFunc(int num_inputs, Stack& stack) {
-  std::vector<IValue> elems{
-    std::make_move_iterator(stack.end() - num_inputs),
-    std::make_move_iterator(stack.end())};
-  drop(stack, num_inputs);
-  push(stack, c10::ivalue::Tuple::create(std::move(elems)));
-}
-}
-
 char const * toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
@@ -43,42 +30,20 @@ void Function::append_operator(const std::string& name,
   }
   auto op = c10::Dispatcher::singleton().findSchema(opname);
   TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
-  code_->operators_.emplace_back(op);
-}
-
-void Function::build_vararg_operator_table() {
-  for (auto& ins : code_->instructions_) {
-    if (ins.op == OPN) {
-      auto opname = code_->op_names_[ins.X];
-      if (opname.name == "prim::ListConstruct") {
-        if (opname.overload_name == "int") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<int64_t>);
-        } else if (opname.overload_name == "float") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<double>);
-        } else if (opname.overload_name == "bool") {
-          code_->vararg_operators_.emplace_back(listConstructFunc<bool>);
-        } else if (opname.overload_name == "Tensor") {
-          code_->vararg_operators_.emplace_back(tensorListConstructFunc);
-        } else {
-          AT_ERROR("Type of ListConstruct is not supported.");
-        }
-      } else if (opname.name == "prim::TupleConstruct") {
-        code_->vararg_operators_.emplace_back(tupleConstructFunc);
-      } else if (opname.name == "prim::TupleUnpack") {
-        code_->vararg_operators_.emplace_back(tupleUnpackFunc);
-      } else if (opname.name == "aten::format") {
-        code_->vararg_operators_.emplace_back(formatFunc);
-      }
-      else {
-        AT_ERROR("OPN operator ", opname.name, " is not supported.");
-      }
-      ins.X = code_->vararg_operators_.size() - 1;
-    }
-  }
+  // TODO: operator.h now does not depend on Node* so we can also look up operators from
+  // that registry for use in mobile as a way to share implementations.
+  auto fn = [op](Stack& stack) {
+    c10::Dispatcher::singleton().callBoxed(*op, &stack);
+  };
+  code_->operators_.emplace_back(fn);
 }
 
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
+}
+
+void Function::append_type(const at::TypePtr& type) {
+  code_->types_.push_back(type);
 }
 
 void Function::set_register_size(size_t size) {
