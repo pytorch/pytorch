@@ -1320,7 +1320,7 @@ class _TestTorchMixin(object):
         def check_copy(copy, is_leaf, requires_grad, data_ptr=None):
             if data_ptr is None:
                 data_ptr = copy.data_ptr
-            self.assertEqual(copy.data, source.data)
+            self.assertEqual(copy, source)
             self.assertTrue(copy.is_leaf == is_leaf)
             self.assertTrue(copy.requires_grad == requires_grad)
             self.assertTrue(copy.data_ptr == data_ptr)
@@ -2139,10 +2139,10 @@ class _TestTorchMixin(object):
         # out of bounds is also empty
         self.assertEqual(x[10:12], empty)
         # additional correctness checks
-        self.assertEqual(x[:1].data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x[:-3].data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x[:, -2:3].data.tolist(), [[2], [6], [10], [14]])
-        self.assertEqual(x[0:-1:2].data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
+        self.assertEqual(x[:1].tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:-3].tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x[:, -2:3].tolist(), [[2], [6], [10], [14]])
+        self.assertEqual(x[0:-1:2].tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     @skipIfNoLapack
     def test_ormqr(self):
@@ -2223,7 +2223,7 @@ class _TestTorchMixin(object):
                 if not onesided:  # check that we can use C2C ifft
                     rec = res.ifft(signal_ndim, normalized=normalized)
                     self.assertEqual(x, rec.select(-1, 0), 1e-8, 'twosided rfft and ifft real')
-                    self.assertEqual(rec.select(-1, 1).data.abs().mean(), 0, 1e-8, 'twosided rfft and ifft imaginary')
+                    self.assertEqual(rec.select(-1, 1).abs().mean(), 0, 1e-8, 'twosided rfft and ifft imaginary')
 
         # contiguous case
         _test_real((100,), 1)
@@ -2972,8 +2972,8 @@ class _TestTorchMixin(object):
 
         # One of
         rec = torch.randn(2, 2, 3, 7, 6, 2).type(torch.float64).clamp(0, 1)
-        val1 = rec.select(-1, -1).data[0][0][0].sum()
-        val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
+        val1 = rec.select(-1, -1)[0][0][0].sum()
+        val2 = rec.select(-1, -1).abs()[0][0][0].sum()
         self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -3545,8 +3545,8 @@ class _TestTorchMixin(object):
 
     def test_storage(self):
         v = torch.randn(3, 5)
-        self.assertEqual(v.storage()[0], v.data[0][0])
-        self.assertEqual(v.storage()[14], v.data[2][4])
+        self.assertEqual(v.storage()[0], v[0][0])
+        self.assertEqual(v.storage()[14], v[2][4])
 
     def test_deepcopy(self):
         from copy import deepcopy
@@ -4703,11 +4703,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 # message includes both Double and Long
                 '(?=.*Double)(?=.*Long)'):
 
-            # Calls model with a DoubleTensor input but LongTensor weights
-            input = torch.autograd.Variable(torch.randn(1, 1, 1, 6).double())
-            weight = torch.zeros(1, 1, 1, 3).long()
+            # Calls model with a LongTensor input but DoubleTensor weights
+            input = torch.zeros(1, 1, 1, 6, dtype=torch.long)
+            weight = torch.nn.Parameter(torch.zeros(1, 1, 1, 3, dtype=torch.double))
             model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
-            model.weight.data = weight
+            model.weight = weight
             out = model(input)
 
     def test_tensor_from_sequence(self):
@@ -5041,9 +5041,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(torch.tensor(6), a.float() * b)
 
         self.assertEqual(a.type(), a_copy.type())
-        self.assertEqual(a.data.type(), a_copy.data.type())
         self.assertEqual(b.type(), b_copy.type())
-        self.assertEqual(b.data.type(), b_copy.type())
 
     def test_cartesian_prod(self):
         a = torch.tensor([1])
@@ -5292,8 +5290,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             input3 = input1.contiguous(memory_format=torch.channels_last)
             for name, param in m.named_parameters():
                 if param.requires_grad:
-                    if param.data.dim() == 4:
-                        param.data = param.data.contiguous(memory_format=torch.channels_last)
+                    if param.dim() == 4:
+                        with torch.no_grad():
+                            param = param.contiguous(memory_format=torch.channels_last)
             output3 = m(input3)
             self.assertEqual(output3, outputs[i])
             self.assertEqual(output3, output1)
@@ -6925,7 +6924,7 @@ class TestTorchDeviceType(TestCase):
         b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
         x, _ = torch.solve(b, A)
         x_exp = torch.Tensor(solve(A.cpu().numpy(), b.cpu().numpy())).to(dtype=dtype, device=device)
-        self.assertEqual(x.data, x_exp)
+        self.assertEqual(x, x_exp)
 
     @slowTest
     @skipCUDAIfNoMagma
@@ -10219,8 +10218,8 @@ class TestTorchDeviceType(TestCase):
         actual = torch.histc(
             torch.tensor([2, 5], dtype=torch.float, device=device))
         expected = torch.zeros(100, dtype=torch.float, device=device)
-        expected.data[0] = 1
-        expected.data[99] = 1
+        expected[0] = 1
+        expected[99] = 1
         self.assertEqual(expected, actual)
         # tensor with the same element
         actual = torch.histc(torch.ones(5, dtype=torch.float, device=device), bins=5)

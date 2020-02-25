@@ -182,7 +182,7 @@ private:
 struct RangeEventList {
   // This mutex is used to serialize access when different threads are writing
   // to the same instance of RangeEventList.
-  std::mutex mut;
+  std::mutex mutex_;
   constexpr static size_t MB = 1024 * 1024;
   constexpr static size_t event_block_size = 16 * MB;
   constexpr static size_t num_block_elements =
@@ -205,7 +205,7 @@ struct RangeEventList {
 
   template<typename... Args>
   void record(Args&&... args) {
-    std::lock_guard<std::mutex> guard(mut);
+    std::lock_guard<std::mutex> guard(mutex_);
     if (blocks.empty() || blocks.front().size() == num_block_elements) {
       allocBlock();
     }
@@ -213,7 +213,7 @@ struct RangeEventList {
   }
 
   std::vector<Event> consolidate() {
-    std::lock_guard<std::mutex> guard(mut);
+    std::lock_guard<std::mutex> guard(mutex_);
     std::vector<Event> result;
     for (auto & block : blocks) {
       result.insert(result.begin(),
