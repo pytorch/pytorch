@@ -1303,7 +1303,7 @@ def make_python_arglists(declaration, is_python_method):
 
 # TODO blowtorch
 def dtype_default_type_hack(name):
-    if name.startswith('randperm'):
+    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
         return 'torch.int64'
     else:
         return 'None'
