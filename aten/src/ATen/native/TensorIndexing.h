@@ -39,7 +39,7 @@ struct CAFFE2_API Slice final {
         step_ = -INDEX_MAX;
     }
     if (!start_index.has_value()) {
-      start_ = step < 0 ? INDEX_MAX : 0;
+      start_ = step_ < 0 ? INDEX_MAX : 0;
     } else {
       start_ = start_index.value();
     }
