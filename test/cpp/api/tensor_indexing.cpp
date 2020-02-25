@@ -690,10 +690,11 @@ TEST(NumpyTests, TestEllipsisIndex) {
   assert_tensor_equal(a.index({0, "..."}), a.index({0}));
 #if defined(__clang__)
   assert_tensor_equal(a.index({0, "..."}), a.index({0, Slice()}));
+  assert_tensor_equal(a.index({"...", 0}), a.index({Slice(), 0}));
 #else
   assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
-#endif
   assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
+#endif
 
   // In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch
   // we don't have separate 0-dim arrays and scalars.
