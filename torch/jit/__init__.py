@@ -1628,6 +1628,15 @@ if _enabled:
             return self.forward.graph
 
         @property
+        def inlined_graph(self):
+            r"""
+            Returns a string representation of the internal graph for the
+            ``forward`` method. This graph will be preprocessed to inline all function and method calls.
+            See `Interpreting Graphs`_ for details.
+            """
+            return self.forward.inlined_graph
+
+        @property
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
