@@ -10180,7 +10180,6 @@ class TestNNDeviceType(NNTestCase):
         offset[0] = 1
         if self.device_type == "cpu":
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
-        if self.device_type == "cpu":
             offset[0] = 0
             offset[-1] = 100
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
