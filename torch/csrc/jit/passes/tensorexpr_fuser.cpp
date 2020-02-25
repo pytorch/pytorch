@@ -12,6 +12,19 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+
+static bool texpr_fuser_enabled = true;
+TORCH_API void SetTexprFuserEnabled(bool val) {
+  texpr_fuser_enabled = val;
+}
+
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
+
 namespace {
 
 const Symbol& getTensorExprSymbol() {
@@ -236,6 +249,9 @@ std::pair<graph_node_list::iterator, bool> scanNode(
 }
 
 void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
+  if (!texpr_fuser_enabled) {
+    return;
+  }
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.

@@ -14,14 +14,14 @@ using namespace torch::jit::tensorexpr;
 void testATen_cast_Float() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr to_float = Cast::make(kFloat32, load_a);
-  Stmt store_b = Store::make(b_buf, index, to_float, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle to_float = Cast::make(kFloat32, load_a);
+  Stmt* store_b = Store::make(b_buf, index, to_float, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -42,14 +42,14 @@ void testATen_cast_Float() {
 void testATennegInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr to_float = Sub::make(0, load_a);
-  Stmt store_b = Store::make(b_buf, index, to_float, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle to_float = Sub::make(0, load_a);
+  Stmt* store_b = Store::make(b_buf, index, to_float, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -70,14 +70,14 @@ void testATennegInt() {
 void testATennegFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr to_float = Sub::make(0, load_a);
-  Stmt store_b = Store::make(b_buf, index, to_float, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle to_float = Sub::make(0, load_a);
+  Stmt* store_b = Store::make(b_buf, index, to_float, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -98,17 +98,17 @@ void testATennegFloat() {
 void testATenaddInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Stmt store_d = Store::make(d_buf, index, load_a + load_b * load_c, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_d);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  Stmt* store_d = Store::make(d_buf, index, load_a + load_b * load_c, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -135,17 +135,17 @@ void testATenaddInt() {
 void testATenaddFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Stmt store_d = Store::make(d_buf, index, load_a + load_b * load_c, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_d);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  Stmt* store_d = Store::make(d_buf, index, load_a + load_b * load_c, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -172,17 +172,17 @@ void testATenaddFloat() {
 void testATensubInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Stmt store_d = Store::make(d_buf, index, load_a - load_b * load_c, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_d);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  Stmt* store_d = Store::make(d_buf, index, load_a - load_b * load_c, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -209,17 +209,17 @@ void testATensubInt() {
 void testATensubFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Stmt store_d = Store::make(d_buf, index, load_a - load_b * load_c, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_d);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  Stmt* store_d = Store::make(d_buf, index, load_a - load_b * load_c, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -246,18 +246,18 @@ void testATensubFloat() {
 void testATenlerp() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Stmt store_d =
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  Stmt* store_d =
       Store::make(d_buf, index, load_a + load_c * (load_b - load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_d);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -284,20 +284,20 @@ void testATenlerp() {
 void testATenaddcmulInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer e_buf(Var("E", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer e_buf(VarHandle("E", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Expr load_d = Load::make(d_buf, index, 1);
-  Stmt store_e =
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  ExprHandle load_d = Load::make(d_buf, index, 1);
+  Stmt* store_e =
       Store::make(e_buf, index, load_a + load_b * load_c * load_d, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_e);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -327,20 +327,20 @@ void testATenaddcmulInt() {
 void testATenaddcmulFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer d_buf(Var("D", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer e_buf(Var("E", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer d_buf(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer e_buf(VarHandle("E", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Expr load_c = Load::make(c_buf, index, 1);
-  Expr load_d = Load::make(d_buf, index, 1);
-  Stmt store_e =
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  ExprHandle load_c = Load::make(c_buf, index, 1);
+  ExprHandle load_d = Load::make(d_buf, index, 1);
+  Stmt* store_e =
       Store::make(e_buf, index, load_a + load_b * load_c * load_d, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_e);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -370,15 +370,15 @@ void testATenaddcmulFloat() {
 void testATenmulInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, load_a * load_b, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, load_a * load_b, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -402,15 +402,15 @@ void testATenmulInt() {
 void testATenmulFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, load_a * load_b, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, load_a * load_b, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -434,15 +434,15 @@ void testATenmulFloat() {
 void testATendivInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, load_a / load_b, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, load_a / load_b, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -466,15 +466,15 @@ void testATendivInt() {
 void testATendivFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, load_a / load_b, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, load_a / load_b, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -498,15 +498,15 @@ void testATendivFloat() {
 void testATenmaxInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, Max::make(load_a, load_b, true), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, Max::make(load_a, load_b, true), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -530,15 +530,15 @@ void testATenmaxInt() {
 void testATenmaxFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, Max::make(load_a, load_b, true), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, Max::make(load_a, load_b, true), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -562,15 +562,15 @@ void testATenmaxFloat() {
 void testATenminInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, Min::make(load_a, load_b, true), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, Min::make(load_a, load_b, true), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -594,15 +594,15 @@ void testATenminInt() {
 void testATenminFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(c_buf, index, Min::make(load_a, load_b, true), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(c_buf, index, Min::make(load_a, load_b, true), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -626,16 +626,16 @@ void testATenminFloat() {
 void testATen_sigmoid_backward() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(
       c_buf, index, load_a * load_b * (FloatImm::make(1.0f) - load_b), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -659,16 +659,16 @@ void testATen_sigmoid_backward() {
 void testATen_tanh_backward() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c_buf(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Expr load_b = Load::make(b_buf, index, 1);
-  Stmt store_c = Store::make(
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  ExprHandle load_b = Load::make(b_buf, index, 1);
+  Stmt* store_c = Store::make(
       c_buf, index, load_a * (FloatImm::make(1.0f) - (load_b * load_b)), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_c);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -692,13 +692,13 @@ void testATen_tanh_backward() {
 void testATenreciprocal() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, FloatImm::make(1.0f) / load_a, 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, FloatImm::make(1.0f) / load_a, 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -719,13 +719,13 @@ void testATenreciprocal() {
 void testATenreluInt() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kInt32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kInt32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kInt32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kInt32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, Max::make(load_a, 0, false), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, Max::make(load_a, 0, false), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
   PaddedBuffer<int> b_v(kTotalSize);
@@ -746,17 +746,17 @@ void testATenreluInt() {
 void testATenreluFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(
       b_buf,
       index,
       Max::make(load_a, 0, false), // relu does not propagate nans
       1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -777,13 +777,13 @@ void testATenreluFloat() {
 void testATenlogFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, log(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, log(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -804,13 +804,13 @@ void testATenlogFloat() {
 void testATenlog10Float() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, log10(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, log10(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -831,13 +831,13 @@ void testATenlog10Float() {
 void testATenlog2Float() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, log2(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, log2(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -858,13 +858,13 @@ void testATenlog2Float() {
 void testATenexpFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, exp(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, exp(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -885,13 +885,13 @@ void testATenexpFloat() {
 void testATenerfFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, erf(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, erf(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -912,13 +912,13 @@ void testATenerfFloat() {
 void testATencosFloat() {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b_buf(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
-  Var index = Var("index", kInt32);
-  Expr load_a = Load::make(a_buf, index, 1);
-  Stmt store_b = Store::make(b_buf, index, cos(load_a), 1);
-  Stmt stmt = For::make(index, 0, kTotalSize, store_b);
+  VarHandle index = VarHandle("index", kInt32);
+  ExprHandle load_a = Load::make(a_buf, index, 1);
+  Stmt* store_b = Store::make(b_buf, index, cos(load_a), 1);
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -939,15 +939,15 @@ void testATencosFloat() {
 void testATeneqInt() {
   KernelScope kernel_scope;
   constexpr int N = 128;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto memcpy_expr = For::make(
       i,
       0,
@@ -970,15 +970,15 @@ void testATeneqInt() {
 void testATengeInt() {
   KernelScope kernel_scope;
   constexpr int N = 128;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto memcpy_expr = For::make(
       i,
       0,
@@ -1001,15 +1001,15 @@ void testATengeInt() {
 void testATengtInt() {
   KernelScope kernel_scope;
   constexpr int N = 128;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 6);
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto memcpy_expr = For::make(
       i,
       0,
@@ -1032,15 +1032,15 @@ void testATengtInt() {
 void testATenleInt() {
   KernelScope kernel_scope;
   constexpr int N = 128;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto memcpy_expr = For::make(
       i,
       0,
@@ -1063,15 +1063,15 @@ void testATenleInt() {
 void testATenltInt() {
   KernelScope kernel_scope;
   constexpr int N = 128;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 5);
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto memcpy_expr = For::make(
       i,
       0,

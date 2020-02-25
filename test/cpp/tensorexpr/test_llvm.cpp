@@ -89,29 +89,29 @@ void testLLVMFloatToIntCastTest() {
 
 void testLLVMLetTest01() {
   KernelScope kernel_scope;
-  Var x("x", kFloat32);
-  Expr value = Expr(3.f);
-  Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f));
-  Expr result = Let::make(x, Expr(3.f), body);
+  VarHandle x("x", kFloat32);
+  ExprHandle value = ExprHandle(3.f);
+  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
+  ExprHandle result = Let::make(x, ExprHandle(3.f), body);
   LLVMExprEval cg(result, {});
   EXPECT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f));
 }
 
 void testLLVMLetTest02() {
   KernelScope kernel_scope;
-  Var x("x", kFloat32);
-  Var y("y", kFloat32);
-  Expr value = Expr(3.f);
-  Expr body = Expr(2.f) + (x * Expr(3.f) + Expr(4.f) * y);
-  Expr e1 = Let::make(x, Expr(3.f), body);
-  Expr e2 = Let::make(y, Expr(6.f), e1);
+  VarHandle x("x", kFloat32);
+  VarHandle y("y", kFloat32);
+  ExprHandle value = ExprHandle(3.f);
+  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
+  ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
+  ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
   LLVMExprEval cg(e2, {});
   EXPECT_EQ(cg.value<float>(), 2.f + (3.f * 3.f + 4.f * 6.f));
 }
 
 void testLLVMBufferTest() {
   KernelScope kernel_scope;
-  Buffer a(Var("A", kHandle), kFloat32, {32});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {32});
   std::vector<int32_t> v(5);
   std::vector<void*> args({v.data()});
   auto rv = IntImm::make(0);
@@ -121,7 +121,7 @@ void testLLVMBufferTest() {
 
 void testLLVMBlockTest() {
   KernelScope kernel_scope;
-  Buffer a(Var("A", kHandle), kInt32, {32});
+  Buffer a(VarHandle("A", kHandle), kInt32, {32});
   std::vector<int32_t> v = {1, 2};
   std::vector<void*> args({v.data()});
 
@@ -139,8 +139,8 @@ void testLLVMBlockTest() {
 
 void testLLVMLoadStoreTest() {
   KernelScope kernel_scope;
-  Buffer a(Var("A", kHandle), kInt32, {1});
-  Buffer b(Var("B", kHandle), kInt32, {1});
+  Buffer a(VarHandle("A", kHandle), kInt32, {1});
+  Buffer b(VarHandle("B", kHandle), kInt32, {1});
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
 
@@ -158,9 +158,9 @@ void testLLVMLoadStoreTest() {
 
 void testLLVMIfThenElseTest() {
   KernelScope kernel_scope;
-  Buffer a(Var("A", kHandle), kInt32, {1});
-  Buffer b(Var("B", kHandle), kInt32, {1});
-  Buffer c(Var("C", kHandle), kInt32, {1});
+  Buffer a(VarHandle("A", kHandle), kInt32, {1});
+  Buffer b(VarHandle("B", kHandle), kInt32, {1});
+  Buffer c(VarHandle("C", kHandle), kInt32, {1});
   std::vector<int32_t> a_buffer = {42};
   std::vector<int32_t> b_buffer = {-11};
   std::vector<int32_t> c_buffer = {1};
@@ -182,8 +182,8 @@ void testLLVMIfThenElseTest() {
 
 void testLLVMVecLoadStoreTest() {
   KernelScope kernel_scope;
-  Buffer a(Var("A", kHandle), kInt32, {1});
-  Buffer b(Var("B", kHandle), kInt32, {1});
+  Buffer a(VarHandle("A", kHandle), kInt32, {1});
+  Buffer b(VarHandle("B", kHandle), kInt32, {1});
   std::vector<int32_t> a_buffer = {1, 1, 1, 1};
   std::vector<int32_t> b_buffer = {2, 2, 2, 2};
 
@@ -208,13 +208,13 @@ void testLLVMVecLoadStoreTest() {
 void testLLVMMemcpyTest() {
   KernelScope kernel_scope;
   constexpr int N = 32;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
   std::vector<int32_t> a_buffer(N, 42);
   std::vector<int32_t> b_buffer(N, 0);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr =
       For::make(i, 0, N, Store::make(b, i, Load::make(a, i, mask), mask));
 
@@ -232,11 +232,11 @@ void testLLVMMemcpyTest() {
 void testLLVMBzeroTest() {
   KernelScope kernel_scope;
   constexpr int N = 32;
-  Buffer b(Var("B", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
   std::vector<int32_t> b_buffer(N, 11);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(i, 0, N, Store::make(b, i, IntImm::make(0), mask));
 
   LLVMCodeGen cg(expr, {b});
@@ -251,15 +251,15 @@ void testLLVMBzeroTest() {
 void testLLVMElemwiseAdd() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int32_t> a_buffer(N, 41);
   std::vector<int32_t> b_buffer(N, 1);
   std::vector<int32_t> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -286,15 +286,15 @@ void testLLVMElemwiseAdd() {
 void testLLVMElemwiseAddFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -317,13 +317,13 @@ void testLLVMElemwiseAddFloat() {
 void testLLVMElemwiseLog10Float() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 10.0f);
   std::vector<float> b_buffer(N, 2.0f);
 
   auto mask = Broadcast::make(IntImm::make(1), 4);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -348,15 +348,15 @@ void testLLVMElemwiseLog10Float() {
 void testLLVMElemwiseMaxInt() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -383,15 +383,15 @@ void testLLVMElemwiseMaxInt() {
 void testLLVMElemwiseMinInt() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 41);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -418,15 +418,15 @@ void testLLVMElemwiseMinInt() {
 void testLLVMElemwiseMaxNumFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -453,15 +453,15 @@ void testLLVMElemwiseMaxNumFloat() {
 void testLLVMElemwiseMaxNumNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -487,15 +487,15 @@ void testLLVMElemwiseMaxNumNaNFloat() {
 void testLLVMElemwiseMinNumFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -522,15 +522,15 @@ void testLLVMElemwiseMinNumFloat() {
 void testLLVMElemwiseMinNumNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -557,15 +557,15 @@ void testLLVMElemwiseMinNumNaNFloat() {
 void testLLVMElemwiseMaximumFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -592,15 +592,15 @@ void testLLVMElemwiseMaximumFloat() {
 void testLLVMElemwiseMaximumNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -628,15 +628,15 @@ void testLLVMElemwiseMaximumNaNFloat() {
 void testLLVMElemwiseMinimumFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, 41);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -663,15 +663,15 @@ void testLLVMElemwiseMinimumFloat() {
 void testLLVMElemwiseMinimumNaNFloat() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {N});
   std::vector<float> a_buffer(N, NAN);
   std::vector<float> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 1);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -700,9 +700,9 @@ void testLLVMElemwiseMinimumNaNFloat() {
 void testLLVMCompareSelectIntEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kInt32, {N});
-  Buffer b(Var("B", kHandle), kInt32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt32, {N});
+  Buffer b(VarHandle("B", kHandle), kInt32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
@@ -714,7 +714,7 @@ void testLLVMCompareSelectIntEQ() {
   }
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -746,15 +746,15 @@ void testLLVMCompareSelectIntEQ() {
 void testLLVMCompareSelectFloatEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(Var("A", kHandle), kFloat32, {N});
-  Buffer b(Var("B", kHandle), kFloat32, {N});
-  Buffer c(Var("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {N});
+  Buffer c(VarHandle("C", kHandle), kInt32, {N});
   std::vector<float> a_buffer(N, 1.0f);
   std::vector<float> b_buffer(N, 1.0f);
   std::vector<int> c_buffer(N, 0);
 
   auto mask = IntImm::make(1);
-  Var i("i", kInt32);
+  VarHandle i("i", kInt32);
   auto expr = For::make(
       i,
       0,
@@ -784,7 +784,7 @@ void testLLVMCompareSelectFloatEQ() {
 
 void testLLVMStoreFloat() {
   KernelScope kernel_scope;
-  Buffer result(Var("result", kHandle), kFloat32, {1});
+  Buffer result(VarHandle("result", kHandle), kFloat32, {1});
   std::vector<float> result_buffer = {0.0f};
   auto expr = Store::make(
       result, IntImm::make(0), FloatImm::make(3.14f), IntImm::make(1));
@@ -798,9 +798,9 @@ void testLLVMSimpleMath01() {
   KernelScope kernel_scope;
   const int N = 1024;
   Tensor* tensor = Compute(
-      "f", {{N, "i"}}, [](const Var& i) { return cast<float>(i * i + 1); });
+      "f", {{N, "i"}}, [](const VarHandle& i) { return cast<float>(i * i + 1); });
   Schedule sch = Schedule::make({tensor});
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
   Buffer f_buf(tensor->function()->func_var(), kFloat32, {N});
   LLVMCodeGen cg(stmt, {f_buf});
 
@@ -818,15 +818,15 @@ void testLLVMSimpleMath01() {
 void testLLVMComputeMul() {
   KernelScope kernel_scope;
   const int N = 1024;
-  Buffer a(Var("a", kHandle), kFloat32, {N});
-  Buffer b(Var("b", kHandle), kFloat32, {N});
-  Tensor* c = Compute("c", {{N, "i"}}, [&](const Var& i) {
+  Buffer a(VarHandle("a", kHandle), kFloat32, {N});
+  Buffer b(VarHandle("b", kHandle), kFloat32, {N});
+  Tensor* c = Compute("c", {{N, "i"}}, [&](const VarHandle& i) {
     return Load::make(a, i, 1) * Load::make(b, i, 1);
   });
 
   Buffer c_buf(c->function()->func_var(), kFloat32, {N});
   Schedule sch = Schedule::make({c});
-  Stmt s = sch.Lower();
+  Stmt* s = sch.Lower();
 
   LLVMCodeGen cg(s, {a, b, c_buf});
 
@@ -842,17 +842,17 @@ void testLLVMBroadcastAdd() {
   KernelScope kernel_scope;
   const int M = 32;
   const int N = 1024;
-  Buffer a(Var("a", kHandle), kFloat32, {M, N});
-  Buffer b(Var("b", kHandle), kFloat32, {N});
+  Buffer a(VarHandle("a", kHandle), kFloat32, {M, N});
+  Buffer b(VarHandle("b", kHandle), kFloat32, {N});
   Tensor* c =
-      Compute("c", {{M, "i"}, {N, "j"}}, [&](const Var& i, const Var& j) {
-        Expr mask(1);
+      Compute("c", {{M, "i"}, {N, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+        ExprHandle mask(1);
         return Load::make(a, i * N + j, mask) + Load::make(b, j, mask);
       });
 
   Buffer c_buf(c->function()->func_var(), kFloat32, {M, N});
   Schedule sch = Schedule::make({c});
-  Stmt s = sch.Lower();
+  Stmt* s = sch.Lower();
 
   LLVMCodeGen cg(s, {a, b, c_buf});
 
@@ -874,12 +874,12 @@ void testLLVMBroadcastAdd() {
 void testLLVMDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
-    Var n("n", kInt32);
-    Buffer a(Var("a", kHandle), kFloat32, {n});
-    Buffer b(Var("b", kHandle), kFloat32, {n});
-    Buffer c(Var("c", kHandle), kFloat32, {n});
-    Var i("i", kInt32);
-    Stmt s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
+    VarHandle n("n", kInt32);
+    Buffer a(VarHandle("a", kHandle), kFloat32, {n});
+    Buffer b(VarHandle("b", kHandle), kFloat32, {n});
+    Buffer c(VarHandle("c", kHandle), kFloat32, {n});
+    VarHandle i("i", kInt32);
+    Stmt* s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -896,12 +896,12 @@ void testLLVMDynamicShapeAdd() {
 void testLLVMBindDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
-    Var n("n", kInt32);
-    Buffer a(Var("a", kHandle), kFloat32, {n});
-    Buffer b(Var("b", kHandle), kFloat32, {n});
-    Buffer c(Var("c", kHandle), kFloat32, {n});
-    Var i("i", kInt32);
-    Stmt s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
+    VarHandle n("n", kInt32);
+    Buffer a(VarHandle("a", kHandle), kFloat32, {n});
+    Buffer b(VarHandle("b", kHandle), kFloat32, {n});
+    Buffer c(VarHandle("c", kHandle), kFloat32, {n});
+    VarHandle i("i", kInt32);
+    Stmt* s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
@@ -917,13 +917,13 @@ void testLLVMBindDynamicShapeAdd() {
 void testLLVMTensorDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
-    Var n("n", kInt32);
-    Buffer a(Var("a", kHandle), kFloat32, {n});
-    Buffer b(Var("b", kHandle), kFloat32, {n});
+    VarHandle n("n", kInt32);
+    Buffer a(VarHandle("a", kHandle), kFloat32, {n});
+    Buffer b(VarHandle("b", kHandle), kFloat32, {n});
     Tensor* c =
-        Compute("c", {{n, "n"}}, [&](const Var& i) { return a(i) + b(i); });
+        Compute("c", {{n, "n"}}, [&](const VarHandle& i) { return a(i) + b(i); });
     Schedule sch = Schedule::make({c});
-    Stmt s = sch.Lower();
+    Stmt* s = sch.Lower();
     LLVMCodeGen cg(s, {a, b, c, n});
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
@@ -939,16 +939,16 @@ void testLLVMTensorDynamicShapeAdd() {
 void testLLVMDynamicShape2D() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
-    Var m("m", kInt32);
-    Var n("n", kInt32);
-    Buffer a(Var("a", kHandle), kFloat32, {m, n});
-    Buffer b(Var("b", kHandle), kFloat32, {m, n});
+    VarHandle m("m", kInt32);
+    VarHandle n("n", kInt32);
+    Buffer a(VarHandle("a", kHandle), kFloat32, {m, n});
+    Buffer b(VarHandle("b", kHandle), kFloat32, {m, n});
     Tensor* c =
-        Compute("c", {{m, "m"}, {n, "n"}}, [&](const Var& i, const Var& j) {
+        Compute("c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
         });
     auto sch = torch::jit::tensorexpr::schedule::Schedule::make({c});
-    Stmt s = sch.Lower();
+    Stmt* s = sch.Lower();
     LLVMCodeGen cg(s, {a, b, c, m, n});
     std::vector<float> aData(M * N, 1.0f);
     std::vector<float> bData(M * N, 2.0f);

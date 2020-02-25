@@ -69,7 +69,7 @@ class Cloneable : public Base {
 /// Loop Axis
 class LoopAxisTransform;
 
-// A loop axis in the Tensor Expr trees.
+// A loop axis in the Tensor ExprHandle trees.
 // Even if two loops are identical in shapes, the should have separate loop
 // axis. In other words, loop axes should be be shared among differnt loops.
 class TORCH_API LoopAxis : public Cloneable<LoopAxis, ScheduleObject> {
@@ -79,7 +79,7 @@ class TORCH_API LoopAxis : public Cloneable<LoopAxis, ScheduleObject> {
     kReduction, // a redution axis
   };
 
-  const Var& var() const {
+  const VarHandle& var() const {
     return loop_var_;
   }
   const Range& range() const {
@@ -113,7 +113,7 @@ class TORCH_API LoopAxis : public Cloneable<LoopAxis, ScheduleObject> {
   friend class LoopAxisTransform;
 
   LoopAxis(
-      const Var& loop_var,
+      const VarHandle& loop_var,
       const Range& loop_range,
       AxisType axis_type,
       LoopAxisTransform* transform)
@@ -144,7 +144,7 @@ class TORCH_API LoopAxis : public Cloneable<LoopAxis, ScheduleObject> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
-  Var loop_var_;
+  VarHandle loop_var_;
   Range loop_range_;
   AxisType axis_type_;
   // TODO: check that only leaf axis can be used in axis tranforms.
@@ -165,14 +165,14 @@ class TORCH_API LoopAxisTransform
   LoopAxisTransform() {}
 
   // One Stmt for each output group
-  virtual Stmt ConvertToNewArgs(Stmt* stmt, int group_index) {
+  virtual Stmt* ConvertToNewArgs(Stmt* stmt, int group_index) {
     LOG(FATAL) << "unmiplemented";
-    return Stmt();
+    return nullptr;
   }
 
-  virtual Expr ConvertToNewArgs(Expr* stmt, int group_index) {
+  virtual ExprHandle ConvertToNewArgs(ExprHandle* stmt, int group_index) {
     LOG(FATAL) << "unmiplemented";
-    return Expr();
+    return ExprHandle();
   }
 
   int output_group_count() const {
@@ -229,7 +229,7 @@ class TORCH_API LoopAxisTransform
   }
 
   // Override Schedule::NewAxis, but also sets current transform as the source.
-  LoopAxis* NewAxis(const Var& loop_var, const Range& loop_range);
+  LoopAxis* NewAxis(const VarHandle& loop_var, const Range& loop_range);
 
  private:
   std::vector<LoopAxis*> inputs_; // not owned
@@ -272,14 +272,14 @@ class SplitAxisWithTail
  public:
   using BaseClass = Cloneable<SplitAxisWithTail, SplitAxisTransform>;
   void CloneFrom(const SplitAxisWithTail* other);
-  Stmt ConvertToNewArgs(Stmt* stmt, int output_group) override;
-  Expr ConvertToNewArgs(Expr* stmt, int output_group) override;
+  Stmt* ConvertToNewArgs(Stmt* stmt, int output_group) override;
+  ExprHandle ConvertToNewArgs(ExprHandle* stmt, int output_group) override;
   SplitAxisWithTail() {}
 
  private:
   friend class ScheduleNode;
   SplitAxisWithTail(LoopAxis* loop_axis, int factor, bool factor_on_inner);
-  Expr combined_loop_index(int output_group);
+  ExprHandle combined_loop_index(int output_group);
 };
 
 class SplitAxisWithMask
@@ -287,24 +287,24 @@ class SplitAxisWithMask
  public:
   using BaseClass = Cloneable<SplitAxisWithMask, SplitAxisTransform>;
   void CloneFrom(const SplitAxisWithMask* other);
-  Stmt ConvertToNewArgs(Stmt* stmt, int output_group) override;
-  Expr ConvertToNewArgs(Expr* stmt, int output_group) override;
+  Stmt* ConvertToNewArgs(Stmt* stmt, int output_group) override;
+  ExprHandle ConvertToNewArgs(ExprHandle* stmt, int output_group) override;
   SplitAxisWithMask() {}
-  const Expr& predicate() const {
+  const ExprHandle& predicate() const {
     return predicate_;
   }
 
  private:
   friend class ScheduleNode;
   SplitAxisWithMask(LoopAxis* loop_axis, int factor, bool factor_on_inner);
-  Expr combined_loop_index(int output_group);
+  ExprHandle combined_loop_index(int output_group);
 
-  Expr predicate_; // original predicate
+  ExprHandle predicate_; // original predicate
 };
 
 class FuseAxisTransform;
 
-// Section: Tensor Expr Tree
+// Section: Tensor ExprHandle Tree
 
 // A tensor expr operation within the expression tree.
 // This is often a leaf node that corresponds subset of the operations from a
@@ -313,11 +313,11 @@ class FuseAxisTransform;
 // the semantics of this operation.
 class TORCH_API TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
  public:
-  const Var& expr_var() const {
+  const VarHandle& expr_var() const {
     return func_->func_var();
   }
 
-  const Expr& body() const {
+  const ExprHandle& body() const {
     return func_->body();
   }
 
@@ -331,26 +331,26 @@ class TORCH_API TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
     this->predicates_ = other->predicates_;
   }
 
-  Stmt ElementStmt() const {
+  Stmt* ElementStmt() const {
     return this->element_stmt_;
   }
 
   void ApplyLoopTransform(LoopAxisTransform* loop_transform, int group_index) {
     element_stmt_ =
-        loop_transform->ConvertToNewArgs(&element_stmt_, group_index);
+        loop_transform->ConvertToNewArgs(element_stmt_, group_index);
     for (int i = 0; i < predicates_.size(); i++) {
       predicates_[i] =
           loop_transform->ConvertToNewArgs(&predicates_[i], group_index);
     }
   }
 
-  void AddPredicate(const Expr& predicate) {
+  void AddPredicate(const ExprHandle& predicate) {
     if (!predicate.empty()) {
       predicates_.push_back(predicate);
     }
   }
 
-  const std::vector<Expr>& predicates() const {
+  const std::vector<ExprHandle>& predicates() const {
     return predicates_;
   }
 
@@ -364,8 +364,8 @@ class TORCH_API TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
   // The ancestor-axes mark the region to evaluate expression.
   // We still need to know the buffer this writes to.
   Function* func_;
-  Stmt element_stmt_;
-  std::vector<Expr> predicates_;
+  Stmt* element_stmt_;
+  std::vector<ExprHandle> predicates_;
 };
 
 // Part of the recursive node structure in the tensor expr tree.
@@ -491,7 +491,7 @@ class TORCH_API ScheduleNode : public KernelScopedObject {
   ~ScheduleNode();
 
   // Section: for schedule related internal functions.
-  LoopAxis* NewAxis(const Var& loop_var, const Range& loop_range) {
+  LoopAxis* NewAxis(const VarHandle& loop_var, const Range& loop_range) {
     return NewObject<LoopAxis>(
         loop_var, loop_range, LoopAxis::kRegular, nullptr);
   }
@@ -529,30 +529,30 @@ class TORCH_API ScheduleNode : public KernelScopedObject {
 
   void SplitWithTail(
       TensorExprNode* expr_node,
-      const Var& loop_var,
+      const VarHandle& loop_var,
       int factor,
       bool factor_on_inner,
-      Var* outer_var,
-      Var* inner_var,
-      Var* tail_var,
+      VarHandle* outer_var,
+      VarHandle* inner_var,
+      VarHandle* tail_var,
       TensorExprNode** tail_op);
 
   void SplitWithMask(
       TensorExprNode* expr_node,
-      const Var& loop_var,
+      const VarHandle& loop_var,
       int factor,
       bool factor_on_inner,
-      Var* outer_var,
-      Var* inner_var);
+      VarHandle* outer_var,
+      VarHandle* inner_var);
 
   void ComputeInline(TensorExprNode* expr_node);
 
   void GPUExecConfig(
       TensorExprNode* expr_node,
-      const std::vector<Var>& blockIdx,
-      const std::vector<Var>& threadIdx);
+      const std::vector<VarHandle>& blockIdx,
+      const std::vector<VarHandle>& threadIdx);
 
-  Stmt Lower();
+  Stmt* Lower();
 
   using CloneMap = std::unordered_map<ScheduleObject*, ScheduleObject*>;
   CloneMap& clone_map() {
@@ -595,8 +595,8 @@ class TORCH_API ScheduleNode : public KernelScopedObject {
   explicit ScheduleNode(const std::vector<Tensor*>& funcs);
   ScheduleObject* CloneScheduleObject(ScheduleObject* object);
   ScheduleObject* LookUpCloneScheduleObject(ScheduleObject* object);
-  Stmt Lower(TensorExprNode* node);
-  Stmt LowerNoSibling(TensorExprNode* node);
+  Stmt* Lower(TensorExprNode* node);
+  Stmt* LowerNoSibling(TensorExprNode* node);
 
   std::vector<Tensor*> output_tensors_;
   std::vector<Tensor*> internal_tensors_;
@@ -640,7 +640,7 @@ class TORCH_API Schedule {
   explicit Schedule(const std::vector<Tensor*>& funcs)
       : node_(new ScheduleNode(funcs)) {}
 
-  Stmt Lower() {
+  Stmt* Lower() {
     return node()->Lower();
   }
 

@@ -17,15 +17,15 @@ class CodeGen {
   class CallArg;
 
   template <typename... Ts>
-  CodeGen(const Stmt& stmt, Ts... ts)
+  CodeGen(Stmt* stmt, Ts... ts)
       : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
 
-  CodeGen(const Stmt& stmt, const std::vector<BufferArg>& buffer_args)
+  CodeGen(Stmt* stmt, const std::vector<BufferArg>& buffer_args)
       : stmt_(stmt), buffer_args_(buffer_args) {}
 
   virtual ~CodeGen() {}
 
-  const Stmt& stmt() const {
+  Stmt* stmt() const {
     return stmt_;
   }
 
@@ -42,7 +42,7 @@ class CodeGen {
   }
 
  private:
-  Stmt stmt_;
+  Stmt* stmt_;
   std::vector<BufferArg> buffer_args_;
 };
 
@@ -55,12 +55,12 @@ class CodeGen::BufferArg {
         dtype_(tensor->function()->body().dtype()) {}
   BufferArg(const Function& func)
       : var_(func.func_var()), dtype_(func.body().dtype()) {}
-  BufferArg(const Var& var) : var_(var), dtype_(var.dtype()), isVar_(true) {}
+  BufferArg(const VarHandle& var) : var_(var), dtype_(var.dtype()), isVar_(true) {}
 
-  const Var& var() const {
+  const VarHandle& var() const {
     return var_;
   }
-  Var& var() {
+  VarHandle& var() {
     return var_;
   }
   Dtype dtype() const {
@@ -72,7 +72,7 @@ class CodeGen::BufferArg {
   }
 
  private:
-  Var var_;
+  VarHandle var_;
   Dtype dtype_;
   bool isVar_{false};
 };
@@ -127,7 +127,7 @@ class RegisterCodeGenList {
   }
 
   using StmtFactoryMethod = std::function<std::unique_ptr<CodeGen>(
-      const Stmt& stmt,
+      Stmt* stmt,
       const std::vector<CodeGen::BufferArg>&)>;
 
   TORCH_API StmtFactoryMethod FindStmtFactoryMethod(const std::string& name);
@@ -138,7 +138,7 @@ class RegisterCodeGenList {
   RegisterCodeGenList() {}
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
-      StmtFactoryMethod stmt_factory_method);
+      const StmtFactoryMethod& stmt_factory_method);
   RegisterCodeGenList(const RegisterCodeGenList&) = delete;
   RegisterCodeGenList& operator=(const RegisterCodeGenList&) = delete;
 
@@ -152,7 +152,7 @@ class RegisterCodeGen {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
         name,
-        [](const Stmt& stmt, const std::vector<CodeGen::BufferArg>& params) {
+        [](Stmt* stmt, const std::vector<CodeGen::BufferArg>& params) {
           std::unique_ptr<CodeGen> method(new CodeGenType(stmt, params));
           return method;
         });
@@ -161,7 +161,7 @@ class RegisterCodeGen {
 
 TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
     const std::string& name,
-    const Stmt& stmt,
+    Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& params);
 
 } // namespace tensorexpr

@@ -24,6 +24,8 @@ class BenchmarkBase(object):
         raise ValueError('this method should be reimplemented by subclass')
 
     def check(self):
+        if not self.deterministic:
+            return
         np.testing.assert_allclose(
             self.reference(), self.numpy(self.compute()), atol=1e-2)
 
@@ -124,6 +126,8 @@ def cuda_pointwise_context(loop_levels, block_count, block_size):
     
         
 def run_benchmark(benchmark, args):
+    torch._C._jit_override_can_fuse_on_gpu(args.cuda_fuser == 'old');
+    torch._C._jit_set_texpr_fuser_enabled(args.cuda_fuser == 'te');
     with cuda_pointwise_context(args.cuda_pointwise_loop_levels,
                                 args.cuda_pointwise_block_count,
                                 args.cuda_pointwise_block_size):
@@ -147,7 +151,8 @@ def run_benchmark_impl(benchmark):
 
         if i == 0:
             if benchmark.jit_mode == 'trace':
-                benchmark.bm_jit = torch.jit.trace(benchmark.forward, example_inputs=benchmark.inputs)
+                benchmark.bm_jit = torch.jit.trace(benchmark.forward,
+                    example_inputs=benchmark.inputs, check_trace=False)
             if callable(getattr(benchmark, 'reference', None)):
                 benchmark.check()
             else:

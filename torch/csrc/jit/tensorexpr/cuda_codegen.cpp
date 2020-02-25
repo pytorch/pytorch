@@ -20,7 +20,7 @@ class ScopedVarName {
  public:
   ScopedVarName(
       VarNameMap* mapping,
-      const Variable* var,
+      const Var* var,
       const std::string& name)
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
@@ -32,7 +32,7 @@ class ScopedVarName {
 
   ScopedVarName(
       UniqueNameManager* manager,
-      const Variable* var,
+      const Var* var,
       const std::string& name)
       : ScopedVarName(&manager->unique_name_mapping_, var, name) {}
 
@@ -47,15 +47,14 @@ class ScopedVarName {
   ScopedVarName& operator=(const ScopedVarName&) = delete;
 
   VarNameMap* mapping_ = nullptr;
-  const Variable* var_ = nullptr;
+  const Var* var_ = nullptr;
 };
 
-static int as_int(const Expr& expr) {
-  const IntImm* v = expr.AsNode<IntImm>();
-  return v->value();
+static int as_int(const Expr* expr) {
+  return dynamic_cast<const IntImm*>(expr)->value();
 }
 
-static bool is_zero(const Expr& expr) {
+static bool is_zero(const Expr* expr) {
   return as_int(expr) == 0;
 }
 
@@ -96,8 +95,8 @@ void CudaPrinter::visit(const For* v) {
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     ScopedVarName var_name(
-        name_manager(), v->var().node(), loop_options.gpu_block_index_str());
-    v->body().accept(this);
+        name_manager(), v->var(), loop_options.gpu_block_index_str());
+    v->body()->accept(this);
     int gpu_block_index = loop_options.gpu_block_index();
     if (gpu_block_extents_.size() <= gpu_block_index) {
       gpu_block_extents_.resize(gpu_block_index + 1);
@@ -105,13 +104,13 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
+          std::to_string(ExprHandle(v->start())));
     }
     gpu_block_extents_[gpu_block_index] = v->stop();
   } else if (loop_options.is_gpu_thread_index()) {
     ScopedVarName var_name(
-        name_manager(), v->var().node(), loop_options.gpu_thread_index_str());
-    v->body().accept(this);
+        name_manager(), v->var(), loop_options.gpu_thread_index_str());
+    v->body()->accept(this);
     int gpu_thread_index = loop_options.gpu_thread_index();
     if (gpu_thread_extents_.size() <= gpu_thread_index) {
       gpu_thread_extents_.resize(gpu_thread_index + 1);
@@ -119,7 +118,7 @@ void CudaPrinter::visit(const For* v) {
     if (!is_zero(v->start())) {
       throw std::runtime_error(
           "start must be zero for gpu_block_index: " +
-          std::to_string(v->start()));
+          std::to_string(ExprHandle(v->start())));
     }
     gpu_thread_extents_[gpu_thread_index] = v->stop();
   } else {
@@ -141,7 +140,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
       func_name = "expf";
       break;
     case IntrinsicsOp::kRand:
-      os() << "Uint32ToFloat(" << rand_func_ << "())";
+      os() << "Uint32ToFloat(" << *rand_func_ << "())";
       return;
     default:
       IRPrinter::visit(v);
@@ -152,14 +151,14 @@ void CudaPrinter::visit(const Intrinsics* v) {
     if (i > 0) {
       os() << ", ";
     }
-    os() << v->param(i);
+    os() << *v->param(i);
   }
   os() << ")";
 }
 
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
-  os() << "__ldg(" << v->base_handle() << " + " << v->index() << ")";
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
 }
 
 void CudaPrinter::visit(const Max* v) {
@@ -168,9 +167,9 @@ void CudaPrinter::visit(const Max* v) {
     os() << "fmaxf";
   }
   os() << "(";
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   os() << ",";
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   os() << ")";
 }
 
@@ -180,109 +179,109 @@ void CudaPrinter::visit(const Min* v) {
     os() << "fminf";
   }
   os() << "(";
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   os() << ",";
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   os() << ")";
 }
 
 void CudaPrinter::visit(const IfThenElse* v) {
   os() << "(";
-  v->condition().accept(this);
+  v->condition()->accept(this);
   os() << ") ? ";
-  v->true_value().accept(this);
+  v->true_value()->accept(this);
   os() << " : ";
-  v->false_value().accept(this);
+  v->false_value()->accept(this);
 }
 
 class PrioritizeLoad : public IRMutator {
  public:
-  virtual Expr mutate(const Load* v) {
+  virtual const Expr* mutate(const Load* v) {
     MemLoadList& load_list = load_stack_.back();
-    Var load_new_var{"v", v->dtype()};
-    Expr new_value = IRMutator::mutate(v);
-    load_list.push_back(std::make_pair(load_new_var.node(), new_value));
+    const Var* load_new_var = new Var("v", v->dtype());
+    const Expr* new_value = IRMutator::mutate(v);
+    load_list.push_back(std::make_pair(load_new_var, new_value));
     return load_new_var;
   }
 
   // TODO: merge this with the IRMutator::mutate version.
-  virtual Stmt mutate(const For* v) {
-    Var var = v->var();
-    Expr start = v->start();
-    Expr stop = v->stop();
-    Stmt body = v->body();
+  virtual Stmt* mutate(const For* v) {
+    const Var* var = v->var();
+    const Expr* start = v->start();
+    const Expr* stop = v->stop();
+    Stmt* body = v->body();
     LoopOptions loop_options = v->loop_options();
-    Expr var_new_expr = var.accept_mutator(this);
-    Var var_new = Var(var_new_expr.AsNode<Variable>());
-    Expr start_new = start.accept_mutator(this);
-    Expr stop_new = stop.accept_mutator(this);
+    const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+    const Expr* start_new = start->accept_mutator(this);
+    const Expr* stop_new = stop->accept_mutator(this);
     PushList();
-    Stmt body_new = body.accept_mutator(this);
-    Stmt body_with_loads = AddMemLoadsFromList(body_new);
-    PopList();
-    if (same_node(var, var_new) && same_node(start, start_new) &&
-        same_node(stop, stop_new) && same_node(body, body_with_loads)) {
-      return Stmt(v);
+    Stmt* body_new = body->accept_mutator(this);
+    if (!body_new) {
+      return nullptr;
     }
-    return For::make(
+    Stmt* body_with_loads = AddMemLoadsFromList(body_new);
+    PopList();
+    if (var == var_new && start == start_new &&
+        stop == stop_new && body == body_with_loads) {
+      return (Stmt*)v;
+    }
+    return new For(
         var_new, start_new, stop_new, body_with_loads, loop_options);
   }
 
-  virtual Stmt mutate(const LetStmt* v) {
-    Var var = v->var();
-    Expr value = v->value();
-    Stmt body = v->body();
-    Expr var_new_expr = var.accept_mutator(this);
-    Variable* var_new_ptr = var_new_expr.AsNode<Variable>();
-    if (var_new_ptr == nullptr) {
+  virtual Stmt* mutate(const LetStmt* v) {
+    const Var* var = v->var();
+    const Expr* value = v->value();
+    Stmt* body = v->body();
+    const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+    if (var_new == nullptr) {
       throw std::runtime_error("LetStmt var must be variable");
     }
-    Var var_new{var_new_ptr};
-    Expr value_new = value.accept_mutator(this);
+    const Expr* value_new = value->accept_mutator(this);
     PushList();
-    Stmt body_new = body.accept_mutator(this);
-    Stmt body_with_loads = AddMemLoadsFromList(body_new);
+    Stmt* body_new = body->accept_mutator(this);
+    Stmt* body_with_loads = AddMemLoadsFromList(body_new);
     PopList();
-    if (same_node(var, var_new) && same_node(value, value_new) &&
-        same_node(body, body_with_loads)) {
-      return Stmt(v);
+    if (var == var_new && value == value_new &&
+        body == body_with_loads) {
+      return (Stmt*)v;
     }
-    return LetStmt::make(var_new, value_new, body_with_loads);
+    return new LetStmt(var_new, value_new, body_with_loads);
   }
 
-  virtual Stmt mutate(const Cond* v) {
-    Expr cond_old = v->condition();
-    Stmt true_old = v->true_stmt();
-    Stmt false_old = v->false_stmt();
+  virtual Stmt* mutate(const Cond* v) {
+    const Expr* cond_old = v->condition();
+    Stmt* true_old = v->true_stmt();
+    Stmt* false_old = v->false_stmt();
 
-    Expr cond_new = cond_old.accept_mutator(this);
+    const Expr* cond_new = cond_old->accept_mutator(this);
     PushList();
-    Stmt true_new = true_old.accept_mutator(this);
-    Stmt true_with_loads = AddMemLoadsFromList(true_new);
+    Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
+    Stmt* true_with_loads = AddMemLoadsFromList(true_new);
     PopList();
     PushList();
-    Stmt false_new = false_old.accept_mutator(this);
-    Stmt false_with_loads = AddMemLoadsFromList(false_new);
+    Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
+    Stmt* false_with_loads = AddMemLoadsFromList(false_new);
     PopList();
 
-    if (same_node(cond_old, cond_new) && same_node(true_old, true_with_loads) &&
-        same_node(false_old, false_with_loads)) {
-      return Stmt(v);
+    if (cond_old == cond_new && true_old == true_with_loads &&
+        false_old == false_with_loads) {
+      return (Stmt*)v;
     }
-    return Cond::make(cond_new, true_with_loads, false_with_loads);
+    return new Cond(cond_new, true_with_loads, false_with_loads);
   }
 
-  Stmt Process(const Stmt& stmt) {
+  Stmt* Process(Stmt* stmt) {
     this->PushList();
-    Stmt stmt_v = stmt;
-    Stmt stmt_new = stmt_v.accept_mutator(this);
-    Stmt stmt_with_loads = AddMemLoadsFromList(stmt_new);
+    Stmt* stmt_v = stmt;
+    Stmt* stmt_new = stmt_v->accept_mutator(this);
+    Stmt* stmt_with_loads = AddMemLoadsFromList(stmt_new);
     this->PopList();
     return stmt_with_loads;
   }
 
  private:
-  using MemLoadEntry = std::pair<const Variable*, Expr>;
+  using MemLoadEntry = std::pair<const Var*, const Expr*>;
   using MemLoadList = std::vector<MemLoadEntry>;
   using MemoryLoadStack = std::vector<MemLoadList>;
 
@@ -294,13 +293,13 @@ class PrioritizeLoad : public IRMutator {
     load_stack_.pop_back();
   }
 
-  Stmt AddMemLoadsFromList(const Stmt& stmt) {
+  Stmt* AddMemLoadsFromList(Stmt* stmt) {
     MemLoadList& load_list = load_stack_.back();
-    Stmt stmt_v = stmt;
+    Stmt* stmt_v = stmt;
     for (int i = load_list.size() - 1; i >= 0; i--) {
       const MemLoadEntry& entry = load_list[i];
-      Variable* var_ptr = const_cast<Variable*>(entry.first);
-      stmt_v = LetStmt::make(Var(var_ptr), entry.second, stmt_v);
+      Var* var_ptr = const_cast<Var*>(entry.first);
+      stmt_v = new LetStmt(var_ptr, entry.second, stmt_v);
     }
     return stmt_v;
   }
@@ -310,8 +309,8 @@ class PrioritizeLoad : public IRMutator {
 
 class HasRand : public IRVisitor {
  public:
-  HasRand(const Stmt& stmt) : stmt_(stmt) {
-    stmt_.accept(this);
+  HasRand(Stmt* stmt) : stmt_(stmt) {
+    stmt_->accept(this);
   }
 
   bool has_rand() const {
@@ -326,7 +325,7 @@ class HasRand : public IRVisitor {
       IRVisitor::visit(v);
     }
   }
-  Stmt stmt_;
+  Stmt* stmt_;
   bool has_rand_ = false;
 };
 
@@ -347,46 +346,46 @@ void CudaCodeGen::Initialize() {
       os() << ", ";
     }
     const BufferArg& buffer_arg = buffer_args[i];
-    const Var& var = buffer_arg.var();
+    const Var* var = buffer_arg.var().node();
     Dtype dtype = buffer_arg.dtype();
     os() << dtype.ToCppString() << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
-  Var rand_seed;
-  Var rand_offset;
+  const Var* rand_seed;
+  const Var* rand_offset;
   if (has_random_) {
     // TODO: switch to kUint64 when it is available.
-    rand_seed = Var("rand_seed", kInt32);
-    rand_offset = Var("rand_offset", kInt32);
+    rand_seed = new Var("rand_seed", kInt32);
+    rand_offset = new Var("rand_offset", kInt32);
     std::string uint64_str = "unsigned long long";
-    os() << ", " << uint64_str << " " << rand_seed << ", " << uint64_str << " "
-         << rand_offset;
+    os() << ", " << uint64_str << " " << *rand_seed << ", " << uint64_str << " "
+         << *rand_offset;
   }
   os() << ") {";
   os() << std::endl;
 
   if (has_random_) {
-    Var idx{"idx", kInt32};
-    os() << "int " << idx << " = blockIdx.x*blockDim.x + threadIdx.x;"
+    const Var* idx = new Var("idx", kInt32);
+    os() << "int " << *idx << " = blockIdx.x*blockDim.x + threadIdx.x;"
          << std::endl;
-    Var rand_func = printer_->rand_func();
-    os() << "Philox " << rand_func << "(" << rand_seed << ", " << idx << ", "
-         << rand_offset << ");" << std::endl;
+    const Var* rand_func = printer_->rand_func();
+    os() << "Philox " << *rand_func << "(" << *rand_seed << ", " << *idx << ", "
+         << *rand_offset << ");" << std::endl;
     os() << std::endl;
   }
 
-  Stmt stmt_v = stmt();
+  Stmt* stmt_v = stmt();
   PrioritizeLoad prioritize_load;
   stmt_v = prioritize_load.Process(stmt_v);
-  stmt_v.accept(printer_.get());
+  stmt_v->accept(printer_.get());
   os() << std::endl;
   os() << "}";
 
   // Check that all block extents had been set.
-  const std::vector<Expr>& gpu_block_extents = printer_->gpu_block_extents();
-  const std::vector<Expr>& gpu_thread_extents = printer_->gpu_thread_extents();
+  const std::vector<const Expr*>& gpu_block_extents = printer_->gpu_block_extents();
+  const std::vector<const Expr*>& gpu_thread_extents = printer_->gpu_thread_extents();
   for (int i = 0; i < gpu_block_extents.size(); i++) {
-    if (gpu_block_extents[i].empty()) {
+    if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
     }
   }
@@ -421,8 +420,8 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   // TODO: move as much of this into the constructors.
   // TODO: handle dynamic shapes.
-  const std::vector<Expr>& gpu_block_extents = printer_->gpu_block_extents();
-  const std::vector<Expr>& gpu_thread_extents = printer_->gpu_thread_extents();
+  const std::vector<const Expr*>& gpu_block_extents = printer_->gpu_block_extents();
+  const std::vector<const Expr*>& gpu_thread_extents = printer_->gpu_thread_extents();
   CHECK(gpu_block_extents.size() <= 3);
   CHECK(gpu_thread_extents.size() <= 3);
   std::vector<int> gpu_block_extents_v(3, 1);

@@ -19,26 +19,26 @@ using schedule::TensorExprNode;
 class TORCH_API TensorOperation : public KernelScopedObject {
  public:
   void SplitWithTail(
-      const Var& loop_var,
+      const VarHandle& loop_var,
       int factor,
       bool factor_on_inner,
-      Var* outer_var,
-      Var* inner_var,
-      Var* tail_var,
+      VarHandle* outer_var,
+      VarHandle* inner_var,
+      VarHandle* tail_var,
       TensorOperation** tail_op);
 
   void SplitWithMask(
-      const Var& loop_var,
+      const VarHandle& loop_var,
       int factor,
       bool factor_on_inner,
-      Var* outer_var,
-      Var* inner_var);
+      VarHandle* outer_var,
+      VarHandle* inner_var);
 
   void ComputeInline();
 
   void GPUExecConfig(
-      const std::vector<Var>& blockIdx,
-      const std::vector<Var>& threadIdx);
+      const std::vector<VarHandle>& blockIdx,
+      const std::vector<VarHandle>& threadIdx);
 
   TensorExprNode* expr_node() {
     return expr_node_;
@@ -63,18 +63,18 @@ class Tensor : public TensorOperation {
   int output_index() const {
     return output_index_;
   }
-  const Var& arg(int index) const {
+  const VarHandle& arg(int index) const {
     return function_->arg(index);
   }
 
   Tensor(Function* function, int output_index)
       : function_(function), output_index_(output_index) {}
   template <typename... Ts>
-  inline Expr operator()(const Ts&... ts);
+  inline ExprHandle operator()(const Ts&... ts);
   template <typename T>
-  inline Expr call(const std::vector<T>& args);
+  inline ExprHandle call(const std::vector<T>& args);
   template <typename... Ts>
-  inline Expr call(const Ts&... ts);
+  inline ExprHandle call(const Ts&... ts);
 
  private:
   Function* function_;
@@ -90,10 +90,10 @@ class Tensor : public TensorOperation {
 class DimArg {
  public:
   // Intentionally leave out explicit to allow implicit conversions.
-  DimArg(const Expr& dim) : dim_(dim) {}
-  DimArg(const Expr& dim, const std::string& name_hint)
+  DimArg(const ExprHandle& dim) : dim_(dim) {}
+  DimArg(const ExprHandle& dim, const std::string& name_hint)
       : dim_(dim), name_hint_(name_hint) {}
-  const Expr& dim() const {
+  const ExprHandle& dim() const {
     return dim_;
   }
   const std::string& name_hint() const {
@@ -101,37 +101,41 @@ class DimArg {
   }
 
  private:
-  Expr dim_;
+  ExprHandle dim_;
   std::string name_hint_;
 };
 
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<Expr(const Var&)> body_func);
+    std::function<ExprHandle(const VarHandle&)> body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<Expr(const Var&, const Var&)> body_func);
+    std::function<ExprHandle(const VarHandle&, const VarHandle&)> body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<Expr(const Var&, const Var&, const Var&)> body_func);
+    std::function<ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)> body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<Expr(const Var&, const Var&, const Var&, const Var&)>
+    std::function<ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&, const VarHandle&)>
         body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<Expr(const std::vector<Var>&)> body_func);
+    std::function<ExprHandle(const std::vector<VarHandle>&)> body_func);
 
 class FunctionCall : public CallNode<FunctionCall> {
  public:
   using BaseClass = CallNode<FunctionCall>;
-  static Expr make(Tensor* tensor, const std::vector<Expr>& params) {
-    return Expr(new FunctionCall(tensor, params));
+  static ExprHandle make(Tensor* tensor, const std::vector<ExprHandle>& params) {
+    std::vector<const Expr*> params_nodes(params.size());
+    for (size_t i = 0; i < params.size(); i++) {
+      params_nodes[i] = params[i].node();
+    }
+    return ExprHandle(new FunctionCall(tensor, params_nodes));
   }
 
   const Tensor* tensor() const {
@@ -141,35 +145,35 @@ class FunctionCall : public CallNode<FunctionCall> {
     return tensor_;
   }
 
+  FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
+      : BaseClass(tensor->function()->body().dtype(), kFunctionCall, params),
+        tensor_(tensor) {}
  private:
-  Expr DefaultMutator(const std::vector<Expr>& new_params) const override {
-    return FunctionCall::make(tensor_, new_params);
+  const Expr* DefaultMutator(const std::vector<const Expr*>& new_params) const override {
+    return new FunctionCall(tensor_, new_params);
   }
 
   std::string func_name() const {
     return tensor_->function()->func_var().name_hint();
   }
 
-  FunctionCall(Tensor* tensor, const std::vector<Expr>& params)
-      : BaseClass(tensor->function()->body().dtype(), kFunctionCall, params),
-        tensor_(tensor) {}
   Tensor* tensor_;
 };
 template <typename... Ts>
-inline Expr Tensor::operator()(const Ts&... ts) {
-  std::vector<Expr> params({Expr(ts)...});
+inline ExprHandle Tensor::operator()(const Ts&... ts) {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
   return FunctionCall::make(this, std::move(params));
 }
 
 template <typename... Ts>
-inline Expr Tensor::call(const Ts&... ts) {
-  std::vector<Expr> params({Expr(ts)...});
+inline ExprHandle Tensor::call(const Ts&... ts) {
+  std::vector<ExprHandle> params({ExprHandle(ts)...});
   return FunctionCall::make(this, std::move(params));
 }
 
 template <typename T>
-inline Expr Tensor::call(const std::vector<T>& args) {
-  std::vector<Expr> params(args.begin(), args.end());
+inline ExprHandle Tensor::call(const std::vector<T>& args) {
+  std::vector<ExprHandle> params(args.begin(), args.end());
   return FunctionCall::make(this, params);
 }
 } // namespace tensorexpr

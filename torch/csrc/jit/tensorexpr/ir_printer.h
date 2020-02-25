@@ -14,8 +14,9 @@ class TORCH_API IRPrinter : public IRVisitor {
  public:
   explicit IRPrinter(std::ostream& os) : printer_os_(this, os) {}
 
-  void print(Expr);
-  void print(Stmt);
+  void print(ExprHandle);
+  void print(const Expr&);
+  void print(const Stmt&);
   void visit(const Add* v) override;
   void visit(const Sub* v) override;
   void visit(const Mul* v) override;
@@ -27,7 +28,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const IntImm* v) override;
   void visit(const FloatImm* v) override;
   void visit(const Cast* v) override;
-  void visit(const Variable* v) override;
+  void visit(const Var* v) override;
   void visit(const Let* v) override;
   void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;
@@ -70,7 +71,9 @@ class TORCH_API IRPrinter : public IRVisitor {
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Expr&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, const ExprHandle&);
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
+TORCH_API std::ostream& operator<<(std::ostream& stream, Stmt*);
 
 } // namespace tensorexpr
 } // namespace jit
@@ -78,16 +81,16 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Stmt&);
 
 namespace std {
 
-using torch::jit::tensorexpr::Expr;
+using torch::jit::tensorexpr::ExprHandle;
 using torch::jit::tensorexpr::Stmt;
 
-inline std::string to_string(const Expr& expr) {
+inline std::string to_string(const ExprHandle& expr) {
   std::ostringstream oss;
   oss << expr;
   return oss.str();
 }
 
-inline std::string to_string(const Stmt& stmt) {
+inline std::string to_string(Stmt* stmt) {
   std::ostringstream oss;
   oss << stmt;
   return oss.str();

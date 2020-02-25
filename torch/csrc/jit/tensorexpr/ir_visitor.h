@@ -16,7 +16,7 @@ class CompareSelect;
 class IntImm;
 class FloatImm;
 class Cast;
-class Variable;
+class Var;
 class Let;
 class LetStmt;
 class Ramp;
@@ -47,7 +47,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const IntImm* v);
   virtual void visit(const FloatImm* v);
   virtual void visit(const Cast* v);
-  virtual void visit(const Variable* v);
+  virtual void visit(const Var* v);
   virtual void visit(const Let* v);
   virtual void visit(const LetStmt* v);
   virtual void visit(const Ramp* v);

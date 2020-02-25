@@ -18,17 +18,18 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
 }
 
 template <typename T>
-inline std::vector<Expr> computeIndicesToBroadcast(
+inline std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<T>& output_axes,
-    const std::vector<int64_t>& input_sizes) {
+    const std::vector<ExprHandle>& input_sizes) {
   TORCH_CHECK(
       output_axes.size() >= input_sizes.size(),
       "Cannot broadcast to a lower rank tensor");
-  std::vector<Expr> bcast;
+  std::vector<ExprHandle> bcast;
   auto axis_it = output_axes.rbegin();
   auto size_it = input_sizes.rbegin();
   while (size_it != input_sizes.rend()) {
-    if (*size_it == 1) {
+    auto const& size = size_it->AsNode<IntImm>();
+    if (size && size->value() == 1) {
       bcast.push_back(0);
     } else {
       bcast.push_back(*axis_it);
@@ -54,15 +55,15 @@ class TensorExprKernel {
     kCudaCodeGen,
   };
 
-  Expr constant(const torch::jit::Value* v);
+  ExprHandle constant(const torch::jit::Value* v);
 
   template <typename T, typename T1>
-  Expr broadcast(const T& t, const std::vector<T1>& axes) {
-    return t->call(computeIndicesToBroadcast(axes, bufferSizes(t)));
+  ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
+    return t->call(computeIndicesToBroadcast(axes, t->function()->dims()));
   }
 
   template <typename T, typename T1>
-  Expr chunk(
+  ExprHandle chunk(
       const T& t,
       size_t chunk_idx,
       size_t dim,
@@ -71,7 +72,7 @@ class TensorExprKernel {
     auto sizes = bufferSizes(t);
     size_t step = sizes[dim] / chunks;
 
-    std::vector<Expr> indices;
+    std::vector<ExprHandle> indices;
     for (size_t i = 0; i < axes.size(); ++i) {
       if (i == dim) {
         indices.push_back(axes[i] + IntImm::make(chunk_idx * step));
@@ -83,14 +84,14 @@ class TensorExprKernel {
     return t->call(indices);
   }
 
-  std::vector<Expr> valueShape(const torch::jit::Value* v);
+  std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  void promoteInputs(std::vector<Expr>& inputs);
+  void promoteInputs(std::vector<ExprHandle>& inputs);
 
-  Expr demoteOutput(const Expr& e, const torch::jit::Value* v);
+  ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
   template <typename T>
-  Expr tensorOrConstant(
+  ExprHandle tensorOrConstant(
       const torch::jit::Value* v,
       const std::vector<T>& axes) {
     auto ti = tensors_.find(v->unique());
@@ -103,27 +104,27 @@ class TensorExprKernel {
   Tensor* ComputeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<Expr(const Expr&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&)> inner_expr);
 
   Tensor* ComputeTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<Expr(const Expr&, const Expr&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> inner_expr);
 
   Tensor* ComputeTwoOperandWithAlpha(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<Expr(const Expr&, const Expr&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> inner_expr);
 
   Tensor* ComputeThreeOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<Expr(const Expr&, const Expr&, const Expr&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)> inner_expr);
 
   Tensor* ComputeFourOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<Expr(const Expr&, const Expr&, const Expr&, const Expr&)>
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&, const ExprHandle&)>
           inner_expr);
 
   Tensor* ComputeValue(const torch::jit::Value* v);
@@ -136,12 +137,54 @@ class TensorExprKernel {
 
   void bindInput(const torch::jit::Value* input);
 
+  ExprHandle createInputIndexExpr(
+      const Buffer& buffer,
+      const std::vector<VarHandle>& axes,
+      const c10::VaryingShape& sizes,
+      const c10::VaryingStrides& strides,
+      const c10::VaryingStrides& contiguity,
+      const std::unordered_map<int64_t, VarHandle>& sizeVars);
+
  private:
+  struct ShapeArg {
+    size_t idx;
+    VarHandle var;
+
+    ShapeArg(size_t i, VarHandle v) : idx(i), var(v) {}
+  };
+
+  struct KernelArg {
+    template <typename B>
+    KernelArg(B&& b) : bufferArg_(std::forward<B>(b)) {}
+
+    template <typename B, typename T>
+    KernelArg(B&& b, T&& sizes, T&& strides)
+        : bufferArg_(b),
+          sizeArgs_(std::forward<T>(sizes)),
+          strideArgs_(std::forward<T>(strides)) {}
+
+    const CodeGen::BufferArg& buffer() const {
+      return bufferArg_;
+    }
+
+    const std::vector<ShapeArg>& sizes() const {
+      return sizeArgs_;
+    }
+
+    const std::vector<ShapeArg>& strides() const {
+      return strideArgs_;
+    }
+
+    CodeGen::BufferArg bufferArg_;
+    std::vector<ShapeArg> sizeArgs_;
+    std::vector<ShapeArg> strideArgs_;
+  };
+
   int64_t n_inputs_ = 0;
-  std::vector<CodeGen::BufferArg> buffer_args_;
+  std::vector<KernelArg> kernelArgs_;
   std::vector<Tensor*> tensor_outputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
-  std::unordered_map<int64_t, Var> scalars_;
+  std::unordered_map<int64_t, VarHandle> scalars_;
   std::unique_ptr<CodeGen> codegen_;
   KernelArena kernel_arena_;
   BackendType backend_type_ = BackendType::kUninitialized;
@@ -151,6 +194,7 @@ class TensorExprKernel {
 TORCH_API int& GetTECudaPointwiseLoopLevels();
 TORCH_API int& GetTECudaPointwiseBlockCount();
 TORCH_API int& GetTECudaPointwiseBlockSize();
+TORCH_API void SetTexprFuserEnabled(bool val);
 
 } // namespace tensorexpr
 } // namespace jit

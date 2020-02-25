@@ -10,35 +10,35 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
 }
 
-Load::Load(const Buffer& buffer, const Expr& index, const Expr& mask)
+Load::Load(const Buffer& buffer, const Expr* index, const Expr* mask)
     : Load(
-          ChooseDtype(buffer.dtype(), index.dtype()),
-          buffer.data(),
+          ChooseDtype(buffer.dtype(), index->dtype()),
+          buffer.data().node(),
           index,
           mask) {}
 
 Load::Load(
     Dtype dtype,
-    const Var& base_handle,
-    const Expr& index,
-    const Expr& mask)
+    const Var* base_handle,
+    const Expr* index,
+    const Expr* mask)
     : ExprNodeBase(dtype),
       base_handle_(base_handle),
       index_(index),
       mask_(mask) {
-  CHECK_EQ(base_handle_.dtype(), kHandle);
-  CHECK_EQ(index.dtype().lanes(), mask.dtype().lanes());
-  CHECK_EQ(index.dtype().scalar_type(), kInt32);
+  CHECK_EQ(base_handle_->dtype(), kHandle);
+  CHECK_EQ(index->dtype().lanes(), mask->dtype().lanes());
+  CHECK_EQ(index->dtype().scalar_type(), kInt32);
 }
 
 Store::Store(
     const Buffer& buffer,
-    const Expr& index,
-    const Expr& value,
-    const Expr& mask)
-    : Store(buffer.data(), index, value, mask) {
-  CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
-  CHECK_EQ(buffer.dtype().scalar_type(), value.dtype().scalar_type());
+    const Expr* index,
+    const Expr* value,
+    const Expr* mask)
+    : Store(buffer.data().node(), index, value, mask) {
+  CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
+  CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
@@ -53,10 +53,10 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
-    const std::vector<Expr>& params) {
+    const std::vector<const Expr*>& params) {
   // TODO: check the op_type an dmake a real decision
   CHECK_GE(params.size(), 1ULL);
-  return params[0].dtype();
+  return params[0]->dtype();
 }
 
 int Intrinsics::OpArgCount(IntrinsicsOp op_type) {

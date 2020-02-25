@@ -40,8 +40,8 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   llvm::Type* int32Ty_;
   llvm::Type* floatTy_;
 
-  std::unordered_map<const BaseExprNode*, int> varToArg_;
-  std::unordered_map<const Variable*, llvm::Value*> varToVal_;
+  std::unordered_map<const Expr*, int> varToArg_;
+  std::unordered_map<const Var*, llvm::Value*> varToVal_;
 
   std::vector<void*> args_;
 
@@ -50,14 +50,14 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   llvm::Type* dtypeToLLVM(Dtype dtype);
   llvm::Type* dtypeToLLVMPtr(Dtype dtype);
   void emitWrapper(const std::vector<llvm::Type*>& params);
-  void emitKernel(const Stmt& stmt, const std::vector<llvm::Type*>& params);
+  void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
 
  public:
   explicit LLVMCodeGen(
-      const Stmt& stmt,
+      Stmt* stmt,
       const std::vector<BufferArg>& args,
       Dtype dtype = kInt32);
-  explicit LLVMCodeGen(const Stmt& stmt);
+  explicit LLVMCodeGen(Stmt* stmt);
 
   ~LLVMCodeGen() override {}
 
@@ -74,7 +74,7 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   void visit(const IntImm* v) override;
   void visit(const FloatImm* v) override;
   void visit(const Cast* v) override;
-  void visit(const Variable* v) override;
+  void visit(const Var* v) override;
   void visit(const Let* v) override;
   void visit(const LetStmt* v) override;
   void visit(const Ramp* v) override;

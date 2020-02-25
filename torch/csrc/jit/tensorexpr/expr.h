@@ -15,66 +15,66 @@ namespace jit {
 namespace tensorexpr {
 
 // The common base between all expression node.
-class Expr;
-class BaseExprNode : public KernelScopedObject {
+class ExprHandle;
+class Expr : public KernelScopedObject {
  public:
-  explicit BaseExprNode(Dtype dtype) : dtype_(dtype) {}
+  explicit Expr(Dtype dtype) : dtype_(dtype) {}
   Dtype dtype() const {
     return dtype_;
   }
   TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
-  virtual Expr accept_mutator(IRMutator* mutator) = 0;
+  virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
  private:
   Dtype dtype_;
 };
 
 // The common base between all statement node.
-class BaseStmtNode : public KernelScopedObject {
+class Stmt : public KernelScopedObject {
  public:
-  BaseStmtNode() {}
+  Stmt() {}
   TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
-  virtual Stmt accept_mutator(IRMutator* mutator) = 0;
+  virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 };
 
 // A CRTP pattern to accept visitors for children class,
 // and dispatch back to the children.
-template <class Op, class Base = BaseExprNode>
+template <class Op, class Base = Expr>
 class ExprNode : public Base {
  public:
   using ExprNodeBase = ExprNode<Op>;
   void accept(IRVisitor* visitor) const override {
     visitor->visit(static_cast<const Op*>(this));
   }
-  Expr accept_mutator(IRMutator* mutator) override;
+  const Expr* accept_mutator(IRMutator* mutator) const override;
   // pass the constructor to the base class
   using Base::Base;
 };
 
 template <class Op>
-class StmtNode : public BaseStmtNode {
+class StmtNode : public Stmt {
  public:
   using StmtNodeBase = StmtNode<Op>;
   void accept(IRVisitor* visitor) const override {
     visitor->visit(static_cast<const Op*>(this));
   }
-  Stmt accept_mutator(IRMutator* mutator) override;
+  Stmt* accept_mutator(IRMutator* mutator) override;
   StmtNode() {}
 };
 
 // A wrapper object to the underlying ExprNode.
 // Also serves the primary way to build and operate on other expressions.
-class TORCH_API Expr {
+class TORCH_API ExprHandle {
  public:
-  Expr() {}
-  explicit Expr(const BaseExprNode* node)
-      : base_expr_node_(const_cast<BaseExprNode*>(node)) {}
+  ExprHandle() {}
+  explicit ExprHandle(const Expr* node)
+      : base_expr_node_(const_cast<Expr*>(node)) {}
 
-  BaseExprNode* node() {
+  Expr* node() {
     return base_expr_node_;
   }
 
-  const BaseExprNode* node() const {
+  const Expr* node() const {
     return base_expr_node_;
   }
 
@@ -82,25 +82,8 @@ class TORCH_API Expr {
     return base_expr_node_ == nullptr;
   }
 
-  void accept(IRVisitor* visitor) const {
-    // TODO: Consider implement this without using recursion. Otherwise,
-    // if the expression tree is degenerate and too long, it could cause a
-    // stack overflow.
-    if (node() == nullptr) {
-      return;
-    }
-    node()->accept(visitor);
-  }
-
-  Expr accept_mutator(IRMutator* mutator) {
-    if (node() == nullptr) {
-      return Expr();
-    }
-    return node()->accept_mutator(mutator);
-  }
-
-  Expr(int v);
-  Expr(float v);
+  ExprHandle(int v);
+  ExprHandle(float v);
 
   template <class Op>
   Op* AsNode() {
@@ -109,7 +92,7 @@ class TORCH_API Expr {
 
   template <class Op>
   const Op* AsNode() const {
-    return const_cast<Expr*>(this)->AsNode<Op>();
+    return const_cast<ExprHandle*>(this)->AsNode<Op>();
   }
 
   Dtype dtype() const {
@@ -117,114 +100,73 @@ class TORCH_API Expr {
   }
 
   // Handling the math operators.
-  Expr operator+(const Expr& other) const;
-  Expr operator-(const Expr& other) const;
-  Expr operator*(const Expr& other) const;
-  Expr operator/(const Expr& other) const;
-  Expr operator==(const Expr& other) const;
-  Expr operator!=(const Expr& other) const;
-  Expr operator>(const Expr& other) const;
-  Expr operator>=(const Expr& other) const;
-  Expr operator<(const Expr& other) const;
-  Expr operator<=(const Expr& other) const;
+  ExprHandle operator+(const ExprHandle& other) const;
+  ExprHandle operator-(const ExprHandle& other) const;
+  ExprHandle operator*(const ExprHandle& other) const;
+  ExprHandle operator/(const ExprHandle& other) const;
+  ExprHandle operator==(const ExprHandle& other) const;
+  ExprHandle operator!=(const ExprHandle& other) const;
+  ExprHandle operator>(const ExprHandle& other) const;
+  ExprHandle operator>=(const ExprHandle& other) const;
+  ExprHandle operator<(const ExprHandle& other) const;
+  ExprHandle operator<=(const ExprHandle& other) const;
 
  private:
-  BaseExprNode* base_expr_node_ = nullptr;
-};
-
-class Stmt {
- public:
-  Stmt() {}
-  explicit Stmt(const BaseStmtNode* node)
-      : base_stmt_node_(const_cast<BaseStmtNode*>(node)) {}
-
-  BaseStmtNode* node() {
-    return base_stmt_node_;
-  }
-
-  const BaseStmtNode* node() const {
-    return base_stmt_node_;
-  }
-
-  void accept(IRVisitor* visitor) const {
-    if (node() == nullptr) {
-      return;
-    }
-    node()->accept(visitor);
-  }
-
-  Stmt accept_mutator(IRMutator* mutator) {
-    if (node() == nullptr) {
-      return Stmt();
-    }
-    return node()->accept_mutator(mutator);
-  }
-
-  bool empty() const {
-    return node() == nullptr;
-  }
-
-  template <class Op>
-  const Op* AsNode() const {
-    return dynamic_cast<const Op*>(this->node());
-  }
-
- private:
-  BaseStmtNode* base_stmt_node_ = nullptr;
+  Expr* base_expr_node_ = nullptr;
 };
 
 template <class Op, class Base>
-Expr ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) {
+const Expr* ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) const {
   ExprNode* this_mutable = const_cast<ExprNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
 
 template <class Op>
-Stmt StmtNode<Op>::accept_mutator(IRMutator* mutator) {
+Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
   StmtNode* this_mutable = const_cast<StmtNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
 
-inline bool same_node(const Expr& expr1, const Expr& expr2) {
-  return expr1.AsNode<BaseExprNode>() == expr2.AsNode<BaseExprNode>();
+inline bool same_node(const ExprHandle& expr1, const ExprHandle& expr2) {
+  return expr1.AsNode<Expr>() == expr2.AsNode<Expr>();
 }
 
-inline bool same_node(const Stmt& stmt1, const Stmt& stmt2) {
-  return stmt1.AsNode<BaseStmtNode>() == stmt2.AsNode<BaseStmtNode>();
+inline bool same_node(Stmt* stmt1, Stmt* stmt2) {
+  return stmt1 == stmt2;
 }
 
-TORCH_API Expr sin(const Expr& v);
-TORCH_API Expr cos(const Expr& v);
-TORCH_API Expr tan(const Expr& v);
-TORCH_API Expr asin(const Expr& v);
-TORCH_API Expr acos(const Expr& v);
-TORCH_API Expr atan(const Expr& v);
-TORCH_API Expr sinh(const Expr& v);
-TORCH_API Expr cosh(const Expr& v);
-TORCH_API Expr tanh(const Expr& v);
-TORCH_API Expr exp(const Expr& v);
-TORCH_API Expr expm1(const Expr& v);
-TORCH_API Expr fabs(const Expr& v);
-TORCH_API Expr log(const Expr& v);
-TORCH_API Expr log2(const Expr& v);
-TORCH_API Expr log10(const Expr& v);
-TORCH_API Expr log1p(const Expr& v);
-TORCH_API Expr erf(const Expr& v);
-TORCH_API Expr erfc(const Expr& v);
-TORCH_API Expr sqrt(const Expr& v);
-TORCH_API Expr rsqrt(const Expr& v);
-TORCH_API Expr ceil(const Expr& v);
-TORCH_API Expr floor(const Expr& v);
-TORCH_API Expr round(const Expr& v);
-TORCH_API Expr trunc(const Expr& v);
-TORCH_API Expr frac(const Expr& v);
-TORCH_API Expr lgamma(const Expr& v);
-TORCH_API Expr atan2(const Expr& v1, const Expr& v2);
-TORCH_API Expr pow(const Expr& v1, const Expr& v2);
-TORCH_API Expr fmod(const Expr& v1, const Expr& v2);
-TORCH_API Expr remainder(const Expr& v1, const Expr& v2);
+TORCH_API ExprHandle sin(const ExprHandle& v);
+TORCH_API ExprHandle cos(const ExprHandle& v);
+TORCH_API ExprHandle tan(const ExprHandle& v);
+TORCH_API ExprHandle asin(const ExprHandle& v);
+TORCH_API ExprHandle acos(const ExprHandle& v);
+TORCH_API ExprHandle atan(const ExprHandle& v);
+TORCH_API ExprHandle sinh(const ExprHandle& v);
+TORCH_API ExprHandle cosh(const ExprHandle& v);
+TORCH_API ExprHandle tanh(const ExprHandle& v);
+TORCH_API ExprHandle exp(const ExprHandle& v);
+TORCH_API ExprHandle expm1(const ExprHandle& v);
+TORCH_API ExprHandle fabs(const ExprHandle& v);
+TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle log2(const ExprHandle& v);
+TORCH_API ExprHandle log10(const ExprHandle& v);
+TORCH_API ExprHandle log1p(const ExprHandle& v);
+TORCH_API ExprHandle erf(const ExprHandle& v);
+TORCH_API ExprHandle erfc(const ExprHandle& v);
+TORCH_API ExprHandle sqrt(const ExprHandle& v);
+TORCH_API ExprHandle rsqrt(const ExprHandle& v);
+TORCH_API ExprHandle ceil(const ExprHandle& v);
+TORCH_API ExprHandle floor(const ExprHandle& v);
+TORCH_API ExprHandle round(const ExprHandle& v);
+TORCH_API ExprHandle trunc(const ExprHandle& v);
+TORCH_API ExprHandle frac(const ExprHandle& v);
+TORCH_API ExprHandle lgamma(const ExprHandle& v);
+TORCH_API ExprHandle atan2(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
 
-TORCH_API Expr ifThenElse(const Expr& c, const Expr& t, const Expr& f);
+TORCH_API ExprHandle ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
 } // namespace tensorexpr
 } // namespace jit

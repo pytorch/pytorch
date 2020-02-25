@@ -99,7 +99,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     for (size_t i = 0; i < args.size(); i++) {
       bind(buffer_args()[i], args[i]);
     }
-    stmt().accept(this);
+    stmt()->accept(this);
     eval_context_.clear();
     buffer_mapping_.clear();
     internal_buffers_.clear();
@@ -253,9 +253,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   template <typename Op>
   void visit_binary_op(const BinaryOpNode<Op>* v, bool option = false) {
-    v->lhs().accept(this);
+    v->lhs()->accept(this);
     Value lhs_v = value_;
-    v->rhs().accept(this);
+    v->rhs()->accept(this);
     Value rhs_v = value_;
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     IRNodeType expr_type = v->expr_type();
@@ -271,13 +271,13 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   void visit_compare_select_op(
       const CompareSelect* v,
       CompareSelectOperation cmp_op) {
-    v->lhs().accept(this);
+    v->lhs()->accept(this);
     Value lhs_v = value_;
-    v->rhs().accept(this);
+    v->rhs()->accept(this);
     Value rhs_v = value_;
-    v->ret_val1().accept(this);
+    v->ret_val1()->accept(this);
     Value ret_val1_v = value_;
-    v->ret_val2().accept(this);
+    v->ret_val2()->accept(this);
     Value ret_val2_v = value_;
 
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
@@ -302,9 +302,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const Let* v) override {
-    const Variable* var = v->var().AsNode<Variable>();
+    const Var* var = dynamic_cast<const Var*>(v->var());
     CHECK(var != nullptr);
-    v->value().accept(this);
+    v->value()->accept(this);
     Value value = value_;
     auto iter = eval_context_.find(var);
     // TODO: make the same value settable multiple times.
@@ -312,15 +312,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         << "var must not exist in the context before";
     eval_context_[var] = value_;
 
-    v->body().accept(this);
+    v->body()->accept(this);
 
     eval_context_.erase(var);
   }
 
   TORCH_API void visit(const LetStmt* v) override {
-    const Variable* var = v->var().AsNode<Variable>();
+    const Var* var = v->var();
     CHECK(var != nullptr);
-    v->value().accept(this);
+    v->value()->accept(this);
     Value value = value_;
     auto iter = eval_context_.find(var);
     // TODO: make the same value settable multiple times.
@@ -328,12 +328,12 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         << "var must not exist in the context before";
     eval_context_[var] = value_;
 
-    v->body().accept(this);
+    v->body()->accept(this);
 
     eval_context_.erase(var);
   }
 
-  TORCH_API void visit(const Variable* v) override {
+  TORCH_API void visit(const Var* v) override {
     auto iter = eval_context_.find(v);
     CHECK(iter != eval_context_.end())
         << "var must be defined in the context before";
@@ -341,10 +341,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const Cast* v) override {
-    const Expr& src_value = v->src_value();
-    src_value.accept(this);
+    const Expr* src_value = v->src_value();
+    src_value->accept(this);
     Dtype dst_dtype = v->dtype();
-    Dtype src_dtype = src_value.dtype();
+    Dtype src_dtype = src_value->dtype();
     CHECK_EQ(src_dtype.lanes(), dst_dtype.lanes());
     if (src_dtype != dst_dtype) {
       if (src_dtype == kFloat32 && dst_dtype == kInt32) {
@@ -366,25 +366,27 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const For* v) override {
-    const BaseExprNode* var_node = v->var().node();
-    v->start().accept(this);
+    const Expr* var_node = v->var();
+    v->start()->accept(this);
     int start = value_.as<int>();
-    v->stop().accept(this);
+    v->stop()->accept(this);
     int stop = value_.as<int>();
     auto iter = eval_context_.find(var_node);
     CHECK(iter == eval_context_.end())
         << "var in For must not exist in eval context";
     for (int i = start; i < stop; i++) {
       eval_context_[var_node] = Value(i);
-      v->body().accept(this);
+      if (v->body()) {
+        v->body()->accept(this);
+      }
     }
     eval_context_.erase(var_node);
   }
 
   TORCH_API void visit(const Ramp* v) override {
-    v->base().accept(this);
+    v->base()->accept(this);
     int base = value().as<int>();
-    v->stride().accept(this);
+    v->stride()->accept(this);
     int stride = value().as<int>();
     int lanes = v->lanes();
 
@@ -397,7 +399,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const Broadcast* v) override {
-    v->value().accept(this);
+    v->value()->accept(this);
     Value value = this->value();
     int lanes = v->lanes();
     if (value.dtype() == kInt32) {
@@ -412,24 +414,24 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const IfThenElse* v) override {
-    v->condition().accept(this);
+    v->condition()->accept(this);
     if (value_.as<int>()) {
-      v->true_value().accept(this);
+      v->true_value()->accept(this);
     } else {
-      v->false_value().accept(this);
+      v->false_value()->accept(this);
     }
   }
 
   TORCH_API void visit(const Load* v) override {
-    const Variable* base_node = v->base_handle().node();
+    const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     CHECK(iter != buffer_mapping_.end())
         << "missing buffer binding: " << base_node->name_hint();
     void* ptr = iter->second;
 
-    v->index().accept(this);
+    v->index()->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask().accept(this);
+    v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     Dtype v_sdtype = v->dtype().scalar_type();
     if (v_sdtype == kFloat32) {
@@ -456,19 +458,19 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   TORCH_API void visit(const Store* v) override {
-    const Variable* base_node = v->base_handle().node();
+    const Var* base_node = v->base_handle();
     auto iter = buffer_mapping_.find(base_node);
     CHECK(iter != buffer_mapping_.end());
     void* ptr = iter->second;
 
-    v->index().accept(this);
+    v->index()->accept(this);
     std::vector<int> index = value().as_vec<int>();
-    v->mask().accept(this);
+    v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     CHECK_EQ(index.size(), mask.size());
-    Dtype v_sdtype = v->value().dtype().scalar_type();
+    Dtype v_sdtype = v->value()->dtype().scalar_type();
     if (v_sdtype == kFloat32) {
-      v->value().accept(this);
+      v->value()->accept(this);
       std::vector<float> value = this->value().as_vec<float>();
       CHECK_EQ(index.size(), value.size());
       float* ptr_f = static_cast<float*>(ptr);
@@ -478,7 +480,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         }
       }
     } else if (v_sdtype == kInt32) {
-      v->value().accept(this);
+      v->value()->accept(this);
       std::vector<int> value = this->value().as_vec<int>();
       CHECK_EQ(index.size(), value.size());
       int* ptr_i = static_cast<int*>(ptr);
@@ -499,7 +501,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   TORCH_API void visit(const Intrinsics* v) override {
     std::vector<Value> values(v->nparams());
     for (int i = 0; i < v->nparams(); i++) {
-      v->param(i).accept(this);
+      v->param(i)->accept(this);
       values[i] = this->value();
     }
     std::vector<float> v1;
@@ -527,11 +529,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   void visit(const Allocate* v) override {
-    const Variable* buffer_var = v->buffer_var().AsNode<Variable>();
-    std::vector<Expr> dims = v->dims();
+    const Var* buffer_var = v->buffer_var();
+    std::vector<const Expr*> dims = v->dims();
     int total_byte_size = v->dtype().byte_size();
     for (size_t i = 0; i < dims.size(); i++) {
-      dims[i].accept(this);
+      dims[i]->accept(this);
       total_byte_size *= value_.as<int>();
     }
     int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
@@ -547,7 +549,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   void visit(const Free* v) override {
-    const Variable* buffer_var = v->buffer_var().AsNode<Variable>();
+    const Var* buffer_var = v->buffer_var();
     int count = internal_buffers_.erase(buffer_var);
     if (count == 0) {
       throw std::runtime_error(
@@ -557,11 +559,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   void visit(const Cond* v) override {
-    v->condition().accept(this);
+    v->condition()->accept(this);
     if (value().as<int>()) {
-      v->true_stmt().accept(this);
+      if (v->true_stmt()) {
+        v->true_stmt()->accept(this);
+      }
     } else {
-      v->false_stmt().accept(this);
+      if (v->false_stmt()) {
+        v->false_stmt()->accept(this);
+      }
     }
   }
 
@@ -646,36 +652,36 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   Value value_;
-  std::unordered_map<const BaseExprNode*, Value> eval_context_;
-  std::unordered_map<const BaseExprNode*, void*> buffer_mapping_;
-  std::unordered_map<const Variable*, std::unique_ptr<std::vector<int>>>
+  std::unordered_map<const Expr*, Value> eval_context_;
+  std::unordered_map<const Expr*, void*> buffer_mapping_;
+  std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
 };
 
-using VarMapping = std::vector<std::pair<Expr, Expr>>;
+using VarMapping = std::vector<std::pair<ExprHandle, ExprHandle>>;
 
 class VarSubMutator : public IRMutator {
  public:
   VarSubMutator(const VarMapping& var_mapping) {
     for (const auto& entry : var_mapping) {
-      const Expr& key = entry.first;
-      const Expr& value = entry.second;
-      const Variable* key_var = key.AsNode<Variable>();
+      const ExprHandle& key = entry.first;
+      const ExprHandle& value = entry.second;
+      const Var* key_var = key.AsNode<Var>();
       CHECK(key_var != nullptr);
       var_mapping_[key_var] = value;
     }
   }
 
-  Expr mutate(const Variable* var) override {
+  const Expr* mutate(const Var* var) override {
     auto iter = var_mapping_.find(var);
     if (iter == var_mapping_.end()) {
-      return Expr(const_cast<Variable*>(var));
+      return const_cast<Var*>(var);
     }
-    return iter->second;
+    return iter->second.node();
   }
 
  private:
-  std::unordered_map<const Variable*, Expr> var_mapping_;
+  std::unordered_map<const Var*, ExprHandle> var_mapping_;
 };
 
 template <class CodeGenType>
@@ -685,13 +691,13 @@ class ExprEval {
   using CallArg = CodeGen::CallArg;
 
   template <typename... Ts>
-  ExprEval(const Expr& expr, Ts... ts) : ExprEval(expr, {BufferArg(ts)...}) {}
+  ExprEval(const ExprHandle& expr, Ts... ts) : ExprEval(expr, {BufferArg(ts)...}) {}
 
-  ExprEval(const Expr& expr, const std::vector<BufferArg>& buffer_args)
+  ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    Stmt store_stmt = Store::make(ret_buf.data(), 0, expr);
+    Stmt* store_stmt = Store::make(ret_buf.data(), 0, expr);
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -739,12 +745,12 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline Expr Substitute(Expr* expr, const VarMapping& var_mapping) {
+inline ExprHandle Substitute(ExprHandle* expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
-  return expr->accept_mutator(&var_sub);
+  return ExprHandle(expr->node()->accept_mutator(&var_sub));
 }
 
-inline Stmt Substitute(Stmt* stmt, const VarMapping& var_mapping) {
+inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }

@@ -38,6 +38,8 @@ Works only with Python3.\n A few examples:
                         help='num of block for Cuda pointwise operations')
     parser.add_argument('--cuda_pointwise_block_size', type=int, default=None,
                         help='num of blocks for Cuda pointwise operations')
+    parser.add_argument('--cuda_fuser', type=str, default='te',
+                        help='The Cuda fuser backend to use: one of {te, old, none}')
 
     args = parser.parse_args()
 

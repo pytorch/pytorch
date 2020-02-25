@@ -21,6 +21,7 @@ class ElementBench(framework.Benchmark):
         self.d3 = self.rand([N], device=device, requires_grad=self.requires_grad)
         self.d4 = self.rand([N], device=device, requires_grad=self.requires_grad)
         self.inputs = [self.d1, self.d2, self.d3, self.d4]
+        self.deterministic = ('rand' not in self.op_str)
 
     def _eval(self, d1, d2, d3, d4, binary_op, unary_op):
         if not binary_op:
@@ -69,6 +70,9 @@ class ElementBench(framework.Benchmark):
             else:
                 sol_count = 1 + 1
                 algorithmic_count = 1 + 1
+            if 'rand' in self.op_str:
+                sol_count = 1
+                algorithmic_count = 1
         else:
             if self.split_input:
                 sol_count = (input_count + 1) + (1 + input_count)
@@ -76,6 +80,9 @@ class ElementBench(framework.Benchmark):
             else:
                 sol_count = 1 + 1
                 algorithmic_count = 1 + 1
+            if 'rand' in self.op_str:
+                sol_count = 1
+                algorithmic_count = 1
 
         buffer_size = self.N * 4
         return {'sol': buffer_size * sol_count, 'algorithmic': buffer_size * algorithmic_count}
@@ -100,6 +107,7 @@ def register_element_ops():
         ["exp", lambda x: torch.exp(x), lambda x: np.exp(x)],
         ["sin", lambda x: torch.sin(x), lambda x: np.sin(x)],
         ["cos", lambda x: torch.cos(x), lambda x: np.cos(x)],
+        ["rand_like", lambda x: torch.rand_like(x), lambda x: np.random.rand(*x.shape)],
     ]
     
     for split_input, binary_op in itertools.product([True, False], binary_op_list):

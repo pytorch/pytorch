@@ -1,9 +1,14 @@
-#include <stdexcept>
 #include "torch/csrc/jit/tensorexpr/mem_arena.h"
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+namespace {
+// Define in an anonymous namespace to hide this symbol from other compilation
+// units
+thread_local KernelArena* current_arena = nullptr;
+}
 
 KernelArena::~KernelArena() {
   for (KernelScopedObject* p : kernel_objects_) {
@@ -12,8 +17,8 @@ KernelArena::~KernelArena() {
 }
 
 KernelScopedObject::KernelScopedObject() {
-  KernelArena& kernel = KernelArena::GetCurrentKernelArena();
-  kernel.kernel_objects_.push_back(this);
+  KernelArena* kernel = KernelArena::GetCurrentKernelArena();
+  kernel->kernel_objects_.push_back(this);
 }
 
 static std::vector<KernelArena*>& GetKernelArenaStack() {
@@ -21,35 +26,29 @@ static std::vector<KernelArena*>& GetKernelArenaStack() {
   return kernel_arena_stack;
 }
 
-KernelArena& KernelArena::GetCurrentKernelArena() {
-  std::vector<KernelArena*>& kernel_arena_stack = GetKernelArenaStack();
-  if (kernel_arena_stack.empty()) {
-    throw std::runtime_error(
-        "A KernelScope must be bound before creating KernelScopedObject");
-  }
-  return *kernel_arena_stack.back();
+void KernelArena::SetCurrentKernelArena(KernelArena *new_kernel_arena) {
+  current_arena = new_kernel_arena;
 }
 
-KernelScope::KernelScope() : owning_kernel_arena_(true) {
-  kernel_arena_ = new KernelArena;
-  GetKernelArenaStack().push_back(kernel_arena_);
+KernelArena* KernelArena::GetCurrentKernelArena() {
+  return current_arena;
 }
 
-KernelScope::KernelScope(KernelArena& kernel_arena)
-    : owning_kernel_arena_(false) {
-  kernel_arena_ = &kernel_arena;
-  GetKernelArenaStack().push_back(&kernel_arena);
+KernelScope::KernelScope() : owning_(true) {
+  old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
+  KernelArena::SetCurrentKernelArena(new KernelArena);
 }
 
-KernelScope::~KernelScope() noexcept(false) {
-  std::vector<KernelArena*>& kernel_arena_stack = GetKernelArenaStack();
-  if (kernel_arena_ != kernel_arena_stack.back()) {
-    throw std::runtime_error("Mismatch KernelScope and kernel");
+KernelScope::KernelScope(KernelArena* arena_) : owning_(false) {
+  old_kernel_arena_ = KernelArena::GetCurrentKernelArena();
+  KernelArena::SetCurrentKernelArena(arena_);
+}
+
+KernelScope::~KernelScope() {
+  if (owning_) {
+    delete KernelArena::GetCurrentKernelArena();
   }
-  if (owning_kernel_arena_) {
-    delete kernel_arena_;
-  }
-  kernel_arena_stack.pop_back();
+  KernelArena::SetCurrentKernelArena(old_kernel_arena_);
 }
 
 } // namespace tensorexpr

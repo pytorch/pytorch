@@ -50,11 +50,11 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #endif
 }
 
-LLVMCodeGen::LLVMCodeGen(const Stmt& stmt)
+LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
     : LLVMCodeGen(stmt, std::vector<BufferArg>()) {}
 
 LLVMCodeGen::LLVMCodeGen(
-    const Stmt& stmt,
+    Stmt* stmt,
     const std::vector<BufferArg>& args,
     Dtype dtype)
     : CodeGen(stmt, args),
@@ -151,14 +151,14 @@ void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
 }
 
 void LLVMCodeGen::emitKernel(
-    const Stmt& stmt,
+    Stmt* stmt,
     const std::vector<llvm::Type*>& params) {
   // Set insert point to the real function.
   bb_ = llvm::BasicBlock::Create(getContext(), "entry", fn_);
   irb_.SetInsertPoint(bb_);
 
   // Compile the kernel.
-  stmt.accept(this);
+  stmt->accept(this);
   irb_.CreateRet(value_);
 
 #if DEBUG_PRINT
@@ -216,10 +216,10 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
 // TODO: The binary ops are copypasta.
 
 void LLVMCodeGen::visit(const Add* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
   bool rfp = rhs->getType()->isFloatingPointTy();
 
@@ -234,10 +234,10 @@ void LLVMCodeGen::visit(const Add* v) {
 }
 
 void LLVMCodeGen::visit(const Sub* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
   bool rfp = rhs->getType()->isFloatingPointTy();
 
@@ -252,10 +252,10 @@ void LLVMCodeGen::visit(const Sub* v) {
 }
 
 void LLVMCodeGen::visit(const Mul* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
   bool rfp = rhs->getType()->isFloatingPointTy();
 
@@ -270,10 +270,10 @@ void LLVMCodeGen::visit(const Mul* v) {
 }
 
 void LLVMCodeGen::visit(const Div* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
   bool rfp = rhs->getType()->isFloatingPointTy();
 
@@ -292,9 +292,9 @@ void LLVMCodeGen::visit(const Mod* v) {
 }
 
 void LLVMCodeGen::visit(const Max* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
 
   if (v->dtype() == kInt32) {
@@ -313,9 +313,9 @@ void LLVMCodeGen::visit(const Max* v) {
 }
 
 void LLVMCodeGen::visit(const Min* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
 
   if (v->dtype() == kInt32) {
@@ -334,16 +334,16 @@ void LLVMCodeGen::visit(const Min* v) {
 }
 
 void LLVMCodeGen::visit(const CompareSelect* v) {
-  v->lhs().accept(this);
+  v->lhs()->accept(this);
   auto lhs = this->value_;
-  v->rhs().accept(this);
+  v->rhs()->accept(this);
   auto rhs = this->value_;
-  v->ret_val1().accept(this);
+  v->ret_val1()->accept(this);
   auto retval1 = this->value_;
-  v->ret_val2().accept(this);
+  v->ret_val2()->accept(this);
   auto retval2 = this->value_;
 
-  auto type_used = v->lhs().dtype();
+  auto type_used = v->lhs()->dtype();
 
   llvm::Value* cmp_;
   CompareSelectOperation cmp_op_ = v->compare_select_op();
@@ -411,7 +411,7 @@ void LLVMCodeGen::visit(const FloatImm* v) {
 }
 
 void LLVMCodeGen::visit(const Cast* v) {
-  v->src_value().accept(this);
+  v->src_value()->accept(this);
 
   llvm::Type* dstType = nullptr;
   if (v->dtype().scalar_type() == kInt32) {
@@ -425,12 +425,12 @@ void LLVMCodeGen::visit(const Cast* v) {
   }
 
   // Scalar casts
-  if (v->dtype() == kInt32 && v->src_value().dtype() == kFloat32) {
+  if (v->dtype() == kInt32 && v->src_value()->dtype() == kFloat32) {
     value_ = irb_.CreateFPToSI(value_, dstType);
     return;
   }
 
-  if (v->dtype() == kFloat32 && v->src_value().dtype() == kInt32) {
+  if (v->dtype() == kFloat32 && v->src_value()->dtype() == kInt32) {
     value_ = irb_.CreateSIToFP(value_, dstType);
     return;
   }
@@ -438,7 +438,7 @@ void LLVMCodeGen::visit(const Cast* v) {
   LOG(FATAL) << "Unsupported cast!";
 }
 
-void LLVMCodeGen::visit(const Variable* v) {
+void LLVMCodeGen::visit(const Var* v) {
   if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
     auto arg = fn_->arg_begin() + idx;
@@ -449,16 +449,16 @@ void LLVMCodeGen::visit(const Variable* v) {
 }
 
 void LLVMCodeGen::visit(const Let* v) {
-  const Variable* var = v->var().AsNode<Variable>();
+  const Var* var = dynamic_cast<const Var*>(v->var());
   CHECK(var != nullptr);
-  v->value().accept(this);
+  v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
     varToVal_.emplace(var, value);
   } else {
     throw std::runtime_error("var should not exist before");
   }
-  v->body().accept(this);
+  v->body()->accept(this);
   if (varToVal_.count(var)) {
     varToVal_.erase(var);
   } else {
@@ -468,16 +468,16 @@ void LLVMCodeGen::visit(const Let* v) {
 
 // TODO: refactor this and merge with Let
 void LLVMCodeGen::visit(const LetStmt* v) {
-  const Variable* var = v->var().AsNode<Variable>();
+  const Var* var = v->var();
   CHECK(var != nullptr);
-  v->value().accept(this);
+  v->value()->accept(this);
   auto value = value_;
   if (!varToVal_.count(var)) {
     varToVal_.emplace(var, value);
   } else {
     throw std::runtime_error("var should not exist before");
   }
-  v->body().accept(this);
+  v->body()->accept(this);
   if (varToVal_.count(var)) {
     varToVal_.erase(var);
   } else {
@@ -486,9 +486,9 @@ void LLVMCodeGen::visit(const LetStmt* v) {
 }
 
 void LLVMCodeGen::visit(const Ramp* v) {
-  v->base().accept(this);
+  v->base()->accept(this);
   auto base = this->value_;
-  v->stride().accept(this);
+  v->stride()->accept(this);
   auto stride = this->value_;
   int lanes = v->lanes();
 
@@ -542,15 +542,15 @@ llvm::Value* LLVMCodeGen::emitMaskedLoad(
 }
 
 void LLVMCodeGen::visit(const Load* v) {
-  v->base_handle().accept(this);
+  v->base_handle()->accept(this);
   auto base = this->value_;
-  v->index().accept(this);
+  v->index()->accept(this);
   auto idx = this->value_;
-  v->mask().accept(this);
+  v->mask()->accept(this);
   auto mask = this->value_;
 
   if (v->dtype().lanes() == 1) {
-    auto* maskimm = v->mask().AsNode<IntImm>();
+    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       value_ = emitUnmaskedLoad(base, idx);
     } else {
@@ -568,18 +568,18 @@ void LLVMCodeGen::visit(const Load* v) {
 
   // Detect whether the vector mask is all true
   bool unmasked_load = false;
-  auto* mask_broadcast = v->mask().AsNode<Broadcast>();
+  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
   if (mask_broadcast) {
-    auto* broadcast_imm = mask_broadcast->value().AsNode<IntImm>();
+    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
     if (broadcast_imm && broadcast_imm->value() == 1) {
       unmasked_load = true;
     }
   }
 
   // Handle the case where the load is contiguous and unmasked efficiently
-  auto* idx_ramp = v->index().AsNode<Ramp>();
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
   if (unmasked_load && idx_ramp) {
-    auto* stride_imm = idx_ramp->stride().AsNode<IntImm>();
+    auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0ULL});
       auto addr = irb_.CreateGEP(base, first_idx);
@@ -609,7 +609,7 @@ void LLVMCodeGen::visit(const Load* v) {
 
 void LLVMCodeGen::visit(const For* v) {
   // Create "start" value.
-  v->start().accept(this);
+  v->start()->accept(this);
   auto start = this->value_;
 
   // Create loop preheader and body.
@@ -621,14 +621,16 @@ void LLVMCodeGen::visit(const For* v) {
   // Set up phi node for index variable.
   auto idx = irb_.CreatePHI(int32Ty_, 2);
   idx->addIncoming(start, preheader);
-  varToVal_.emplace(v->var().node(), idx);
+  varToVal_.emplace(v->var(), idx);
 
   // Codegen the body.
-  v->body().accept(this);
+  if (v->body()) {
+    v->body()->accept(this);
+  }
 
   // Create the stop condition. and "after" block.
   auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(int32Ty_, 1));
-  v->stop().accept(this);
+  v->stop()->accept(this);
   auto stop = this->value_;
   auto cond = irb_.CreateICmpSLT(inc, stop);
 
@@ -643,7 +645,7 @@ void LLVMCodeGen::visit(const For* v) {
 
 void LLVMCodeGen::visit(const Block* v) {
   for (int i = 0; i < v->nstmts(); i++) {
-    v->stmt(i).accept(this);
+    v->stmt(i)->accept(this);
   }
 }
 
@@ -680,19 +682,19 @@ void LLVMCodeGen::emitMaskedStore(
 }
 
 void LLVMCodeGen::visit(const Store* v) {
-  v->base_handle().accept(this);
+  v->base_handle()->accept(this);
   auto base = this->value_;
-  v->index().accept(this);
+  v->index()->accept(this);
   auto idx = this->value_;
-  v->mask().accept(this);
+  v->mask()->accept(this);
   auto mask = this->value_;
-  v->value().accept(this);
+  v->value()->accept(this);
   auto val = this->value_;
 
   value_ = llvm::ConstantInt::get(int32Ty_, 0);
 
-  if (v->value().dtype().lanes() == 1) {
-    auto* maskimm = v->mask().AsNode<IntImm>();
+  if (v->value()->dtype().lanes() == 1) {
+    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
     if (maskimm && maskimm->value() == 1) {
       emitUnmaskedStore(base, idx, val);
     } else {
@@ -703,18 +705,18 @@ void LLVMCodeGen::visit(const Store* v) {
 
   // Detect whether the vector mask is all true
   bool unmasked_store = false;
-  auto* mask_broadcast = v->mask().AsNode<Broadcast>();
+  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
   if (mask_broadcast) {
-    auto* broadcast_imm = mask_broadcast->value().AsNode<IntImm>();
+    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
     if (broadcast_imm && broadcast_imm->value() == 1) {
       unmasked_store = true;
     }
   }
 
   // Handle the case where the store is contiguous and unmasked efficiently
-  auto* idx_ramp = v->index().AsNode<Ramp>();
+  auto* idx_ramp = dynamic_cast<const Ramp*>(v->index());
   if (unmasked_store && idx_ramp) {
-    auto* stride_imm = idx_ramp->stride().AsNode<IntImm>();
+    auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       auto first_idx = irb_.CreateExtractElement(idx, uint64_t{0});
       auto addr = irb_.CreateGEP(base, first_idx);
@@ -726,7 +728,7 @@ void LLVMCodeGen::visit(const Store* v) {
   }
 
   // Fallback to a scalar implementation
-  for (int i = 0; i < v->value().dtype().lanes(); ++i) {
+  for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     auto sub_val = irb_.CreateExtractElement(val, i);
     if (unmasked_store) {
@@ -739,13 +741,13 @@ void LLVMCodeGen::visit(const Store* v) {
 }
 
 void LLVMCodeGen::visit(const Broadcast* v) {
-  v->value().accept(this);
+  v->value()->accept(this);
   int lanes = v->lanes();
   value_ = irb_.CreateVectorSplat(lanes, value_);
 }
 
 void LLVMCodeGen::visit(const IfThenElse* v) {
-  v->condition().accept(this);
+  v->condition()->accept(this);
   llvm::Value* condition = value_;
   llvm::Value* c =
       irb_.CreateICmpNE(condition, llvm::ConstantInt::get(int32Ty_, 0));
@@ -756,13 +758,13 @@ void LLVMCodeGen::visit(const IfThenElse* v) {
   irb_.CreateCondBr(c, then_block, else_block);
 
   irb_.SetInsertPoint(then_block);
-  v->true_value().accept(this);
+  v->true_value()->accept(this);
   llvm::Value* then_val = value_;
   then_block = irb_.GetInsertBlock();
   irb_.CreateBr(end_block);
 
   irb_.SetInsertPoint(else_block);
-  v->false_value().accept(this);
+  v->false_value()->accept(this);
   llvm::Value* else_val = value_;
   else_block = irb_.GetInsertBlock();
   irb_.CreateBr(end_block);
@@ -793,7 +795,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \
-    v->params().front().accept(this);                   \
+    v->params().front()->accept(this);                   \
     value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
     return;                                             \
   } break;
@@ -812,7 +814,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
 #undef UNARY_INTRIN_CASE
 
     case kRsqrt: {
-      v->params().front().accept(this);
+      v->params().front()->accept(this);
       value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
       llvm::Value* constant = llvm::ConstantFP::get(floatTy_, 1.0);
       if (v->dtype().lanes() > 1) {
@@ -857,13 +859,13 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
 #undef BINARY_MATH_CASE
 
     default: {
-      LOG(FATAL) << "Unimplemented: Intrinsics: " << Expr(v);
+      LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
     } break;
   }
 
   std::vector<llvm::Value*> params;
   for (auto& p : v->params()) {
-    p.accept(this);
+    p->accept(this);
     params.push_back(value_);
   }
 

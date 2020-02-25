@@ -6,171 +6,171 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-Expr Expr::operator+(const Expr& other) const {
+ExprHandle ExprHandle::operator+(const ExprHandle& other) const {
   return Add::make(*this, other);
 }
 
-Expr Expr::operator-(const Expr& other) const {
+ExprHandle ExprHandle::operator-(const ExprHandle& other) const {
   return Sub::make(*this, other);
 }
 
-Expr Expr::operator*(const Expr& other) const {
+ExprHandle ExprHandle::operator*(const ExprHandle& other) const {
   return Mul::make(*this, other);
 }
 
-Expr Expr::operator/(const Expr& other) const {
+ExprHandle ExprHandle::operator/(const ExprHandle& other) const {
   return Div::make(*this, other);
 }
 
-Expr Expr::operator==(const Expr& other) const {
+ExprHandle ExprHandle::operator==(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kEQ);
 }
 
-Expr Expr::operator!=(const Expr& other) const {
+ExprHandle ExprHandle::operator!=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kNE);
 }
 
-Expr Expr::operator>(const Expr& other) const {
+ExprHandle ExprHandle::operator>(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kGT);
 }
 
-Expr Expr::operator>=(const Expr& other) const {
+ExprHandle ExprHandle::operator>=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kGE);
 }
 
-Expr Expr::operator<(const Expr& other) const {
+ExprHandle ExprHandle::operator<(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLT);
 }
 
-Expr Expr::operator<=(const Expr& other) const {
+ExprHandle ExprHandle::operator<=(const ExprHandle& other) const {
   return CompareSelect::make(*this, other, CompareSelectOperation::kLE);
 }
 
-Expr::Expr(int v) : Expr(IntImm::make(v)) {}
+ExprHandle::ExprHandle(int v) : ExprHandle(IntImm::make(v)) {}
 
-Expr::Expr(float v) : Expr(FloatImm::make(v)) {}
+ExprHandle::ExprHandle(float v) : ExprHandle(FloatImm::make(v)) {}
 
-Expr sin(const Expr& v) {
+ExprHandle sin(const ExprHandle& v) {
   return Intrinsics::make(kSin, v);
 }
 
-Expr cos(const Expr& v) {
+ExprHandle cos(const ExprHandle& v) {
   return Intrinsics::make(kCos, v);
 }
 
-Expr tan(const Expr& v) {
+ExprHandle tan(const ExprHandle& v) {
   return Intrinsics::make(kTan, v);
 }
 
-Expr asin(const Expr& v) {
+ExprHandle asin(const ExprHandle& v) {
   return Intrinsics::make(kAsin, v);
 }
 
-Expr acos(const Expr& v) {
+ExprHandle acos(const ExprHandle& v) {
   return Intrinsics::make(kAcos, v);
 }
 
-Expr atan(const Expr& v) {
+ExprHandle atan(const ExprHandle& v) {
   return Intrinsics::make(kAtan, v);
 }
 
-Expr sinh(const Expr& v) {
+ExprHandle sinh(const ExprHandle& v) {
   return Intrinsics::make(kSinh, v);
 }
 
-Expr cosh(const Expr& v) {
+ExprHandle cosh(const ExprHandle& v) {
   return Intrinsics::make(kCosh, v);
 }
 
-Expr tanh(const Expr& v) {
+ExprHandle tanh(const ExprHandle& v) {
   return Intrinsics::make(kTanh, v);
 }
 
-Expr exp(const Expr& v) {
+ExprHandle exp(const ExprHandle& v) {
   return Intrinsics::make(kExp, v);
 }
 
-Expr expm1(const Expr& v) {
+ExprHandle expm1(const ExprHandle& v) {
   return Intrinsics::make(kExpm1, v);
 }
 
-Expr fabs(const Expr& v) {
+ExprHandle fabs(const ExprHandle& v) {
   return Intrinsics::make(kFabs, v);
 }
 
-Expr log(const Expr& v) {
+ExprHandle log(const ExprHandle& v) {
   return Intrinsics::make(kLog, v);
 }
 
-Expr log2(const Expr& v) {
+ExprHandle log2(const ExprHandle& v) {
   return Intrinsics::make(kLog2, v);
 }
 
-Expr log10(const Expr& v) {
+ExprHandle log10(const ExprHandle& v) {
   return Intrinsics::make(kLog10, v);
 }
 
-Expr log1p(const Expr& v) {
+ExprHandle log1p(const ExprHandle& v) {
   return Intrinsics::make(kLog1p, v);
 }
 
-Expr erf(const Expr& v) {
+ExprHandle erf(const ExprHandle& v) {
   return Intrinsics::make(kErf, v);
 }
 
-Expr erfc(const Expr& v) {
+ExprHandle erfc(const ExprHandle& v) {
   return Intrinsics::make(kErfc, v);
 }
 
-Expr sqrt(const Expr& v) {
+ExprHandle sqrt(const ExprHandle& v) {
   return Intrinsics::make(kSqrt, v);
 }
 
-Expr rsqrt(const Expr& v) {
+ExprHandle rsqrt(const ExprHandle& v) {
   return Intrinsics::make(kRsqrt, v);
 }
 
-Expr ceil(const Expr& v) {
+ExprHandle ceil(const ExprHandle& v) {
   return Intrinsics::make(kCeil, v);
 }
 
-Expr floor(const Expr& v) {
+ExprHandle floor(const ExprHandle& v) {
   return Intrinsics::make(kFloor, v);
 }
 
-Expr round(const Expr& v) {
+ExprHandle round(const ExprHandle& v) {
   return Intrinsics::make(kRound, v);
 }
 
-Expr trunc(const Expr& v) {
+ExprHandle trunc(const ExprHandle& v) {
   return Intrinsics::make(kTrunc, v);
 }
 
-Expr frac(const Expr& v) {
+ExprHandle frac(const ExprHandle& v) {
   return Intrinsics::make(kFrac, v);
 }
 
-Expr lgamma(const Expr& v) {
+ExprHandle lgamma(const ExprHandle& v) {
   return Intrinsics::make(kLgamma, v);
 }
 
-Expr atan2(const Expr& v1, const Expr& v2) {
+ExprHandle atan2(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kAtan2, v1, v2);
 }
 
-Expr pow(const Expr& v1, const Expr& v2) {
+ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kPow, v1, v2);
 }
 
-Expr fmod(const Expr& v1, const Expr& v2) {
+ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kFmod, v1, v2);
 }
 
-Expr remainder(const Expr& v1, const Expr& v2) {
+ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kRemainder, v1, v2);
 }
 
-Expr ifThenElse(const Expr& c, const Expr& t, const Expr& f) {
+ExprHandle ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f) {
   return IfThenElse::make(c, t, f);
 }
 

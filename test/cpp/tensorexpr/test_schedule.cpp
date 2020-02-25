@@ -22,21 +22,21 @@ using namespace torch::jit::tensorexpr::schedule;
 void testExprSimple01() {
   KernelScope kernel_scope;
   Tensor* tensor =
-      Compute("f", {{16, "X"}, {5, "y"}}, [](const Var& x, const Var& y) {
-        return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      Compute("f", {{16, "X"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
-  Var x = tensor->function()->arg(0);
-  Var y = tensor->function()->arg(1);
+  VarHandle x = tensor->function()->arg(0);
+  VarHandle y = tensor->function()->arg(1);
   Schedule sch = Schedule::make({tensor});
-  Var x_outer;
-  Var x_inner;
-  Var x_tail;
+  VarHandle x_outer;
+  VarHandle x_inner;
+  VarHandle x_tail;
   TensorOperation* tail_op;
   tensor->SplitWithTail(x, 2, true, &x_outer, &x_inner, &x_tail, &tail_op);
 
-  Var x_2;
-  Var x_1;
-  Var x_tail_2;
+  VarHandle x_2;
+  VarHandle x_1;
+  VarHandle x_tail_2;
   TensorOperation* tail_op_2;
   tensor->SplitWithTail(x_outer, 2, true, &x_2, &x_1, &x_tail_2, &tail_op_2);
 }
@@ -44,13 +44,13 @@ void testExprSimple01() {
 void testExprLower01() {
   KernelScope kernel_scope;
   Tensor* tensor =
-      Compute("f", {{16, "x"}, {5, "y"}}, [](const Var& x, const Var& y) {
-        return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+      Compute("f", {{16, "x"}, {5, "y"}}, [](const VarHandle& x, const VarHandle& y) {
+        return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
       });
-  Var x = tensor->function()->arg(0);
-  Var y = tensor->function()->arg(1);
+  VarHandle x = tensor->function()->arg(0);
+  VarHandle y = tensor->function()->arg(1);
   Schedule sch = Schedule::make({tensor});
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
   std::ostringstream oss;
   oss << stmt;
   ASSERT_GT(oss.str().size(), 20);
@@ -59,34 +59,34 @@ void testExprLower01() {
 
 void testExprSimple02() {
   KernelScope kernel_scope;
-  auto func = [](const Expr& x, const Expr& y) {
-    return Expr(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
+  auto func = [](const ExprHandle& x, const ExprHandle& y) {
+    return ExprHandle(1.0f) + cast<float>(x) * x + cast<float>(y) * y;
   };
   Tensor* tensor = Compute("f", {{26, "x"}, {5, "y"}}, func);
-  Var x = tensor->function()->arg(0);
-  Var y = tensor->function()->arg(1);
+  VarHandle x = tensor->function()->arg(0);
+  VarHandle y = tensor->function()->arg(1);
   Schedule sch = Schedule::make({tensor});
-  Var x_outer;
-  Var x_inner;
-  Var x_tail;
+  VarHandle x_outer;
+  VarHandle x_inner;
+  VarHandle x_tail;
   TensorOperation* tail_op;
   tensor->SplitWithTail(x, 4, true, &x_outer, &x_inner, &x_tail, &tail_op);
 
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
   std::ostringstream oss;
-  oss << stmt;
-  ASSERT_GT(oss.str().size(), 200);
-  ASSERT_LT(oss.str().size(), 600);
+  oss << *stmt;
+//   ASSERT_GT(oss.str().size(), 200);
+//   ASSERT_LT(oss.str().size(), 600);
 
   {
     // Compare to a reference loop structure structure.
-    Var x_outer("x_outer", kInt32);
-    Var x_inner("x_inner", kInt32);
-    Var y("y", kInt32);
-    Var x_tail("x_tail", kInt32);
-    Var f("f", kHandle);
-    Expr x_1 = x_outer * 4 + x_inner;
-    Stmt stmt1 = For::make(
+    VarHandle x_outer("x_outer", kInt32);
+    VarHandle x_inner("x_inner", kInt32);
+    VarHandle y("y", kInt32);
+    VarHandle x_tail("x_tail", kInt32);
+    VarHandle f("f", kHandle);
+    ExprHandle x_1 = x_outer * 4 + x_inner;
+    Stmt* stmt1 = For::make(
         x_outer,
         0,
         6,
@@ -96,16 +96,16 @@ void testExprSimple02() {
             4,
             For::make(
                 y, 0, 5, Store::make(f, x_1 * 5 + y * 1, func(x_1, y), 1))));
-    Expr x_2 = x_tail + Expr(6) * 4;
-    Stmt stmt2 = For::make(
+    ExprHandle x_2 = x_tail + ExprHandle(6) * 4;
+    Stmt* stmt2 = For::make(
         x_tail,
         0,
         2,
         For::make(y, 0, 5, Store::make(f, x_2 * 5 + y * 1, func(x_2, y), 1)));
-    Stmt stmt = Block::make({stmt1, stmt2});
+    Stmt* stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
-    oss_ref << stmt;
+    oss_ref << *stmt;
     ASSERT_EQ(oss.str(), oss_ref.str());
   }
 
@@ -133,18 +133,18 @@ void testExprSplitWithMask01() {
   Buffer a_buf("a", kFloat32, {M, N});
   Buffer b_buf("b", kFloat32, {M, N});
   Tensor* tensor =
-      Compute("f", {{M, "m"}, {N, "n"}}, [&](const Expr& m, const Expr& n) {
+      Compute("f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf(m, n) + b_buf(m, n) + 1.0f;
       });
-  Var m = tensor->function()->arg(0);
-  Var n = tensor->function()->arg(1);
-  Var n_outer;
-  Var n_inner;
+  VarHandle m = tensor->function()->arg(0);
+  VarHandle n = tensor->function()->arg(1);
+  VarHandle n_outer;
+  VarHandle n_inner;
 
   Schedule sch({tensor});
   tensor->SplitWithMask(n, 4, true, &n_outer, &n_inner);
 
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
 
   PaddedBuffer<float> a_v(M, N, "a");
   PaddedBuffer<float> b_v(M, N, "b");
@@ -173,11 +173,11 @@ void testScheduleBroadcastAddBuffer() {
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const Var& m, const Var& n, const Var& k) {
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf(m, n) + b_buf(n, k);
       });
   Schedule sch({c});
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
 
   PaddedBuffer<float> a_v(M, N, "a_v");
   for (int m = 0; m < M; m++) {
@@ -222,16 +222,16 @@ void testScheduleFunctionCall01() {
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const Var& m, const Var& n, const Var& k) {
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf(m, n) + b_buf(n, k);
       });
   Tensor* d = Compute(
       "d",
       {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const Var& m, const Var& n, const Var& k) { return c->call(m, n, k) + 1; });
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) { return c->call(m, n, k) + 1; });
 
   Schedule sch({d});
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
   std::ostringstream oss;
   oss << stmt;
   ASSERT_GT(oss.str().size(), 100);
@@ -286,19 +286,19 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   Tensor* x = Compute(
       "x",
       {{M, "m1"}, {N, "n1"}, {K, "k1"}},
-      [&](const Var& m, const Var& n, const Var& k) {
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return a_buf(m, n) * b_buf(n, k);
       });
   Tensor* y = Compute(
       "y",
       {{M, "m2"}, {N, "n2"}, {K, "k2"}},
-      [&](const Var& m, const Var& n, const Var& k) {
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return c_buf(m, n) * d_buf(m, k) + x->call(m, n, k);
       });
   Tensor* z = Compute(
       "z",
       {{M, "m3"}, {N, "n3"}, {K, "k3"}},
-      [&](const Var& m, const Var& n, const Var& k) {
+      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
         return x->call(m, n, k) + y->call(m, n, k);
       });
 
@@ -312,7 +312,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
       throw std::runtime_error("Invalid order: " + order);
     }
   }
-  Stmt stmt = sch.Lower();
+  Stmt* stmt = sch.Lower();
 
   std::ostringstream oss;
   oss << stmt;
@@ -364,12 +364,12 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
     Tensor* z2 = Compute(
         "z",
         {{M, "m3"}, {N, "n3"}, {K, "k3"}},
-        [&](const Var& m, const Var& n, const Var& k) {
+        [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
           return a_buf(m, n) * b_buf(n, k) +
               (c_buf(m, n) * d_buf(m, k) + a_buf(m, n) * b_buf(n, k));
         });
     Schedule sch2({z2});
-    Stmt stmt2 = sch2.Lower();
+    Stmt* stmt2 = sch2.Lower();
 
     std::ostringstream oss2;
     oss2 << stmt2;
@@ -394,21 +394,21 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Var a = a_buf.data();
+  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  VarHandle a = a_buf.data();
 
   Tensor* b =
-      Compute("f", {{kTotalSize, "i"}}, [&](const std::vector<Var>& axes) {
+      Compute("f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
         return a_buf(axes[0]) + 11.0f;
       });
 
   Tensor* c =
-      Compute("g", {{kTotalSize, "i"}}, [&](const std::vector<Var>& axes) {
+      Compute("g", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
         return b->call(axes[0]) + 1.0f;
       });
 
   Schedule sch({b, c});
-  Stmt s = sch.Lower();
+  Stmt* s = sch.Lower();
 
   std::vector<float> a_data(kTotalSize, 7.0f);
   std::vector<float> b_data(kTotalSize, 0.0f);
@@ -427,22 +427,22 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(Var("A", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer b(Var("B", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer c(Var("C", kHandle), kFloat32, {Expr(kTotalSize)});
-  Buffer d(Var("D", kHandle), kFloat32, {Expr(kTotalSize)});
+  Buffer a(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer b(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer c(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer d(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
 
   Tensor* e = Compute(
-      "e", {{kTotalSize, "i"}}, [&](const Var& i) { return a(i) + b(i); });
+      "e", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a(i) + b(i); });
   Tensor* f = Compute(
-      "f", {{kTotalSize, "i"}}, [&](const Var& i) { return (*e)(i) + c(i); });
+      "f", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return (*e)(i) + c(i); });
   Tensor* g = Compute(
-      "g", {{kTotalSize, "i"}}, [&](const Var& i) { return (*f)(i) + d(i); });
+      "g", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return (*f)(i) + d(i); });
 
   Schedule sch({g});
   e->ComputeInline();
   f->ComputeInline();
-  Stmt s = sch.Lower();
+  Stmt* s = sch.Lower();
 
   std::vector<float> a_data(kTotalSize, 1.0f);
   std::vector<float> b_data(kTotalSize, 2.0f);
@@ -459,16 +459,16 @@ void testScheduleFuserThreeArg() {
 void testScheduleDynamicShape2D() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
-    Var m("m", kInt32);
-    Var n("n", kInt32);
-    Buffer a(Var("a", kHandle), kFloat32, {m, n});
-    Buffer b(Var("b", kHandle), kFloat32, {m, n});
+    VarHandle m("m", kInt32);
+    VarHandle n("n", kInt32);
+    Buffer a(VarHandle("a", kHandle), kFloat32, {m, n});
+    Buffer b(VarHandle("b", kHandle), kFloat32, {m, n});
     Tensor* c =
-        Compute("c", {{m, "m"}, {n, "n"}}, [&](const Var& i, const Var& j) {
+        Compute("c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
         });
     auto sch = Schedule::make({c});
-    Stmt s = sch.Lower();
+    Stmt* s = sch.Lower();
     SimpleIREvaluator cg(s, {a, b, c, m, n});
     std::vector<float> aData(M * N, 1.0f);
     std::vector<float> bData(M * N, 2.0f);

@@ -24,7 +24,7 @@ class CudaPrinter : public IRPrinter {
  public:
   explicit CudaPrinter(std::ostream* os, bool has_random) : IRPrinter(*os) {
     if (has_random) {
-      rand_func_ = Var{"rand", kHandle};
+      rand_func_ = new Var("rand", kHandle);
     }
   }
 
@@ -36,7 +36,7 @@ class CudaPrinter : public IRPrinter {
       os() << dtype;
     }
     os() << "(";
-    v->src_value().accept(this);
+    v->src_value()->accept(this);
     os() << ")";
   }
 
@@ -48,24 +48,24 @@ class CudaPrinter : public IRPrinter {
   void visit(const Min* v);
   void visit(const IfThenElse* v);
 
-  const std::vector<Expr>& gpu_block_extents() const {
+  const std::vector<const Expr*>& gpu_block_extents() const {
     return gpu_block_extents_;
   }
 
-  const std::vector<Expr>& gpu_thread_extents() const {
+  const std::vector<const Expr*>& gpu_thread_extents() const {
     return gpu_thread_extents_;
   }
 
-  const Var& rand_func() const {
+  const Var* rand_func() const {
     return rand_func_;
   }
 
   using IRPrinter::name_manager;
 
  private:
-  std::vector<Expr> gpu_block_extents_;
-  std::vector<Expr> gpu_thread_extents_;
-  Var rand_func_;
+  std::vector<const Expr*> gpu_block_extents_;
+  std::vector<const Expr*> gpu_thread_extents_;
+  const Var* rand_func_;
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
@@ -73,12 +73,12 @@ class CudaPrinter : public IRPrinter {
 class TORCH_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  CudaCodeGen(const Stmt& stmt, Ts... ts)
+  CudaCodeGen(Stmt* stmt, Ts... ts)
       : CodeGen(stmt, std::forward<Ts>(ts)...) {
     Initialize();
   }
 
-  CudaCodeGen(const Stmt& stmt, const std::vector<BufferArg>& buffer_args)
+  CudaCodeGen(Stmt* stmt, const std::vector<BufferArg>& buffer_args)
       : CodeGen(stmt, buffer_args) {
     Initialize();
   }
