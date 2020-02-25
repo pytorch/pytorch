@@ -573,7 +573,7 @@ struct FullBidirectionalLayer
       const Tensor& input,
       const hidden_type& input_hidden,
       const param_type& params,
-      const bool type_2) const override {
+      const bool& type_2) const override {
     std::vector<Tensor> step_inputs;
     if (input.device().is_cpu()) {
       auto actual_input = input;
