@@ -104,11 +104,9 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_symmetric``
     """
 
-    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+    def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine, qmin=0, qmax=255):
         super(_ObserverBase, self).__init__(dtype=dtype)
         self.qscheme = qscheme
-        self.reduce_range = reduce_range
 
         self.eps = torch.finfo(torch.float32).eps
         assert self.qscheme in (
@@ -122,7 +120,17 @@ class _ObserverBase(ObserverBase):
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
-        ), "Default Observer only works for qint8 and quint8 data type"
+        ), "Default Observer only works for qint8 and quint8 data type"       
+        if dtype == torch.quint8:
+            assert qmin >= 0
+            assert qmax <= 255
+        if dtype == torch.qint8:
+            assert qmin >= -128
+            assert qmax <= 127
+
+        self.qmin = qmin
+        self.qmax = qmax
+    
 
     def _calculate_per_channel_qparams(self, min_vals, max_vals):
         # type: (Tensor, Tensor) -> Tuple[Tensor, Tensor]
@@ -184,17 +192,8 @@ class _ObserverBase(ObserverBase):
             min_val, max_val
         )
 
-        if self.dtype == torch.qint8:
-            if self.reduce_range:
-                qmin, qmax = -64, 63
-            else:
-                qmin, qmax = -128, 127
-        else:
-            if self.reduce_range:
-                qmin, qmax = 0, 127
-            else:
-                qmin, qmax = 0, 255
-
+        qmin = self.qmin
+        qmax = self.qmax
         max_val, min_val = float(max_val), float(min_val)
         min_val = min(0.0, min_val)
         max_val = max(0.0, max_val)
@@ -206,7 +205,7 @@ class _ObserverBase(ObserverBase):
                 max_val = max(-min_val, max_val)
                 scale = max_val / ((qmax - qmin) / 2)
                 scale = max(scale, self.eps)
-                zero_point = 0 if self.dtype == torch.qint8 else 128
+                zero_point = 0 if self.dtype == torch.qint8 else int((qmax + qmin + 1)/ 2)
             else:
                 scale = (max_val - min_val) / float(qmax - qmin)
                 scale = max(scale, self.eps)
@@ -285,7 +284,7 @@ class MinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
-                 reduce_range=False):
+                 qmin=0, qmax=255):
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -295,14 +294,12 @@ class MinMaxObserver(_ObserverBase):
 
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
-                                             reduce_range=reduce_range)
+                                             qmin=qmin,
+                                             qmax=qmax)
         self.min_val = torch.tensor([])
         self.max_val = torch.tensor([])
-        if self.qscheme == torch.per_tensor_symmetric and \
-           self.reduce_range and \
-           self.dtype == torch.quint8:
-            raise NotImplementedError("Cannot reduce range for symmetric \
-                                       quantization for quint8")
+      
+
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
@@ -389,11 +386,12 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
               and zero_point are set to 1.0 and 0.
     """
     def __init__(self, averaging_constant=0.01, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_tensor_affine, qmin=0, qmax=255):
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(dtype=dtype,
                                                           qscheme=qscheme,
-                                                          reduce_range=reduce_range)
+                                                          qmin=qmin,
+                                                          qmax=qmax)
 
     def forward(self, x_orig):
         x = x_orig.detach()  # avoid keeping autograd tape
@@ -435,21 +433,14 @@ class PerChannelMinMaxObserver(_ObserverBase):
     """
 
     def __init__(self, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, qmin=0, qmax=255):
         super(PerChannelMinMaxObserver, self).__init__(dtype=dtype,
                                                        qscheme=qscheme,
-                                                       reduce_range=reduce_range)
+                                                       qmin=qmin,
+                                                       qmax=qmax)
         self.ch_axis = ch_axis
         self.min_vals = torch.tensor([])
         self.max_vals = torch.tensor([])
-        if (
-            self.qscheme == torch.per_channel_symmetric
-            and self.reduce_range
-            and self.dtype == torch.quint8
-        ):
-            raise NotImplementedError(
-                "Cannot reduce range for symmetric quantization for quint8"
-            )
 
     def forward(self, x_orig):
         return self._forward(x_orig)
@@ -531,10 +522,10 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     """
 
     def __init__(self, averaging_constant=0.01, ch_axis=0, dtype=torch.quint8,
-                 qscheme=torch.per_channel_affine, reduce_range=False):
+                 qscheme=torch.per_channel_affine, qmin=0, qmax=255):
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis, dtype=dtype, qscheme=qscheme,
-            reduce_range=reduce_range)
+            qmin=qmin, qmax=qmax)
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
@@ -584,11 +575,12 @@ class HistogramObserver(_ObserverBase):
     """
 
     def __init__(self, bins=2048, upsample_rate=128, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+                 qscheme=torch.per_tensor_affine, qmin=0, qmax=255):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
                                                 qscheme=qscheme,
-                                                reduce_range=reduce_range)
+                                                qmin=qmin,
+                                                qmax=qmax)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
         self.min_val = torch.tensor([])
@@ -897,8 +889,8 @@ class NoopObserver(ObserverBase):
 
 
 # Restrict activations to be in the range (0,127)
-default_observer = MinMaxObserver.with_args(reduce_range=True)
-default_debug_observer = RecordingObserver
-default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric)
-default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
-default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
+default_observer = MinMaxObserver.with_args(dtype=torch.quint8, qscheme=torch.per_tensor_affine, qmin=0, qmax=127)
+default_debug_observer = RecordingObserver.with_args(dtype=torch.quint8, qscheme=torch.per_tensor_symmetric, qmin=0, qmax=255)
+default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, qmin=-128, qmax=127)
+default_histogram_observer = HistogramObserver.with_args(dtype=torch.quint8, qscheme=torch.per_tensor_affine, qmin=0, qmax=127)
+default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric, qmin=-128, qmax=127)

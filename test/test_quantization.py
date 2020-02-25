@@ -1189,11 +1189,27 @@ class ObserverTest(QuantizationTestCase):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
             reduce_range = False
-        ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
+        if reduce_range:
+            if qdtype == torch.qint8:
+                qmin = -64
+                qmax = 63
+            else:
+                qmin = 0
+                qmax = 127
+        else:
+            if qdtype == torch.qint8:
+                qmin = -128
+                qmax = 127
+            else:
+                qmin = 0
+                qmax = 255
+
+        ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, qmin=qmin, qmax=qmax),
                         MovingAverageMinMaxObserver(averaging_constant=0.5,
                                                     dtype=qdtype,
                                                     qscheme=qscheme,
-                                                    reduce_range=reduce_range)]
+                                                    qmin=qmin, 
+                                                    qmax=qmax)]
         for myobs in ObserverList:
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
@@ -1235,7 +1251,7 @@ class ObserverTest(QuantizationTestCase):
             loaded_dict = torch.load(b)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, qmin=qmin, qmax=qmax)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
             self.assertEqual(myobs.min_val, loaded_obs.min_val)
@@ -1249,12 +1265,29 @@ class ObserverTest(QuantizationTestCase):
         # reduce_range cannot be true for symmetric quantization with uint8
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
             reduce_range = False
-        ObserverList = [PerChannelMinMaxObserver(reduce_range=reduce_range,
+        if reduce_range:
+            if qdtype == torch.qint8:
+                qmin = -64
+                qmax = 63
+            else:
+                qmin = 0
+                qmax = 127
+        else:
+            if qdtype == torch.qint8:
+                qmin = -128
+                qmax = 127
+            else:
+                qmin = 0
+                qmax = 255
+       
+        ObserverList = [PerChannelMinMaxObserver(qmin=qmin, 
+                                                 qmax=qmax,
                                                  ch_axis=ch_axis,
                                                  dtype=qdtype,
                                                  qscheme=qscheme),
                         MovingAveragePerChannelMinMaxObserver(averaging_constant=0.5,
-                                                              reduce_range=reduce_range,
+                                                              qmin=qmin,
+                                                              qmax=qmax,
                                                               ch_axis=ch_axis,
                                                               dtype=qdtype,
                                                               qscheme=qscheme)]
@@ -1329,7 +1362,7 @@ class ObserverTest(QuantizationTestCase):
             loaded_dict = torch.load(b)
             for key in state_dict:
                 self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
+            loaded_obs = PerChannelMinMaxObserver(qmin=qmin, qmax=qmax, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
             self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
@@ -1386,7 +1419,13 @@ class RecordHistogramObserverTest(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)))
     def test_observer_scriptable(self, qdtype, qscheme):
-        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme)
+        if qdtype == torch.quint8:
+            qmin = 0
+            qmax = 255
+        if qdtype == torch.qint8:
+            qmin= -128
+            qmax = 127
+        obs = RecordingObserver(dtype=qdtype, qscheme=qscheme, qmin=qmin, qmax=qmax)
         scripted = torch.jit.script(obs)
 
         x = torch.rand(3, 4)
@@ -1403,7 +1442,23 @@ class RecordHistogramObserverTest(QuantizationTestCase):
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
-        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
+            reduce_range = False
+        if reduce_range:
+            if qdtype == torch.qint8:
+                qmin = -64
+                qmax = 63
+            else:
+                qmin = 0
+                qmax = 127
+        else:
+            if qdtype == torch.qint8:
+                qmin = -128
+                qmax = 127
+            else:
+                qmin = 0
+                qmax = 255
+        myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, qmin=qmin, qmax=qmax)
         # Calculate qparams should work for empty observers
         qparams = myobs.calculate_qparams()
         x = torch.tensor([2.0, 3.0, 4.0, 5.0])
@@ -1441,7 +1496,7 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         loaded_dict = torch.load(b)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_dict[key])
-        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+        loaded_obs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, qmin=qmin, qmax=qmax)
         loaded_obs.load_state_dict(loaded_dict)
         loaded_qparams = loaded_obs.calculate_qparams()
         self.assertEqual(myobs.min_val, loaded_obs.min_val)

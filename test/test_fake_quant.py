@@ -8,7 +8,6 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.quantization import FakeQuantize
-from torch.quantization import default_observer, default_per_channel_weight_observer
 import io
 import unittest
 
@@ -66,42 +65,46 @@ tolerance = 1e-6
 class TestFakeQuantizePerTensor(TestCase):
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_forward_per_tensor(self, device, X):
+           X_scale=st.floats(0.1, 10),
+           X_shape=hu.array_shapes(min_dims=1, max_dims=5),
+           qmin=st.sampled_from((-128, -64, 32)),
+           qmax=st.sampled_from((127, 255)))
+    def test_forward_per_tensor(self, device, X_scale, X_shape, qmin, qmax):
         r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
         """
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
+        zero_point = int(round((qmax + qmin) / 2.0))
 
+        X = torch.from_numpy(np.random.randint(-512, 512, X_shape))
+        X_float = (X - zero_point) * X_scale
         X = to_tensor(X, device)
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
+        
+        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), X_scale, zero_point, qmin, qmax)
         Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
+            X, X_scale, zero_point, qmin, qmax)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
-    def test_backward_per_tensor(self, device, X):
+           X_scale=st.floats(0.1, 10),
+           X_shape=hu.array_shapes(min_dims=1, max_dims=5),
+           qmin=st.sampled_from((-128, -64, 32)),
+           qmax=st.sampled_from((127, 255)))
+    def test_backward_per_tensor(self, device, X_scale, X_shape, qmin, qmax):
         r"""Tests the backward method.
         """
         np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
+        zero_point = int(round((qmax + qmin) / 2.0))
 
+        X = torch.from_numpy(np.random.randint(-512, 512, X_shape))
+        X_float = (X - zero_point) * X_scale
         X = to_tensor(X, device)
         X.requires_grad_()
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
+        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), X_scale, zero_point, qmin, qmax)
         Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
+            X, X_scale, zero_point, qmin, qmax)
         dout = torch.rand(X.shape, dtype=torch.float).to(device)
         dX = _fake_quantize_per_tensor_affine_grad_reference(
-            dout, X, scale, zero_point, quant_min, quant_max)
+            dout, X, X_scale, zero_point, qmin, qmax)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
@@ -151,10 +154,10 @@ class TestFakeQuantizePerTensor(TestCase):
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):
-        observer = default_observer
+        observer = torch.quantization.MinMaxObserver
         quant_min = 0
-        quant_max = 255
-        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        quant_max = 127
+        fq_module = FakeQuantize(observer, qmin=quant_min, qmax=quant_max)
         X = torch.tensor([-5, -3.5, -2, 0, 3, 5, 7], dtype=torch.float32)
         y_ref = fq_module(X)
         state_dict = fq_module.state_dict()
@@ -164,7 +167,7 @@ class TestFakeQuantizePerTensor(TestCase):
         torch.save(state_dict, b)
         b.seek(0)
         loaded_dict = torch.load(b)
-        loaded_fq_module = FakeQuantize(observer, quant_min, quant_max)
+        loaded_fq_module = FakeQuantize(observer, qmin=quant_min, qmax=quant_max)
         loaded_fq_module.load_state_dict(loaded_dict)
         for key in state_dict:
             self.assertEqual(state_dict[key], loaded_fq_module.state_dict()[key])
@@ -278,7 +281,7 @@ class TestFakeQuantizePerChannel(TestCase):
 
         X = to_tensor(X, device)
         X.requires_grad_()
-        fq_module = FakeQuantize(default_per_channel_weight_observer, quant_min, quant_max, ch_axis=axis).to(device)
+        fq_module = FakeQuantize(default_per_channel_weight_observer, qmin=quant_min, qmax=quant_max, ch_axis=axis).to(device)
         Y_prime = fq_module(X)
         assert fq_module.scale is not None
         assert fq_module.zero_point is not None
@@ -294,10 +297,10 @@ class TestFakeQuantizePerChannel(TestCase):
         np.testing.assert_allclose(dX.cpu().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
     def test_fq_serializable(self):
-        observer = default_per_channel_weight_observer
+        observer = torch.quantization.PerChannelMinMaxObserver
         quant_min = -128
         quant_max = 127
-        fq_module = FakeQuantize(observer, quant_min, quant_max)
+        fq_module = FakeQuantize(observer, dtype=torch.qint8, qscheme=torch.per_channel_symmetric, qmin=quant_min, qmax=quant_max)
         X = torch.tensor([[-5, -3.5, -2, 0, 3, 5, 7], [1, 3, 2, 5, 6.5, 8, 10]], dtype=torch.float32)
         y_ref = fq_module(X)
         state_dict = fq_module.state_dict()

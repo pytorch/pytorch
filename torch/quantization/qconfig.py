@@ -75,10 +75,10 @@ default_activation_only_qconfig = QConfig(activation=default_fake_quant,
 
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
-        qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+        qconfig = QConfig(activation=HistogramObserver.with_args(qmin=0, qmax=127),
                           weight=default_per_channel_weight_observer)
     elif backend == 'qnnpack':
-        qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
+        qconfig = QConfig(activation=HistogramObserver.with_args(qmin=0, qmax=255),
                           weight=default_weight_observer)
     else:
         raise ValueError("Unknown backend, please specify qconfig manually")
@@ -88,15 +88,15 @@ def get_default_qat_qconfig(backend='fbgemm'):
     # Histogram observer is too slow for quantization aware training
     if backend == 'fbgemm':
         qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=True),
+                                                            qmin=0,
+                                                            qmax=127,
+                                                           ),
                           weight=default_per_channel_weight_fake_quant)
     elif backend == 'qnnpack':
         qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=False),
+                                                            qmin=0,
+                                                            qmax=255,
+                                                           ),
                           weight=default_weight_fake_quant)
     else:
         raise ValueError("Unknown backend, please specify qconfig manually")
