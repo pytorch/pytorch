@@ -544,7 +544,8 @@ def gen_pyi(declarations_path, out):
                 ' other: Union[Tensor, Number]{})'
                 ' -> Tensor: ...'.format(name, out_suffix))
     simple_conversions = ['byte', 'char', 'cpu', 'double', 'float',
-                          'half', 'int', 'long', 'short', 'bool']
+                          'half', 'int', 'long', 'short', 'bool',
+                          'bfloat16']
     for name in simple_conversions:
         unsorted_tensor_method_hints[name].append('def {}(self) -> Tensor: ...'.format(name))
 
