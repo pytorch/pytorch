@@ -865,24 +865,6 @@
     - real alpha
 ]]
 [[
-  name: _th_ger
-  cname: addr
-  cpu_bfloat16: True
-  cuda_bfloat16: True
-  variants: function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-      resize: [ [self,0], [vec2,0] ]
-      resize_scalar: True
-    - argument 0
-    - THTensor* self
-    - THTensor* vec2
-    - CONSTANT AS_REAL(0)
-    - CONSTANT AS_REAL(1)
-]]
-[[
   name: _th_mv
   cuda_bfloat16: True
   cname: addmv

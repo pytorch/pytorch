@@ -156,6 +156,21 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
 }
 
+Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  if (result.numel() == 0) {
+    result.resize_({ self.size(0), vec2.size(0) });
+  }
+  return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
+}
+
+Tensor ger(const Tensor& self, const Tensor& vec2) {
+  Tensor result = at::empty({0}, self.options());
+  at::native::ger_out(result, self, vec2);
+  return result;
+}
+
 template <typename scalar_t, bool is_bmm>
 inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const Tensor& mat2, Scalar beta_, Scalar alpha_) {
   int64_t bs = result.size(0);

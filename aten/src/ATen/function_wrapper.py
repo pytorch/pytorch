@@ -1386,11 +1386,7 @@ def create_derived(backend_type_env, declarations):
         if isinstance(resize, str):
             return "{}.resize_({}.sizes());".format(arg['name'], resize)
         else:
-            resize_scalar = arg.get('resize_scalar', False)
-            if resize_scalar:
-                dims = ['{}.dim() == 0 ? 1 : {}.size({})'.format(name, name, dim) for name, dim in resize]
-            else:
-                dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
+            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):

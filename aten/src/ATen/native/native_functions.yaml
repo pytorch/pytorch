@@ -1400,14 +1400,8 @@
 - func: ger(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  dispatch:
-    CPU: legacy::cpu::_th_ger
-    CUDA: legacy::cuda::_th_ger
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: legacy::cpu::_th_ger_out
-    CUDA: legacy::cuda::_th_ger_out
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
