@@ -885,24 +885,25 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     double dropout_p, \
     bool train, \
     bool bidirectional, \
+    bool type_2, \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     NAME##_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, batch_first);         \
+            num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   if (use_miopen(_input, dropout_p)) {                                         \
     Tensor output, hy;                                                         \
     NAME##_miopen_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, batch_first);         \
+            num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   check_device(_input, _params, hx);                                           \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_params(_params, has_biases);                            \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
-          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional, type_2); \
   if (batch_first) {                                                           \
     std::get<0>(results).transpose_(0, 1);               \
   }                                                                            \
@@ -918,23 +919,24 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     int64_t num_layers, \
     double dropout_p, \
     bool train, \
-    bool bidirectional) {  \
+    bool bidirectional, \
+    bool type_2) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
     NAME##_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
-            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2); \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   if (use_miopen(data, dropout_p)) {                                           \
     Tensor output, hy;                                                         \
     NAME##_packed_miopen_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
-            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2); \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   PackedSequence input { data, batch_sizes };                                  \
   auto params = gather_params(_params, has_biases);                            \
   auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
-          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional, type_2); \
   auto & packed_output = std::get<0>(result);                                  \
   return std::make_tuple(std::move(packed_output.data), std::move(std::get<1>(result)));             \
 }
@@ -949,18 +951,19 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     double dropout_p,  \
     bool train, \
     bool bidirectional, \
+    bool type_2, \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     gru_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, batch_first);         \
+            num_layers, dropout_p, train, bidirectional, type_2 batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   check_device(_input, _params, hx); \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
   auto params = gather_quantized_params(_params);                            \
   auto results = _rnn_impl_with_concat<CELL, FullLayer, FullBidirectionalLayer>( \
-      input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+      input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional, type_2); \
   if (batch_first) {                                                           \
     std::get<0>(results).transpose_(0, 1);               \
   }                                                                            \
@@ -976,17 +979,18 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     int64_t num_layers, \
     double dropout_p, \
     bool train, \
-    bool bidirectional) {  \
+    bool bidirectional, \
+    bool type_2) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
     gru_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
-            _params, has_biases, num_layers, dropout_p, train, bidirectional); \
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2); \
     return std::make_tuple(std::move(output), std::move(hy));                                        \
   }                                                                            \
   PackedSequence input { data, batch_sizes };                                  \
   auto params = gather_quantized_params(_params);                            \
   auto result = _rnn_impl_with_concat<CELL, PackedLayer, PackedBidirectionalLayer>( \
-          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional); \
+          input, params, hx.unbind(0), num_layers, dropout_p, train, bidirectional, type_2); \
   auto & packed_output = std::get<0>(result);                                  \
   return std::make_tuple(std::move(packed_output.data), std::move(std::get<1>(result)));             \
 }
