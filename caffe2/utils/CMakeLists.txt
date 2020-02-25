@@ -1,8 +1,12 @@
+# TODO: Add ThreadPoolXNNPACK.cc when XNNPACK integration is updated
+# to pass the actual threadpool ptr instead of nullptr.
 if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
     utils/threadpool/pthreadpool.cc
     utils/threadpool/pthreadpool_impl.cc
+    utils/threadpool/pthreadpool_new_if_impl.c
+    utils/threadpool/pthreadpool_utils_new_if.h
     utils/threadpool/ThreadPool.cc
     utils/threadpool/ThreadPoolMobile.cc
   )
