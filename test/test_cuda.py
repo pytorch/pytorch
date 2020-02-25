@@ -2205,6 +2205,9 @@ t2.start()
                 else:
                     control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
                 self.assertTrue(type(output_to_compare) == type(control))
+                if(op == "conv_transpose2d"):
+                    print(op + " autocasted =\n", output_to_compare)
+                    print(op + " control = \n", control)
                 comparison = torch.equal(output_to_compare, control) if isinstance(control, torch.Tensor) \
                     else (output_to_compare == control)
                 self.assertTrue(comparison, "torch.{} result did not match control".format(op))
