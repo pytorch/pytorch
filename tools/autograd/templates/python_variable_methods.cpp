@@ -783,6 +783,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   auto opt_memory_format = r.memoryformatOptional(2);
   std::string type_name;
   bool is_dtype = false;
+  ScalarType scalar_type;
   if (PyType_Check(obj)) {
     if (obj == THPVariableClass) {
       type_name = "torch.Tensor";
@@ -792,15 +793,14 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else if (THPUtils_checkString(obj)) {
     type_name = THPUtils_unpackString(obj);
   } else if (THPDtype_Check(obj)) {
+    // TODO: this logic is a bit goofy, refactor it some more
+    scalar_type = reinterpret_cast<THPDtype*>(obj)->scalar_type;
     is_dtype = true;
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  ScalarType scalar_type;
   Device device = self_.device();
-  if (is_dtype) {
-    scalar_type = r.scalartype(0);
-  } else {
+  if (!is_dtype) {
     at::TensorOptions options = torch::utils::options_from_string(type_name);
     scalar_type = at::typeMetaToScalarType(options.dtype());
     auto device_type = options.device().type();
