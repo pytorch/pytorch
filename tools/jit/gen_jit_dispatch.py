@@ -574,10 +574,12 @@ def hacked_twin(decl):
     decl_copy['schema_string'] = decl['schema_string'].replace('Tensor?[]', 'Tensor[]')
     if decl['overload_name']:
         decl_copy['overload_name'] = decl['overload_name'] + "_hacked_twin"
-        decl_copy['schema_string'] = decl_copy['schema_string'].replace(decl['name'] + "." + decl['overload_name'], decl_copy['name'] + "." + decl_copy['overload_name'])
+        decl_copy['schema_string'] = decl_copy['schema_string'].replace(decl['name'] + "." + \
+                decl['overload_name'], decl_copy['name'] + "." + decl_copy['overload_name'])
     else:
         decl_copy['overload_name'] = "hacked_twin"
-        decl_copy['schema_string'] = decl_copy['schema_string'].replace(decl['name'], decl_copy['name'] + "." + decl_copy['overload_name'])
+        decl_copy['schema_string'] = decl_copy['schema_string']
+                .replace(decl['name'], decl_copy['name'] + "." + decl_copy['overload_name'])
     for arg in decl_copy['arguments']:
         if arg['simple_type'] == 'TensorList' and arg.get('is_nullable'):
             arg['is_nullable'] = False
