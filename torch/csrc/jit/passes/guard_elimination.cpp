@@ -273,6 +273,20 @@ private:
     case aten::reciprocal:
     case aten::addcmul:
     case aten::where:
+    case aten::softmax:
+    case aten::log_softmax:
+    case aten::log_sigmoid:
+    case aten::dropout:
+    case aten::matmul:
+    case aten::bmm:
+    case aten::_cast_Long:
+    case aten::_cast_Short:
+    case aten::_cast_Int:
+    case aten::_cast_Float:
+    case aten::_cast_Half:
+    case aten::_cast_Double:
+    case aten::contiguous:
+    case aten::select:
      return checkInputs(n, no_exceptions);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
