@@ -551,6 +551,7 @@ def add_torch_libs():
             ("python", None),
         ],
         compiler_flags = compiler_flags_cpu,
+        propagated_pp_flags = ["-DUSE_DISTRIBUTED"],
         **common_flags
     )
 
@@ -570,6 +571,7 @@ def add_torch_libs():
             ("python", None),
         ],
         compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
+        propagated_pp_flags = ["-DUSE_DISTRIBUTED"],
         **common_flags
     )
 
