@@ -134,8 +134,11 @@ struct CAFFE2_API TensorIndex final {
     }
   }
 
-  // Case 5: Tensor value
-  TensorIndex(Tensor tensor) : tensor_(tensor), type_(TensorIndexType::Tensor) {}
+  // Case 6: Slice represented in `at::indexing::Slice` form
+  TensorIndex(Slice slice) : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
+
+  // Case 7: Tensor value
+  TensorIndex(Tensor tensor) : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
   inline bool is_none() const {
     return type_ == TensorIndexType::None;
