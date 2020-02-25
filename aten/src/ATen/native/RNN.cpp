@@ -960,7 +960,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
     gru_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, type_2 batch_first);         \
+                   num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   check_device(_input, _params, hx); \
