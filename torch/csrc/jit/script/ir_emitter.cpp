@@ -1780,22 +1780,37 @@ struct to_ir {
   // If the RHS is a tensor, return the corresponding ATen in-place op
   // If it's a list of scalars, then return the corresponding list augment op
   Symbol getAugOp(const AugAssign& stmt, const TypePtr& type) {
-    if (type->cast<ListType>()) { // Lists also have in-place ops.
-      switch (stmt.aug_op()) {
-        case '+':
-          return aten::add_;
-      }
-    }
-    bool isTensor = type->isSubtypeOf(TensorType::get());
+    bool use_inplace_op = type->isSubtypeOf(TensorType::get()) ||
+        type->kind() == TypeKind::ListType;
     switch (stmt.aug_op()) {
       case '+':
-        return isTensor ? aten::add_ : aten::add;
+        return use_inplace_op ? aten::add_ : aten::add;
       case '-':
-        return isTensor ? aten::sub_ : aten::sub;
+        return use_inplace_op ? aten::sub_ : aten::sub;
       case '/':
-        return isTensor ? aten::div_ : aten::div;
+        return use_inplace_op ? aten::div_ : aten::div;
       case '*':
-        return isTensor ? aten::mul_ : aten::mul;
+        return use_inplace_op ? aten::mul_ : aten::mul;
+      default:
+        throw ErrorReport(stmt)
+            << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
+    }
+  }
+
+  // Get a pair of <in place magic method name, out of place magic method name>
+  // since the out of place method is called if the in place method is not
+  // present
+  std::pair<std::string, std::string> getAugMagicMethod(const AugAssign& stmt) {
+    switch (stmt.aug_op()) {
+      case '+':
+        return std::make_pair(std::string("__iadd__"), std::string("__add__"));
+      case '-':
+        return std::make_pair(std::string("__isub__"), std::string("__sub__"));
+      case '/':
+        return std::make_pair(
+            std::string("__itruediv__"), std::string("__truediv__"));
+      case '*':
+        return std::make_pair(std::string("__imul__"), std::string("__mul__"));
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -1831,34 +1846,58 @@ struct to_ir {
   //
   //  def forward():
   //    self.num_batches += 1
-  //
-  // In this case we will only consider the scenario that the module
-  // buffer type is a tensor, and we emit the corresponding tensor
-  // in place op, and throw error for other unsupported types
   void emitAugAssignmentToSelectVar(const AugAssign& stmt) {
     const auto lhs = Select(stmt.lhs());
-    const auto lhsSugaredVar =
-        environment_stack->getSugaredVar(Var(lhs.value()).name());
+    auto lhsSugaredVar = emitSugaredExpr(lhs.value(), 1);
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
-    if (lhsValue->type()->isSubtypeOf(TensorType::get())) {
-      // for module parameter/buffer assignment, only consider tensor types,
-      // emit the corresponding in-place op
-      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()));
-      const auto self = NamedValue(stmt.lhs().range(), "self", lhsValue);
-      emitBuiltinCall(
+  if (lhsValue->type()->kind() == TypeKind::ClassType) {
+      // Call `__iadd__` so updates happen in place on class types
+      // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
+      std::string in_place_method_name;
+      std::string out_of_place_method_name;
+      std::tie(in_place_method_name, out_of_place_method_name) =
+          getAugMagicMethod(stmt);
+      const auto rhs = emitExpr(stmt.rhs());
+
+      // Determine whether to use __iadd__ or __add__ (use __add__ only if
+      // __iadd__ is not present)
+      auto type = lhsValue->type()->expect<ClassType>();
+      std::string magic_method_name;
+      if (type->getMethod(in_place_method_name)) {
+        magic_method_name = in_place_method_name;
+      } else if (type->getMethod(out_of_place_method_name)) {
+        magic_method_name = out_of_place_method_name;
+      } else {
+        throw ErrorReport(stmt.range())
+            << "Cannot emit inplace op on " << type->python_str()
+            << " since it does not define an " << in_place_method_name << " or "
+            << out_of_place_method_name << " method";
+      }
+
+      // Insert call to the magic method
+      MethodValue method_value(lhsValue, magic_method_name);
+      auto result = method_value.call(stmt.range(), method, {rhs}, {}, 0)
+                        ->asValue(stmt.range(), method);
+
+      // x += y is equivalent to x = x.__iadd__(y) or x = x.__add__(y) if
+      // __iadd__ is not present, so set the value to the function's return
+      // value
+      lhsSugaredVar->setAttr(
+          stmt.range(), method, lhs.selector().name(), result);
+    } else {
+      const auto rhs = NamedValue(stmt.rhs().range(), emitExpr(stmt.rhs()))
+                           .value(*method.graph());
+      auto rhsValue = emitBuiltinCall(
           stmt.range(),
           *method.graph(),
           getAugOp(stmt, lhsValue->type()),
-          {rhs},
+          {lhsValue, rhs},
           {},
-          self);
-
-    } else {
-      throw ErrorReport(stmt.lhs())
-          << "left-hand side of augmented assignment to module "
-          << "parameters/buffers can only be tensor types";
+          /*self=*/c10::nullopt);
+      lhsSugaredVar->setAttr(
+          stmt.range(), method, lhs.selector().name(), rhsValue);
     }
   }
 
