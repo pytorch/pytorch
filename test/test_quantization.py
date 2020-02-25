@@ -534,6 +534,8 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    # We have the flaky test failures with QNNPACK.
+    # See https://github.com/pytorch/pytorch/issues/32644
     @given(qengine=st.sampled_from(("fbgemm",)))
     def test_quantized_rnn(self, qengine):
         d_in, d_hid = 2, 2
