@@ -122,6 +122,7 @@ namespace {
           return ScalarType::Undefined;
       }
     }
+    return ScalarType::Undefined;
   }
 } // end anonymous namespace
 
