@@ -1,5 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/rref_context.h>
+#endif
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
@@ -126,6 +129,13 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     err << ". Please define serialization methods via torch::jit::pickle_ for "
            "this class.";
     AT_ERROR(err.str());
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    pushRRef(ivalue);
+#else
+    TORCH_CHECK(
+        false, "RRef pickling is only supported with the distributed package");
+#endif
   } else {
     AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
   }
@@ -145,6 +155,28 @@ void Pickler::pushDevice(const IValue& ivalue) {
     pushBinGet(it->second);
   }
 }
+
+#ifdef USE_DISTRIBUTED
+void Pickler::pushRRef(const IValue& ivalue) {
+  // It is the same as how rref is pickled in python, see PyRRef::pickle
+  auto rrefInterface = ivalue.toRRef();
+  auto rref =
+      c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(rrefInterface);
+  pushGlobal("torch.distributed.rpc", "rref");
+  auto& ctx = distributed::rpc::RRefContext::getInstance();
+  auto rrefForkData = ctx.prepareChildFork(rref);
+  push<PickleOpCode>(PickleOpCode::MARK);
+  pushInt(rrefForkData.ownerId_);
+  pushInt(rrefForkData.rrefId_.createdOn_);
+  pushInt(rrefForkData.rrefId_.localId_);
+  pushInt(rrefForkData.forkId_.createdOn_);
+  pushInt(rrefForkData.forkId_.localId_);
+  pushInt(rrefForkData.parent_);
+  pushString(rrefForkData.typeStr_);
+  push<PickleOpCode>(PickleOpCode::TUPLE);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+#endif
 
 void Pickler::pushIValue(const IValue& ivalue) {
   bool shouldMemoizeByPointer =
