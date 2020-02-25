@@ -15,6 +15,7 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
+import gen_backend_select_register
 
 from code_template import CodeTemplate
 
@@ -141,7 +142,7 @@ TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/OpsAlreadyMovedToC10.cpp")
-
+BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
@@ -382,7 +383,7 @@ def declare_outputs():
     for f in core_files:
         core_file_manager.will_write(f)
     files = ['Declarations.yaml', 'TypeDefault.cpp', 'TypeDefault.h',
-             'Functions.h', 'NativeFunctions.h']
+             'Functions.h', 'NativeFunctions.h', 'BackendSelectRegister.cpp']
     for f in files:
         file_manager.will_write(f)
     for backend, density in iterate_types():
@@ -466,6 +467,8 @@ def generate_outputs():
         top_env, declarations)
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
+
+    gen_backend_select_register.register_backend_select_methods(declarations, BACKEND_SELECT_REGISTER_CPP, file_manager)
 
     add_op_registrations(
         top_env['function_registrations'], per_op_registrations, op_registrations)

@@ -27,7 +27,8 @@ const std::vector<Function*>& ClassType::methods() const {
   return methods_;
 }
 
-void ClassType::checkNotExist(const std::string& name, const std::string& what) const {
+void ClassType::checkNotExist(const std::string& name, const std::string& what)
+    const {
   // Check no overlap with existing constants
   for (size_t i = 0; i < constantNames_.size(); ++i) {
     TORCH_CHECK(
@@ -70,6 +71,14 @@ size_t ClassType::addAttribute(
   attributeTypes_.push_back(type);
   if (is_parameter) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
+    TORCH_CHECK(
+        (type->kind() == TensorType::Kind) ||
+            (type->kind() == OptionalType::Kind &&
+             type->expect<OptionalType>()->getElementType()->kind() ==
+                 TensorType::Kind) ||
+            (type->kind() == NoneType::Kind),
+        "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
+        toString(type));
   }
   if (is_module()) {
     parameterSlots_->push_back(is_parameter);
@@ -81,6 +90,9 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   auto slot = getAttributeSlot(name);
   attributeNames_.erase(attributeNames_.begin() + slot);
   attributeTypes_.erase(attributeTypes_.begin() + slot);
+  if (is_module()) {
+    parameterSlots_->erase(parameterSlots_->begin() + slot);
+  }
 }
 
 void ClassType::addMethod(Function* method) {
@@ -102,9 +114,7 @@ Function* ClassType::getMethod(const std::string& name) const {
   return nullptr;
 }
 
-size_t ClassType::addConstant(
-      const std::string& name,
-      const IValue& value) {
+size_t ClassType::addConstant(const std::string& name, const IValue& value) {
   checkNotExist(name, "constant");
   size_t slot = constantNames_.size();
   constantNames_.push_back(name);
@@ -193,14 +203,14 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
   if (auto iface = rhs->cast<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a
     // Module Interface Type but the Class Type is not a Module Class Type
-    if(!is_module() && iface->is_module()) {
-        if (why_not) {
-          *why_not << "Class '" << python_str() << "' is not a subtype of "
-                   << "the module interface '" << rhs->python_str()
-                   << "' , only ScriptModule class can be subtype of module"
-                   << " interface.\n";
-        }
-        return false;
+    if (!is_module() && iface->is_module()) {
+      if (why_not) {
+        *why_not << "Class '" << python_str() << "' is not a subtype of "
+                 << "the module interface '" << rhs->python_str()
+                 << "' , only ScriptModule class can be subtype of module"
+                 << " interface.\n";
+      }
+      return false;
     }
     for (const FunctionSchema& schema : iface->methods()) {
       auto self_method = getMethod(schema.name());

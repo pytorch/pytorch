@@ -119,35 +119,6 @@ void THTensor_(maskedSelectBool)(THTensor *tensor, THTensor *src, THBoolTensor *
                    });
 }
 
-void THTensor_(scatterFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
-{
-  int64_t elems_per_row, i, idx;
-  dim = at::maybe_wrap_dim(dim, tensor);
-  int index_ndim_legacy_all = THLongTensor_nDimensionLegacyAll(index);
-
-  THArgCheck(dim < THTensor_(nDimensionLegacyAll)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(index_ndim_legacy_all == 0 || index_ndim_legacy_all == THLongTensor_nDimensionLegacyAll(tensor), 3,
-             "Index tensor must either be empty or have same dimensions as output tensor");
-
-  // no-op if index is empty
-  if (index_ndim_legacy_all == 0)
-      return;
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, tensor, int64_t, index, dim,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= tensor_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in scatter");
-                         }
-                         tensor_data[idx * tensor_stride] = val;
-                       })
-}
-
 void THTensor_(maskedFill)(THTensor *tensor, THByteTensor *mask, scalar_t value)
 {
   at::NoNamesGuard guard;
@@ -508,39 +479,6 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
     }
   }
   THLongTensor_free(index);
-}
-
-void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
-{
-  int64_t elems_per_row, i, idx;
-  dim = at::maybe_wrap_dim(dim, tensor);
-  int index_ndim_legacy_all = THTensor_nDimensionLegacyAll(index);
-
-  THArgCheck(dim < THTensor_(nDimensionLegacyNoScalars)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(index_ndim_legacy_all == 0
-             || THLongTensor_nDimensionLegacyNoScalars(index) == THTensor_(nDimensionLegacyNoScalars)(tensor), 3,
-             "Index tensor must be either empty or have same dimensions as output tensor");
-  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(src) == THTensor_(nDimensionLegacyNoScalars)(tensor), 4,
-             "Input tensor must have same dimensions as output tensor");
-
-  // no-op if index is empty
-  if (index_ndim_legacy_all == 0)
-      return;
-
-  elems_per_row = THTensor_sizeLegacyNoScalars(index, dim);
-
-  TH_TENSOR_DIM_APPLY3(int64_t, index, scalar_t, tensor, scalar_t, src, dim,
-                       TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
-                       for (i = 0; i < elems_per_row; ++i)
-                       {
-                         idx = *(index_data + i*index_stride);
-                         if (idx < 0 || idx >= tensor_size)
-                         {
-                           THFree(TH_TENSOR_DIM_APPLY_counter);
-                           THError("Invalid index in scatter");
-                         }
-                         tensor_data[idx * tensor_stride] = *(src_data + i*src_stride);
-                       })
 }
 
 #if !defined(TH_REAL_IS_BOOL)

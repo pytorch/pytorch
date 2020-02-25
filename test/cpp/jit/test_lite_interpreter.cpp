@@ -177,6 +177,19 @@ void testLiteInterpreterPrim() {
   AT_ASSERT(resi == refi);
 }
 
+void testLiteInterpreterLoadOrigJit() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m.save(ss);
+  ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+}
+
 void testLiteInterpreterQuant() {
 
   auto m = torch::jit::load("/Users/myuan/data/lstm/linear.pt");
@@ -196,5 +209,7 @@ void testLiteInterpreterQuant() {
   }
 
   AT_ASSERT(ref.toTensor().item().toFloat() == res.toTensor().item().toFloat());
-}} // namespace torch
+}
+} // namespace torch
 } // namespace jit
+} // namespace torch

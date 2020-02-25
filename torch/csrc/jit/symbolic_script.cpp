@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/symbolic_script.h>
 #include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 
 namespace torch {
 namespace jit {
@@ -638,7 +638,7 @@ const std::vector<std::string> functions = {
         def rsub_0(self,
                    other,
                    alpha: number):
-            result = torch.rsub(self, other, alpha)
+            result = torch.rsub(self, other, alpha=alpha)
             self_size = torch._size_if_not_equal(self.size(), result.size())
             other_size = torch._size_if_not_equal(other.size(), result.size())
             def backward(grad_output):

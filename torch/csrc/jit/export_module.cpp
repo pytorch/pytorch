@@ -26,82 +26,65 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
+static IValue Tup(std::vector<IValue> ivalues) {
+  return c10::ivalue::Tuple::create(std::move(ivalues));
+}
+
+static IValue Table(std::vector<std::pair<std::string, IValue>> entries) {
+  std::vector<IValue> ivalue_entries;
+  for (const auto& e : entries) {
+    ivalue_entries.push_back(Tup({e.first, e.second}));
+  }
+  return Tup(std::move(ivalue_entries));
+}
+
 c10::IValue getMethodTuple(const script::Method& method) {
-    const auto& func = method.function();
-    auto graph = func.graph()->copy();
-    Inline(*graph);
-    torch::jit::Code code(graph);
-    // Make a copy of opnames. Some of them may be changed for mobile later.
-    std::vector<c10::OperatorName> opnames;
-    for (size_t i = 0; i < code.instructions().size(); ++i) {
-      Instruction ins = code.instructions()[i];
-      if (ins.op == OP) {
-        auto node = code.instructions_source()[i];
-        opnames.emplace_back(node->schema().operator_name());
-      }
+  const auto& func = method.function();
+  auto graph = func.graph()->copy();
+  Inline(*graph);
+  torch::jit::Code code(graph);
+
+  // operator names
+  std::vector<c10::OperatorName> opnames;
+  for (size_t i = 0; i < code.instructions().size(); ++i) {
+    Instruction ins = code.instructions()[i];
+    if (ins.op == OP || ins.op == OPN) {
+      auto node = code.instructions_source()[i];
+      opnames.emplace_back(node->schema().operator_name());
     }
+  }
 
-    // instructions
-    std::vector<IValue> inss;
-    for (size_t i = 0; i < code.instructions().size(); ++i) {
-      Instruction ins = code.instructions()[i];
-      TORCH_CHECK(isOpSupportedInMobile(ins.op), toString(ins.op),
-                  " is not supported in mobile module.");
-      if (ins.op == OP) {
-        if (opnames[ins.X].name == "prim::ListConstruct" ||
-            opnames[ins.X].name == "prim::TupleConstruct" ||
-            opnames[ins.X].name == "prim::TupleUnpack" ||
-            opnames[ins.X].name == "aten::format") {
-          auto node = code.instructions_source()[i];
-          ins.op = OPN;
-          if (opnames[ins.X].name == "prim::TupleUnpack") {
-            ins.N = node->outputs().size();
-          } else {
-            ins.N = node->inputs().size();
-          }
-          if (opnames[ins.X].name == "prim::ListConstruct") {
-            ListTypePtr lt = node->output()->type()->expect<ListType>();
-            if (lt->getElementType() == IntType::get()) {
-              opnames[ins.X].overload_name = "int";
-            } else if (lt->getElementType() == FloatType::get()) {
-              opnames[ins.X].overload_name = "float";
-            } else if (lt->getElementType() == BoolType::get()) {
-              opnames[ins.X].overload_name = "bool";
-            } else if (lt->getElementType()->isSubtypeOf(TensorType::get())) {
-              opnames[ins.X].overload_name = "Tensor";
-            } else {
-              opnames[ins.X].overload_name = "generic";
-            }
-          } else if (opnames[ins.X].name == "prim::TupleConstruct" &&
-                     node->output()->type()->expect<TupleType>()->name().has_value()) {
-            AT_WARN("Named tuple is serialized as un-named tuple.");
-          }
-        }
-      }
-      std::vector<IValue> insv{toString(ins.op), ins.X, ins.N};
-      inss.emplace_back(c10::ivalue::Tuple::create(std::move(insv)));
-    }
-    auto instructions = c10::ivalue::Tuple::create(std::move(inss));
-    auto named_ins = c10::ivalue::Tuple::create({"instructions", instructions});
+  // instructions
+  std::vector<IValue> instructions;
+  for (Instruction ins : code.instructions()) {
+    instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
+  }
 
-    // operators
-    std::vector<IValue> opss;
-    for (const auto& opname : opnames) {
-      opss.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
-    }
-    auto operators = c10::ivalue::Tuple::create(std::move(opss));
-    auto named_ops = c10::ivalue::Tuple::create({"operators", operators});
+  // operators
+  std::vector<IValue> operators;
+  for (const auto& opname : opnames) {
+    operators.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+  }
 
-    // constants
-    auto constants = c10::ivalue::Tuple::create(code.constant_table());
-    auto named_consts = c10::ivalue::Tuple::create({"constants", constants});
+  // constants
+  auto constants = code.constant_table();
 
-    // since the register location is embedded into the bytecode, pass the register size
-    auto named_regsize = c10::ivalue::Tuple::create({"register_size",
-                                                     static_cast<int>(code.register_size())});
+  // types
+  std::vector<IValue> types;
+  for (const TypePtr& t : code.type_table()) {
+    types.push_back(t->python_str());
+  }
 
-    auto element = c10::ivalue::Tuple::create({named_ins, named_ops, named_consts, named_regsize});
-    return c10::ivalue::Tuple::create({func.qualname().qualifiedName(), element});
+  // since the register location is embedded into the bytecode, pass the register size
+  auto register_size = static_cast<int>(code.register_size());
+
+  auto table = Table({{"instructions", Tup(instructions)},
+                      {"operators", Tup(operators)},
+                      {"constants", Tup(constants)},
+                      {"types", Tup(types)},
+                      {"register_size", register_size}});
+
+  return Tup({func.qualname().qualifiedName(), table});
 }
 
 void moduleMethodsTuple(const script::Module& module,
@@ -242,11 +225,12 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const script::Module& module) {
     std::vector<c10::IValue> elements;
+
     // top-level methods
     moduleMethodsTuple(module, elements, false, "");
     // __setstate__ of all modules
     moduleMethodsTuple(module, elements, true, "__setstate__");
-    auto telements = c10::ivalue::Tuple::create(std::move(elements));
+    auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
   }
 
