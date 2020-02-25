@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import sys
 import threading
 import time
@@ -13,7 +11,6 @@ import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
-from torch.testing import FileCheck
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_shutdown_error_regex,
@@ -182,8 +179,7 @@ class ExecMode(Enum):
 
 
 @unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package " "does not support python2",
+    not torch._six.PY3, "Pytorch distributed autograd package does not support python2"
 )
 class DistAutogradTest(RpcAgentTestFixture):
     def _exec_func(self, exec_mode, method, *args):
@@ -1728,7 +1724,9 @@ class DistAutogradTest(RpcAgentTestFixture):
             torch.autograd.backward([t3.sum()], retain_graph=True)
             torch.autograd.backward([t3.sum()])
 
-            t3 = rpc.rpc_sync('worker{}'.format(self._next_rank()), torch.matmul, args=(t1, t2))
+            t3 = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()), torch.matmul, args=(t1, t2)
+            )
             # Run backward twice.
             dist_autograd.backward([t3.sum()], retain_graph=True)
             dist_autograd.backward([t3.sum()])
@@ -1743,7 +1741,7 @@ class DistAutogradTest(RpcAgentTestFixture):
 
     @staticmethod
     def _test_nested_backward_accumulate_grads(t1, t2, dst_rank):
-        return rpc.rpc_sync('worker{}'.format(dst_rank), torch.matmul, args=(t1, t2))
+        return rpc.rpc_sync("worker{}".format(dst_rank), torch.matmul, args=(t1, t2))
 
     @dist_init
     def test_nested_backward_accumulate_grads(self):
@@ -1751,9 +1749,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
             loss = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()),
+                "worker{}".format(self._next_rank()),
                 DistAutogradTest._test_nested_backward_accumulate_grads,
-                args=(t1, t2, self._next_rank())).sum()
+                args=(t1, t2, self._next_rank()),
+            ).sum()
 
             # Run backward twice.
             dist_autograd.backward([loss], retain_graph=True)
@@ -1765,43 +1764,11 @@ class DistAutogradTest(RpcAgentTestFixture):
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
             loss = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()),
+                "worker{}".format(self._next_rank()),
                 torch.add,
-                args=(t1, t2, self._next_rank())).sum()
+                args=(t1, t2, self._next_rank()),
+            ).sum()
 
             # Run backward in a loop multiple times.
             for i in range(1000):
                 dist_autograd.backward([loss], retain_graph=True)
-
-@unittest.skipIf(
-    not torch._six.PY3,
-    "Pytorch distributed autograd package " "does not support python2",
-)
-class DistAutogradJitTest(RpcAgentTestFixture):
-    @dist_init
-    def test_get_gradients(self):
-        dst_rank = self.rank
-
-        @torch.jit.script
-        def dist_get_gradients(context_id):
-            # type: (int) -> (Dict[Tensor, Tensor])
-            return dist_autograd.get_gradients(context_id)
-
-        FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))
-        with dist_autograd.context() as context_id:
-            t1 = torch.rand((3, 3), requires_grad=True)
-            t2 = torch.rand((3, 3), requires_grad=True)
-            t3 = torch.add(t1, t2)
-
-            dist_autograd.backward([t3.sum()])
-            grads = dist_get_gradients(context_id)
-
-            self.assertEqual(2, len(grads))
-            self.assertIn(t1, grads)
-            self.assertIn(t2, grads)
-            self.assertEqual(torch.ones(3, 3), grads[t1])
-            self.assertEqual(torch.ones(3, 3), grads[t2])
-
-
-if __name__ == "__main__":
-    unittest.main()
