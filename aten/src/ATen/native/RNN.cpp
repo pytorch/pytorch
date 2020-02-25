@@ -577,8 +577,10 @@ struct FullBidirectionalLayer
     std::vector<Tensor> step_inputs;
     if (input.device().is_cpu()) {
       auto actual_input = input;
-      if(type_2) {
-        at::print(std::cerr, input, 80);
+      if(!type_2) {
+        std::cout << std::to_string(input.dim()) << "\n";
+        std::cout << std::to_string(params.first.w_ih.size(params.first.w_ih.dim() - 1)) << "\n";
+        at::print(std::cout, input, 80);
       }
       auto input_w = params.first.linear_ih(input);
       step_inputs = input_w.unbind(0);
