@@ -6,6 +6,7 @@ from datetime import timedelta
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
 
+from .constants import default_pg_timeout
 from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 from . import (
     AllreduceOptions,
@@ -127,13 +128,6 @@ _pg_group_ranks = {}
 # Default process group state
 _default_pg = None
 _default_pg_init_method = None
-
-# Default process group wide timeout, if applicable.
-# This only applies to the gloo and nccl backends
-# (only if NCCL_BLOCKING_WAIT is set to 1). To make an attempt at
-# backwards compatibility with THD, we use an extraordinarily high default
-# timeout, given that THD did not have timeouts.
-_default_pg_timeout = timedelta(minutes=30)
 
 # Process group count for default naming
 _group_count = 0
@@ -308,7 +302,7 @@ def get_backend(group=group.WORLD):
 
 def init_process_group(backend,
                        init_method=None,
-                       timeout=_default_pg_timeout,
+                       timeout=default_pg_timeout,
                        world_size=-1,
                        rank=-1,
                        store=None,
@@ -393,7 +387,9 @@ def init_process_group(backend,
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(init_method, rank, world_size)
+            rendezvous_iterator = rendezvous(
+                init_method, rank, world_size, timeout=timeout
+            )
             store, rank, world_size = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
@@ -417,7 +413,7 @@ def _new_process_group_helper(world_size,
                               backend,
                               store,
                               group_name=None,
-                              timeout=_default_pg_timeout):
+                              timeout=default_pg_timeout):
     """
     Create a new distributed process group.
 
@@ -1496,7 +1492,7 @@ def barrier(group=group.WORLD,
         work.wait()
 
 
-def new_group(ranks=None, timeout=_default_pg_timeout, backend=None):
+def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
     """
     Creates a new distributed group.
 

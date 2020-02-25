@@ -259,7 +259,19 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>());
 
   shared_ptr_class_<::c10d::TCPStore>(module, "TCPStore", store)
-      .def(py::init<const std::string&, int, int, bool>());
+      .def(
+          py::init<
+              const std::string&,
+              int,
+              int,
+              bool,
+              std::chrono::milliseconds>(),
+          py::arg("host_name"),
+          py::arg("port"),
+          py::arg("world_size"),
+          py::arg("is_master"),
+          py::arg("timeout") =
+              std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
   shared_ptr_class_<::c10d::PrefixStore>(module, "PrefixStore", store)
       .def(py::init<const std::string&, std::shared_ptr<::c10d::Store>>());

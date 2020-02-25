@@ -1674,18 +1674,8 @@ Node* Graph::createLoad(const std::string& name, const TypePtr& type) {
 
 Node* Graph::createIsInstance(
     Value* v,
-    at::ArrayRef<TypePtr> types,
-    bool is_list,
-    bool is_tuple) {
+    at::ArrayRef<TypePtr> types) {
   auto n = create(prim::isinstance, {v}, /*num_outputs*/ 1);
-  std::vector<std::string> kinds;
-  if (is_list) {
-    kinds.emplace_back("list");
-  }
-  if (is_tuple) {
-    kinds.emplace_back("tuple");
-  }
-  n->ss_(attr::kinds, std::move(kinds));
   n->tys_(attr::types, types.vec());
   n->output()->setType(BoolType::get());
   return n;

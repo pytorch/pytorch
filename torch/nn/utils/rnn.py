@@ -209,7 +209,7 @@ def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True)
             format.
         enforce_sorted (bool, optional): if ``True``, the input is expected to
             contain sequences sorted by length in a decreasing order. If
-            ``False``, this condition is not checked. Default: ``True``.
+            ``False``, the input will get sorted unconditionally. Default: ``True``.
 
     Returns:
         a :class:`PackedSequence` object

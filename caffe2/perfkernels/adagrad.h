@@ -101,9 +101,9 @@ inline void adagrad_update_prefetch_inlined(
     __m256 nhi = _mm256_add_ps(hi, _mm256_mul_ps(gi, gi));
     _mm256_storeu_ps(nh + i, nhi);
     __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    _mm256_storeu_ps(
-        nw + i, _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp)));
+        _mm256_mul_ps(_mm256_set1_ps(lr), gi),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    _mm256_storeu_ps(nw + i, _mm256_add_ps(wi, vtmp));
   }
 #endif
 

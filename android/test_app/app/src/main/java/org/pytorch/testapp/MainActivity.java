@@ -10,12 +10,11 @@ import androidx.annotation.Nullable;
 import androidx.annotation.UiThread;
 import androidx.annotation.WorkerThread;
 import androidx.appcompat.app.AppCompatActivity;
+import java.nio.FloatBuffer;
 import org.pytorch.IValue;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
 import org.pytorch.Tensor;
-
-import java.nio.FloatBuffer;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -31,21 +30,23 @@ public class MainActivity extends AppCompatActivity {
   private Tensor mInputTensor;
   private StringBuilder mTextViewStringBuilder = new StringBuilder();
 
-  private final Runnable mModuleForwardRunnable = new Runnable() {
-    @Override
-    public void run() {
-      final Result result = doModuleForward();
-      runOnUiThread(new Runnable() {
+  private final Runnable mModuleForwardRunnable =
+      new Runnable() {
         @Override
         public void run() {
-          handleResult(result);
-          if (mBackgroundHandler != null) {
-            mBackgroundHandler.post(mModuleForwardRunnable);
-          }
+          final Result result = doModuleForward();
+          runOnUiThread(
+              new Runnable() {
+                @Override
+                public void run() {
+                  handleResult(result);
+                  if (mBackgroundHandler != null) {
+                    mBackgroundHandler.post(mModuleForwardRunnable);
+                  }
+                }
+              });
         }
-      });
-    }
-  };
+      };
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {

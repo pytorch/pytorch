@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/instruction.h>
-
+#include <torch/csrc/jit/mobile/type_parser.h>
 
 #include <fstream>
 #include <string>
@@ -40,27 +40,27 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char *str);
 namespace {
+
+IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
+  auto row = tup.toTuple()->elements().at(entry).toTuple();
+  TORCH_INTERNAL_ASSERT(row->elements().at(0).toStringRef() == expected_name, "Expected ", expected_name, " found " , row->elements().at(0).toStringRef());
+  return row->elements().at(1);
+}
+
 void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::CompilationUnit> mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
+    const std::string& function_name = m_tuple[0].toStringRef();
+    IValue table = m_tuple[1];
 
-    auto function = std::unique_ptr<mobile::Function>(new mobile::Function(
-        c10::QualifiedName(m_tuple[0].toString()->string())));
-    auto comps = m_tuple[1].toTuple()->elements();
+    auto function = std::unique_ptr<mobile::Function>(
+        new mobile::Function(c10::QualifiedName(function_name)));
 
-    // The sequence of the named tuple is 0: instructions, 1: operators,
-    // 2: constants, 3: register_size
-    auto named_ins = comps[0].toTuple()->elements();
-    auto ins_name = named_ins[0].toString()->string();
-    TORCH_CHECK(ins_name == "instructions",
-                "instruction is expected, but get", ins_name);
-    auto ins_list = named_ins[1].toTuple()->elements();
-
-    auto named_ops = comps[1].toTuple()->elements();
-    auto ops_name = named_ops[0].toString()->string();
-    TORCH_CHECK(ops_name == "operators",
-                "operator is expected, but get", ops_name);
-    auto ops_list = named_ops[1].toTuple()->elements();
+    const auto& ins_list = expect_field(table, "instructions", 0).toTuple()->elements();
+    const auto& ops_list = expect_field(table, "operators", 1).toTuple()->elements();
+    const auto& consts_list = expect_field(table, "constants", 2).toTuple()->elements();
+    const auto& types_list = expect_field(table, "types", 3).toTuple()->elements();
+    const auto& register_size = expect_field(table, "register_size", 4).toInt();
 
     for (const auto& ins : ins_list) {
       auto ins_item = ins.toTuple()->elements();
@@ -80,23 +80,15 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
                            op_item[1].toString()->string());
     }
 
-    // vararg operators are stored in a separate table.
-    function->build_vararg_operator_table();
-
-    auto named_consts = comps[2].toTuple()->elements();
-    auto consts_name = named_consts[0].toString()->string();
-    TORCH_CHECK(consts_name == "constants",
-                "constant is expected, but get", consts_name);
-    auto consts_list = named_consts[1].toTuple()->elements();
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
     }
 
-    auto named_agg_size = comps[3].toTuple()->elements();
-    auto size_name = named_agg_size[0].toString()->string();
-    TORCH_CHECK(size_name == "register_size",
-                "register_size is expected, but get", ops_name);
-    function->set_register_size(named_agg_size[1].toInt());
+    for (const auto& t : types_list) {
+      function->append_type(c10::parseType(t.toStringRef()));
+    }
+
+    function->set_register_size(register_size);
 
     mcu->register_function(std::move(function));
   }
