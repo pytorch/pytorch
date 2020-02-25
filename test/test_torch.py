@@ -9755,22 +9755,20 @@ class TestTorchDeviceType(TestCase):
                             self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large(self, device):
-        if self.device_type in ('cpu', 'cuda'):
-            for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-                x = torch.randn(1000, 10, device=device)
-                y = torch.randn(1000, 10, device=device)
-                actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                expected = self._brute_cdist(x, y, p=2)
-                self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(1000, 10, device=device)
+            y = torch.randn(1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = self._brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_large_batch(self, device):
-        if self.device_type in ('cpu', 'cuda'):
-            for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
-                x = torch.randn(4, 3, 1000, 10, device=device)
-                y = torch.randn(4, 3, 1000, 10, device=device)
-                actual = torch.cdist(x, y, p=2, compute_mode=cm)
-                expected = self._brute_cdist(x, y, p=2)
-                self.assertTrue(torch.allclose(expected, actual))
+        for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+            x = torch.randn(4, 3, 1000, 10, device=device)
+            y = torch.randn(4, 3, 1000, 10, device=device)
+            actual = torch.cdist(x, y, p=2, compute_mode=cm)
+            expected = self._brute_cdist(x, y, p=2)
+            self.assertTrue(torch.allclose(expected, actual))
 
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
