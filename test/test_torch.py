@@ -13953,7 +13953,7 @@ class TestTorchDeviceType(TestCase):
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
         # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
-        if IS_WINDOWS and device == 'cuda' and dtype == torch.bfloat16:
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
             return
 
         size = 2000
@@ -13982,7 +13982,7 @@ class TestTorchDeviceType(TestCase):
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
         # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
-        if IS_WINDOWS and device == 'cuda' and dtype == torch.bfloat16:
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
             return
 
         size = 2000
@@ -14022,7 +14022,7 @@ class TestTorchDeviceType(TestCase):
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
         # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
-        if IS_WINDOWS and device == 'cuda' and dtype == torch.bfloat16:
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
             return
 
         size = 2000
@@ -14049,7 +14049,7 @@ class TestTorchDeviceType(TestCase):
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):
         # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
-        if IS_WINDOWS and device == 'cuda' and dtype == torch.bfloat16:
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
             return
 
         size = 2000
