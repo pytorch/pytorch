@@ -1238,12 +1238,12 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      c10::optional<ScalarType> dtype, bool use_dynamic) {
+      bool type_2, c10::optional<ScalarType> dtype, bool use_dynamic) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
@@ -1256,18 +1256,18 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
       auto params = gather_quantized_params_dynamic(_params);
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          dropout_p, train, bidirectional, type_2);
     } else {
       auto params = gather_quantized_params(_params);
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
           input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          dropout_p, train, bidirectional, type_2);
     }
   } else {
     auto params = gather_quantized_params_fp16(_params);
     results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
         input, params, hx[0], hx[1], num_layers,
-        dropout_p, train, bidirectional);
+        dropout_p, train, bidirectional, type_2);
   }
   auto & packed_output = std::get<0>(results);
   return std::make_tuple(std::move(packed_output.data),
