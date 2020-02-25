@@ -11,6 +11,7 @@ import platform
 import re
 import gc
 import types
+from functools import partial
 import inspect
 import io
 import argparse
@@ -98,6 +99,7 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -106,6 +108,7 @@ if args.ge_config == 'legacy':
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -1185,9 +1188,17 @@ def find_free_port():
     sock.close()
     return sockname[1]
 
+# Errors that we can get in c10d initialization for which we should retry tests for.
+ADDRESS_IN_USE = "Address already in use"
+CONNECT_TIMEOUT = "connect() timed out."
 
-def retry_on_address_already_in_use_error(func):
-    """Reruns a test if it sees "Address already in use" error."""
+def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
+    """Reruns a test if the test returns a RuntimeError and the exception
+    matches exactly with one of the strings in connect_errors."""
+    # This if block is executed when using this function as a decorator with arguments.
+    if func is None:
+        return partial(retry_on_connect_failures, connect_errors=connect_errors)
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         tries_remaining = 10
@@ -1195,7 +1206,7 @@ def retry_on_address_already_in_use_error(func):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) == "Address already in use":
+                if str(error) in connect_errors:
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise
@@ -1303,48 +1314,6 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
             # in LU factorization will be non-trivial
             s[0, 0] = 0
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
-
-
-def brute_pdist(inp, p=2):
-    """Computes the same as torch.pdist using primitives"""
-    n = inp.shape[-2]
-    k = n * (n - 1) // 2
-    if k == 0:
-        # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
-    unroll = square.view(square.shape[:-2] + (n * n,))
-    inds = torch.ones(k, dtype=torch.int)
-    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
-    return unroll[..., inds.cumsum(0)]
-
-
-def pdist_single(self, shape, device, p, dtype, trans, grad_check=False):
-    x = torch.randn(shape, dtype=dtype, device=device)
-    if trans:
-        x.transpose_(-2, -1)
-    if grad_check:
-        x.requires_grad_()
-        y = x.detach().clone().requires_grad_()
-    else:
-        y = x
-    actual = torch.pdist(x, p=p)
-    expected = brute_pdist(y, p=p)
-    self.assertEqual(expected.shape, actual.shape)
-    self.assertTrue(torch.allclose(expected, actual))
-    if grad_check and expected.size() != torch.Size([0]):
-        g0 = torch.rand_like(actual)
-        actual.backward(g0)
-        expected.backward(g0)
-        self.assertTrue(torch.allclose(x.grad, y.grad))
-
-
-def brute_cdist(x, y, p=2):
-    r1 = x.shape[-2]
-    r2 = y.shape[-2]
-    if r1 == 0 or r2 == 0:
-        return torch.empty(r1, r2, device=x.device)
-    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -1482,7 +1451,9 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
-dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2,
-              torch.bfloat16: 1e-1}
+# Using @precisionOverride specific to your test is the recommended way
+# of doing this. These are just some values that worked for test_nn.
+dtype2prec_DONTUSE = {torch.float: 1e-5,
+                      torch.double: 1e-5,
+                      torch.half: 1e-2,
+                      torch.bfloat16: 1e-1}

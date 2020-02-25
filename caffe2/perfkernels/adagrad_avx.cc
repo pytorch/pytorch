@@ -28,9 +28,9 @@ void adagrad_update__avx_f16c(
         _mm256_mul_ps(_mm256_set1_ps(decay), hi), _mm256_mul_ps(gi, gi));
     _mm256_storeu_ps(nh + i, nhi);
     __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    _mm256_storeu_ps(
-        nw + i, _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp)));
+        _mm256_mul_ps(_mm256_set1_ps(lr), gi),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    _mm256_storeu_ps(nw + i, _mm256_add_ps(wi, vtmp));
   }
 
   for (; i < N; ++i) {
@@ -96,8 +96,9 @@ void adagrad_fp16_update_prefetch__avx_f16c(
     _mm_storeu_si128(reinterpret_cast<__m128i*>(nh + i), nhhi);
 
     __m256 vtmp = _mm256_div_ps(
-        gi, _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
-    __m256 nwi = _mm256_add_ps(wi, _mm256_mul_ps(_mm256_set1_ps(lr), vtmp));
+        _mm256_mul_ps(_mm256_set1_ps(lr), gi),
+        _mm256_add_ps(_mm256_sqrt_ps(nhi), _mm256_set1_ps(epsilon)));
+    __m256 nwi = _mm256_add_ps(wi, vtmp);
     __m128i nhwi = _mm256_cvtps_ph(nwi, 0);
     _mm_storeu_si128(reinterpret_cast<__m128i*>(nw + i), nhwi);
   }
