@@ -880,7 +880,8 @@ void lstm_miopen(Tensor& output, Tensor& hy, Tensor& cy,
 void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool type_2) {
     auto result = _miopen_impl(data, batch_sizes, std::make_tuple(hx[0], hx[1]),
         params, has_biases, miopenLSTM, num_layers, dropout_p, train, bidirectional);
     output = result.first;

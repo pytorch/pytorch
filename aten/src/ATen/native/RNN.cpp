@@ -1040,26 +1040,27 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& data, const Tensor& batch_sizes, TensorList hx,
       TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool type_2) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;
     lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+            _params, has_biases, num_layers, dropout_p, train, bidirectional, type_2);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   PackedSequence input { data, batch_sizes };
   auto params = gather_params(_params, has_biases);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional, type_2);
   auto & packed_output = std::get<0>(result);
   return std::make_tuple(std::move(packed_output.data),
                          std::move(std::get<1>(result)),
