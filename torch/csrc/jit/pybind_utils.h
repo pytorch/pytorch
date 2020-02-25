@@ -749,6 +749,14 @@ inline py::object toPyObject(IValue ivalue) {
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    return py::cast(torch::distributed::rpc::PyRRef(
+        c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
+            ivalue.toRRef())));
+#else
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
+#endif
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

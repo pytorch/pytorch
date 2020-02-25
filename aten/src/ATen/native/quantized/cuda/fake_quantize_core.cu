@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/quantized/fake_quant_affine.h>
 #include <cmath>
 
 /* Fake quantize a tensor, common block for per-channel & per-tensor fake quant
@@ -16,7 +17,7 @@ Returns:
 */
 namespace at {
 namespace native {
-void fake_quantize_slice_cuda(
+void fake_quantize_slice_kernel_cuda(
     Tensor& output,
     const Tensor& input,
     float scale,
@@ -37,7 +38,7 @@ void fake_quantize_slice_cuda(
       });
 }
 
-void fake_quantize_grad_slice_cuda(
+void fake_quantize_grad_slice_kernel_cuda(
     Tensor& input_grad,
     const Tensor& input,
     const Tensor& output_grad,
@@ -55,6 +56,9 @@ void fake_quantize_grad_slice_cuda(
         dx = (Xq >= quant_min && Xq <= quant_max) * dy;
       });
 }
+
+REGISTER_DISPATCH(fake_quant_slice_stub, &fake_quantize_slice_kernel_cuda);
+REGISTER_DISPATCH(fake_quant_grad_slice_stub, &fake_quantize_grad_slice_kernel_cuda);
 
 } // namespace native
 } // namespace at
