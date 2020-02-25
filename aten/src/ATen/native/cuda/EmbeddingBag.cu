@@ -52,7 +52,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
     if (featureDim < featureSize) {
       int64_t bag = chunk / chunksPerBag;
       scalar_t *weightFeat = weight + featureDim * weight_stride1;
-      int64_t begin = offsets[bag];
+      int64_t begin = bag == 0 ? 0 : offsets[bag]; // forces first offset to be 0 instead of asserting on it
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
 
@@ -276,21 +276,21 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   }
   int64_t featureSize = weight.size(1);
 
-  auto bag_size = at::zeros(offsets.sizes(), indices.options());
+  auto bag_size = at::empty(offsets.sizes(), indices.options());
   auto offset2bag =
-      at::zeros({indices.size(0)}, indices.options()); // offset2bag = [0 0 0 0 0]
+      at::empty({indices.size(0)}, indices.options()); // offset2bag = [0 0 0 0 0]
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  auto output = at::zeros({numBags, featureSize}, weight.options());
+  auto output = at::empty({numBags, featureSize}, weight.options());
 
   Tensor max_indices;
 
   if (mode == MODE_MAX) {
-    max_indices = at::zeros({numBags, featureSize}, indices.options());
+    max_indices = at::empty({numBags, featureSize}, indices.options());
   } else {
     // No need to allocate if we aren't doing a backwards pass
-    max_indices = at::zeros({0}, indices.options());
+    max_indices = at::empty({0}, indices.options());
   }
 
 #ifdef __HIP_PLATFORM_HCC__

@@ -52,7 +52,7 @@ def _floats_wrapper(*args, **kwargs):
 def floats(*args, **kwargs):
     if 'width' not in kwargs:
         kwargs['width'] = 32
-    return st.floats(*args, **kwargs)
+    return _floats_wrapper(*args, **kwargs)
 
 """Hypothesis filter to avoid overflows with quantized tensors.
 
