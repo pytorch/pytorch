@@ -5277,26 +5277,23 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                  [[0.999994993209838867187500000, 0.499997496604919433593750000],
                   [1.499992489814758300781250000, -1.499992489814758300781250000]]]])]
 
+
         for i in range(len(inputs)):
-            m = torch.nn.BatchNorm2d(inputs[i].size()[1], 1e-05, 0.1, affine=False)
-            m.eval()
-            # contiguous case
-            input1 = inputs[i].contiguous()
-            output1 = m(input1)
-            # non-contiguous case
-            input2 = input1.permute(0, 1, 3, 2)
-            output2 = m(input2).permute(0, 1, 3, 2)
-            # channels last case
-            input3 = input1.contiguous(memory_format=torch.channels_last)
-            for name, param in m.named_parameters():
-                if param.requires_grad:
-                    if param.dim() == 4:
-                        with torch.no_grad():
-                            param = param.contiguous(memory_format=torch.channels_last)
-            output3 = m(input3)
-            self.assertEqual(output3, outputs[i])
-            self.assertEqual(output3, output1)
-            self.assertEqual(output3, output2)
+            for affine in [False, True]:
+                m = torch.nn.BatchNorm2d(inputs[i].size()[1], 1e-05, 0.1, affine=affine)
+                m.eval()
+                # contiguous case
+                input1 = inputs[i].contiguous()
+                output1 = m(input1)
+                # non-contiguous case
+                input2 = input1.permute(0, 1, 3, 2)
+                output2 = m(input2).permute(0, 1, 3, 2)
+                # channels last case
+                input3 = input1.contiguous(memory_format=torch.channels_last)
+                output3 = m(input3)
+                self.assertEqual(output3, outputs[i])
+                self.assertEqual(output3, output1)
+                self.assertEqual(output3, output2)
 
     def test_tensor_grad_warnings(self):
         dummy = torch.empty(1)
@@ -5416,6 +5413,22 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         qx = qxraw.permute(0, 2, 3, 1)
         qy = qyraw.permute(0, 3, 2, 1)
         test_memory_layout(qx, qy, 0.1, 5, torch.ops.quantized.add(qx, qy, 0.1, 5))
+
+    # Tests to make sure we still handle .data properly until it is removed
+    def test_dot_data_use(self):
+        # .data allows to change the Tensors types inplace, check that we still
+        # raise a nice error.
+        with self.assertRaisesRegex(
+                RuntimeError,
+                # message includes both Double and Long
+                '(?=.*Double)(?=.*Long)'):
+
+            # Calls model with a LongTensor input but DoubleTensor weights
+            input = torch.randn(1, 1, 1, 6, dtype=torch.double)
+            weight = torch.zeros(1, 1, 1, 3, dtype=torch.long)
+            model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
+            model.weight.data = weight
+            out = model(input)
 
 # Functions to test negative dimension wrapping
 METHOD = 1
