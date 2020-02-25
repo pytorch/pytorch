@@ -2,7 +2,7 @@ require 'optparse'
 require 'xcodeproj'
 
 options = {}
-option_parser = OptionParser.new do |opts| 
+option_parser = OptionParser.new do |opts|
  opts.banner = 'Tools for building PyTorch iOS framework on MacOS'
  opts.on('-i', '--install_path ', 'path to the cmake install folder') { |value|
     options[:install] = value
@@ -23,11 +23,11 @@ end.parse!
 puts options.inspect
 
 install_path = File.expand_path(options[:install])
-if not Dir.exist? (install_path) 
+if not Dir.exist? (install_path)
     raise "path don't exist:#{install_path}!"
 end
 xcodeproj_path = File.expand_path(options[:xcodeproj])
-if not File.exist? (xcodeproj_path) 
+if not File.exist? (xcodeproj_path)
     raise "path don't exist:#{xcodeproj_path}!"
 end
 
@@ -51,8 +51,8 @@ end
 
 # link static libraries
 target.frameworks_build_phases.clear
-libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
-for lib in libs do 
+libs = ['libc10.a', 'libclog.a', 'libnnpack.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+for lib in libs do
     path = "#{install_path}/lib/#{lib}"
     if File.exist?(path)
         libref = project.frameworks_group.new_file(path)
@@ -68,12 +68,12 @@ elsif options[:platform] == 'OS'
     sdk = 'iphoneos'
 else
     raise "unsupported platform #{options[:platform]}"
-end 
+end
 
 profile = options[:profile]
-if not profile 
+if not profile
     raise "no provisioning profile found!"
-end 
+end
 
 # run xcodebuild
 exec "xcodebuild clean build  -project #{xcodeproj_path}  -target #{target.name} -sdk #{sdk} -configuration Release PROVISIONING_PROFILE_SPECIFIER=#{profile}"
