@@ -1463,7 +1463,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1499,9 +1498,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1509,6 +1507,9 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
+                # to make sure new bias is not zero
+                self.bn.eps = 0.0027
+                self.bn.bias = torch.nn.Parameter(torch.rand([20]))
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1536,9 +1537,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -1561,14 +1561,53 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.sub(x)
                 return x
 
-        m = torch.jit.script(TestModule())
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
 
-        m = wrap_cpp_module(torch._C._jit_pass_fold_convbn(m._c))
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        x = torch.rand(1, 1, 10, 10)
+        self.assertEqual(eager(x), scripted(x))
+
+    def test_foldbn_shared_classtype(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, bias=False):
+                super(TestModule, self).__init__()
+                self.conv1 = torch.nn.Conv2d(5, 5, 3, bias=bias)
+                self.bn1 = torch.nn.BatchNorm2d(num_features=5)
+                self.bn1.running_mean.fill_(-0.2)
+                self.bn1.bias = torch.nn.Parameter(torch.rand([5]))
+                # to make sure new bias is not zero
+                self.bn1.eps = 0.0023
+                self.conv2 = torch.nn.Conv2d(5, 5, 3, bias=bias)
+                self.bn2 = torch.nn.BatchNorm2d(num_features=5)
+                self.bn2.eps = 0.0029
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                return x
+        for bias in [True, False]:
+            eager = TestModule(bias).eval()
+            scripted = torch.jit.script(eager).copy()
+            torch._C._jit_pass_dedup_module_uses(scripted._c)
+
+            folded = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
+            x = torch.rand(1, 5, 6, 6)
+            self.assertEqual(eager(x), scripted(x))
 
     def test_fuse_linear(self):
         input_strs = ["""
