@@ -636,7 +636,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 }
 
 Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
-  auto tensor = at::empty(n, options);
+  auto tensor = at::empty(n, at::dtype(at::kLong).merge_in(options));
   return at::randperm_out(tensor, n, generator);
 }
 
