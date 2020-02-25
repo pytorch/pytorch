@@ -16,7 +16,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
 
-  // TODO: use tensor.index() after improving perf
+  // TODO: use tensor.advanced_index() after improving perf
   if (indices.dim() == 1) {
     return weight.index_select(0, indices);
   }
@@ -57,8 +57,8 @@ Tensor embedding_sparse_backward(
   Tensor grad = grad_;
   if (padding_idx != -1) {
     auto c = indices != padding_idx;
-    indices = indices.index(c);
-    grad = grad.index(c);
+    indices = indices.advanced_index(c);
+    grad = grad.advanced_index(c);
   }
 
   int64_t num_features = grad_.size(-1);

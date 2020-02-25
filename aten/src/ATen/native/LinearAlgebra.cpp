@@ -31,7 +31,7 @@ static inline std::tuple<Tensor, Tensor> _lu_det_P_diag_U(const Tensor& self) {
 
   // We have to manually set the diagonal to 0 due to an issue with MAGMA's getrf_batched routine
   if (self.dim() > 2 && self.is_cuda()) {
-    u_diagonal.index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
+    u_diagonal.advanced_index_put_(infos.nonzero_numpy(), at::zeros({}, self.options()));
   }
   return std::tuple<Tensor, Tensor>(num_exchanges.mul_(-2).add_(1), u_diagonal);
 }
@@ -63,7 +63,7 @@ Tensor logdet(const Tensor& self) {
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   Tensor logdet_vals = diag_U.abs_().log_().sum(-1);
   if (self.dim() > 2) {
-    logdet_vals.index_put_((det_sign < 0).nonzero_numpy(), at::full({}, NAN, self.options()));
+    logdet_vals.advanced_index_put_((det_sign < 0).nonzero_numpy(), at::full({}, NAN, self.options()));
   } else if (det_sign.item<double>() < 0) {
     logdet_vals.fill_(NAN);
   }
