@@ -492,7 +492,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
 // Layers are scan-like higher-order functions, which take in cells, and
 // transform them to functions of signature
 //
-// (io_type input, hidden_type hidden, param_type params) -> (io_type, hidden_type)
+// (io_type input, hidden_type hidden, param_type params, bool type_2) -> (io_type, hidden_type)
 //
 // which can apply the cell over a sequence of inputs, and produce both a new set
 // of hidden states, as well as a concatenated output of each step.
@@ -512,7 +512,8 @@ struct Layer {
   virtual output_type operator()(
       const io_type& input,
       const hidden_type& input_hidden,
-      const param_type& params) const = 0;
+      const param_type& params,
+      const bool& type_2) const = 0;
 };
 
 template<typename hidden_type, typename cell_params>
@@ -570,9 +571,14 @@ struct FullBidirectionalLayer
   output_type operator()(
       const Tensor& input,
       const hidden_type& input_hidden,
-      const param_type& params) const override {
+      const param_type& params,
+      const bool type_2) const override {
     std::vector<Tensor> step_inputs;
     if (input.device().is_cpu()) {
+      auto actual_input = input;
+      if(type_2) {
+        at::print(std::cerr, input)
+      }
       auto input_w = params.first.linear_ih(input);
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
@@ -772,7 +778,7 @@ template<typename io_type, typename hidden_type, typename weight_type>
 LayerOutput<io_type, std::vector<hidden_type>>
 apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const io_type& input,
                   const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
-                  int64_t num_layers, double dropout_p, bool train) {
+                  int64_t num_layers, double dropout_p, bool train, bool type_2) {
   TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
   TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
 
@@ -781,7 +787,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
   for (int64_t l = 0; l < num_layers; ++l) {
-    auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++));
+    auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++), type_2);
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
 
@@ -802,15 +808,16 @@ LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
       const io_type& input,
       const std::vector<cell_params>& params,
       const std::vector<typename CellType::hidden_type>& hiddens,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool type_2) {
   using hidden_type = typename CellType::hidden_type;
   CellType cell;
   if (bidirectional) {
     using BidirLayer = BidirLayerT<hidden_type, cell_params>;
-    auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train);
+    auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train, type_2);
     return {bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
   } else {
-    return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train);
+    return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train, type_2);
   }
 }
 
@@ -828,7 +835,7 @@ template<template<typename,typename> class LayerT, template<typename,typename> c
 std::tuple<io_type, Tensor, Tensor> _lstm_impl(
       const io_type& input,
       const std::vector<cell_params>& params, const Tensor& hx, const Tensor& cx,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool type_2) {
   // It's much more useful for us to work on lists of pairs of hx and cx for each layer, so we need
   // to transpose a pair of those tensors.
   auto layer_hx = hx.unbind(0);
@@ -840,7 +847,7 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
 
-  auto result = _rnn_impl<LSTMCell<cell_params>, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
+  auto result = _rnn_impl<LSTMCell<cell_params>, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional, type_2);
 
   // Now, we need to reverse the transposed we performed above.
   std::vector<Tensor> hy, cy;
@@ -1023,7 +1030,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
+      input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional, type_2);
   if (batch_first) {
     std::get<0>(results) = std::get<0>(results).transpose(0, 1);
   }
