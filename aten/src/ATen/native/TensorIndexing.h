@@ -165,7 +165,7 @@ struct CAFFE2_API TensorIndex final {
     return type_ == TensorIndexType::Slice;
   }
 
-  inline const impl::Slice& slice() const {
+  inline const Slice& slice() const {
     return slice_;
   }
 
@@ -180,7 +180,7 @@ struct CAFFE2_API TensorIndex final {
  private:
   int64_t integer_;
   bool boolean_;
-  impl::Slice slice_;
+  Slice slice_;
   Tensor tensor_;
   TensorIndexType type_;
 };
