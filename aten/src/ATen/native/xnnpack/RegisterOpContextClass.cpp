@@ -103,7 +103,4 @@ static auto registry =
 } // native
 } // at
 
-namespace {
-}
-
 #endif /* USE_XNNPACK */

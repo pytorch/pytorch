@@ -101,7 +101,8 @@ Tensor run(
           context.stride_,
           context.dilation_),
       padded_input_nhwc.options().dtype(),
-      MemoryFormat::ChannelsLast);
+      MemoryFormat::ChannelsLast,
+      padded_input_nhwc.names());
 
   const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
@@ -290,7 +291,6 @@ Tensor convolution2d(
 }
 
 } // namespace xnnpack
-
 } // namespace native
 } // namespace at
 

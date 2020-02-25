@@ -31,6 +31,7 @@ ContextLinear create(
     const c10::optional<Tensor>& bias,
     const float output_min,
     const float output_max);
+
 } // namespace linear
 } // namespace internal
 } // namespace xnnpack
