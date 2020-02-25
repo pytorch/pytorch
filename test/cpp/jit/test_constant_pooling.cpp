@@ -67,7 +67,7 @@ graph():
   %y : Tensor = aten::tensor(%3, %10, %7, %15)
   %9 : int[] = prim::ListConstruct(%1, %2)
   %z : Tensor = aten::tensor(%9, %10, %7, %15)
-  %f = prim::Print(%x, %y, %z)
+  prim::Print(%x, %y, %z)
   return (%1)
   )IR",
         &*graph);

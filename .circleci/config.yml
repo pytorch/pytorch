@@ -215,15 +215,33 @@ pytorch_windows_params: &pytorch_windows_params
     test_name:
       type: string
       default: ""
+    cuda_version:
+      type: string
+      default: "10"
+    python_version:
+      type: string
+      default: "3.6"
+    vc_version:
+      type: string
+      default: "14.11"
+    vc_year:
+      type: string
+      default: "2017"
+    vc_product:
+      type: string
+      default: "BuildTools"
+    use_cuda:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
     SCCACHE_BUCKET: "ossci-compiler-cache"
-    CUDA_VERSION: "10"
-    PYTHON_VERSION: "3.6"
-    VC_VERSION: "14.11"
-    VC_YEAR: "2017"
-    VC_PRODUCT: "BuildTools"
-    USE_CUDA: "1"
+    CUDA_VERSION: <<parameters.cuda_version>>
+    PYTHON_VERSION: <<parameters.python_version>>
+    VC_VERSION: <<parameters.vc_version>>
+    VC_YEAR: <<parameters.vc_year>>
+    VC_PRODUCT: <<parameters.vc_product>>
+    USE_CUDA: <<parameters.use_cuda>>
     TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>
 caffe2_params: &caffe2_params
@@ -454,13 +472,37 @@ jobs:
 
   pytorch_windows_build:
     <<: *pytorch_windows_params
+    parameters:
+      test_name:
+        type: string
+        default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.11"
+      vc_year:
+        type: string
+        default: "2017"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
     executor: windows-cpu-with-nvidia-cuda
     steps:
       - checkout
       - run:
           name: Install VS2017
           command: |
-            powershell .circleci/scripts/vs_install.ps1
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              powershell .circleci/scripts/vs_install.ps1
+            fi
       - run:
           name: Install Cuda
           command: |
@@ -490,13 +532,33 @@ jobs:
       test_name:
         type: string
         default: ""
+      cuda_version:
+        type: string
+        default: "10"
+      python_version:
+        type: string
+        default: "3.6"
+      vc_version:
+        type: string
+        default: "14.11"
+      vc_year:
+        type: string
+        default: "2017"
+      vc_product:
+        type: string
+        default: "BuildTools"
+      use_cuda:
+        type: string
+        default: ""
     executor: windows-with-nvidia-gpu
     steps:
       - checkout
       - run:
           name: Install VS2017
           command: |
-            powershell .circleci/scripts/vs_install.ps1
+            if [[ "${VC_YEAR}" == "2017" ]]; then
+              powershell .circleci/scripts/vs_install.ps1
+            fi
       - run:
           name: Test
           no_output_timeout: "30m"
@@ -1493,9 +1555,7 @@ jobs:
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install pillow==7.0.0 --progress-bar off
-            #install the latest version of PyTorch and TorchVision
-            pip install torch "torchvision>=0.5.0" --progress-bar off
+            pip install torch torchvision --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
@@ -1716,61 +1776,139 @@ workflows:
     jobs:
       # Warning: indentation here matters!
 
-      # Pytorch MacOS builds
       - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
           requires:
             - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
-          name: pytorch_windows_test1
+          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test1
           test_name: pytorch-windows-test1
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
       - pytorch_windows_test:
-          name: pytorch_windows_test2
+          name: pytorch_windows_vs2017_14.11_py36_cuda10.1_test2
           test_name: pytorch-windows-test2
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.11"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
           requires:
             - setup
-            - pytorch_windows_build
+            - pytorch_windows_vs2017_14.11_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
+          requires:
+            - setup
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test1
+          test_name: pytorch-windows-test1
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2017_14.16_py36_cuda10.1_test2
+          test_name: pytorch-windows-test2
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: "14.16"
+          vc_year: "2017"
+          vc_product: "BuildTools"
+          use_cuda: "1"
+          requires:
+            - setup
+            - pytorch_windows_vs2017_14.16_py36_cuda10.1_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+      - pytorch_windows_build:
+          name: pytorch_windows_vs2019_py36_cuda10.1_build
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "1"
+          requires:
+            - setup
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cuda10.1_test1
+          test_name: pytorch-windows-test1
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "1"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cuda10.1_build
+      - pytorch_windows_test:
+          name: pytorch_windows_vs2019_py36_cuda10.1_test2
+          test_name: pytorch-windows-test2
+          cuda_version: "10"
+          python_version: "3.6"
+          vc_version: ""
+          vc_year: "2019"
+          vc_product: "Community"
+          use_cuda: "1"
+          requires:
+            - setup
+            - pytorch_windows_vs2019_py36_cuda10.1_build
       - setup
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_py2_7_9_build
-          requires:
-            - setup
-          build_environment: "pytorch-linux-xenial-py2.7.9-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:07597f23-fa81-474c-8bef-5c8a91b50595"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py2_7_9_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py2_7_9_build
-          build_environment: "pytorch-linux-xenial-py2.7.9-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7.9:07597f23-fa81-474c-8bef-5c8a91b50595"
-          resource_class: large
-      - pytorch_linux_build:
-          name: pytorch_linux_xenial_py2_7_build
-          requires:
-            - setup
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py2.7-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:07597f23-fa81-474c-8bef-5c8a91b50595"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_py2_7_test
-          requires:
-            - setup
-            - pytorch_linux_xenial_py2_7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-          build_environment: "pytorch-linux-xenial-py2.7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py2.7:07597f23-fa81-474c-8bef-5c8a91b50595"
-          resource_class: large
       - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_5_build
           requires:

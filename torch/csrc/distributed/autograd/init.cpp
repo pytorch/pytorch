@@ -111,7 +111,12 @@ PyObject* dist_autograd_init(PyObject* /* unused */) {
         for (const auto& root : roots) {
           variables.emplace_back(root);
         }
-        DistEngine::getInstance().execute(variables, retainGraph);
+        try {
+          DistEngine::getInstance().execute(variables, retainGraph);
+        } catch (python_error & e) {
+          // FIXME: crashes if exception type is not RuntimeError
+          throw std::runtime_error(e.what());
+        }
       },
       R"(
 backward(roots: List[Tensor], retain_graph = False) -> None
