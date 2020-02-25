@@ -14,23 +14,22 @@ def einsum(g, equation, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     return g.op("Einsum", *tensors, equation_s=equation)
 
-@parse_args('s', 'v', 'v')
 def crossentropyloss(g, input, target, weight, reduction, ignore_index):
+    # none reduction : onnx::Constant[value={0}]
+    # mean reduction : onnx::Constant[value={1}]
+    # sum reduction : onnx::Constant[value={2}]
+    reduction = sym_help._maybe_get_const(reduction, 'i')
+    reduction_vals = ['none', 'mean', 'sum']
+    reduction = reduction_vals[reduction]
 
     if sym_help._is_none(weight):
         if sym_help._maybe_get_const(ignore_index, 'i') == -100:
             return g.op("SoftmaxCrossEntropyLoss", input, target, reduction_s=reduction)
-
         loss = g.op("SoftmaxCrossEntropyLoss", input, target, reduction_s='none')
     else:
         if sym_help._maybe_get_const(ignore_index, 'i') == -100:
             return g.op("SoftmaxCrossEntropyLoss", input, target, weight, reduction_s=reduction)
-
         loss = g.op("SoftmaxCrossEntropyLoss", input, target, weight, reduction_s='none')
-
-    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
-    if sym_help._maybe_get_const(ignore_index, 'i') == -100:
-        return loss
 
     # if ignore_index
     zeros = zeros_like(g, loss)
