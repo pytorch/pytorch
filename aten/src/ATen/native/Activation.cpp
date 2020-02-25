@@ -644,10 +644,9 @@ Tensor & leaky_relu_(
   return at::leaky_relu_out(self, self, neg_val);
 }
 
-// Note: [for leaky_relu_backward and leaky_relu_backward_out]
-// leakyReLu backward calculation doesn't support in-place call with non-positive slope.
-// The reason is that for in-place call, the forward result will be saved into autograd node
-// instead of the input itself, when calculating backward gradient, there is no way to know
+// Note: leakyReLu backward calculation doesn't support in-place call with non-positive slope.
+// The reason is that for in-place forward call, the forward result will be saved into autograd
+// node instead of the input itself, when calculating backward gradient, there is no way to know
 // whether the original input for current node is positive or not if the input slope is
 // non-positive. eg. forward is 2, slope is -0.2, the original input for this node could be
 // either 2, or -10, so no way to get a correct backward gradient in this case.
@@ -659,7 +658,7 @@ Tensor leaky_relu_backward(
   TORCH_CHECK(
     !is_result || negval.to<double>() > 0.0,
     "In-place leakyReLu backward calculation is triggered with a non-positive slope which is not supported. "
-    "This is caused by calling in-place function with a non-positive slope, "
+    "This is caused by calling in-place forward function with a non-positive slope, "
     "please call out-of-place version instead.");
 
   Tensor result;

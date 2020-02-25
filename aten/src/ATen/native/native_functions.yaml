@@ -5599,7 +5599,7 @@
     CUDA: leaky_relu
     QuantizedCPU: quantized_leaky_relu
 
-- func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result=False) -> Tensor
+- func: leaky_relu_backward(Tensor grad_output, Tensor self, Scalar negative_slope, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
@@ -5654,7 +5654,7 @@
     CPU: rrelu_with_noise_cpu
     CUDA: legacy::cuda::_thnn_rrelu_with_noise_forward
 
-- func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result=False) -> Tensor
+- func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
 
