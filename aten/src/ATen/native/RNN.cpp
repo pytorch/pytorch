@@ -1009,14 +1009,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+            num_layers, dropout_p, train, bidirectional, type_2, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
     lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-              num_layers, dropout_p, train, bidirectional, batch_first);
+              num_layers, dropout_p, train, bidirectional, type_2, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
   check_device(_input, _params, hx);
