@@ -650,19 +650,16 @@ private:
   bool is_intrusive_ptr;
 };
 
-// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
-// and its owning CU, so that the class type is guaranteed to stay alive as long
-// as we hold this object.
-struct StrongTypePtr {
+// An owning pointer to a type. When the type is class type, it requires a pair
+// of shared_ptrs to the class type and its owning CU, so that the class type is
+// guaranteed to stay alive as long as we hold this object.
+struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
+      std::shared_ptr<Type> type);
+
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+  std::shared_ptr<Type> type_;
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
