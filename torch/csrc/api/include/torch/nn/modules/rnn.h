@@ -88,6 +88,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
       /*dropout=*/double,
       /*train=*/bool,
       /*bidirectional=*/bool,
+      /*type_2=*/bool,
       /*batch_first=*/bool);
 
   /// A generic `forward()` used for RNN and GRU (but not LSTM!). Takes the ATen
