@@ -20,6 +20,25 @@ from . import (
 from . import ReduceOp
 from . import PrefixStore
 
+import logging
+def init_logger():
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(process)s t:%(thread)s: %(message)s"
+    )
+    console.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(console)
+    logger.propagate = False
+    logger.info("Set up a logger.")
+    return logger
+
+
+gLogger = init_logger()
+
 
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
@@ -469,6 +488,7 @@ def _new_process_group_helper(world_size,
                 rank,
                 world_size,
                 timeout=timeout)
+            gLogger.info(f"Creating a gloo group {type(pg)}")
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
@@ -485,6 +505,7 @@ def _new_process_group_helper(world_size,
         else:
             raise RuntimeError("Unsupported distributed backend by group")
 
+    gLogger.info(f"Created a gloo group {type(pg)}")
     return pg
 
 
@@ -1559,10 +1580,12 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
                                    backend,
                                    default_store,
                                    timeout=timeout)
+    gLogger.info(f"type in new_group {type(pg)}")
 
     # Create the global rank to group rank mapping
     _pg_group_ranks[pg] = {
         global_rank: group_rank
         for group_rank, global_rank in enumerate(ranks)
     }
+    gLogger.info(f"type before return in new_group {type(pg)}")
     return pg
