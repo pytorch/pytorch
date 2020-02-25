@@ -31,9 +31,9 @@ class MyModuleInterface(torch.nn.Module):
 
 
 class MyScriptModule(torch.jit.ScriptModule):
-    def __init__(self):
+    def __init__(self, rank):
         super().__init__()
-        self.a = torch.randn(10)
+        self.a = torch.ones(rank)
 
     @torch.jit.script_method
     def forward(self):
@@ -94,7 +94,7 @@ class JitRpcTest(RpcAgentTestFixture):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
                 torch.jit._qualified_name(MyScriptModule),
-                args=(),
+                args=(self.rank,),
             )
 
         with self.assertRaisesRegex(
@@ -102,14 +102,14 @@ class JitRpcTest(RpcAgentTestFixture):
         ):
             ret = rpc._rpc_sync_torchscript(
                 "worker{}".format(dst_rank),
-                torch.jit._qualified_name(MyScriptModule().forward),
+                torch.jit._qualified_name(MyScriptModule(self.rank).forward),
                 args=(),
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
         with self.assertRaisesRegex(Exception, "pickle"):
             ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule().forward, args=()
+                "worker{}".format(dst_rank), MyScriptModule(self.rank).forward, args=()
             )
 
     @dist_init
@@ -129,34 +129,24 @@ class JitRpcTest(RpcAgentTestFixture):
         local_ret = one_arg(torch.ones(2, 2))
 
         # create rref on current rank
-        rref = rpc.remote("worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),))
+        rref = rpc.remote(
+            "worker{}".format(self.rank), one_arg, args=(torch.ones(2, 2),)
+        )
 
         # pass rref to another user in rpc call
-        ret = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
-            rref_to_here,
-            args=(rref,))
+        ret = rpc.rpc_sync("worker{}".format(dst_rank), rref_to_here, args=(rref,))
         self.assertEqual(ret, local_ret)
 
         # return rref in rpc call
-        rref1 = rpc.rpc_sync(
-            "worker{}".format(dst_rank),
-            return_rref,
-            args=(rref,))
+        rref1 = rpc.rpc_sync("worker{}".format(dst_rank), return_rref, args=(rref,))
         self.assertEqual(rref1.to_here(), local_ret)
 
         # pass rref to another user in remote call
-        rref2 = rpc.remote(
-            "worker{}".format(dst_rank),
-            rref_to_here,
-            args=(rref,))
+        rref2 = rpc.remote("worker{}".format(dst_rank), rref_to_here, args=(rref,))
         self.assertEqual(rref2.to_here(), local_ret)
 
         # return rref in remote call
-        rref3 = rpc.remote(
-            "worker{}".format(dst_rank),
-            return_rref,
-            args=(rref,))
+        rref3 = rpc.remote("worker{}".format(dst_rank), return_rref, args=(rref,))
         self.assertEqual(rref3.to_here().to_here(), local_ret)
 
     @dist_init
@@ -182,6 +172,7 @@ class JitRpcTest(RpcAgentTestFixture):
         # ref as arg is passed to pybind boundary, and the ref is not garbage
         # collected by python when calling shutdown()
         import torch.distributed.rpc.api as api
+
         api._ignore_rref_leak = True
 
         local_ret = MyScriptModule(self.rank).forward() + torch.ones(self.rank)
@@ -189,15 +180,15 @@ class JitRpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         remote_ref = rpc.remote(
-            "worker{}".format(dst_rank),
-            construct_my_script_module,
-            args=(self.rank, ))
+            "worker{}".format(dst_rank), construct_my_script_module, args=(self.rank,)
+        )
 
         # pass rref arg to owner
         ret = rpc.rpc_sync(
             "worker{}".format(dst_rank),
             run_ref_script_module,
-            args=(remote_ref, torch.ones(self.rank)))
+            args=(remote_ref, torch.ones(self.rank)),
+        )
         self.assertEqual(ret, local_ret)
 
     @dist_init

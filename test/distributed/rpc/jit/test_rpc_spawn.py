@@ -9,7 +9,7 @@ from torch.testing._internal.distributed.rpc.jit.rpc_test import JitRpcTest
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
 )
-class RpcJitTestWithSpawn(MultiProcessTestCase, JitRpcTest):
+class JitRpcTestWithSpawn(MultiProcessTestCase, JitRpcTest):
     def setUp(self):
         super(RpcJitTestWithSpawn, self).setUp()
         self._spawn_processes()
