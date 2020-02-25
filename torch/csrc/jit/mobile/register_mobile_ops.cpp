@@ -455,6 +455,13 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::append.int(int self) -> void",
   torch::RegisterOperators::options().catchAllKernel<&listAppend<int64_t>>()
+  // Segmentation
+).op(
+  "_aten::sigmoid(Tensor self) -> Tensor",
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [](const Tensor & self) {
+     return at::sigmoid(self);
+  })
 );
 
 }

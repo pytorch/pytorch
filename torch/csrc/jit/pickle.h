@@ -66,6 +66,7 @@ TORCH_API IValue pickle_load(const std::vector<char>& data);
 /// binary. `reader` should remember where it last read, and return
 /// the number of bytes read.
 /// See `torch::pickle` for details.
+/// type_resolver is used to resolve any JIT type based on type str
 TORCH_API IValue unpickle(
     std::function<size_t(char*, size_t)> reader,
     TypeResolver type_resolver,

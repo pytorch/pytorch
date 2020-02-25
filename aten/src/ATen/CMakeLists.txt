@@ -84,8 +84,11 @@ FILE(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 FILE(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 FILE(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
 
+# XNNPACK
+FILE(GLOB native_xnnpack "native/xnnpack/*.cpp")
+
 add_subdirectory(quantized)
-set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp} ${native_sparse_cpp} ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${native_xnnpack} ${generated_cpp} ${core_generated_cpp} ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
