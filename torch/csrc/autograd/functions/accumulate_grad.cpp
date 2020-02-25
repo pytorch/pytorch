@@ -27,8 +27,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     at::Tensor variable_grad,
     const at::Tensor& new_grad,
     size_t num_expected_refs,
-    bool has_post_hooks,
-    const std::function<void(at::Tensor&&)>& update_grad_fn) {
+    const std::function<void(at::Tensor&&)>& update_grad) {
   // Copy since we need to work with non-const Tensor. Grab the original
   // use_count beforehand though.
   size_t new_grad_use_count = new_grad.use_count();
@@ -42,15 +41,15 @@ void AccumulateGrad::accumulateGradAndCallHooks(
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled() && !new_grad_copy.is_sparse() &&
         new_grad_copy.is_contiguous() &&
-        new_grad_use_count <= num_expected_refs + has_post_hooks) {
+        new_grad_use_count <= num_expected_refs) {
       // first check it is in first-order grad only mode
       // then check not sparse before is_contiguous
       // then check contiguous, otherwise later in place accumulation may fail
-      // and lastly, check it is the last reference before we grab it.
-      // If the function has post hooks (for example, a DDP allreduce hook),
-      // call_function in Engine.cpp will temporarily bump the refcount by one,
-      // hence the addition of has_post_hooks.
-      update_grad_fn(new_grad_copy.detach());
+      // and lastly, check if the use_count is less than or equal to the number
+      // of references we expect before grabbing it. The number of references we
+      // expect is basically internal structures that are holding references to
+      // the Tensor and that is fine since these are not exposed to the user.
+      update_grad(new_grad_copy.detach());
     } else if (
         !GradMode::is_enabled() && new_grad_copy.is_sparse() &&
         new_grad_copy._indices().is_contiguous() &&
@@ -63,16 +62,16 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // We only skip clone if indices and values themselves are contiguous for
       // backward compatiblity reasons. Since without this optimization, earlier
       // we would clone the entire SparseTensor which cloned indices and values.
-      update_grad_fn(at::sparse_coo_tensor(
+      update_grad(at::sparse_coo_tensor(
           new_grad_copy._indices(),
           new_grad_copy._values(),
           new_grad_copy.sizes(),
           new_grad_copy.options()));
     } else {
       if (new_grad_copy.is_sparse()) {
-        update_grad_fn(new_grad_copy.clone());
+        update_grad(new_grad_copy.clone());
       } else {
-        update_grad_fn(new_grad_copy.clone(at::MemoryFormat::Contiguous));
+        update_grad(new_grad_copy.clone(at::MemoryFormat::Contiguous));
       }
     }
   } else if (!GradMode::is_enabled()) {
@@ -84,7 +83,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       // `variable_grad` for it to store the result. However, changing the
       // TensorImpl type of a tensor requires changing the tensor itself, and
       // thus in this case we have to change the grad tensor.
-      update_grad_fn(new_grad_copy + variable_grad);
+      update_grad(new_grad_copy + variable_grad);
     } else {
       // In this case we can avoid changing the grad tensor. There are three
       // scenarios when we'll hit this case:
@@ -100,7 +99,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
       variable_grad += new_grad_copy;
     }
   } else {
-    update_grad_fn(variable_grad + new_grad_copy);
+    update_grad(variable_grad + new_grad_copy);
   }
 }
 
@@ -118,12 +117,15 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
 
   const auto& new_grad = grads[0];
   at::Tensor& grad = variable.grad();
+  // If the function has post hooks (for example, a DDP allreduce hook),
+  // call_function in Engine.cpp will temporarily bump the refcount by one,
+  // hence the addition of !post_hooks().empty() for num_expected_refs in
+  // addition to the one reference that we're holding.
   accumulateGradAndCallHooks(
       variable,
       grad,
       new_grad,
-      1, // only 1 reference expected to be held to ensure we can void clone.
-      !post_hooks().empty(),
+      1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = grad_update; });
 
   return variable_list();

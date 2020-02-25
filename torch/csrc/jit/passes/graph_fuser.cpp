@@ -134,8 +134,11 @@ struct GraphFuser {
   Block* block_;
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) { return isFusableDefault(n); };
+  FusionCallback callback_ = [&](Node* n) {
+    return isFusableDefault(n, this->strict_fuser_check_);
+  };
   Symbol kind_ = prim::FusionGroup;
+  bool strict_fuser_check_;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -145,8 +148,13 @@ struct GraphFuser {
   // Change with setInputArgLimit
   size_t subgraph_arg_limit_ = 128;
 
-  GraphFuser(Block* block, std::shared_ptr<Graph> graph)
-      : block_(block), graph_(std::move(graph)) {}
+  GraphFuser(
+      Block* block,
+      std::shared_ptr<Graph> graph,
+      bool strict_fuser_check)
+      : block_(block),
+        graph_(std::move(graph)),
+        strict_fuser_check_(strict_fuser_check) {}
 
   // Custom passes require kind to specified
   GraphFuser(
@@ -173,13 +181,13 @@ struct GraphFuser {
     return callback_(node);
   }
 
-  bool isFusableDevice(Value *v) {
+  bool isFusableDevice(Value* v, bool strict_fuser_check) {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
     auto device = v->type()->expect<TensorType>()->device();
     if (!device) {
-      return true;
+      return !strict_fuser_check;
     }
     if ((*device).is_cpu()) {
       return canFuseOnCPU();
@@ -189,14 +197,13 @@ struct GraphFuser {
     throw std::runtime_error("Unknown device");
   }
 
-
   // Default fusability check - used when the user doesn't pass in
   // a callback.
-  bool isFusableDefault(Node* node) {
+  bool isFusableDefault(Node* node, bool strict_fuser_check) {
     bool fusableDevice = true;
     for (const auto& output : node->outputs()) {
       if (output->uses().size() > 0) {
-        fusableDevice &= isFusableDevice(output);
+        fusableDevice &= isFusableDevice(output, strict_fuser_check);
       }
     }
     return fusableDevice && isFusableMap(node);
@@ -1205,8 +1212,8 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 
 } // anonymous namespace
 
-void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph->block(), graph).run();
+void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
+  GraphFuser(graph->block(), graph, strict_fuser_check).run();
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so

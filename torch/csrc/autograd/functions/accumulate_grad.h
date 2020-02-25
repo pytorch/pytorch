@@ -12,7 +12,9 @@ struct TORCH_API AccumulateGrad : public Node {
   variable_list apply(variable_list&& grads) override;
 
   // Given a variable with its current grad as variable_grad, accumulates
-  // new_grad into variable_grad.
+  // new_grad into variable_grad if in place accumulation is possible.
+  // Otherwise, uses 'update_grad' to update the grad for the variable.
+
   // variable: the variable whose grad we're accumulating.
   // variable_grad: the current grad for the variable.
   // new_grad: new grad we want to acummulate for the variable.
@@ -20,16 +22,15 @@ struct TORCH_API AccumulateGrad : public Node {
   //                    such that it is safe to avoid cloning the grad
   //                    if use_count() of the grad is less than or equal
   //                    to this value (in addition to post_hooks).
-  // has_post_hooks: Whether or post_hooks are holding references to
-  //                 the grad tensor, this is also used to determine
-  //                 whether or not to clone.
+  // update_grad: Function that is used to update grad for the variable.
+  //              The argument to the function is a Tensor which
+  //              is used to set a new value for the grad.
   static void accumulateGradAndCallHooks(
       const Variable& variable,
       at::Tensor variable_grad,
       const at::Tensor& new_grad,
       size_t num_expected_refs,
-      bool has_post_hooks,
-      const std::function<void(at::Tensor&&)>& update_grad_fn);
+      const std::function<void(at::Tensor&&)>& update_grad);
 
   Variable variable;
 };

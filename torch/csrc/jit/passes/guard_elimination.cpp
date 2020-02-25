@@ -272,7 +272,8 @@ private:
     case aten::lgamma:
     case aten::reciprocal:
     case aten::addcmul:
-      return checkInputs(n, no_exceptions);
+    case aten::where:
+     return checkInputs(n, no_exceptions);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
