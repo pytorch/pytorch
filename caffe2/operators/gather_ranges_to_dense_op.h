@@ -29,7 +29,9 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             10000)),
         maxMismatchedRatio_(this->template GetSingleArgument<float>(
             "max_mismatched_ratio",
-            0.01)) {
+            0.01)),
+        maxEmptyRatio_(
+            this->template GetSingleArgument<float>("max_empty_ratio", 1.0)) {
     CAFFE_ENFORCE_GT(lengths_.size(), 0, "There has to be at least one length");
     for (auto length : lengths_) {
       CAFFE_ENFORCE_GT(length, 0, "Each length should be positive");
@@ -178,6 +180,23 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           totalRanges_,
           ") which exceeds ",
           maxMismatchedRatio_);
+
+      // +0.5 to make sure when maxEmptyRatio_ is 1, this enforce will always be
+      // satisfied.
+      CAFFE_ENFORCE_GT(
+          std::max(totalRanges_, minObservation_) * maxEmptyRatio_ + 0.5,
+          emptyRanges_[j],
+          "Ratio of empty ranges for feature at index ",
+          j,
+          " is ",
+          (static_cast<double>(emptyRanges_[j]) /
+           static_cast<double>(totalRanges_)),
+          " (",
+          emptyRanges_[j],
+          "/",
+          totalRanges_,
+          ") which exceeds ",
+          maxEmptyRatio_);
     }
 
     return true;
@@ -196,6 +215,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
   // not.
   int64_t minObservation_ = 0;
   float maxMismatchedRatio_ = 0;
+  float maxEmptyRatio_ = 0;
 };
 
 } // namespace caffe2
