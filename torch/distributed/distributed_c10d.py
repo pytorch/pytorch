@@ -185,7 +185,7 @@ def _get_global_rank(group, group_rank):
 
 def _check_default_pg():
     """
-    Helper that checks if the default ProcessGroup has been initializd, with
+    Helper that checks if the default ProcessGroup has been initialized, with
     assertion
 
     """

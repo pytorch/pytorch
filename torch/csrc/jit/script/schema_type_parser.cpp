@@ -2,6 +2,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
+#include <torch/csrc/jit/custom_class.h>
 #include <torch/csrc/jit/script/lexer.h>
 #include <torch/csrc/jit/script/parse_string_literal.h>
 #include <torch/csrc/jit/script/schema_type_parser.h>
@@ -22,6 +23,7 @@ using c10::NumberType;
 using c10::OptionalType;
 using c10::StringType;
 using c10::Symbol;
+using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;
@@ -30,7 +32,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-TypeAndAlias SchemaTypeParser::parseBaseType() {
+TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
@@ -38,8 +40,11 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
-      {"QScheme", IntType::get()},
-      {"ConstQuantizerPtr", IntType::get()},  // TODO This type should be removed from the schema parser, it should use the custom class mechanism instead. @jerryzh
+      {"QScheme", QSchemeType::get()},
+      {"ConstQuantizerPtr",
+       IntType::get()}, // TODO This type should be removed from the schema
+                        // parser, it should use the custom class mechanism
+                        // instead. @jerryzh
       {"Device", DeviceObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
@@ -60,11 +65,11 @@ TypeAndAlias SchemaTypeParser::parseBaseType() {
     if (text.size() > 0 && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return TypeAndAlias(VarType::create(text), parseAliasAnnotation());
+      return VarType::create(text);
     }
     throw ErrorReport(tok.range) << "unknown type specifier";
   }
-  return TypeAndAlias(it->second, c10::nullopt);
+  return it->second;
 }
 
 // Examples:
@@ -214,10 +219,32 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+    L.next();
+    L.expect('.');
+    auto torch_tok = L.expect(TK_IDENT);
+    if (torch_tok.text() != "torch") {
+      throw ErrorReport(torch_tok.range)
+          << "Expected classes namespace but got " << torch_tok.text();
+    }
+    L.expect('.');
+    auto classes_tok = L.expect(TK_IDENT);
+    if (classes_tok.text() != "classes") {
+      throw ErrorReport(classes_tok.range)
+          << "Expected classes namespace but got " << classes_tok.text();
+    }
+    L.expect('.');
+    auto class_tok = L.expect(TK_IDENT);
+    value = getCustomClass(
+        std::string("__torch__.torch.classes.") + class_tok.text());
+    if (!value) {
+      throw ErrorReport(class_tok.range)
+          << "Unknown custom class type " << class_tok.text()
+          << ". Please ensure it is registered.";
+    }
   } else {
-    auto value_alias = parseBaseType();
-    value = value_alias.first;
-    alias_info = value_alias.second;
+    value = parseBaseType();
+    alias_info = parseAliasAnnotation();
   }
   while (true) {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {

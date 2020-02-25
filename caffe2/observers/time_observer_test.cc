@@ -57,7 +57,7 @@ TEST(TimeObserverTest, Test3Seconds) {
   ws.CreateBlob("in");
   NetDef net_def;
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
-  auto net_ob = caffe2::make_unique<TimeObserver>(net.get());
+  auto net_ob = std::make_unique<TimeObserver>(net.get());
   const auto* ob = net_ob.get();
   net->AttachObserver(std::move(net_ob));
   net->Run();

@@ -17,6 +17,17 @@ namespace detail {
 // Obtains the base name from a full path.
 C10_API std::string StripBasename(const std::string& full_path);
 
+template <typename T>
+struct CanonicalizeStrTypes {
+  using type = const T&;
+};
+
+template <size_t N>
+struct CanonicalizeStrTypes<char[N]> {
+  using type = const char *;
+};
+
+
 inline std::ostream& _str(std::ostream& ss) {
   return ss;
 }
@@ -32,14 +43,19 @@ inline std::ostream& _str(std::ostream& ss, const T& t, const Args&... args) {
   return _str(_str(ss, t), args...);
 }
 
+template <typename... Args>
+inline std::string _str_wrapper(const Args&... args) {
+    std::ostringstream ss;
+    _str(ss, args...);
+    return ss.str();
+}
+
 } // namespace detail
 
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
 inline std::string str(const Args&... args) {
-  std::ostringstream ss;
-  detail::_str(ss, args...);
-  return ss.str();
+  return detail::_str_wrapper<typename detail::CanonicalizeStrTypes<Args>::type...>(args...);
 }
 
 // Specializations for already-a-string types.

@@ -44,8 +44,8 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<MemoryFormat> optional_memory_format) {
-  AT_ASSERT(options.backend() == at::Backend::CUDA);
-  TORCH_INTERNAL_ASSERT(impl::variable_is_excluded());
+  AT_ASSERT(options.device().type() == at::DeviceType::CUDA);
+  TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   TORCH_CHECK(!options.pinned_memory(), "Only dense CPU tensors can be pinned");
   check_size_nonnegative(size);
 
@@ -59,7 +59,7 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     allocator,
     /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, TensorTypeId::CUDATensorId);
+  auto tensor = detail::make_tensor<TensorImpl>(storage_impl, DispatchKey::CUDATensorId);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -141,7 +141,7 @@ namespace {
 // iterations. This would give the accurate result, but is relatively slow and
 // is an overkill for most cases where double's precision suffice.
 //
-// If we directly use sqrt to calculate the root, the convertion from int64_t
+// If we directly use sqrt to calculate the root, the conversion from int64_t
 // to double would lose 11 bits precision.
 //
 // The following solution uses sqrt directly for most cases, and would only
@@ -211,7 +211,7 @@ inline int64_t resolve_root_int(
 //                       (row + 2f - 1)row <= 2x
 //                  row^2 + (2f-1)row - 2x <= 0.                            [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = 2f - 1
@@ -254,7 +254,7 @@ inline void get_coordinate_in_tril_trapezoid(
 //                       (-row + 2f + 1)row <= 2x
 //                   row^2 - (2f+1)row + 2x >= 0.                           [3]
 //
-// Based on ineuqality [3], we have the following coefficients for formula of
+// Based on inequality [3], we have the following coefficients for formula of
 // root:
 //                               a = 1
 //                               b = -1 - 2f

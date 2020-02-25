@@ -6,7 +6,7 @@ namespace torch {
 namespace jit {
 
 int device(const autograd::Variable& v) {
-  return v.type().is_cuda() ? v.get_device() : -1;
+  return v.device().is_cuda() ? v.get_device() : -1;
 }
 
 bool isEqual(at::IntArrayRef lhs, at::IntArrayRef rhs) {
@@ -29,18 +29,18 @@ bool isEqual(const ArgumentInfo& ti, const autograd::Variable& v) {
       ti.type() == v.scalar_type() && ti.dim() == v.dim();
 }
 
-autograd::Variable var(at::DeprecatedTypeProperties& t, at::IntArrayRef sizes, bool requires_grad) {
-  return autograd::make_variable(at::rand(sizes, t.options()), requires_grad);
+autograd::Variable var(at::TensorOptions t, at::IntArrayRef sizes, bool requires_grad) {
+  return autograd::make_variable(at::rand(sizes, t), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();
 }
 
 void testCompleteArgumentSpec() {
-  auto& CF = at::CPU(at::kFloat);
-  auto& CD = at::CPU(at::kDouble);
-  auto& GF = at::CUDA(at::kFloat);
-  auto& GD = at::CUDA(at::kDouble);
+  auto const CF = at::CPU(at::kFloat);
+  auto const CD = at::CPU(at::kDouble);
+  auto const GF = at::CUDA(at::kFloat);
+  auto const GD = at::CUDA(at::kDouble);
 
   auto list = createStack({var(CF, {1}, true),
                            var(CD, {1, 2}, false),

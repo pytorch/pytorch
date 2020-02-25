@@ -14,7 +14,7 @@ bool AsyncTaskGraph::CreateNode(
     const std::vector<OperatorBase*>& ops) {
   CAFFE_ENFORCE(!frozen_);
   if (!nodes_.count(node_id)) {
-    nodes_[node_id] = caffe2::make_unique<AsyncTask>(ops);
+    nodes_[node_id] = std::make_unique<AsyncTask>(ops);
     return true;
   } else {
     return false;
@@ -45,7 +45,7 @@ bool AsyncTaskGraph::AddDependency(
   AsyncTaskFuture* parents_future = nullptr;
   if (parent_futures.size() > 1) {
     edge_futures_.push_back(
-        caffe2::make_unique<AsyncTaskFuture>(parent_futures));
+        std::make_unique<AsyncTaskFuture>(parent_futures));
     parents_future = edge_futures_.back().get();
   } else {
     CAFFE_ENFORCE_EQ(parent_futures.size(), 1);
@@ -100,7 +100,7 @@ void AsyncTaskGraph::FreezeGraph() {
   CAFFE_ENFORCE(!root_tasks_.empty());
   CAFFE_ENFORCE(!final_futures.empty());
 
-  run_future_ = caffe2::make_unique<AsyncTaskFuture>(final_futures);
+  run_future_ = std::make_unique<AsyncTaskFuture>(final_futures);
 
   frozen_ = true;
 }

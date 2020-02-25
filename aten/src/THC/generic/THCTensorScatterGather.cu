@@ -12,6 +12,7 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, src);
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, index) == THCTensor_(nDimensionLegacyNoScalars)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(tensor->sizes().equals(index->sizes()), 4,
@@ -107,6 +108,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
@@ -205,6 +207,7 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
@@ -306,6 +309,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  dim = at::maybe_wrap_dim(dim, tensor);
   int index_ndim_legacy_all = THCudaLongTensor_nDimensionLegacyAll(state, index);
   THArgCheck(dim >= 0 && dim < THCTensor_(nDimensionLegacyNoScalars)(state, tensor), 2,
              "Index dimension is out of bounds");

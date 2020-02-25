@@ -3,6 +3,7 @@
 #else
 
 #include "ATen/cuda/CUDAContext.h"
+#include <ATen/MemoryOverlap.h>
 
 void THCTensor_(fill)(THCState* state, THCTensor *self_, scalar_t value)
 {
@@ -86,6 +87,15 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   THCTensor *notSkippedTensor = NULL;  // non-owning reference
   auto should_skip = [](THCTensor *t) { return t->is_empty() && t->dim() == 1; };
   int nDims = 0;
+
+  // Inputs cannot alias the output tensor
+  for (int i = 0; i < numInputs; i++) {
+    auto lap = at::get_overlap_status(result, inputs[i]);
+    THArgCheck(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor %d.", i);
+  }
 
   for (i = 0; i < numInputs; i++)
   {
@@ -320,7 +330,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  int nDimension = THCTensor_(nDimensionLegacyNoScalars)(state, src_);
+  int nDimension = THCTensor_(nDimension)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
     int64_t stride0 = THCTensor_(stride)(state, src_, 0);
@@ -340,7 +350,7 @@ void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   } else {
     ptrdiff_t totalElements = THCTensor_(nElement)(state, src_);
     ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
-    int64_t strideSrc = THTensor_strideLegacyNoScalars(src_, 0);
+    int64_t strideSrc = THTensor_(stride)(src_, 0);
     THCTensor_(resize2d)(state, self_, size, size);
     THCTensor_(zero)(state, self_);
     if (size > 0) {

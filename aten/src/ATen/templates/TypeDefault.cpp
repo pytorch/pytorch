@@ -14,7 +14,6 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 namespace at {
 namespace TypeDefault {

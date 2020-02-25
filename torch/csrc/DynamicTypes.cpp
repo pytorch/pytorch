@@ -54,15 +54,15 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
   if (isSparse(backend) && scalarType == at::kHalf) {
     return nullptr;
   }
-  return &at::getNonVariableDeprecatedTypeProperties(backend, scalarType);
+  return &at::getDeprecatedTypeProperties(backend, scalarType);
 }
 
 PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   at::ScalarType scalarType = at::typeMetaToScalarType(storage.dtype());
   at::TensorOptions options = at::TensorOptions(storage.device_type()).dtype(scalarType);
-  auto attype = &at::getNonVariableDeprecatedTypeProperties(
-      at::tensorTypeIdToBackend(at::computeTensorTypeId(options)),
+  auto attype = &at::getDeprecatedTypeProperties(
+      at::dispatchKeyToBackend(at::computeDispatchKey(options)),
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
   if (it != attype_to_py_storage_type.end()) {

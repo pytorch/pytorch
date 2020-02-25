@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
+#include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
@@ -207,7 +208,12 @@ void BlockToONNX(
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        outputs[i]->setType(old->type());
+        auto old_tensor_type = old->type()->cast<TensorType>();
+        if (old_tensor_type == nullptr || old_tensor_type->scalarType().has_value()) {
+          // Check if Tensor has scalartype when overwriting output type
+          outputs[i]->setType(old->type());
+        }
+
         // Copy over source location and scope information to all nodes
         // created by the symbolic
         outputs[i]->node()->setSourceRange(node->sourceRange());
@@ -340,7 +346,7 @@ void BlockToONNX(
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
     if (node->kind().is_caffe2()) {
-      // Pass on Caffe2 opeartor, since we already preprocess it
+      // Pass on Caffe2 operator, since we already preprocess it
       cloneNode(node);
     } else if (node->kind() == prim::PythonOp) {
       callPySymbolicMethod(static_cast<ConcretePythonOp*>(node));

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/unpickler.h>
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/script/module.h>
 
 #include <istream>
@@ -62,6 +64,13 @@ TORCH_API script::Module load(
     std::unique_ptr<caffe2::serialize::ReadAdapterInterface> rai,
     c10::optional<c10::Device> device = c10::nullopt,
     script::ExtraFilesMap& extra_files = default_extra_files);
+
+TORCH_API IValue readArchiveAndTensors(
+    const std::string& archive_name,
+    c10::optional<ClassResolver> class_resolver,
+    c10::optional<ObjLoader> obj_loader,
+    c10::optional<at::Device> device,
+    caffe2::serialize::PyTorchStreamReader& stream_reader);
 
 } // namespace jit
 } // namespace torch

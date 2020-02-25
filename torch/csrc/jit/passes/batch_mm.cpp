@@ -167,7 +167,7 @@ RegisterOperators mm_tree_reduction_reg({Operator(
 // TreeTokens will be used to label nodes of the graph, if the nodes will fit
 // our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
 // when we reach node N with inputs A and B, then A and B have already been
-// procesed, and we can try to unify their TreeTokens (if they have them)
+// processed, and we can try to unify their TreeTokens (if they have them)
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops

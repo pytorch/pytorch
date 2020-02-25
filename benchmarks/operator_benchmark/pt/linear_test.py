@@ -14,6 +14,7 @@ import torch.nn as nn
 linear_configs_short = op_bench.config_list(
     attr_names=["N", "IN", "OUT"],
     attrs=[
+        [1, 1, 1],
         [4, 256, 128],
         [16, 512, 256],
     ],
@@ -36,7 +37,7 @@ linear_configs_long = op_bench.cross_product_configs(
 class LinearBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, device):
         self.input_one = torch.rand(N, IN, device=device)
-        self.linear = nn.Linear(IN, OUT)
+        self.linear = nn.Linear(IN, OUT).to(device=device)
         self.set_module_name("linear")
 
     def forward(self):

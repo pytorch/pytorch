@@ -14,11 +14,11 @@
 
 #include <typeinfo>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_engine.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/pybind.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 namespace py = pybind11;
 
@@ -29,7 +29,7 @@ namespace {
 
 // Note: const_cast is used twice below to acquire a handle to a pyobject.
 Operation createPythonOperation(const Node* op_) {
-  AutoGIL gil;
+  pybind11::gil_scoped_acquire gil;
   const ConcretePythonOp* op = static_cast<const ConcretePythonOp*>(op_);
   const py::function func = py::reinterpret_borrow<const py::function>(
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -44,7 +44,7 @@ Operation createPythonOperation(const Node* op_) {
   AT_ASSERT(op->outputs().size() == 1);
 
   return [=](Stack& stack) {
-    AutoGIL gil;
+    pybind11::gil_scoped_acquire gil;
     py::tuple py_inputs(op->cconv.size());
     size_t i = 0;
     size_t next_scalar = 0;

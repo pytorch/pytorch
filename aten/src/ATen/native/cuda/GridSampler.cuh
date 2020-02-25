@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <THC/THCAtomics.cuh>
 
 namespace at { namespace native {
 
@@ -213,7 +214,7 @@ void safe_add_2d(scalar_t *data, int h, int w,
                  int sH, int sW, int H, int W,
                  scalar_t delta) {
   if (within_bounds_2d(h, w, H, W)) {
-    atomicAdd(data + h * sH + w * sW, delta);
+    gpuAtomicAdd(data + h * sH + w * sW, delta);
   }
 }
 
@@ -223,7 +224,7 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
                  int sD, int sH, int sW, int D, int H, int W,
                  scalar_t delta) {
   if (within_bounds_3d(d, h, w, D, H, W)) {
-    atomicAdd(data + d * sD + h * sH + w * sW, delta);
+    gpuAtomicAdd(data + d * sD + h * sH + w * sW, delta);
   }
 }
 

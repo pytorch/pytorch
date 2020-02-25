@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
+#include <torch/csrc/jit/type_hashing.h>
 
 namespace torch {
 namespace jit {
@@ -24,7 +25,14 @@ namespace jit {
  *
  * There is a special alias set called the "wildcard set", which indicates that
  * we're not sure what this value may alias. To be conservative, we consider
- * the wildcard alias set as potentially aliasing any value.
+ * the wildcard alias set as potentially aliasing any value within the same
+ * type class. Whenever a value becomes contained by another value, such as
+ * when a Tensor is appended to a List[Tensor], the contained element becomes
+ * part of the wildcard set.
+ *
+ * Values that contain other mutable types, such as List[Tensor], are
+ * initialized as containing the Wildcard set for all contained mutable types.
+ *
  */
 class AliasDb {
  public:
@@ -52,8 +60,8 @@ class AliasDb {
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(
-      const at::ArrayRef<Value*>& a,
-      const at::ArrayRef<Value*>& b) const;
+      const at::ArrayRef<Value*> a,
+      const at::ArrayRef<Value*> b) const;
 
   // Do `a` and `b` potentially share a memory location?
   TORCH_API bool mayAlias(const Value* a, const Value* b) const;
@@ -70,14 +78,22 @@ class AliasDb {
   // Do any nodes write to an alias set inputed/outputed by `n`?
   TORCH_API bool hasWriters(const Node* n) const;
 
+  // Do any nodes write to `v`s memory location?
+  TORCH_API bool hasWriters(const Value* v) const;
+
   // Is the operation in-place? i.e. doesn't write anywhere but locations it
   // reads from.
   TORCH_API bool isMutable(Node* n) const;
 
+  // Is it safe to change whether `a` and `b` alias each other ?
+  TORCH_API bool safeToChangeAliasingRelationship(
+      const at::ArrayRef<Value*>& a,
+      const at::ArrayRef<Value*>& b) const;
+
   // Move 'n' (already in the graph) after 'movePoint' in the topological order.
   //
   // Tries to preserve value dependencies, so other nodes might be moved. We
-  // make two gurantees about the postcondition of the node list:
+  // make two guarantees about the postcondition of the node list:
   //   - `n` is directly after `movePoint`.
   //   - only nodes between `n` and `movePoint` have been moved.
   //
@@ -92,6 +108,9 @@ class AliasDb {
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
+
+  static bool mutableType(const Value* v);
+  static bool mutableType(const TypePtr& type);
 
  private:
   // Helper for topologically-safe node moves.
@@ -110,8 +129,6 @@ class AliasDb {
   // if `recurseBlocks` is true, gather writes on the nodes in `n`s sub-blocks
   MemoryLocations getWrites(Node* n) const;
   void getWritesImpl(Node* n, MemoryLocations& ret) const;
-  // Do any nodes write to `v`s memory location?
-  TORCH_API bool hasWriters(const Value* v) const;
   // Register the fact that `n` writes to `v`.
   void registerWrite(const Value* v, Node* n);
   void registerWrite(const Element* e, Node* n);
@@ -124,14 +141,12 @@ class AliasDb {
    * Wildcard methods
    */
   // Register `v` as a wildcard value.
-  void setWildcard(const Value* v);
-
-  // Is the element a wildcard or an unhandled container type,
-  // or does the element contain an element for which that's true
-  bool cannotCheckAliasContainment(const Value* elem) const;
+  c10::optional<Element*> setWildcard(const Value* v);
 
   // Is this a value which will not alias
   bool nonAliasingValue(const Value* elem) const;
+
+  bool escapesScope(const at::ArrayRef<Value*>& vs) const;
 
   /**
    * Special analysis methods
@@ -151,7 +166,6 @@ class AliasDb {
   void analyzeWait(Node* node);
   void analyzeGradOf(Node* node);
   void analyzeSetAttr(Node* node);
-  void analyzeTupleConstruct(Node* node);
   void analyzeConservative(Node* node);
   void analyzeContainerConstruct(Node* node);
   bool tryRegisteredAnalysis(Node* node);
@@ -168,8 +182,6 @@ class AliasDb {
   void giveFreshAlias(const Value* value);
   Element* getOrCreateElement(const Value* value);
 
-  static bool shouldAnnotate(const Value* v);
-  static bool shouldAnnotate(const TypePtr& type);
   static c10::optional<TypeKind> getMutableTypeKind(const TypePtr& type);
 
   static bool isContainerType(const TypePtr& type);
@@ -181,10 +193,17 @@ class AliasDb {
   // Mapping of values to MemoryDAG elements
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
-  std::map<TypeKind, Element*> wildcardIndex_;
+  std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
-  Element* getOrCreateWildcard(const TypePtr& type);
+  c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
+  void addContainedTypesToFreshElement(
+      Element* container_elem,
+      const TypePtr& mut_type);
+
+  std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
+  bool mayAliasWildcard(const at::ArrayRef<Value*> vs) const;
+  bool hasWriters(const at::ArrayRef<Value*>& values) const;
 
   /**
    * State for tracking write info.
@@ -198,7 +217,5 @@ class AliasDb {
   std::string getElementName(const Element* e) const;
 };
 
-// Used to assert that unschematized operators have an analysis method written
-TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 } // namespace jit
 } // namespace torch

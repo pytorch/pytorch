@@ -1,7 +1,7 @@
 #include <torch/csrc/utils/throughput_benchmark.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/utils/auto_gil.h>
 
 namespace torch {
 namespace throughput_benchmark {
@@ -21,7 +21,7 @@ py::object ThroughputBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)  {
   if (script_module_.initialized()) {
     c10::IValue result;
     {
-      AutoNoGIL no_gil_guard;
+      pybind11::gil_scoped_release no_gil_guard;
       result = script_module_.runOnce(std::move(args), std::move(kwargs));
     }
     return jit::toPyObject(std::move(result));
@@ -75,14 +75,14 @@ ScriptModuleOutput ScriptModuleBenchmark::runOnce(
       function.getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_.module_object());
+      model_._ivalue());
   return function(std::move(stack));
 }
 
 template <>
 void ModuleBenchmark::runOnce(ModuleInput&& input) const {
   CHECK(initialized_);
-  AutoGIL gil_guard;
+  pybind11::gil_scoped_acquire gil_guard;
   model_(*input.args, **input.kwargs);
 }
 
@@ -90,7 +90,7 @@ template <>
 ModuleOutput ModuleBenchmark::runOnce(py::args&& args, py::kwargs&& kwargs)
     const {
   CHECK(initialized_);
-  AutoGIL gil_guard;
+  pybind11::gil_scoped_acquire gil_guard;
   return model_(*args, **kwargs);
 }
 
@@ -100,7 +100,7 @@ void ScriptModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
       model_.get_method("forward").function().getSchema(),
       std::move(args),
       std::move(kwargs),
-      model_.module_object());
+      model_._ivalue());
   inputs_.emplace_back(std::move(stack));
 }
 
@@ -111,7 +111,7 @@ void ModuleBenchmark::addInput(py::args&& args, py::kwargs&& kwargs) {
 
 template <>
 ModuleInput cloneInput<ModuleInput>(const ModuleInput& input) {
-  AutoGIL gil_guard;
+  pybind11::gil_scoped_acquire gil_guard;
   py::args args = input.args;
   py::kwargs kwargs = input.kwargs;
   return {std::move(args), std::move(kwargs)};

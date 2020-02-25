@@ -231,7 +231,8 @@ class QLinearInt8 final : public torch::OperatorKernel {
     auto& pack_ptr =
         cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(packed_weight);
     auto packB = pack_ptr.w.get();
-    auto kernel_zp = pack_ptr.w_zp;
+    // Adjust weight zero point, similar to weight data.
+    auto kernel_zp = pack_ptr.w_zp + 128;
     auto kernel_scale = pack_ptr.w_scale;
     size_t rows_w = pack_ptr.bias.size(0);
     size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -259,7 +260,7 @@ class QLinearInt8 final : public torch::OperatorKernel {
       // Update the input scale to not pack again.
       pack_ptr.input_scale = input_scale;
       pack_ptr.w.reset();
-      pack_ptr.w = guts::make_unique<qnnpack::PackBMatrix>(
+      pack_ptr.w = std::make_unique<qnnpack::PackBMatrix>(
           cols_w /* input_channels */,
           rows_w /* output_channels */,
           kernel_zp,
@@ -355,10 +356,10 @@ static auto registry =
     torch::RegisterOperators()
         .op("quantized::linear(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<false>>(
-                TensorTypeId::QuantizedCPUTensorId))
+                DispatchKey::QuantizedCPUTensorId))
         .op("quantized::linear_relu(Tensor X, Tensor W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y",
             torch::RegisterOperators::options().kernel<QLinearInt8<true>>(
-                TensorTypeId::QuantizedCPUTensorId));
+                DispatchKey::QuantizedCPUTensorId));
 } // namespace
 } // namespace native
 } // namespace at

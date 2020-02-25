@@ -12,7 +12,7 @@ namespace rpc {
 class TORCH_API RequestCallback {
  public:
   // Invoke the callback.
-  Message operator()(Message& request) const;
+  std::shared_ptr<FutureMessage> operator()(Message& request) const;
 
   virtual ~RequestCallback() {}
 
@@ -20,11 +20,12 @@ class TORCH_API RequestCallback {
   // RpcAgent implementation should invoke ``RequestCallback`` to process
   // received requests. There is no restriction on the implementation's
   // threading model. This function takes an rvalue reference of the Message
-  // object. It is expected to return the response message or message
-  // containing an exception. Different rpc agent implementations are expected
-  // to ensure delivery of the response/exception based on their implementation
-  // specific mechanisms.
-  virtual Message processMessage(Message& request) const = 0;
+  // object. It is expected to return the future to a response message or
+  // message containing an exception. Different rpc agent implementations are
+  // expected to ensure delivery of the response/exception based on their
+  // implementation specific mechanisms.
+  virtual std::shared_ptr<FutureMessage> processMessage(
+      Message& request) const = 0;
 };
 
 } // namespace rpc

@@ -36,7 +36,7 @@ namespace caffe2 {
  *                            IDEEPFallbackOp<MyMagicOp, SkipIndices<0>>);
  */
 template <class CPUOp, typename SkipOutputCopy = SkipIndices<>>
-class C10_EXPORT IDEEPFallbackOp final : public IDEEPOperator {
+class IDEEPFallbackOp final : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();

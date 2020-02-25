@@ -10,9 +10,9 @@ import torch
 
 # Configs for PT add operator
 add_long_configs = op_bench.cross_product_configs(
-    M=[8, 64, 128],
-    N=range(2, 128, 64),
-    K=[8 ** x for x in range(0, 3)],
+    M=[8, 128],
+    N=[32, 64],
+    K=[256, 512],
     device=['cpu', 'cuda'],
     tags=["long"]
 )
@@ -21,6 +21,7 @@ add_long_configs = op_bench.cross_product_configs(
 add_short_configs = op_bench.config_list(
     attr_names=["M", "N", "K"],
     attrs=[
+        [1, 1, 1],
         [64, 64, 64],
         [64, 64, 128],
     ],
@@ -51,6 +52,20 @@ class AddBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
 op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenchmark)
 
+
+"""Mircobenchmark for addmm operator."""
+class AddmmBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, K, device):
+        self.input_one = torch.rand(M, K, device=device, requires_grad=self.auto_set())
+        self.mat1 = torch.rand(M, N, device=device, requires_grad=self.auto_set())
+        self.mat2 = torch.rand(N, K, device=device, requires_grad=self.auto_set())
+        self.set_module_name("addmm")
+
+    def forward(self):
+        return torch.addmm(self.input_one, self.mat1, self.mat2)
+
+op_bench.generate_pt_test(add_long_configs + add_short_configs, AddmmBenchmark)
+op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddmmBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

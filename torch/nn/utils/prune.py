@@ -103,7 +103,7 @@ class BasePruningMethod(ABC):
             hooks_to_remove = []
             for k, hook in module._forward_pre_hooks.items():
                 # if it exists, take existing thing, remove hook, then
-                # go thru normal thing
+                # go through normal thing
                 if (
                     isinstance(hook, BasePruningMethod)
                     and hook._tensor_name == name
@@ -169,7 +169,7 @@ class BasePruningMethod(ABC):
             del module._parameters[name]
             default_mask = torch.ones_like(orig)  # temp
         # If this is not the first time pruning is applied, all of the above
-        # has been done before in a previos pruning iteration, so we're good
+        # has been done before in a previous pruning iteration, so we're good
         # to go
         else:
             default_mask = getattr(module, name + "_mask").detach().clone(memory_format=torch.contiguous_format)

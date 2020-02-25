@@ -8,6 +8,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+#include <THC/THCAtomics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -115,7 +116,7 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int inputH = index / gradInput.size(3);
     assert(inputH < gradInput.size(2));
 
-    atomicAdd(
+    gpuAtomicAdd(
       &gradInput[batch][plane][inputH][inputW],
       gradOutput[batch][plane][outputH][outputW]
     );

@@ -15,7 +15,7 @@
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/compiler.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 #include <torch/csrc/jit/script/logging.h>
 
 #include <cstdint>
@@ -62,7 +62,9 @@ struct GraphExecutorImplBase {
   // entry point where execution begins
   void run(Stack& stack);
 
-  virtual ExecutionPlan getPlanFor(Stack& stack) = 0;
+  virtual ExecutionPlan getPlanFor(
+      Stack& stack,
+      size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;
   virtual ~GraphExecutorImplBase() = default;
 

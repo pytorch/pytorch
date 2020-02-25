@@ -341,7 +341,7 @@ repr::NNModule convertToNNModule(
   }
 
   /// \brief For the construction of the control flow graph we keep track
-  /// of a current basic block, which we split up as we come accross control
+  /// of a current basic block, which we split up as we come across control
   /// flow operations such as if and while.
   auto bbNode = cfg.createNamedFunction("main");
 

@@ -99,7 +99,6 @@ PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
                          ../../../torch/csrc/api/include \
-                         ../../../aten/src \
                          ../../../build/aten/src
 ################################################################################
 # Compound extraction control.                                                 #
@@ -108,7 +107,8 @@ EXTRACT_ALL            = YES
 EXTRACT_PACKAGE        = YES
 EXTRACT_STATIC         = YES
 CASE_SENSE_NAMES       = NO
-EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
+EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::*
+# EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
 ################################################################################
 # Docstring control / customization.                                           #
 ################################################################################

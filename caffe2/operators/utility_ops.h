@@ -1180,7 +1180,7 @@ class GatherRangesOp : public Operator<Context> {
     CAFFE_ENFORCE(ranges.dim() == 3, "Ranges must be 3-D");
     CAFFE_ENFORCE(ranges.size(1) > 0, "There has to be at least one range");
     CAFFE_ENFORCE_EQ(
-        ranges.size(2), 2, "Ranges last dimention should be of size 2");
+        ranges.size(2), 2, "Ranges last dimension should be of size 2");
 
     auto* rawData = static_cast<const char*>(data.raw_data());
     auto* rangesData = ranges.template data<Index>();

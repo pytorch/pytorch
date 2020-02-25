@@ -127,7 +127,7 @@ class PyTorchOperatorTestCase(object):
         self.framework = "PyTorch"
         self.time_series = []
 
-    def run_jit_forward(self, num_runs, print_per_iter=False):
+    def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """ Run the forward path of an op with JIT mode
         """
         if self.op_bench._jit_forward is None:
@@ -147,18 +147,22 @@ class PyTorchOperatorTestCase(object):
                 }
             ))
 
-    def run_forward(self, num_runs, print_per_iter):
+    def run_forward(self, num_runs, print_per_iter, cuda_sync):
         """ Run the forward path of an op with eager mode
         """
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward()
+                if cuda_sync: 
+                    torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward()
+            if cuda_sync: 
+                torch.cuda.synchronize(torch.cuda.current_device())
 
     def _output_mean(self):
         """ TODO (mingzhe): it is not necessary to sum up everything by myself,

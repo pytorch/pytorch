@@ -1,11 +1,11 @@
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/script/compiler.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/script/ir_emitter.h>
 
 namespace torch {
 namespace jit {
@@ -47,7 +47,7 @@ bool isDecomposableNorm(Node* normalize_op) {
     return false;
   }
 
-  if (decomposable_normalization_ops.find(normalize_op)) {
+  if (normalize_op->isMemberOf(decomposable_normalization_ops)) {
     // If we can't determine if weight and bias is defined statically there's
     // really no point in decomposing normalization into simpler ops, since it
     // won't get fused into a single kernel.
@@ -57,38 +57,34 @@ bool isDecomposableNorm(Node* normalize_op) {
   return false;
 }
 
-RegisterOperators reg_bn_unsqueeze({Operator(
-    "aten::_ncf_unsqueeze(Tensor self, int ndim) -> Tensor",
-    [](const Node* node) -> Operation {
-      return [](Stack& stack) {
-        const int64_t ndim = pop(stack).toInt();
-        auto self = pop(stack).toTensor();
-        c10::SmallVector<int64_t, 8> sizes(ndim, 1);
-        AT_ASSERT(self.dim() == 1);
-        sizes.at(1) = self.size(0);
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    },
-    aliasAnalysisFromSchema())});
-
-RegisterOperators reg_ln_view({Operator(
-    "aten::_ncf_view(Tensor self, int[] input_shape, int normalized_ndim) -> Tensor",
-    [](const Node* node) -> Operation {
-      return [](Stack& stack) {
-        const int64_t normalized_ndim = pop(stack).toInt();
-        auto input_shape = pop(stack).toIntList();
-        auto self = pop(stack).toTensor();
-        const int64_t input_ndim = input_shape.size();
-        c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
-        for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
-          sizes.at(i) = input_shape.get(i);
-        }
-        push(stack, self.reshape(sizes));
-        return 0;
-      };
-    },
-    aliasAnalysisFromSchema())});
+RegisterOperators reg_ops(
+    {Operator(
+         "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
+         [](Stack& stack) {
+             const int64_t ndim = pop(stack).toInt();
+             auto self = pop(stack).toTensor();
+             c10::SmallVector<int64_t, 8> sizes(ndim, 1);
+             AT_ASSERT(self.dim() == 1);
+             sizes.at(1) = self.size(0);
+             push(stack, self.reshape(sizes));
+             return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "aten::_ncf_view(Tensor(a) self, int[] input_shape, int normalized_ndim) -> Tensor(a)",
+           [](Stack& stack) {
+             const int64_t normalized_ndim = pop(stack).toInt();
+             auto input_shape = pop(stack).toIntList();
+             auto self = pop(stack).toTensor();
+             const int64_t input_ndim = input_shape.size();
+             c10::SmallVector<int64_t, 8> sizes(input_ndim, 1);
+             for (int i = 0; i < input_ndim - normalized_ndim; ++i) {
+               sizes.at(i) = input_shape.get(i);
+             }
+             push(stack, self.reshape(sizes));
+             return 0;
+         },
+         aliasAnalysisFromSchema())});
 
 bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
   bool decomposed = false;

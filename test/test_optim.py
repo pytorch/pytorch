@@ -13,7 +13,7 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
-from common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -508,6 +508,24 @@ class TestLRScheduler(TestCase):
         self.opt = SGD(
             [{'params': self.net.conv1.parameters()}, {'params': self.net.conv2.parameters(), 'lr': 0.5}],
             lr=0.05)
+
+    def test_error_when_getlr_has_epoch(self):
+        class MultiStepLR(torch.optim.lr_scheduler._LRScheduler):
+            def __init__(self, optimizer, gamma, milestones, last_epoch=-1):
+                self.init_lr = [group['lr'] for group in optimizer.param_groups]
+                self.gamma = gamma
+                self.milestones = milestones
+                super().__init__(optimizer, last_epoch)
+
+            def get_lr(self, step):
+                global_step = self.last_epoch
+                gamma_power = ([0] + [i + 1 for i, m in enumerate(self.milestones) if global_step >= m])[-1]
+                return [init_lr * (self.gamma ** gamma_power) for init_lr in self.init_lr]
+
+        optimizer = torch.optim.SGD([torch.rand(1)], lr=1)
+
+        with self.assertRaises(TypeError):
+            scheduler = MultiStepLR(optimizer, gamma=1, milestones=[10, 20])
 
     def test_no_cyclic_references(self):
         import gc

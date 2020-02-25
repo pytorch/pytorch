@@ -321,7 +321,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
    const Tensor & g,
    int64_t dim)
 {
-  auto w = at::empty_like(v, at::MemoryFormat::Contiguous);
+  auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   // weight_norm_fused does have a derivative defined in derivatives.yaml, therefore, VariableType.cpp
   // sends the unpacked g.data() as the argument.  In other words, we expect "g" is a bare Tensor here.
@@ -420,8 +420,8 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
   TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
   TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
-  auto grad_v = at::empty_like(saved_v, at::MemoryFormat::Contiguous);
-  auto grad_g = at::empty_like(saved_g, at::MemoryFormat::Contiguous);
+  auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   const int ndims = saved_v.dim();
 

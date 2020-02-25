@@ -57,12 +57,12 @@ Tensor pow(const Tensor& base, const Tensor& exp) {
 }
 
 Tensor pow(const Tensor& base, Scalar exp) {
-  Tensor result = at::empty_like(base, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(base, MemoryFormat::Preserve);
   return native::pow_out(result, base, exp);
 }
 
 Tensor pow(Scalar base, const Tensor& exp) {
-  Tensor result = at::empty_like(exp, at::MemoryFormat::Contiguous);
+  Tensor result = at::empty_like(exp, MemoryFormat::Preserve);
   return native::pow_out(result, base, exp);
 }
 

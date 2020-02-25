@@ -1023,7 +1023,7 @@ void TransformImage(
   ColorNormalization<Context>(image_data, crop, channels, mean, std);
 }
 
-// Only crop / transose the image
+// Only crop / transpose the image
 // leave in uint8_t dataType
 template <class Context>
 void CropTransposeImage(

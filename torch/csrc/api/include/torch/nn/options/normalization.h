@@ -22,7 +22,25 @@ struct TORCH_API LayerNormOptions {
   TORCH_ARG(bool, elementwise_affine) = true;
 };
 
-TORCH_NN_FUNCTIONAL_USE_MODULE_OPTIONS(LayerNorm, LayerNormFuncOptions)
+// ============================================================================
+
+namespace functional {
+
+/// Options for the `LayerNorm` module.
+struct TORCH_API LayerNormFuncOptions {
+  /* implicit */ LayerNormFuncOptions(std::vector<int64_t> normalized_shape);
+  /// input shape from an expected input.
+  TORCH_ARG(std::vector<int64_t>, normalized_shape);
+
+  TORCH_ARG(Tensor, weight) = {};
+
+  TORCH_ARG(Tensor, bias) = {};
+
+  /// a value added to the denominator for numerical stability. ``Default: 1e-5``.
+  TORCH_ARG(double, eps) = 1e-5;
+};
+
+} // namespace functional
 
 // ============================================================================
 
@@ -72,6 +90,48 @@ struct TORCH_API NormalizeFuncOptions {
   TORCH_ARG(int64_t, dim) = 1;
   /// Small value to avoid division by zero. Default: 1e-12
   TORCH_ARG(double, eps) = 1e-12;
+  /// the output tensor. If `out` is used, this
+  /// operation won't be differentiable.
+  TORCH_ARG(c10::optional<Tensor>, out) = c10::nullopt;
+};
+
+} // namespace functional
+
+// ============================================================================
+
+/// Options for the `GroupNorm` module.
+struct TORCH_API GroupNormOptions {
+  /* implicit */ GroupNormOptions(int64_t num_groups, int64_t num_channels);
+
+  /// number of groups to separate the channels into
+  TORCH_ARG(int64_t, num_groups);
+  /// number of channels expected in input
+  TORCH_ARG(int64_t, num_channels);
+  /// a value added to the denominator for numerical stability. Default: 1e-5
+  TORCH_ARG(double, eps) = 1e-5;
+  /// a boolean value that when set to ``true``, this module
+  /// has learnable per-channel affine parameters initialized to ones (for weights)
+  /// and zeros (for biases). Default: ``true``.
+  TORCH_ARG(bool, affine) = true;
+};
+
+// ============================================================================
+
+namespace functional {
+
+/// Options for the `GroupNorm` functional.
+struct TORCH_API GroupNormFuncOptions {
+  /* implicit */ GroupNormFuncOptions(int64_t num_groups);
+
+  /// number of groups to separate the channels into
+  TORCH_ARG(int64_t, num_groups);
+
+  TORCH_ARG(Tensor, weight) = {};
+
+  TORCH_ARG(Tensor, bias) = {};
+
+  /// a value added to the denominator for numerical stability. Default: 1e-5
+  TORCH_ARG(double, eps) = 1e-5;
 };
 
 } // namespace functional

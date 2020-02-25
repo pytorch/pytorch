@@ -26,8 +26,6 @@
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/symbolic_script.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/hash.h"
-#include "torch/csrc/utils/memory.h"
 
 
 
@@ -37,7 +35,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 #include "ATen/core/ivalue.h"
 #include "torch/csrc/jit/graph_executor.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/script/ir_emitter.h"
 #include "torch/csrc/jit/script/module.h"
 
 #include "onnx/onnx_pb.h"

@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-
+#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/c10_utils.h>
 
 namespace at { namespace native {
@@ -275,28 +275,59 @@ static std::vector<QuantizedCellParams> gather_quantized_params(TensorList param
   return result;
 }
 
+static std::vector<QuantizedCellParamsDynamic> _quantized_params_dynamic(
+  TensorList params, std::string qengine) {
+
+    static at::Tensor undefined;
+    std::vector<QuantizedCellParamsDynamic> result;
+    for (size_t i = 0; i < params.size(); i += 2) {
+      at::Tensor bias_ih, bias_hh;
+
+      if (qengine == "fbgemm") {
+#ifdef USE_FBGEMM
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias.value_or(undefined);
+        bias_hh = packed_struct_hh.bias.value_or(undefined);
+#endif
+      } else if (qengine == "qnnpack") {
+#ifdef USE_PYTORCH_QNNPACK
+        auto& packed_struct_ih =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i]);
+        auto& packed_struct_hh =
+            cpp_custom_type_hack::cast<PackedLinearWeightsQnnp>(params[i + 1]);
+
+        bias_ih = packed_struct_ih.bias;
+        bias_hh = packed_struct_hh.bias;
+#endif
+      }
+      result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
+    }
+    return result;
+}
+
 static std::vector<QuantizedCellParamsDynamic> gather_quantized_params_dynamic(
     TensorList params) {
-  static at::Tensor undefined;
-  std::vector<QuantizedCellParamsDynamic> result;
+
   TORCH_CHECK(
       params.size() % 2 == 0,
       "got an incorrect number of quantized RNN parameters");
-  // PackedLinearWeight is only defined when USE_FBGEMM is defined
+  auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
-  for (size_t i = 0; i < params.size(); i += 2) {
-    auto& packed_struct_ih =
-        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i]);
-    auto& packed_struct_hh =
-        cpp_custom_type_hack::cast<PackedLinearWeight>(params[i + 1]);
-    auto bias_ih = packed_struct_ih.bias.value_or(undefined);
-    auto bias_hh = packed_struct_hh.bias.value_or(undefined);
-    result.emplace_back(params[i], params[i + 1], bias_ih, bias_hh);
+  if (ctx.qEngine() == at::QEngine::FBGEMM){
+    return _quantized_params_dynamic(params, "fbgemm");
+}
+#endif
+#ifdef USE_PYTORCH_QNNPACK
+  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+      return _quantized_params_dynamic(params, "qnnpack");
   }
-  return result;
-#else // USE_FBGEMM
-  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN wihtout FBGEMM!")
-#endif // USE_FBGEMM
+#endif
+  TORCH_INTERNAL_ASSERT(false, "Tried to use quantized RNN without FBGEMM or QNNPACK!")
+
 }
 
 static std::vector<QuantizedCellParamsFP16> gather_quantized_params_fp16(
@@ -850,13 +881,13 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
-    NAME##_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+    NAME##_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   if (use_miopen(_input, dropout_p)) {                                         \
     Tensor output, hy;                                                         \
-    NAME##_miopen_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+    NAME##_miopen_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
@@ -883,13 +914,13 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
-    NAME##_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+    NAME##_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
   if (use_miopen(data, dropout_p)) {                                           \
     Tensor output, hy;                                                         \
-    NAME##_packed_miopen_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+    NAME##_packed_miopen_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
@@ -914,7 +945,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     Tensor output, hy;                                                         \
-    gru_cudnn_stub(_input.type().device_type(), output, hy, _input, hx, _params, has_biases, \
+    gru_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
             num_layers, dropout_p, train, bidirectional, batch_first);         \
     return std::make_tuple(std::move(output), std::move(hy));                  \
   }                                                                            \
@@ -941,7 +972,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool bidirectional) {  \
   if (at::cudnn_is_acceptable(data)) {                                         \
     Tensor output, hy;                                                         \
-    gru_packed_cudnn_stub(data.type().device_type(), output, hy, data, batch_sizes, hx, \
+    gru_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
             _params, has_biases, num_layers, dropout_p, train, bidirectional); \
     return std::make_tuple(std::move(output), std::move(hy));                                        \
   }                                                                            \
@@ -976,14 +1007,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+    lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   if (use_miopen(_input, dropout_p)) {
     Tensor output, hy, cy;
-    lstm_miopen_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+    lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
               num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
@@ -1005,14 +1036,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
-    lstm_packed_cudnn_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+    lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 
   if (use_miopen(data, dropout_p)) {
     Tensor output, hy, cy;
-    lstm_packed_miopen_stub(data.type().device_type(), output, hy, cy, data, batch_sizes, hx,
+    lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
@@ -1068,7 +1099,7 @@ _thnn_differentiable_lstm_cell_backward(
       gcx = gcx + grad_cy;
     }
   } else if (grad_cy.defined()) {
-    gog = at::zeros_like(cx, at::MemoryFormat::Contiguous);
+    gog = at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     gcx = grad_cy;
   }
   Tensor gig = gcx * c;
@@ -1154,7 +1185,7 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.type().device_type(), output, hy, cy, _input, hx, _params, has_biases,
+    lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
                     num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
@@ -1192,6 +1223,47 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
   }
   return results;
 
+}
+
+std::tuple<Tensor, Tensor, Tensor> quantized_lstm(
+      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
+      TensorList _params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      c10::optional<ScalarType> dtype, bool use_dynamic) {
+  TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
+  if (at::cudnn_is_acceptable(data)) {
+    Tensor output, hy, cy;
+    lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
+            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+  }
+
+  auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
+
+  PackedSequence input { data, batch_sizes };
+  std::tuple<PackedSequence, Tensor, Tensor> results;
+  if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
+    if (use_dynamic) {
+      auto params = gather_quantized_params_dynamic(_params);
+      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    } else {
+      auto params = gather_quantized_params(_params);
+      results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+          input, params, hx[0], hx[1], num_layers,
+          dropout_p, train, bidirectional);
+    }
+  } else {
+    auto params = gather_quantized_params_fp16(_params);
+    results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
+        input, params, hx[0], hx[1], num_layers,
+        dropout_p, train, bidirectional);
+  }
+  auto & packed_output = std::get<0>(results);
+  return std::make_tuple(std::move(packed_output.data),
+                         std::move(std::get<1>(results)),
+                         std::move(std::get<2>(results)));
 }
 
 #define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \

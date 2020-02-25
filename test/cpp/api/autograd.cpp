@@ -187,6 +187,30 @@ TEST(CustomAutogradTest, NoGradCustomFunction) {
  }
 }
 
+TEST(CustomAutogradTest, MarkDirty) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable v) {
+      // Change the value inplace
+      auto v_data = v.data_ptr<float>();
+      v_data[0] = 2;
+      ctx->mark_dirty({v});
+      return v;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      return { (grad_output[0]*2.0) };
+    }
+  };
+
+  // Clone here because modifying leafs inplace is not allowed
+  auto x = torch::randn({5,5}, torch::requires_grad()).clone();
+  auto version_before = x._version();
+  auto out = MyFunction::apply(x);
+  auto version_after = x._version();
+  ASSERT_TRUE(version_after >= (version_before + 1));
+  out.sum().backward();
+}
+
 TEST(CustomAutogradTest, MarkNonDifferentiable) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(AutogradContext *ctx, Variable v) {

@@ -453,7 +453,16 @@ void inlineScopeBlocks(Block* b) {
         return remaps[v];
       });
 
-      inlineCallTo(n, *graph);
+      WithInsertPoint insert_point(n);
+      AT_ASSERT(n->inputs().size() == graph->inputs().size());
+      auto new_outputs = insertGraph(*n->owningGraph(), *graph, n->inputs());
+      const auto& old_outputs = n->outputs();
+
+      AT_ASSERT(new_outputs.size() == old_outputs.size());
+      for (size_t i = 0; i < old_outputs.size(); ++i) {
+        old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
+      }
+      n->destroy();
     }
   }
 }

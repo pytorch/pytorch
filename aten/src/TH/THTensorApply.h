@@ -254,7 +254,7 @@
  *    It can hinted by a classical problem: Getting each individual digit from a whole integer(Decimal base).
  *    A N-digit decimal base number could be view as a N-dimension tensor and the sizes of the tensor are 10.
  *    So the value the whole integer is the line index. And the digits could be viewed as the indexes in
- *    different dimentions.
+ *    different dimensions.
  *
  * 2. convert the indexs(coordinates) in the tensor to the memory offset.
  *

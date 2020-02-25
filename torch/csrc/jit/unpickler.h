@@ -43,10 +43,16 @@ class Unpickler {
         read_record_(std::move(read_record)),
         device_(std::move(device)) {}
 
+  // consume the pickle stream, producing an IValue from the contents.
+  // Type Tags: the pickler will restore the type tags on
+  // List and Dict objects when possible IValue is an Object.
+  // Otherwise, Dict and List objects will end up with Any as their tag.
+  // If you know the type of the ivalue, tags can be restored with
+  // restoreAccurateTypeTags
   IValue parse_ivalue();
 
  private:
-  // No arguments ensures that a template arugment must be specified
+  // No arguments ensures that a template argument must be specified
   // so that the number of bytes read / type read is explicit
   template <typename T>
   T read() {
@@ -66,6 +72,10 @@ class Unpickler {
   std::string readBytes(size_t num_bytes);
 
   double readFloat();
+  void readGlobal(
+      const std::string& module_name,
+      const std::string& class_name);
+  void rebuildTensor(bool quantized);
   PickleOpCode readInstruction();
   PickleOpCode readOpCode() {
     return static_cast<PickleOpCode>(read<uint8_t>());

@@ -41,7 +41,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+                state['sum'] = torch.full_like(p.data, initial_accumulator_value, memory_format=torch.preserve_format)
 
     def share_memory(self):
         for group in self.param_groups:

@@ -2,7 +2,7 @@
 #include <torch/csrc/cuda/comm.h>
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/THCP.h>
-#include <torch/csrc/utils/auto_gil.h>
+#include <pybind11/pybind11.h>
 #include <ATen/core/functional.h>
 
 #include <ATen/ATen.h>
@@ -45,7 +45,7 @@ void initCommMethods(PyObject *module) {
               streams = THPUtils_PySequence_to_CUDAStreamList(handle.ptr());
             }
             // Note: We're holding the GIL up to here.
-            AutoNoGIL no_gil;
+            pybind11::gil_scoped_release no_gil;
             return scatter(tensor, devices, chunk_sizes, dim, streams);
           },
           py::arg("tensor"),

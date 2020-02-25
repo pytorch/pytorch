@@ -24,7 +24,7 @@ batchnorm_configs_short = op_bench.config_list(
 
 batchnorm_configs_long = op_bench.cross_product_configs(
     M=[1, 128],
-    N=[2 ** 16, 2048],
+    N=[8192, 2048],
     K=[1],
     device=['cpu', 'cuda'],
     tags=["long"]

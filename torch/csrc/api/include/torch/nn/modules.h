@@ -9,6 +9,7 @@
 
 // Layers
 #include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/modules/instancenorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/distance.h>

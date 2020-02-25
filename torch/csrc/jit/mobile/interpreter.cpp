@@ -2,6 +2,11 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
 
+#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
+#include <torch/csrc/autograd/record_function.h>
+#include <torch/csrc/jit/mobile/observer.h>
+#endif
+
 namespace torch{
 namespace jit{
 char const * toString(OpCode op);
@@ -15,8 +20,8 @@ namespace {
 template <typename dtype> // int64_t, bool, double
 void listConstruct(Stack& stack, int num_inputs) {
   auto inputs = peekSlice(stack, 0, num_inputs, num_inputs);
-  c10::List<dtype> vals =
-      c10::impl::toList(fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
+  c10::List<dtype> vals(
+      fmap(inputs, [](const IValue& v) { return v.to<dtype>(); }));
   drop(stack, num_inputs);
   push(stack, std::move(vals));
 }
@@ -25,7 +30,13 @@ void listConstruct(Stack& stack, int num_inputs) {
 bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
+    Instruction inst = code_->instructions_[pc];
+
 //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
+//    if (inst.op == OP) {
+//      std::cout << ", " << code_->op_names_[inst.X].name << "." <<
+//        code_->op_names_[inst.X].overload_name;
+//    }
 //    std::cout << std::endl;
 //    for (auto val : stack) {
 //      if (val.isTensor()) {
@@ -34,9 +45,18 @@ bool InterpreterState::run(Stack& stack) {
 //        std::cout << val << std::endl;
 //      }
 //    }
-    Instruction inst = code_->instructions_[pc];
     switch (inst.op) {
       case OP: {
+#if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
+        if (auto debug_info = at::getThreadLocalDebugInfo()) {
+          if (auto* mobile_debug_info = dynamic_cast<MobileDebugInfo*>(
+            debug_info.get())) {
+            mobile_debug_info->setOpIdx(pc);
+          }
+        }
+        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+#endif
+
         c10::Dispatcher::singleton().callBoxed(*code_->operators_[inst.X], &stack);
         ++pc;
       } break;

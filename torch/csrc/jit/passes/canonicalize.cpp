@@ -209,7 +209,7 @@ void CanonicalizeOutputs(Block* block) {
 
 // Canonicalize a graph's control flow node outputs. We do this to solve jitter
 // issues with outputs added to control flow nodes after the first pass of
-// compilation in compiler.cpp
+// compilation in ir_emitter.cpp
 void CanonicalizeOutputs(std::shared_ptr<Graph>& graph) {
   CanonicalizeOutputs(graph->block());
 }

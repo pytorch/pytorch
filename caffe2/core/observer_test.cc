@@ -27,7 +27,7 @@ template <>
 void DummyObserver<NetBase>::Start() {
   vector<OperatorBase*> operators = subject_->GetOperators();
   for (auto& op : operators) {
-    op->AttachObserver(caffe2::make_unique<DummyObserver<OperatorBase>>(op));
+    op->AttachObserver(std::make_unique<DummyObserver<OperatorBase>>(op));
   }
   counter.fetch_add(1000);
 }

@@ -86,7 +86,7 @@ class reverse_iterator
   constexpr reverse_iterator(const reverse_iterator& __x)
       : current(__x.current) {}
 
-  AT_CPP14_CONSTEXPR reverse_iterator& operator=(
+  constexpr reverse_iterator& operator=(
       const reverse_iterator& rhs) noexcept {
     current = rhs.current;
   }
@@ -119,23 +119,23 @@ class reverse_iterator
 #endif
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator& operator++() {
+  constexpr reverse_iterator& operator++() {
     --current;
     return *this;
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator operator++(int) {
+  constexpr reverse_iterator operator++(int) {
     reverse_iterator __tmp = *this;
     --current;
     return __tmp;
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator& operator--() {
+  constexpr reverse_iterator& operator--() {
     ++current;
     return *this;
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator operator--(int) {
+  constexpr reverse_iterator operator--(int) {
     reverse_iterator __tmp = *this;
     ++current;
     return __tmp;
@@ -145,7 +145,7 @@ class reverse_iterator
     return reverse_iterator(current - __n);
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator& operator+=(difference_type __n) {
+  constexpr reverse_iterator& operator+=(difference_type __n) {
     current -= __n;
     return *this;
   }
@@ -154,7 +154,7 @@ class reverse_iterator
     return reverse_iterator(current + __n);
   }
 
-  AT_CPP14_CONSTEXPR reverse_iterator& operator-=(difference_type __n) {
+  constexpr reverse_iterator& operator-=(difference_type __n) {
     current += __n;
     return *this;
   }
