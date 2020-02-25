@@ -172,6 +172,7 @@ RNNOutput RNNImplBase<Derived>::generic_forward(
       options.dropout(),
       this->is_training(),
       options.bidirectional(),
+      options.cat_layer_fwd_bwd_states(),
       options.batch_first());
   return {output, new_state};
 }
