@@ -34,13 +34,8 @@ using fake_quant_by_channel_fn = void (*)(
     int64_t quant_min,
     int64_t quant_max);
 
-using fake_quant_grad_by_channel_fn = void (*)(
-    TensorIterator &iter,
-    int64_t quant_min,
-    int64_t quant_max);
-
 DECLARE_DISPATCH(fake_quant_by_channel_fn, fake_quant_by_channel_stub);
-DECLARE_DISPATCH(fake_quant_grad_by_channel_fn, fake_quant_grad_by_channel_stub);
+DECLARE_DISPATCH(fake_quant_by_channel_fn, fake_quant_grad_by_channel_stub);
 
 } // namespace native
 } // namespace at
