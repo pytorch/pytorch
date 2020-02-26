@@ -4,7 +4,7 @@
 
 #include <gtest/gtest.h>
 
-#include <ATen/native/TensorIndexing.h>
+#include <ATen/TensorIndexing.h>
 #include <torch/nn/cloneable.h>
 #include <torch/types.h>
 #include <torch/utils.h>

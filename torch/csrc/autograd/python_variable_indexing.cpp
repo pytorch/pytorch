@@ -16,9 +16,9 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/native/TensorIndexing.h>
 
 #include <vector>
 #include <tuple>
