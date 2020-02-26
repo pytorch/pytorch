@@ -177,7 +177,7 @@ TEST(TensorIndexingTest, TestStepAssignment) {
   auto v = torch::zeros({4, 4});
   v.index_put_({0, {1, None, 2}}, torch::tensor({3., 4.}));
   assert_tensor_equal(v.index({0}), torch::tensor({0., 3., 0., 4.}));
-  assert_tensor_equal(v.index({{1, None}}).sum(), 0);
+  assert_tensor_equal(v.index({{1, None}}).sum(), torch::tensor(0));
 }
 
 TEST(TensorIndexingTest, TestBoolIndices) {
