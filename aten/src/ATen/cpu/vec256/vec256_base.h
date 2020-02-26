@@ -610,7 +610,7 @@ template <class T, typename Op>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
   using iT = int_same_size_t<T>;
   iT buffer[Vec256<T>::size()];
-  for (int64_t i = 0; i != Vec256<T>::size(); i++) {
+  for (int i = 0; i != Vec256<T>::size(); i++) {
     auto a_val = a[i];
     auto b_val = b[i];
     iT *i_a_ptr = reinterpret_cast<iT*>(&a_val);
