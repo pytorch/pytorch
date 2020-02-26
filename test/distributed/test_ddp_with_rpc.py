@@ -302,6 +302,15 @@ class Trainer:
             output = self.hybrid_module(input)
             return self.criterion(output, input.labels)
 
+    def get_real_module(self):
+        if isinstance(self.hybrid_module, DistributedDataParallel):
+            return self.hybrid_module.module
+        else:
+            return self.hybrid_module
+
+    def print_parameters(self):
+        self.get_real_module().print_parameters()
+
     def do_mini_batch(self, mini_batch: FeatureSet):
         gLogger.info(f"Doing a mini batch on {mini_batch}")
         loss = 0
@@ -321,12 +330,12 @@ class Trainer:
             )
             # The local optimize is unable to update the parameters
             self.local_optimizer.step()
-            self.hybrid_module.print_parameters()
+            self.print_parameters()
 
             gLogger.info(f"Running distributed optimizer...")
             dist_optimizer = DistributedOptimizer(
                 optim.SGD,
-                self.hybrid_module.remote_parameters_rrefs
+                self.get_real_module().remote_parameters_rrefs
                 + [
                     rpc.RRef(local_param)
                     for local_param in self.hybrid_module.parameters()
@@ -335,7 +344,7 @@ class Trainer:
             )
             dist_optimizer.step()
 
-            self.hybrid_module.print_parameters()
+            self.print_parameters()
 
         gLogger.info(f"Loss: {loss}.")
         return loss
