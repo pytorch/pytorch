@@ -91,6 +91,7 @@ void Adam::step() {
       auto& max_exp_avg_sq = state.max_exp_avg_sq();
 
       state.step(state.step()+1);
+      std::cout<<"step_val: "<<state.step();
       auto beta1 = std::get<0>(options.betas());
       auto beta2 = std::get<1>(options.betas());
 
@@ -116,7 +117,11 @@ void Adam::step() {
       }
 
       auto step_size = options.lr() / bias_correction1;
+      std::cout<<"before --- p.data(): "<<p.data();
+      std::cout<<"\nexp_avg: "<<exp_avg<<"\ndenom: "<<denom<<"\n-step_size: "<<step_size;
       p.data().addcdiv_(exp_avg, denom, -step_size);
+      std::cout<<"\nafter ---- p.data(): "<<p.data();
+      std::cout<<"\np.grad.data(): "<<p.grad().data();
     }
   }
 }
