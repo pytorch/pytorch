@@ -659,7 +659,8 @@ Tensor leaky_relu_backward(
     !is_result || negval.to<double>() > 0.0,
     "In-place leakyReLu backward calculation is triggered with a non-positive slope which is not supported. "
     "This is caused by calling in-place forward function with a non-positive slope, "
-    "please call out-of-place version instead.");
+    "please call out-of-place version instead. File an issue at https://github.com/pytorch/pytorch if you do "
+    "require supporting in-place leakRelu backward calculation with non-positive slope");
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self_or_result, grad_output);
