@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
+// NOLINTNEXTLINE(bugprone-exception-escape)
 CAFFE_KNOWN_TYPE(torch::autograd::profiler::RecordFunction);
 } // namespace caffe2
 
@@ -36,10 +37,9 @@ void record_function_exit(const at::Tensor& handle) {
   if (rec.active() && current) {
     if (current != &rec) {
       AT_ASSERT(current->parent() == &rec, "rec must be parent");
-      AT_ASSERT(current->name() == StringView("profiler::_record_function_exit"));
+      AT_ASSERT(
+          current->name() == StringView("profiler::_record_function_exit"));
       current->end();
-    } else {
-      AT_ASSERT(current == &rec, "rec must be active");
     }
     rec.end();
   }
