@@ -50,15 +50,6 @@ inline bool pointer_equal(at::Tensor first, at::Tensor second) {
   return first.data_ptr() == second.data_ptr();
 }
 
-// This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, Number)` branch
-// in `TestCase.assertEqual` in test/common_utils.py
-#define TENSOR(T, S) \
-inline void assert_tensor_equal(at::Tensor a, T b) { \
-  ASSERT_TRUE(std::abs(a.item<T>() - b) < 1e-4); \
-}
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-#undef TENSOR
-
 // This mirrors the `isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)` branch
 // in `TestCase.assertEqual` in torch/testing/_internal/common_utils.py
 inline void assert_tensor_equal(at::Tensor a, at::Tensor b, bool allow_inf=false) {
