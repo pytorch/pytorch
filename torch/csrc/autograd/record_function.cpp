@@ -215,13 +215,20 @@ RecordFunction::~RecordFunction() {
   }
 }
 
+void RecordFunction::runEndCallbacks() {
+  TORCH_INTERNAL_ASSERT(
+      initialized_,
+      "Cannot run end callbacks on an uninitialized RecordFunction.");
+  for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
+    if (!manager().is_callback_sampled[idx] || run_sampled_) {
+      manager().end_callbacks[idx](*this);
+    }
+  }
+}
+
 void RecordFunction::end() {
   if (initialized_) {
-    for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
-      if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
-      }
-    }
+    runEndCallbacks();
 
     // In the case that RecordFunction::end is called from a different thread,
     // thread_local_func will not be this, so assert that we have overridden the
@@ -254,7 +261,7 @@ void RecordFunctionAsync::before(std::string name, int64_t sequence_nr) {
 
 void RecordFunctionAsync::before(Node* fn, int64_t sequence_nr) {
   RecordFunction::before(fn, sequence_nr);
-   RecordFunction::setThreadId();
+  RecordFunction::setThreadId();
 }
 
 void RecordFunctionAsync::exitScope() {
@@ -272,11 +279,7 @@ void RecordFunctionAsync::exitScope() {
 
 void RecordFunctionAsync::end() {
   if (initialized_) {
-    for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
-      if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
-      }
-    }
+    runEndCallbacks();
     initialized_ = false;
   }
 }
@@ -286,8 +289,6 @@ void RecordFunctionAsync::end() {
 RecordFunctionAsync::~RecordFunctionAsync() {
   initialized_ = false;
 }
-
-
 
 } // namespace profiler
 } // namespace autograd

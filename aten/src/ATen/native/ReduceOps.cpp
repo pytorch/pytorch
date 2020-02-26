@@ -35,6 +35,8 @@ DEFINE_DISPATCH(min_values_stub);
 DEFINE_DISPATCH(max_values_stub);
 DEFINE_DISPATCH(argmax_stub);
 DEFINE_DISPATCH(argmin_stub);
+DEFINE_DISPATCH(cumsum_stub);
+DEFINE_DISPATCH(cumprod_stub);
 
 #define OPTION_TYPE_EQUALITY_CHECK(option, out, self) \
 { \
@@ -184,6 +186,17 @@ static TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype));
 }
 
+Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  cumsum_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
+Tensor& _cumsum_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  cumsum_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
 Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
@@ -207,6 +220,17 @@ Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, c10::optiona
     at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
   }
   namedinference::propagate_names(result, self);
+  return result;
+}
+
+Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
+  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
+  cumprod_stub(self.device().type(), result, self, dim);
+  return result;
+}
+
+Tensor& _cumprod_out_cpu(Tensor& result, const Tensor& self, int64_t dim) {
+  cumprod_stub(self.device().type(), result, self, dim);
   return result;
 }
 
