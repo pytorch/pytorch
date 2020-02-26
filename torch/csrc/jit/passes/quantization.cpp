@@ -106,22 +106,19 @@ std::string getFuncName(Value* func_value) {
   }
 }
 
-bool nodeQuantizable(Node* n) {
-  static std::vector<std::string> call_funcs = {
-      "conv2d",
-      "linear",
-      "relu",
-  };
-  std::vector<Symbol> aten_funcs = {
-      Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
+bool isFunctionNode(Node* n,
+                    const std::vector<std::string>& call_funcs,
+                    const std::vector<std::string>& aten_funcs) {
+  std::vector<Symbol> aten_func_symbols;
   std::transform(
-      call_funcs.begin(),
-      call_funcs.end(),
-      std::back_inserter(aten_funcs),
+      aten_funcs.begin(),
+      aten_funcs.end(),
+      std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
+
   bool is_quantizable =
-      std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
-      aten_funcs.end();
+      std::find(aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+      aten_func_symbols.end();
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
@@ -129,6 +126,23 @@ bool nodeQuantizable(Node* n) {
         call_funcs.end();
   }
   return is_quantizable;
+}
+
+bool nodeQuantizable(Node* n) {
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+    }, /* aten_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+      "addmm",
+      "matmul",
+      "add_"
+    });
 }
 
 bool valueNeedsToBeQuantized(Value* v) {
@@ -365,6 +379,11 @@ class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(const ModuleQConfigMap& map)
       : module_qconfig_map_(map) {}
+
+  void preprocess(
+    script::Module& module,
+    const std::string& method_name);
+
   void insertObservers(script::Module& module, const std::string& method_name);
 
  private:
@@ -671,6 +690,28 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
+void InsertObserversHelper::preprocess(
+    script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+  // To cleanup traced graph
+  ConstantPooling(graph);
+  ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+  // We need to call this before calling insertObservers for
+  // invoked methods
+  addIntermediateValuesToSkipObserver(module, method_name);
+  for (auto& invoked_method : getInvokedMethods(module, method_name)) {
+    auto& invoked_module = std::get<0>(invoked_method);
+    const auto& invoked_method_name = std::get<1>(invoked_method);
+    preprocess(invoked_module, invoked_method_name);
+  }
+}
+
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -693,14 +734,6 @@ void InsertObserversHelper::insertObservers(
     return;
   }
 
-  // To cleanup traced graph
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
-  // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
-  // fuse decomposed linear into aten::linear
-  FuseLinear(graph);
-  addIntermediateValuesToSkipObserver(module, method_name);
   // For storing all values that need to be instrumented with an observer call.
   std::vector<Value*> values_to_observe;
 
@@ -751,6 +784,20 @@ void InsertObserversHelper::insertObservers(
   }
 }
 
+void insertDeQuantCall(Graph* graph,
+                       Value* quantized_val,
+                       Value* original_val,
+                       const std::vector<Use>& uses) {
+  for (size_t i = 0; i < uses.size(); ++i) {
+    Node* dequant =
+      graph->create(Symbol::aten("dequantize"), {quantized_val});
+    dequant->output()->setDebugName(
+        original_val->debugName() + ".dequant." + c10::guts::to_string(i));
+    uses[i].user->replaceInputWith(original_val, dequant->output());
+    graph->insertNode(dequant);
+  }
+}
+
 void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
   Graph* g = observer->owningGraph();
   // Original value that is observed
@@ -784,26 +831,18 @@ void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
 
   // two passes to insert the dequant for every usage
   // in first pass, identify all the nodes using "v"
-  std::vector<Node*> use_nodes;
+  std::vector<Use> uses;
   for (const auto& use : v->uses()) {
-    auto cur = use.user;
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
-    if (cur != quant && cur != observer) {
-      use_nodes.push_back(cur);
+    if (use.user != quant && use.user != observer) {
+      uses.push_back(use);
     }
   }
 
   // in second pass, replace the input "v" with dequant output
-  for (size_t i = 0; i < use_nodes.size(); ++i) {
-    Node* dequant =
-        g->create(at::Symbol::aten("dequantize"), {quant->output()});
-    dequant->output()->setDebugName(
-        v->debugName() + ".dequant." + c10::guts::to_string(i));
-    use_nodes[i]->replaceInputWith(v, dequant->output());
-    g->insertNode(dequant);
-  }
+  insertDeQuantCall(g, quant->output(), v, uses);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -1613,6 +1652,7 @@ TORCH_API script::Module InsertObservers(
   // the qconfig map again
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
+  helper.preprocess(module, method_name);
   helper.insertObservers(module, method_name);
   return module;
 }
