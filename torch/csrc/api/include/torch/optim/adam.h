@@ -19,10 +19,10 @@ namespace torch {
 namespace optim {
 
 struct TORCH_API AdamOptions : public OptimizerCloneableOptions<AdamOptions> {
-  AdamOptions(double learning_rate = 1e-3);
+  AdamOptions(double lr = 1e-3);
   TORCH_ARG(double, lr) = 1e-3;
-  TORCH_ARG(double, beta1) = 0.9;
-  TORCH_ARG(double, beta2) = 0.999;
+  typedef std::tuple<double, double> betas_t;
+  TORCH_ARG(betas_t, betas) = std::make_tuple(0.9, 0.999);
   TORCH_ARG(double, eps) = 1e-8;
   TORCH_ARG(double, weight_decay) = 0;
   TORCH_ARG(bool, amsgrad) = false;
@@ -37,7 +37,7 @@ struct TORCH_API AdamParamState : public OptimizerCloneableParamState<AdamParamS
   TORCH_ARG(int64_t, step);
   TORCH_ARG(torch::Tensor, exp_avg);
   TORCH_ARG(torch::Tensor, exp_avg_sq);
-  TORCH_ARG(torch::Tensor, max_exp_avg_sq);
+  TORCH_ARG(torch::Tensor, max_exp_avg_sq) = {};
 
 public:
   void serialize(torch::serialize::InputArchive& archive) override;
@@ -49,7 +49,14 @@ public:
 class TORCH_API Adam : public Optimizer {
  public:
    explicit Adam(std::vector<OptimizerParamGroup> param_groups,
-       AdamOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<AdamOptions>(defaults)) {}
+       AdamOptions defaults) : Optimizer(std::move(param_groups), std::make_unique<AdamOptions>(defaults)) {
+     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
+     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
+     auto betas = defaults.betas();
+     TORCH_CHECK(std::get<0>(betas) >= 0, "Invalid learning rate: ", std::get<0>(betas));
+     TORCH_CHECK(std::get<1>(betas) >= 0, "Invalid learning rate: ", std::get<1>(betas));
+     TORCH_CHECK(defaults.weight_decay() >= 0, "Invalid learning rate: ", defaults.weight_decay());
+   }
    explicit Adam(
        std::vector<Tensor> params,
        AdamOptions defaults) : Adam({std::move(OptimizerParamGroup(params))}, defaults) {}

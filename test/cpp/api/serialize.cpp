@@ -127,6 +127,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   // optim3_2 and optim1 should have param_groups and state of size 1 and 2 respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
   ASSERT_TRUE(optim3_2_state.size() == 2);
+
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
   ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
@@ -553,12 +554,12 @@ TEST(SerializeTest, Optim_SGD) {
 }
 
 TEST(SerializeTest, Optim_Adam) {
-  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions());
+  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().amsgrad(true).weight_decay(1e-2));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
-  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
+  // added a tensor for lazy init check - when all params do not have entry in buffers
   model1_params.emplace_back(torch::randn({2,3}));
   auto optim1 = torch::optim::Adam(model1_params, torch::optim::AdamOptions());
 
@@ -589,7 +590,7 @@ TEST(SerializeTest, Optim_Adam) {
       }
     }
   }
-  // write momentum_buffers to the file
+  // write buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   write_step_buffers(output_archive, "step_buffers", step_buffers);

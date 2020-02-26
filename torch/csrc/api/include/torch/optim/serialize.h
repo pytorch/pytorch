@@ -214,18 +214,21 @@ void serialize(
   torch::optim::serialize<OptimizerName##ParamState, OptimizerName##Options>(archive, self)
 
 #define _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name) \
-  archive.write(#name, IValue(name()))
+  archive.write(#name, IValue(name())); \
+
+// serialize only if the tensor is defined
+#define _TORCH_OPTIM_SERIALIZE_TORCH_ARG_IF_DEFINED(name) \
+{ \
+  if(name().defined()) \
+    _TORCH_OPTIM_SERIALIZE_TORCH_ARG(name); \
+} \
 
 #define _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(T, name) \
 { \
   c10::IValue ivalue; \
   bool exists = archive.try_read(#name, ivalue); \
-  if(exists) { \
+  if (exists) \
     name(ivalue.to<T>()); \
-  } else { \
-    /*undefined tensor*/ \
-    name({}); \
-  } \
 }
 } // namespace optim
 } // namespace torch
