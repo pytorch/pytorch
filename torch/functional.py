@@ -963,6 +963,7 @@ lu = boolean_dispatch(
     if_false=_lu_no_infos,
     module_name=__name__,
     func_name='lu')
+lu.__doc__ = _lu_impl.__doc__
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
