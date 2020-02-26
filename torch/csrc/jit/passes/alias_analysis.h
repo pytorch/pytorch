@@ -1,7 +1,7 @@
 #pragma once
 
+#include <ATen/core/alias_info.h>
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/type_hashing.h>
