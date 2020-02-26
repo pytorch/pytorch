@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <algorithm>
 
