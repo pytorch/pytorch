@@ -137,14 +137,21 @@ class DdpMode(enum.Enum):
 
 def init_logger():
     logger = logging.getLogger(__name__)
+<<<<<<< HEAD
     level = logging.DEBUG if "debug" in os.environ else logging.INFO
     logger.setLevel(level)
+=======
+>>>>>>> make the framework work
     console = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(processName)s t:%(threadName)s: %(message)s"
     )
     console.setFormatter(formatter)
+<<<<<<< HEAD
     console.setLevel(level)
+=======
+    console.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
+>>>>>>> make the framework work
     # add the handlers to the logger
     logger.addHandler(console)
     logger.propagate = False
@@ -221,6 +228,7 @@ class RemoteEM(nn.Module):
 
     def forward(self, input: torch.Tensor):
 <<<<<<< HEAD
+<<<<<<< HEAD
         gLogger.debug(f"Running RemoteEM.forward() on: {input}")
         return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 
@@ -245,6 +253,9 @@ class RemoteNet(nn.Module):
         return [rpc.RRef(param) for param in self.parameters()]
 =======
         gLogger.info(f"Running RemoteEM.forward() on: {input}")
+=======
+        gLogger.debug(f"Running RemoteEM.forward() on: {input}")
+>>>>>>> make the framework work
         return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 >>>>>>> Add backward()
 
@@ -260,7 +271,7 @@ class RemoteNet(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, input: torch.Tensor):
-        gLogger.info(f"Running RemoteNet.forward() on: {input}")
+        gLogger.debug(f"Running RemoteNet.forward() on: {input}")
         return self.relu(self.fc(input))
 
     def print_parameters(self):
@@ -313,6 +324,7 @@ class HybridModel(nn.Module):
         dense = self.fc1(input.dense_features)
         x = torch.cat((dense, sparse), 1)
 <<<<<<< HEAD
+<<<<<<< HEAD
         gLogger.debug(f"Concatenated feature: {x}")
         x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
         return self.fc2(x)
@@ -324,6 +336,9 @@ class HybridModel(nn.Module):
         )
 =======
         gLogger.info(f"Concatenated feature: {x}")
+=======
+        gLogger.debug(f"Concatenated feature: {x}")
+>>>>>>> make the framework work
         x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
         return self.fc2(x)
 >>>>>>> Use a file store for init_process_group()
@@ -437,7 +452,13 @@ class Trainer:
         ddp_mode: DdpMode,
         rank: int,
     ):
-        process_group_for_ddp = gTrainerProcessGroup[rank]
+        self.process_group_context = ProcessGroupContext(
+            name=TRAINER_NAME_TEMPLATE.format(rank),
+            ranks=DDP_TRAINER_RANKS,
+            group_name="trainers_ddp",
+        )
+        process_group_for_ddp = self.process_group_context.__enter__()
+        check_process_group_type(f"trainer #{rank}", process_group_for_ddp)
         gLogger.info(
             f"Initing a trainer with process group {process_group_for_ddp} ..."
         )
@@ -459,8 +480,11 @@ class Trainer:
             )
         gLogger.info(f"Succeeded in creating a HybridModel instance.")
 
+    def __del__(self):
+        self.process_group_context.__exit__(None, None, None)
+
     def do_forward_without_grad(self, input: FeatureSet):
-        gLogger.info(f"Doing a forward pass on {input}")
+        gLogger.debug(f"Doing a forward pass on {input}")
         with torch.no_grad():
             output = self.hybrid_module(input)
             return self.criterion(output, input.labels)
@@ -556,6 +580,7 @@ def get_training_examples():
         for y in range(2):
             for z in range(2):
 <<<<<<< HEAD
+<<<<<<< HEAD
                 training_examples.dense_features[idx, :] = torch.Tensor((x, y))
                 training_examples.sparse_features[idx] = z
                 training_examples.labels[idx] = x ^ y ^ z
@@ -584,6 +609,9 @@ class TestDdpWithRpc(TestCase):
                 training_examples.dense_features[idx, :] = torch.Tensor(
                     (x, y)
                 )
+=======
+                training_examples.dense_features[idx, :] = torch.Tensor((x, y))
+>>>>>>> make the framework work
                 training_examples.sparse_features[idx] = z
                 training_examples.labels[idx] = x ^ y ^ z
                 idx += 1
@@ -606,6 +634,7 @@ class TestDdpWithRpc(TestCase):
             group_name="trainers_ddp",
         ) as process_group:
 <<<<<<< HEAD
+<<<<<<< HEAD
             if not isinstance(process_group, dist.ProcessGroup):
                 gLogger.error(
                     f"The process group in the remote worker is of type {type(process_group)}"
@@ -614,6 +643,8 @@ class TestDdpWithRpc(TestCase):
             check_process_group_type("remote worker", process_group)
 >>>>>>> Spawn a master process to do all driving work
             dist.barrier()
+=======
+>>>>>>> make the framework work
             gLogger.info(f"The remote worker is running.")
 
         gLogger.info(f"Exiting remote worker.")
@@ -661,6 +692,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
             rank=rank,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
+<<<<<<< HEAD
         ), ProcessGroupContext(
             name=TRAINER_NAME_TEMPLATE.format(rank),
             ranks=DDP_TRAINER_RANKS,
@@ -676,6 +708,9 @@ class TestDdpWithRpc(MultiProcessTestCase):
             check_process_group_type(f"trainer #{rank}", process_group)
 >>>>>>> Spawn a master process to do all driving work
             dist.barrier()
+=======
+        ):
+>>>>>>> make the framework work
             gLogger.info(f"Trainer #{rank} is running.")
 
         gLogger.info(f"Exiting trainer #{rank}...")
@@ -736,7 +771,6 @@ class TestDdpWithRpc(MultiProcessTestCase):
             "master", DDP_TRAINER_RANKS, "trainers_ddp"
         ) as process_group:
             gLogger.info(f"Running the master process...")
-            check_process_group_type("master", process_group)
             remote_em_rref = rpc.remote(
                 REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
             )
@@ -1050,6 +1084,9 @@ class TestDdpWithRpc(MultiProcessTestCase):
         self.spawn_master_process(DdpMode.NONE, Trainer.do_mini_batch)
 >>>>>>> e5b4e7d245... Spawn a master process to do all driving work
 >>>>>>> Spawn a master process to do all driving work
+
+    def test_training_ddp_outside(self):
+        self.spawn_master_process(DdpMode.OUTSIDE, Trainer.do_mini_batch)
 
 
 if __name__ == "__main__":
