@@ -21,7 +21,6 @@ from . import ReduceOp
 from . import PrefixStore
 
 
-
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
@@ -1566,4 +1565,5 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None):
         global_rank: group_rank
         for group_rank, global_rank in enumerate(ranks)
     }
+
     return pg

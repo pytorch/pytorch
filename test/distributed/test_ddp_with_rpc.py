@@ -29,9 +29,19 @@ D_DENSE = 2
 D_HID = 3
 D_OUT = 2
 
-NUM_TRAINERS = 1
+NUM_TRAINERS = 2
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
+
+TRAINER_NAME_TEMPLATE = "trainer:{}"
+REMOTE_WORKER_NAME = "remote_worker"
+TRAINER_GROUP = "trainer_group"
+MASTER_NAME = "master"
+DDP_TRAINER_RANKS = list(range(1, NUM_TRAINERS + 1))
+TRAINER_NAMES = [
+    TRAINER_NAME_TEMPLATE.format(rank) for rank in DDP_TRAINER_RANKS
+]
+REMOTE_WORKER_RANK = NUM_TRAINERS + 1
 
 gTrainerProcessGroup: [dist.ProcessGroup] = [None] * WORLD_SIZE
 
@@ -87,6 +97,15 @@ def _remote_method_async(method, rref, *args, **kwargs):
     return rpc.rpc_async(
         rref.owner(), _call_method, args=args_tup, kwargs=kwargs
     )
+
+
+def check_process_group_type(
+    process_name: str, process_group: dist.ProcessGroup
+):
+    if not isinstance(process_group, dist.ProcessGroup):
+        gLogger.warning(
+            f"The process group in {process_name} process is of type {type(process_group)}"
+        )
 
 
 class RemoteEM(nn.Module):
@@ -295,30 +314,41 @@ class Trainer:
         return loss
 
 
-class TestDdpWithRpc(TestCase):
-    TRAINER_NAME_TEMPLATE = "trainer:{}"
-    REMOTE_WORKER_NAME = "remote_worker"
-    TRAINER_GROUP = "trainer_group"
-    DDP_TRAINER_RANKS = list(range(1, NUM_TRAINERS + 1))
-    REMOTE_WORKER_RANK = NUM_TRAINERS + 1
+def get_training_examples():
+    n = 8
+    training_examples = FeatureSet(
+        dense_features=torch.zeros((n, D_DENSE)),
+        sparse_features=torch.zeros(n, dtype=torch.long),
+        labels=torch.zeros(n, dtype=torch.long),
+    )
+    idx = 0
+    for x in range(2):
+        for y in range(2):
+            for z in range(2):
+                training_examples.dense_features[idx, :] = torch.Tensor(
+                    (x, y)
+                )
+                training_examples.sparse_features[idx] = z
+                training_examples.labels[idx] = x ^ y ^ z
+                idx += 1
+    return training_examples
 
+
+class TestDdpWithRpc(TestCase):
     @classmethod
     def _remote_worker_process(cls):
         gLogger.info(f"Starting the remote worker...")
         with RpcContext(
-            name=cls.REMOTE_WORKER_NAME,
-            rank=cls.REMOTE_WORKER_RANK,
+            name=REMOTE_WORKER_NAME,
+            rank=REMOTE_WORKER_RANK,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
         ), ProcessGroupContext(
-            cls.REMOTE_WORKER_NAME,
-            ranks=cls.DDP_TRAINER_RANKS,
+            REMOTE_WORKER_NAME,
+            ranks=DDP_TRAINER_RANKS,
             group_name="trainers_ddp",
         ) as process_group:
-            if not isinstance(process_group, dist.ProcessGroup):
-                gLogger.warning(
-                    f"The process group in the remote worker is of type {type(process_group)}"
-                )
+            check_process_group_type("remote worker", process_group)
             dist.barrier()
             gLogger.info(f"The remote worker is running.")
 
@@ -328,7 +358,7 @@ class TestDdpWithRpc(TestCase):
 
     def spawn_remote_worker(self):
         remote_worker_process = multiprocessing.Process(
-            target=self._remote_worker_process, name=self.REMOTE_WORKER_NAME
+            target=self._remote_worker_process, name=REMOTE_WORKER_NAME
         )
         remote_worker_process.start()
         self.processes.append(remote_worker_process)
@@ -337,20 +367,17 @@ class TestDdpWithRpc(TestCase):
     def _trainer_process(cls, rank: int):
         gLogger.info(f"Starting the trainer #{rank}...")
         with RpcContext(
-            name=cls.TRAINER_NAME_TEMPLATE.format(rank),
+            name=TRAINER_NAME_TEMPLATE.format(rank),
             rank=rank,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
         ), ProcessGroupContext(
-            name=cls.TRAINER_NAME_TEMPLATE.format(rank),
-            ranks=cls.DDP_TRAINER_RANKS,
+            name=TRAINER_NAME_TEMPLATE.format(rank),
+            ranks=DDP_TRAINER_RANKS,
             group_name="trainers_ddp",
         ) as process_group:
             gTrainerProcessGroup[rank] = process_group
-            if not isinstance(process_group, dist.ProcessGroup):
-                gLogger.warning(
-                    f"The process group in the trainer #{rank} is of type {type(process_group)}"
-                )
+            check_process_group_type(f"trainer #{rank}", process_group)
             dist.barrier()
             gLogger.info(f"Trainer #{rank} is running.")
 
@@ -362,12 +389,78 @@ class TestDdpWithRpc(TestCase):
         for rank in range(1, NUM_TRAINERS + 1):
             trainer = multiprocessing.Process(
                 target=self._trainer_process,
-                name=self.TRAINER_NAME_TEMPLATE.format(rank),
+                name=TRAINER_NAME_TEMPLATE.format(rank),
                 args=(rank,),
             )
             trainer.start()
             self.processes.append(trainer)
-            self.trainer_names.append(self.TRAINER_NAME_TEMPLATE.format(rank))
+
+    @classmethod
+    def do_test_on_master(
+        cls,
+        ddp_mode: DdpMode,
+        trainer_method: Callable[[FeatureSet], None],
+        remote_em_rref: rpc.RRef,
+        remote_net_rref: rpc.RRef,
+    ):
+        # Wait for all trainers to get their own process group populated in
+        # 'gTrainerProcessGroup'
+        dist.barrier()
+        trainer_rrefs = []
+        for rank, trainer in zip(DDP_TRAINER_RANKS, TRAINER_NAMES):
+            trainer_rrefs.append(
+                rpc.remote(
+                    trainer,
+                    Trainer,
+                    args=(remote_em_rref, remote_net_rref, ddp_mode, rank + 1),
+                )
+            )
+
+        for epoch in range(3):
+            futures = []
+            for trainer_rref in trainer_rrefs:
+                futures.append(
+                    _remote_method_async(
+                        trainer_method, trainer_rref, get_training_examples()
+                    )
+                )
+            log_loss = 0
+            for future in futures:
+                log_loss += future.wait()
+            gLogger.info(f"Log loss at epoch #{epoch}: {log_loss}")
+
+    @classmethod
+    def _master_process(
+        cls, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
+    ):
+        with RpcContext(
+            "master_process", 0, WORLD_SIZE, "trainer/remote RPC"
+        ), ProcessGroupContext(
+            "master", DDP_TRAINER_RANKS, "trainers_ddp"
+        ) as process_group:
+            gLogger.info(f"Running the master process...")
+            check_process_group_type("master", process_group)
+            remote_em_rref = rpc.remote(
+                REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
+            )
+            remote_net_rref = rpc.remote(
+                REMOTE_WORKER_NAME, RemoteNet, args=(D_DENSE + D_SPARSE, D_HID)
+            )
+            gLogger.info(f"Created remote rrefs on master")
+            cls.do_test_on_master(
+                ddp_mode, trainer_method, remote_em_rref, remote_net_rref
+            )
+
+    def spawn_master_process(
+        self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
+    ):
+        master_process = multiprocessing.Process(
+            target=self._master_process,
+            name=MASTER_NAME,
+            args=(ddp_mode, trainer_method),
+        )
+        master_process.start()
+        self.processes.append(master_process)
 
     def setUp(self):
         super(TestDdpWithRpc, self).setUp()
@@ -377,53 +470,12 @@ class TestDdpWithRpc(TestCase):
         # os.environ["WORLD_SIZE"] = str(NUM_TRAINERS + 1)
 
         self.processes: List[multiprocessing.Process] = []
-        self.remote_em_rref: rpc.RRef = None
-        self.remote_net_rref: rpc.RRef = None
-        self.trainer_names = []
-        self.trainer_rrefs = []
-        n = 8
-        self.training_examples = FeatureSet(
-            dense_features=torch.zeros((n, D_DENSE)),
-            sparse_features=torch.zeros(n, dtype=torch.long),
-            labels=torch.zeros(n, dtype=torch.long),
-        )
-        idx = 0
-        for x in range(2):
-            for y in range(2):
-                for z in range(2):
-                    self.training_examples.dense_features[
-                        idx, :
-                    ] = torch.Tensor((x, y))
-                    self.training_examples.sparse_features[idx] = z
-                    self.training_examples.labels[idx] = x ^ y ^ z
-                    idx += 1
 
         self.spawn_remote_worker()
         self.spawn_trainers()
 
-        self.rpc_context = RpcContext(
-            "master_process", 0, WORLD_SIZE, "trainer/remote RPC"
-        )
-        self.rpc_context.__enter__()
-
-        self.remote_em_rref = rpc.remote(
-            self.REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
-        )
-        self.remote_net_rref = rpc.remote(
-            self.REMOTE_WORKER_NAME, RemoteNet, args=(D_DENSE + D_SPARSE, D_HID)
-        )
-
-        self.process_group_context = ProcessGroupContext(
-            "master", self.DDP_TRAINER_RANKS, "trainers_ddp"
-        )
-        self.process_group = self.process_group_context.__enter__()
-
     def tearDown(self):
         super(TestDdpWithRpc, self).tearDown()
-
-        self.process_group_context.__exit__(None, None, None)
-        self.rpc_context.__exit__(None, None, None)
-
         self.join_processes()
         for p in self.processes:
             p.terminate()
@@ -432,53 +484,16 @@ class TestDdpWithRpc(TestCase):
         for p in self.processes:
             p.join()
 
-    def create_trainers(self, ddp_mode: DdpMode):
-        if not isinstance(self.process_group, dist.ProcessGroup):
-            gLogger.warning(
-                f"The process group in the master process is of type {type(self.process_group)}"
-            )
-        # Wait for all trainers to get their own process group populated in
-        # 'gTrainerProcessGroup'
-        dist.barrier()
-        for rank, trainer in enumerate(self.trainer_names):
-            self.trainer_rrefs.append(
-                rpc.remote(
-                    trainer,
-                    Trainer,
-                    args=(
-                        self.remote_em_rref,
-                        self.remote_net_rref,
-                        ddp_mode,
-                        rank + 1,
-                    ),
-                )
-            )
-
-    def do_test(
-        self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
-    ):
-        self.create_trainers(ddp_mode)
-        for epoch in range(3):
-            futures = []
-            for trainer_rref in self.trainer_rrefs:
-                futures.append(
-                    _remote_method_async(
-                        trainer_method, trainer_rref, self.training_examples
-                    )
-                )
-            log_loss = 0
-            for future in futures:
-                log_loss += future.wait()
-            gLogger.info(f"Log loss at epoch #{epoch}: {log_loss}")
-
     def test_forward_no_ddp(self):
-        self.do_test(DdpMode.NONE, Trainer.do_forward_without_grad)
+        self.spawn_master_process(DdpMode.NONE, Trainer.do_forward_without_grad)
 
     def test_forward_ddp_outside(self):
-        self.do_test(DdpMode.OUTSIDE, Trainer.do_forward_without_grad)
+        self.spawn_master_process(
+            DdpMode.OUTSIDE, Trainer.do_forward_without_grad
+        )
 
     def test_training_no_ddp(self):
-        self.do_test(DdpMode.NONE, Trainer.do_mini_batch)
+        self.spawn_master_process(DdpMode.NONE, Trainer.do_mini_batch)
 
 
 if __name__ == "__main__":
