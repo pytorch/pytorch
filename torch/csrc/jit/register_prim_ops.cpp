@@ -1681,6 +1681,26 @@ int listInplaceAdd(Stack& stack) {
 }
 
 template <class T>
+int listMulIntLeftInPlace(Stack& stack) {
+  int64_t n = pop(stack).to<int64_t>();
+  c10::List<T> list = pop(stack).to<c10::List<T>>();
+
+  if (n <= 0) {
+    list.clear();
+  } else if (n > 1) {
+    size_t list_size = list.size();
+    for (auto i = 1; i < n; i++) {
+      for (size_t j = 0; j < list_size; j++) {
+        list.push_back(list.get(j));
+      }
+    }
+  }
+
+  push(stack, std::move(list));
+  return 0;
+}
+
+template <class T>
 int listMulIntLeft(Stack& stack) {
   int64_t n = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
@@ -2295,6 +2315,10 @@ RegisterOperators reg2({
       Operator(                                                                     \
           "aten::mul(int n, " decl_type "[] l) -> " decl_type "[]",                 \
           listMulIntRight<c_type::value_type>,                                      \
+          aliasAnalysisFromSchema()),                                               \
+      Operator(                                                                     \
+          "aten::mul_(" decl_type "[](a!) l, int n) -> " decl_type "[](a!)",        \
+          listMulIntLeftInPlace<c_type::value_type>,                                \
           aliasAnalysisFromSchema())
 
     CREATE_LIST_OPS("int", c10::List<int64_t>),

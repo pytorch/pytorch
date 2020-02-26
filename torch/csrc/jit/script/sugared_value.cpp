@@ -525,6 +525,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
           ->call(loc, m, inputs.slice(1), attributes, n_binders);
     }
   }
+  TORCH_INTERNAL_ASSERT(base_value_);
   return base_value_->call(loc, m, inputs, attributes, n_binders);
 }
 

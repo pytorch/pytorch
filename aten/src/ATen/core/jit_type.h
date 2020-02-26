@@ -1077,7 +1077,7 @@ struct CAFFE2_API FunctionType : public NamedType {
     return "Function";
   }
   std::string python_str() const override {
-    throw "Function";
+    return "Function";
   }
   Function* function() const {
     return function_;

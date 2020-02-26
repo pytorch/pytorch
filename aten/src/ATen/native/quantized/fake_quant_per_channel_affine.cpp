@@ -1,10 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/fake_quantize_core.h>
+#include <ATen/native/quantized/fake_quant_affine.h>
 
-/* FakeQuantize Op for PerChannelAffine quantization scheme */
+// FakeQuantize Op for PerChannelAffine quantization scheme.
 namespace at {
 namespace native {
 
@@ -22,19 +23,16 @@ Returns:
 
 */
 
-Tensor fake_quantize_per_channel_affine_cpu(
+Tensor fake_quantize_per_channel_affine(
     const Tensor& self,
     const Tensor& scale,
     const Tensor& zero_point,
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
-  // TODO: Use REGISTER_DISPATCH
   TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(
-      scale.dim() == 1, "scale should be a 1-D tensor");
-  TORCH_CHECK(
-      zero_point.dim() == 1, "zero point should be a 1-D tensor");
+  TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
+  TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
       scale.numel() == zero_point.numel(),
       "scale and zero-point need to have the same dimensions");
@@ -62,8 +60,14 @@ Tensor fake_quantize_per_channel_affine_cpu(
     auto output_slice = Y.slice(axis, i, i + 1);
     float sc = scale[i].item().toFloat();
     int64_t z_point = zero_point[i].item().toLong();
-    fake_quantize_slice(
-        output_slice, input_slice, sc, z_point, quant_min, quant_max);
+    fake_quant_slice_stub(
+        self.device().type(),
+        output_slice,
+        input_slice,
+        sc,
+        z_point,
+        quant_min,
+        quant_max);
   }
 
   return Y;
@@ -84,7 +88,7 @@ Returns:
   Gradient for per channel fake quant (double dtype).
 
 */
-Tensor fake_quantize_per_channel_affine_backward_cpu(
+Tensor fake_quantize_per_channel_affine_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& scale,
@@ -100,10 +104,8 @@ Tensor fake_quantize_per_channel_affine_backward_cpu(
       quant_min <= quant_max,
       "`quant_min` should be less than or \
         equal to `quant_max`.");
-  TORCH_CHECK(
-      scale.dim() == 1, "scale should be a 1-D tensor");
-  TORCH_CHECK(
-      zero_point.dim() == 1, "zero point should be a 1-D tensor");
+  TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
+  TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
       scale.numel() == zero_point.numel(),
       "scale and zero-point need to have the same dimensions");
@@ -137,8 +139,15 @@ Tensor fake_quantize_per_channel_affine_backward_cpu(
     auto dX_slice = dX.slice(axis, i, i + 1);
     float sc = scale[i].item().toFloat();
     int64_t z_point = zero_point[i].item().toLong();
-    fake_quantize_grad_slice(dX_slice, X_slice, dY_slice,
-                             sc, z_point, quant_min, quant_max);
+    fake_quant_grad_slice_stub(
+        X.device().type(),
+        dX_slice,
+        X_slice,
+        dY_slice,
+        sc,
+        z_point,
+        quant_min,
+        quant_max);
   }
 
   return dX;
