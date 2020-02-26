@@ -12400,7 +12400,7 @@ a")
         def randint():
             return torch.randint(0, 5, [1, 2])
         out = randint()
-        self.assertEqual(out.dtype, torch.double)
+        self.assertEqual(out.dtype, torch.int64)
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:

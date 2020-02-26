@@ -32,6 +32,7 @@
 
 using at::Tensor;
 using at::Device;
+using at::Layout;
 using at::Scalar;
 using at::ScalarType;
 using at::Backend;
@@ -49,33 +50,25 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static void check_out_type_matches(Tensor result,
-                                   ScalarType scalarType, bool scalarType_is_none,
-                                   const THPLayout& layout, bool layout_is_none,
-                                   const Device& device, bool device_is_none) {
-  if (scalarType_is_none && layout_is_none && device_is_none) {  // common case
+                                   c10::optional<ScalarType> scalarType,
+                                   c10::optional<Layout> layout,
+                                   c10::optional<Device> device) {
+  if (!scalarType && !layout && !device) {  // common case
     return;
   }
-  if (!scalarType_is_none && result.scalar_type() != scalarType) {
+  if (scalarType && result.scalar_type() != *scalarType) {
     AT_ERROR(
-        "dtype ", scalarType,
+        "dtype ", *scalarType,
         " does not match dtype of out parameter (", result.scalar_type(), ")");
   }
-  auto scalarType_arg = scalarType_is_none ? result.scalar_type() : scalarType;
-  auto layout_arg = layout_is_none ? result.layout() : layout.layout;
-  auto device_type_arg = device_is_none ? result.device().type() : device.type();
-  if (result.scalar_type() != scalarType_arg) {
+  if (layout && result.layout() != *layout) {
     AT_ERROR(
-        "scalar type ", scalarType_arg,
-        " does not match scalar type of out parameter (", result.scalar_type(), ")");
-  }
-  if (result.layout() != layout_arg) {
-    AT_ERROR(
-        "layout ", layout_arg,
+        "layout ", *layout,
         " does not match layout of out parameter (", result.layout(), ")");
   }
-  if (result.device().type() != device_type_arg) {
+  if (device && result.device().type() != device->type()) {
     AT_ERROR(
-        "device type ", device_type_arg,
+        "device type ", device->type(),
         " does not match device type of out parameter (", result.device().type(), ")");
   }
 }
@@ -106,8 +99,8 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar end, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool requires_grad=False)",
+    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -116,19 +109,17 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
   if (r.idx == 0) {
     if (r.isNone(1)) {
       auto end = r.scalar(0);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      c10::optional<ScalarType> scalarType = r.scalartypeOptional(2);
       const auto options = TensorOptions()
-          .dtype(scalarType)
-          .device(r.device(4))
-          .layout(r.layout(3).layout)
-          .requires_grad(r.toBool(6))
-          .pinned_memory(r.toBool(5));
+          .dtype(r.scalartypeOptional(2))
+          .device(r.deviceOptional(4))
+          .layout(r.layoutOptional(3))
+          .requires_grad(r.toBoolOptional(6))
+          .pinned_memory(r.toBoolOptional(5));
       return wrap(dispatch_arange(end, options));
     } else {
       TORCH_CHECK(!r.toBool(5), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(r.tensor(1), r.scalartype(2), r.isNone(2), r.layout(3), r.isNone(3),
-                             r.device(4), r.isNone(4));
+      check_out_type_matches(r.tensor(1), r.scalartypeOptional(2), r.layoutOptional(3),
+                             r.deviceOptional(4));
       return wrap(dispatch_arange(r.scalar(0), r.tensor(1)).set_requires_grad(r.toBool(6)));
     }
   } else if (r.idx == 1) {
@@ -136,19 +127,17 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
       auto start = r.scalar(0);
       auto end = r.scalar(1);
       auto step = r.scalar(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      c10::optional<ScalarType> scalarType = r.scalartypeOptional(4);
       const auto options = TensorOptions()
-          .dtype(scalarType)
-          .device(r.device(6))
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(8))
-          .pinned_memory(r.toBool(7));
+          .dtype(r.scalartypeOptional(4))
+          .device(r.deviceOptional(6))
+          .layout(r.layoutOptional(5))
+          .requires_grad(r.toBoolOptional(8))
+          .pinned_memory(r.toBoolOptional(7));
       return wrap(dispatch_arange(start, end, step, options));
     } else {
       TORCH_CHECK(!r.toBool(7), " `pin_memory` and `out` parameters are incompatible");
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4), r.layout(5), r.isNone(5),
-                               r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4), r.layoutOptional(5),
+                               r.deviceOptional(6));
       return wrap(dispatch_arange(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(8)));
     }
   }
@@ -173,7 +162,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device device?=None, bool requires_grad=False)",
   });
 
   ParsedArgs<8> parsed_args;
@@ -184,15 +173,15 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
         "not [start; end].", 1);
     if (r.isNone(3)) {
       const auto options = TensorOptions()
-          .dtype(r.scalartype(4))
-          .device(r.device(6))
-          .layout(r.layout(5).layout)
+          .dtype(r.scalartypeOptional(4))
+          .device(r.deviceOptional(6))
+          .layout(r.layoutOptional(5))
           .requires_grad(r.toBool(7));
       return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), options));
     } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4),
+                             r.layoutOptional(5),
+                             r.deviceOptional(6));
       return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   }
@@ -241,8 +230,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
@@ -252,19 +241,16 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto high = r.toInt64(0);
       auto size = r.intlist(1);
       auto generator = r.generator(2);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(4, at::ScalarType::Long);
-      auto device = r.device(6);
       const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(5).layout)
-          .requires_grad(r.toBool(7));
+          .dtype(r.scalartypeOptional(4))
+          .device(r.deviceOptional(6))
+          .layout(r.layoutOptional(5))
+          .requires_grad(r.toBoolOptional(7));
       return wrap(dispatch_randint(high, size, generator, options));
     } else {
-      check_out_type_matches(r.tensor(3), r.scalartype(4), r.isNone(4),
-                             r.layout(5), r.isNone(5),
-                             r.device(6), r.isNone(6));
+      check_out_type_matches(r.tensor(3), r.scalartypeOptional(4),
+                             r.layoutOptional(5),
+                             r.deviceOptional(6));
       return wrap(dispatch_randint(r.toInt64(0), r.intlist(1), r.generator(2), r.tensor(3)).set_requires_grad(r.toBool(7)));
     }
   } else if (r.idx == 1) {
@@ -273,19 +259,16 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
       auto high = r.toInt64(1);
       auto size = r.intlist(2);
       auto generator = r.generator(3);
-      // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
-      auto dtype = r.scalartypeWithDefault(5, at::ScalarType::Long);
-      auto device = r.device(7);
       const auto options = TensorOptions()
-          .dtype(dtype)
-          .device(device)
-          .layout(r.layout(6).layout)
-          .requires_grad(r.toBool(8));
+          .dtype(r.scalartypeOptional(5))
+          .device(r.deviceOptional(7))
+          .layout(r.layoutOptional(6))
+          .requires_grad(r.toBoolOptional(8));
       return wrap(dispatch_randint(low, high, size, generator, options));
     } else {
-      check_out_type_matches(r.tensor(4), r.scalartype(5), r.isNone(5),
-                             r.layout(6), r.isNone(6),
-                             r.device(7), r.isNone(7));
+      check_out_type_matches(r.tensor(4), r.scalartypeOptional(5),
+                             r.layoutOptional(6),
+                             r.deviceOptional(7));
       return wrap(dispatch_randint(r.toInt64(0), r.toInt64(1), r.intlist(2), r.generator(3), r.tensor(4)).set_requires_grad(r.toBool(8)));
     }
   }

@@ -49,6 +49,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/QScheme.h>
+#include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/jit/ir.h>
@@ -162,8 +163,9 @@ struct PythonArgs {
   inline c10::optional<int64_t> toInt64Optional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
-  inline const THPLayout& layout(int i);
-  inline const THPLayout& layoutWithDefault(int i, const THPLayout& default_layout);
+  inline at::Layout layout(int i);
+  inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
+  inline c10::optional<at::Layout> layoutOptional(int i);
   inline at::Device device(int i);
   inline at::Device deviceWithDefault(int i, const at::Device& default_device);
   inline c10::optional<at::Device> deviceOptional(int i);
@@ -217,7 +219,7 @@ struct FunctionParameter {
     double default_double;
     double default_complex[2]; // see Scalar
     at::ScalarType default_scalartype;
-    THPLayout* default_layout;
+    at::Layout default_layout;
   };
 };
 
@@ -369,13 +371,18 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
-inline const THPLayout& PythonArgs::layout(int i) {
-  if (!args[i]) return *signature.params[i].default_layout;
-  return *reinterpret_cast<THPLayout*>(args[i]);
+inline at::Layout PythonArgs::layout(int i) {
+  if (!args[i]) return signature.params[i].default_layout;
+  return reinterpret_cast<THPLayout*>(args[i])->layout;
 }
 
-inline const THPLayout& PythonArgs::layoutWithDefault(int i, const THPLayout& default_layout) {
+inline at::Layout PythonArgs::layoutWithDefault(int i, at::Layout default_layout) {
   if (!args[i]) return default_layout;
+  return layout(i);
+}
+
+inline c10::optional<at::Layout> PythonArgs::layoutOptional(int i) {
+  if (!args[i]) return c10::nullopt;
   return layout(i);
 }
 
