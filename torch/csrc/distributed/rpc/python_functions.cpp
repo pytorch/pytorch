@@ -27,14 +27,14 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::args& args,
     const py::kwargs& kwargs,
     Stack& stack) {
+  // Acquire GIL for py::args and py::kwargs processing.
+  pybind11::gil_scoped_acquire ag;
   Symbol symbol = Symbol::fromQualString(opName);
   if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
         // FIXME: This is temporary solution. We should at least refactor
         // ``createStackForSchema`` to avoid throwing an error.
-        // Acquire GIL for py::args and py::kwargs processing.
-        pybind11::gil_scoped_acquire ag;
         stack = torch::jit::createStackForSchema(
             op->schema(), args, kwargs, c10::nullopt);
       } catch (std::runtime_error& e) {
