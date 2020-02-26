@@ -92,11 +92,12 @@ class Transformer(Module):
             Note: [src/tgt/memory]_mask should be filled with
             float('-inf') for the masked positions and float(0.0) else. These masks
             ensure that predictions for position i depend only on the unmasked positions
-            j and are applied identically for each sequence in a batch.
-            [src/tgt/memory]_key_padding_mask should be a ByteTensor where True values are positions
-            that should be masked with float('-inf') and False values will be unchanged.
-            This mask ensures that no information will be taken from position i if
-            it is masked, and has a separate mask for each sequence in a batch.
+            j and are applied identically for each sequence in a batch. If a ByteTensor is provided,
+            ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
+            [src/tgt/memory]_key_padding_mask should be a ByteTensor where ``1`` or ``True`` 
+            values are positions that should be masked with float('-inf') and ``0`` or ``False``
+            values will be unchanged. This mask ensures that no information will be taken
+            from position i if it is masked, and has a separate mask for each sequence in a batch.
 
             - output: :math:`(T, N, E)`.
 

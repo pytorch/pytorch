@@ -3639,10 +3639,11 @@ def multi_head_attention_forward(query,                           # type: Tensor
         - value: :math:`(S, N, E)` where S is the source sequence length, N is the batch size, E is
           the embedding dimension.
         - key_padding_mask: :math:`(N, S)`, ByteTensor, where N is the batch size, S is the source sequence length.
+          ``1`` or ``True`` is filled with ``-inf`` while ``0`` or ``False`` is filled with ``0.0``.
         - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
           3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor in
-          which True is filled with -inf while False is filled with 0.0.
+          S is the source sequence length. If a ByteTensor is provided, it will be converted to a float tensor.
+          ``1`` is filled with ``-inf`` while ``0`` is filled with ``0.0``.
         - static_k: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
           N is the batch size, E is the embedding dimension. E/num_heads is the head dimension.
         - static_v: :math:`(N*num_heads, S, E/num_heads)`, where S is the source sequence length,
@@ -3759,9 +3760,10 @@ def multi_head_attention_forward(query,                           # type: Tensor
     if attn_mask is not None:
 
         # convert ByteTensor attn_mask to float
-        if attn_mask.dtype == torch.bool:
+        if attn_mask.dtype == torch.uint8:
             attn_mask = torch.zeros(attn_mask.size(),
-                                    device=attn_mask.device).masked_fill_(attn_mask, float('-inf'))
+                                    device=attn_mask.device).masked_fill_(attn_mask.bool(),
+                                                                          float('-inf'))
 
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
@@ -3773,6 +3775,10 @@ def multi_head_attention_forward(query,                           # type: Tensor
         else:
             raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
         # attn_mask's dim is 3 now.
+
+    # convert ByteTensor key_padding_mask to bool
+    if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
+        key_padding_mask = key_padding_mask.bool()
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:

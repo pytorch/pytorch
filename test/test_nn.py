@@ -3288,7 +3288,7 @@ class TestNN(NNTestCase):
             return (src_indices < src_lengths).int().detach()
 
         def _multihead_attn_test_helper(add_key_padding_mask=False, add_bias_kv=False, add_zero_attn=False,
-                                        saved_kv=False, same_embed_dim=False, bool_attn_mask=False):
+                                        saved_kv=False, same_embed_dim=False, byte_mask=False):
             for _ in range(100):
                 batch_sz, seq_len = [random.randint(2, 10) for r in range(2)]
                 d_head = random.randint(3, 10)
@@ -3316,15 +3316,16 @@ class TestNN(NNTestCase):
                     seq_mask = np.random.randint(0, 2, (1, seq_len))
                     key_padding_mask = (np.repeat(seq_mask, batch_sz, axis=0) == 1)
                     key_padding_mask_tensor = torch.from_numpy(key_padding_mask)
-
+                    if byte_mask:
+                        key_padding_mask_tensor = key_padding_mask_tensor.byte()
                 decoder_state = np.random.rand(batch_sz, d_model)
                 K = np.random.rand(*dims)
                 V = K
                 Q = np.expand_dims(decoder_state, 1)
                 attn_mask = np.random.randint(0 , 2, size=(1, seq_len))
                 attn_mask_tensor = torch.from_numpy(attn_mask).float()
-                if bool_attn_mask:
-                    attn_mask_tensor = (attn_mask_tensor == 0).bool()
+                if byte_mask:
+                    attn_mask_tensor = (attn_mask_tensor == 0).byte()
                 else:
                     attn_mask_tensor.masked_fill_(attn_mask_tensor == 0, float('-inf'))
                     attn_mask_tensor.masked_fill_(attn_mask_tensor > 0, float('0.0'))
@@ -3475,7 +3476,7 @@ class TestNN(NNTestCase):
 
         def test_multihead_attn_all_arguments4():
             _multihead_attn_test_helper(add_key_padding_mask=True, add_zero_attn=True,
-                                        saved_kv=True, same_embed_dim=True, bool_attn_mask=True)
+                                        saved_kv=True, same_embed_dim=True, byte_mask=True)
 
         test_multihead_attn_add_zero_attn()  # Test MultiheadAttention with add_zero_attn
         test_multihead_attn_add_bias_kv()  # Test MultiheadAttention with add_bias_kv
