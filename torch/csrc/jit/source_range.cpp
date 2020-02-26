@@ -24,8 +24,9 @@ C10_EXPORT void SourceRange::highlight(std::ostream& out) const {
 C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEntry>& entries) {
   bool has_orig_ranges = false;
   std::vector<SourceRange> orig_ranges;
-  // gather original ranges. if we have a situation where we do not have orig ranges
-  // for some frames, we still want to report them for the frames we do have,
+  // gather original ranges. if we have a situation where we do not have orig
+  // ranges for some frames, we still want to report them for the frames we do
+  // have,
   //  so substitute the current range for that frame
   for (const StackEntry& entry : entries) {
     if (auto orig_source_range = entry.range.findSourceRangeThatGenerated()) {
@@ -39,15 +40,17 @@ C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEnt
   if (has_orig_ranges) {
     out << ", serialized code";
   }
-  out << " (most recent call last):\n"; 
+  out << " (most recent call last):\n";
   for (const StackEntry& entry : entries) {
-    entry.range.print_with_context(out, SourceRange::CONTEXT, true, entry.filename);
+    entry.range.print_with_context(
+        out, SourceRange::CONTEXT, true, entry.filename);
   }
   if (has_orig_ranges) {
-  out << "\nTraceback of TorchScript, original code (most recent call last):\n";
+    out << "\nTraceback of TorchScript, original code (most recent call last):\n";
     auto it = entries.begin();
     for (const SourceRange& range : orig_ranges) {
-      range.print_with_context(out, SourceRange::CONTEXT, true, (*it++).filename);
+      range.print_with_context(
+          out, SourceRange::CONTEXT, true, (*it++).filename);
     }
   }
 }
