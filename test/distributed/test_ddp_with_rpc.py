@@ -57,13 +57,12 @@ class DdpMode(enum.Enum):
 
 def init_logger():
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
     console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
     formatter = logging.Formatter(
         "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(process)s t:%(thread)s: %(message)s"
     )
     console.setFormatter(formatter)
+    console.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
     # add the handlers to the logger
     logger.addHandler(console)
     logger.propagate = False
@@ -120,7 +119,7 @@ class RemoteEM(nn.Module):
         )
 
     def forward(self, input: torch.Tensor):
-        gLogger.info(f"Running RemoteEM.forward() on: {input}")
+        gLogger.debug(f"Running RemoteEM.forward() on: {input}")
         return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 
     def print_parameters(self):
@@ -135,7 +134,7 @@ class RemoteNet(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, input: torch.Tensor):
-        gLogger.info(f"Running RemoteNet.forward() on: {input}")
+        gLogger.debug(f"Running RemoteNet.forward() on: {input}")
         return self.relu(self.fc(input))
 
     def print_parameters(self):
@@ -173,7 +172,7 @@ class HybridModel(nn.Module):
         )
 
     def forward(self, input: FeatureSet):
-        gLogger.info(f"Running HybridModel.forward on {input}")
+        gLogger.debug(f"Running HybridModel.forward on {input}")
         sparse = _remote_method(
             RemoteEM.forward, self.remote_em_rref, input.sparse_features
         )
@@ -181,7 +180,7 @@ class HybridModel(nn.Module):
         assert sparse.shape[0] == input.dense_features.shape[0]
         dense = self.fc1(input.dense_features)
         x = torch.cat((dense, sparse), 1)
-        gLogger.info(f"Concatenated feature: {x}")
+        gLogger.debug(f"Concatenated feature: {x}")
         x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
         return self.fc2(x)
 
@@ -234,7 +233,7 @@ class ProcessGroupContext:
         )
         if exc_type is not None:
             raise exc_value
-        # dist.destroy_process_group(self.group)
+        dist.destroy_process_group(self.group)
 
 
 class Trainer:
@@ -245,7 +244,13 @@ class Trainer:
         ddp_mode: DdpMode,
         rank: int,
     ):
-        process_group_for_ddp = gTrainerProcessGroup[rank]
+        self.process_group_context = ProcessGroupContext(
+            name=TRAINER_NAME_TEMPLATE.format(rank),
+            ranks=DDP_TRAINER_RANKS,
+            group_name="trainers_ddp",
+        )
+        process_group_for_ddp = self.process_group_context.__enter__()
+        check_process_group_type(f"trainer #{rank}", process_group_for_ddp)
         gLogger.info(
             f"Initing a trainer with process group {process_group_for_ddp} ..."
         )
@@ -267,8 +272,11 @@ class Trainer:
             )
         gLogger.info(f"Succeeded in creating a HybridModel instance.")
 
+    def __del__(self):
+        self.process_group_context.__exit__(None, None, None)
+
     def do_forward_without_grad(self, input: FeatureSet):
-        gLogger.info(f"Doing a forward pass on {input}")
+        gLogger.debug(f"Doing a forward pass on {input}")
         with torch.no_grad():
             output = self.hybrid_module(input)
             return self.criterion(output, input.labels)
@@ -325,9 +333,7 @@ def get_training_examples():
     for x in range(2):
         for y in range(2):
             for z in range(2):
-                training_examples.dense_features[idx, :] = torch.Tensor(
-                    (x, y)
-                )
+                training_examples.dense_features[idx, :] = torch.Tensor((x, y))
                 training_examples.sparse_features[idx] = z
                 training_examples.labels[idx] = x ^ y ^ z
                 idx += 1
@@ -348,8 +354,6 @@ class TestDdpWithRpc(TestCase):
             ranks=DDP_TRAINER_RANKS,
             group_name="trainers_ddp",
         ) as process_group:
-            check_process_group_type("remote worker", process_group)
-            dist.barrier()
             gLogger.info(f"The remote worker is running.")
 
         gLogger.info(f"Exiting remote worker.")
@@ -371,15 +375,7 @@ class TestDdpWithRpc(TestCase):
             rank=rank,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
-        ), ProcessGroupContext(
-            name=TRAINER_NAME_TEMPLATE.format(rank),
-            ranks=DDP_TRAINER_RANKS,
-            group_name="trainers_ddp",
-        ) as process_group:
-            check_process_group_type(f"trainer #{rank}", process_group)
-            gTrainerProcessGroup[rank] = process_group
-            gLogger.info(f"Trainer #{rank} process group: {process_group}")
-            dist.barrier()
+        ):
             gLogger.info(f"Trainer #{rank} is running.")
 
         gLogger.info(f"Exiting trainer #{rank}...")
@@ -437,7 +433,6 @@ class TestDdpWithRpc(TestCase):
             "master", DDP_TRAINER_RANKS, "trainers_ddp"
         ) as process_group:
             gLogger.info(f"Running the master process...")
-            check_process_group_type("master", process_group)
             remote_em_rref = rpc.remote(
                 REMOTE_WORKER_NAME, RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
             )
@@ -445,9 +440,6 @@ class TestDdpWithRpc(TestCase):
                 REMOTE_WORKER_NAME, RemoteNet, args=(D_DENSE + D_SPARSE, D_HID)
             )
             gLogger.info(f"Created remote rrefs on master")
-            # Wait for all trainers to get their own process group populated in
-            # 'gTrainerProcessGroup'
-            dist.barrier()
             cls.do_test_on_master(
                 ddp_mode, trainer_method, remote_em_rref, remote_net_rref
             )
@@ -495,6 +487,9 @@ class TestDdpWithRpc(TestCase):
 
     def test_training_no_ddp(self):
         self.spawn_master_process(DdpMode.NONE, Trainer.do_mini_batch)
+
+    def test_training_ddp_outside(self):
+        self.spawn_master_process(DdpMode.OUTSIDE, Trainer.do_mini_batch)
 
 
 if __name__ == "__main__":
