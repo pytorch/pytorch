@@ -13775,6 +13775,7 @@ class TestTorchDeviceType(TestCase):
         """
         import time
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
+        from torch._linalg_utils import matmul as mm
         from scipy.sparse.linalg import lobpcg as scipy_lobpcg
         import scipy.sparse
 
@@ -13805,8 +13806,8 @@ class TestTorchDeviceType(TestCase):
         print('std: E1=', E1)
         print('std: E2=', E2)
 
-        eq_err = torch.norm((A1 @ V1 - V1 * E1), 2) / E1.max()
-        eq_err_scipy = (abs(A2 @ V2 - V2 * E2)**2).sum() ** 0.5 / E2.max()
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err_scipy = (abs(mm(A2, V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-4)        # std
         self.assertLess(eq_err_scipy, 1e-4)  # std
 
@@ -13819,8 +13820,8 @@ class TestTorchDeviceType(TestCase):
         print('gen: E1=', E1)
         print('gen: E2=', E2)
 
-        eq_err = torch.norm((A1 @ V1 - B1 @ V1 * E1), 2) / E1.max()
-        eq_err_scipy = (abs(A2 @ V2 - B2 @ V2 * E2)**2).sum() ** 0.5 / E2.max()
+        eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err_scipy = (abs(mm(A2, V2) - mm(B2, V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-5)        # general
         self.assertLess(eq_err_scipy, 1e-5)  # general
 
