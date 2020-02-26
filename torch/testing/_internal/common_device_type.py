@@ -270,7 +270,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
     empty_class = type(empty_name, generic_test_class.__bases__, {})
 
     # Acquires members names
-    generic_members = set(dir(generic_test_class)) - set(dir(empty_class))
+    generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Creates device-specific test cases
@@ -294,7 +294,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None):
                 # Instantiates the device-specific tests
                 device_type_test_class.instantiate_test(name, test)
             else:  # Ports non-test member
-                assert not hasattr(device_type_test_class, name), "Redefinition of non-test member {0}".format(name)
+                assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
                 # Unwraps to functions (when available) for Python2 compat
                 nontest = getattr(generic_test_class, name)

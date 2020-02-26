@@ -99,6 +99,7 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -107,6 +108,7 @@ if args.ge_config == 'legacy':
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -774,7 +776,7 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=False):
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -796,6 +798,8 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                if exact_dtype:
+                    self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
