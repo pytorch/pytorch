@@ -14,17 +14,17 @@ try:
 except ImportError:
     raise RuntimeError(
         "test_cpp_extensions_aot.py cannot be invoked directly. Run "
-        "`python run_test.py -i test_cpp_extensions_aot` instead."
+        "`python run_test.py -i test_cpp_extensions_aot_ninja` instead."
     )
 
 
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
-    NOTE: run_test.py's test_cpp_extensions_aot_no_ninja target
-    also runs this test case, but with ninja disabled. If you are debugging
+    NOTE: run_test.py's test_cpp_extensions_aot_ninja target
+    also runs this test case, but with ninja enabled. If you are debugging
     a test failure here from the CI, check the logs for which target
-    (test_cpp_extensions_aot vs test_cpp_extensions_aot_no_ninja)
+    (test_cpp_extensions_aot_no_ninja vs test_cpp_extensions_aot_ninja)
     failed.
     """
 
@@ -55,7 +55,6 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(tensor.grad, expected_tensor_grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @unittest.skipIf(IS_WINDOWS, "Flaky on Windows, see issue #33270")
     def test_cuda_extension(self):
         import torch_test_cpp_extension.cuda as cuda_extension
 

@@ -38,6 +38,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/native/cuda/CUDA9Workarounds.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
@@ -228,7 +229,7 @@ struct compute_base_ptrs {
 template<int i>
 struct load_with_policy {
   template <typename args_t, typename policy_t>
-  static __device__ void apply(args_t args[], policy_t policy, detail::pointers<args_t> args_base) {
+  static __device__ void apply(args_t *args, policy_t policy, detail::pointers<args_t> args_base) {
     using arg_t = std::tuple_element_t<i, args_t>;
     auto args_accessor = [&args] __device__ (int index) -> arg_t & { return std::get<i>(args[index]); };
     policy.load(args_accessor, std::get<i>(args_base));
@@ -251,7 +252,8 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   detail::static_unroll<compute_base_ptrs, arity>::with_args(args_base, data, idx);
 
   return_t results[thread_work_size];
-  args_t args[thread_work_size];
+  cuda9::workaround::enable_default_constructor<args_t> args_[thread_work_size];
+  args_t *args = reinterpret_cast<args_t *>(&args_);
 
   // load
   detail::static_unroll<load_with_policy, arity>::with_args(args, policy, args_base);
@@ -259,7 +261,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, array_t data, policy_
   // compute
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    results[i] = c10::guts::apply(f, args[i]);
+    if (policy.check_inbounds(i)) {
+      results[i] = c10::guts::apply(f, args[i]);
+    }
   }
 
   // store

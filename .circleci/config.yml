@@ -505,6 +505,7 @@ jobs:
             fi
       - run:
           name: Install Cuda
+          no_output_timeout: 30m
           command: |
             curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
             ./cuda_10.1.243_426.00_win10.exe -s

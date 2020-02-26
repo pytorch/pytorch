@@ -207,6 +207,15 @@ void RpcAgent::setCurrentRpcAgent(std::shared_ptr<RpcAgent> rpcAgent) {
   currentRpcAgent_ = std::move(rpcAgent);
 }
 
+void RpcAgent::setTypeResolver(std::shared_ptr<TypeResolver> typeResolver) {
+  typeResolver_ = std::move(typeResolver);
+}
+
+std::shared_ptr<TypeResolver> RpcAgent::getTypeResolver() {
+  TORCH_INTERNAL_ASSERT(typeResolver_, "Type resolver is not set!");
+  return typeResolver_;
+}
+
 void RpcAgent::enableGILProfiling(bool flag) {
   profilingEnabled_ = flag;
 }
