@@ -284,6 +284,31 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
       std::make_shared<SugaredTupleValue>(values));
 }
 
+std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (field == "keys") {
+    return std::make_shared<ModuleDictMethod>(keys_, "keys");
+  } else if (field == "values") {
+    return std::make_shared<ModuleDictMethod>(modules_, "values");
+  } else if (field == "items") {
+    auto iterator = std::make_shared<IterableTree>();
+    iterator->addChild(loc, m, keys_);
+    iterator->addChild(loc, m, modules_);
+    return std::make_shared<ModuleDictMethod>(iterator, "items");
+  } else if (field == "named_modules") {
+    auto iterator = std::make_shared<IterableTree>();
+    std::vector<SugaredValuePtr> keys;
+    std::vector<SugaredValuePtr> values;
+    recurseThroughNestedModules(loc, m, keys, values, self_, "");
+    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(keys));
+    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(values));
+    return std::make_shared<ModuleDictMethod>(iterator, "named_modules");
+  };
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 // helper function for instantiating a SugaredValue from an IValue
 std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
@@ -335,7 +360,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
-    if (field == "items" || field == "keys" || field != "values") {
+    if (field == "items" || field == "keys" || field == "values") {
       return getSugaredModuleDict(loc, m)->attr(loc, m, field);
     }
   }
