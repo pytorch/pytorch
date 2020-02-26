@@ -427,7 +427,7 @@ class InsertObserversHelper {
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
   insertObservers(script::Module& module,
                   const std::string& method_name,
-                  bool is_entry_point = false);
+                  bool is_entry_point = false,
                   std::unordered_set<Value*> graph_observed_values = std::unordered_set<Value*>());
 
  private:
