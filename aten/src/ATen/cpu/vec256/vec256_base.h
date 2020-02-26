@@ -621,11 +621,17 @@ static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b
 }
 
 template<class T>
-inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) { return bitwise_binary_op(a, b, std::bit_and<T>()); }
+inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_and<int_same_size_t<T>>());
+}
 template<class T>
-inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) { return bitwise_binary_op(a, b, std::bit_or<T>()); }
+inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_or<int_same_size_t<T>>());
+}
 template<class T>
-inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) { return bitwise_binary_op(a, b, std::bit_xor<T>()); }
+inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_xor<int_same_size_t<T>>());
+}
 
 template <typename T>
 inline T fmadd(const T& a, const T& b, const T& c) {
