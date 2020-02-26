@@ -54,7 +54,7 @@ void AccumulateGrad::accumulateGradAndCallHooks(
         !GradMode::is_enabled() && new_grad_copy.is_sparse() &&
         new_grad_copy._indices().is_contiguous() &&
         new_grad_copy._values().is_contiguous() &&
-        new_grad_use_count <= num_expected_refs + has_post_hooks) {
+        new_grad_use_count <= num_expected_refs) {
       // Can't detach sparse tensor (since metadata changes are not allowed
       // after detach), so just create a new one for the grad which is a
       // shallow copy. We need a shallow copy so that modifying the original
