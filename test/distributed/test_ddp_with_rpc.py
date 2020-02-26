@@ -90,6 +90,9 @@ D_OUT = 2
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> make the distributed optimizer to update all parameters
 
 def get_env_int(key: str, default: int):
     return int(os.environ[key]) if key in os.environ else default
@@ -98,6 +101,7 @@ def get_env_int(key: str, default: int):
 NUM_TRAINERS = get_env_int("trainers", 2)
 NUM_EPOCH = get_env_int("epoch", 3)
 
+<<<<<<< HEAD
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
 
@@ -112,6 +116,8 @@ NUM_TRAINERS = 1
 =======
 NUM_TRAINERS = 2
 >>>>>>> Spawn a master process to do all driving work
+=======
+>>>>>>> make the distributed optimizer to update all parameters
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
 
@@ -125,8 +131,12 @@ TRAINER_NAMES = [
 ]
 REMOTE_WORKER_RANK = NUM_TRAINERS + 1
 
+<<<<<<< HEAD
 gTrainerProcessGroup: [dist.ProcessGroup] = [None] * WORLD_SIZE
 >>>>>>> Use a file store for init_process_group()
+=======
+LR = 0.1
+>>>>>>> make the distributed optimizer to update all parameters
 
 
 class DdpMode(enum.Enum):
@@ -217,7 +227,61 @@ class FeatureSet(NamedTuple):
 =======
 
 
+<<<<<<< HEAD
 >>>>>>> Spawn a master process to do all driving work
+=======
+class RpcContext:
+    def __init__(
+        self, name: str, rank: int, world_size: int, group_name: str = ""
+    ):
+        self.name = name
+        self.rank = rank
+        self.world_size = world_size
+        self.group_name = group_name
+
+    def __enter__(self):
+        gLogger.info(
+            f"Initing RPC [{self.group_name}] by {self.name} with rank "
+            f"#{self.rank} out of {self.world_size} peers."
+        )
+        rpc.init_rpc(name=self.name, rank=self.rank, world_size=self.world_size)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        gLogger.info(
+            f"Shutting down RPC group [{self.group_name}] from process {self.name}."
+        )
+        if exc_type is not None:
+            raise exc_value
+        rpc.shutdown()
+
+
+class ProcessGroupContext:
+    def __init__(self, name: str, ranks: [int], group_name: str = ""):
+        self.name = name
+        self.ranks = ranks
+        self.group_name = group_name
+        self.group = None
+
+    def process_group(self) -> dist.ProcessGroup:
+        return self.group
+
+    def __enter__(self) -> dist.ProcessGroup:
+        gLogger.info(
+            f"Initing process group [{self.group_name}] by {self.name} with ranks {self.ranks}"
+        )
+        self.group = dist_c10d.new_group(ranks=self.ranks)
+        return self.group
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        gLogger.info(
+            f"Destroy process group [{self.group_name}] from process {self.name}."
+        )
+        if exc_type is not None:
+            raise exc_value
+        dist.destroy_process_group(self.group)
+
+
+>>>>>>> make the distributed optimizer to update all parameters
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
         gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
@@ -262,8 +326,9 @@ class RemoteNet(nn.Module):
         return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
 >>>>>>> Add backward()
 
-    def print_parameters(self):
-        gLogger.info(f"RemoteEM params: {self.parameters}")
+    def get_parameter_rrefs(self):
+        gLogger.debug(f"RemoteEM params: {list(self.parameters())}")
+        return [rpc.RRef(param) for param in self.parameters()]
 
 
 class RemoteNet(nn.Module):
@@ -277,8 +342,9 @@ class RemoteNet(nn.Module):
         gLogger.debug(f"Running RemoteNet.forward() on: {input}")
         return self.relu(self.fc(input))
 
-    def print_parameters(self):
-        gLogger.info(f"RemoteNet params: {self.parameters}")
+    def get_parameter_rrefs(self):
+        gLogger.debug(f"RemoteNet params: {list(self.parameters())}")
+        return [rpc.RRef(param) for param in self.parameters()]
 
 
 class HybridModel(nn.Module):
@@ -292,11 +358,17 @@ class HybridModel(nn.Module):
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.remote_parameters_rrefs = _remote_method(
             RemoteEM.get_parameter_rrefs, self.remote_em_rref
         ) + _remote_method(RemoteNet.get_parameter_rrefs, self.remote_net_rref)
 =======
 >>>>>>> Use a file store for init_process_group()
+=======
+        self.remote_parameters_rrefs = _remote_method(
+            RemoteEM.get_parameter_rrefs, self.remote_em_rref
+        ) + _remote_method(RemoteNet.get_parameter_rrefs, self.remote_net_rref)
+>>>>>>> make the distributed optimizer to update all parameters
         self.fc1 = nn.Linear(D_DENSE, D_DENSE)
         self.fc2 = nn.Linear(D_HID, D_OUT)
 
@@ -346,6 +418,7 @@ class HybridModel(nn.Module):
         return self.fc2(x)
 >>>>>>> Use a file store for init_process_group()
 
+<<<<<<< HEAD
 
 class Trainer:
     def __init__(
@@ -441,10 +514,13 @@ class ProcessGroupContext:
     def __exit__(self, exc_type, exc_value, traceback):
         gLogger.info(
             f"Destroy process group [{self.group_name}] from process {self.name}."
+=======
+    def print_parameters(self):
+        gLogger.debug(f"Local parameters: {list(self.parameters())}")
+        gLogger.debug(
+            f"Remote parameters: {[param_rref.to_here() for param_rref in self.remote_parameters_rrefs]}"
+>>>>>>> make the distributed optimizer to update all parameters
         )
-        if exc_type is not None:
-            raise exc_value
-        dist.destroy_process_group(self.group)
 
 
 class Trainer:
@@ -481,6 +557,7 @@ class Trainer:
                 process_group=process_group_for_ddp,
                 check_reduction=True,
             )
+        self.local_optimizer = optim.SGD(self.hybrid_module.parameters(), lr=LR)
         gLogger.info(f"Succeeded in creating a HybridModel instance.")
 
     def __del__(self):
@@ -533,41 +610,45 @@ class Trainer:
         gLogger.info(f"Doing a mini batch on {mini_batch}")
         loss = 0
 
-        def optimize_remote_parameters():
-            gLogger.info(f"Optimizing the remote parameters.")
-            dist_optim = DistributedOptimizer(
-                optim.SGD, [self.remote_em_rref, self.remote_net_rref], lr=0.05
-            )
-            dist_optim.step()
-
         with dist_autograd.context() as context_id:
-            local_optim = optim.SGD(self.hybrid_module.parameters(), lr=0.05)
-            local_optim.zero_grad()
-
+            self.local_optimizer.zero_grad()
             output = self.hybrid_module.forward(mini_batch)
-            loss = self.criterion(output, mini_batch.labels)
-            dist_autograd.backward([loss])
-            grads_for_local_params = dist_autograd.get_gradients(context_id)
-            gLogger.info(f"Distributed grads: {grads_for_local_params}")
-            # TODO: use the local optimize to update local parameters
             with torch.no_grad():
-                for param in self.hybrid_module.parameters():
-                    if param in grads_for_local_params:
-                        param += 0.05 * grads_for_local_params[param]
-                    else:
-                        gLogger.error(
-                            f"Param not in distributed autograd: {param}"
-                        )
-
-            gLogger.info(
-                f"Optimizing the {len(list(self.hybrid_module.parameters()))} local parameters"
+                gLogger.debug(
+                    f"Output: {output} softmax: {torch.softmax(output, 0)} labels: {mini_batch.labels}"
+                )
+            loss = self.criterion(output, mini_batch.labels)
+            # grads will be stored in dist_autograd context
+            dist_autograd.backward([loss])
+            gLogger.debug(
+                f"Distributed grads: {dist_autograd.get_gradients(context_id)}"
             )
-            local_optim.step()
+            # The local optimize is unable to update the parameters
+            self.local_optimizer.step()
+            self.hybrid_module.print_parameters()
 
+            gLogger.info(f"Running distributed optimizer...")
+            dist_optimizer = DistributedOptimizer(
+                optim.SGD,
+                self.hybrid_module.remote_parameters_rrefs
+                + [
+                    rpc.RRef(local_param)
+                    for local_param in self.hybrid_module.parameters()
+                ],
+                lr=LR,
+            )
+            dist_optimizer.step()
+
+<<<<<<< HEAD
         gLogger.info(
             f"Local parameters: {list(self.hybrid_module.parameters())}"
         )
 >>>>>>> Add backward()
+=======
+            self.hybrid_module.print_parameters()
+
+        gLogger.info(f"Loss: {loss}.")
+>>>>>>> make the distributed optimizer to update all parameters
         return loss
 
 
@@ -618,8 +699,27 @@ class TestDdpWithRpc(TestCase):
                 training_examples.sparse_features[idx] = z
                 training_examples.labels[idx] = x ^ y ^ z
                 idx += 1
+<<<<<<< HEAD
     return training_examples
 >>>>>>> Spawn a master process to do all driving work
+=======
+    # Split the examples among NUM_TRAINERS trainers
+    examples_per_trainer = int(n / NUM_TRAINERS)
+    return [
+        FeatureSet(
+            dense_features=training_examples.dense_features[
+                start : start + examples_per_trainer, :
+            ],
+            sparse_features=training_examples.sparse_features[
+                start : start + examples_per_trainer
+            ],
+            labels=training_examples.labels[
+                start : start + examples_per_trainer
+            ],
+        )
+        for start in range(0, n, examples_per_trainer)
+    ]
+>>>>>>> make the distributed optimizer to update all parameters
 
 
 class TestDdpWithRpc(TestCase):
@@ -751,12 +851,13 @@ class TestDdpWithRpc(MultiProcessTestCase):
                 )
             )
 
-        for epoch in range(3):
+        training_examples = get_training_examples()
+        for epoch in range(NUM_EPOCH):
             futures = []
-            for trainer_rref in trainer_rrefs:
+            for idx, trainer_rref in enumerate(trainer_rrefs):
                 futures.append(
                     _remote_method_async(
-                        trainer_method, trainer_rref, get_training_examples()
+                        trainer_method, trainer_rref, training_examples[idx]
                     )
                 )
             log_loss = 0
