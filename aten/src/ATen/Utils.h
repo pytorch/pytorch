@@ -32,39 +32,6 @@ namespace at {
 
 CAFFE2_API int _crash_if_asan(int);
 
-static inline const Storage& checked_storage(
-    const Storage& expr,
-    const char* name,
-    int pos,
-    DeviceType device_type,
-    caffe2::TypeMeta dtype) {
-  if (expr.device_type() != device_type) {
-    AT_ERROR(
-        "Expected object of device type ",
-        device_type,
-        " but got device type ",
-        expr.data_ptr().device().type(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "'");
-  }
-  if (expr.dtype() != dtype) {
-    AT_ERROR(
-        "Expected object of data type ",
-        dtype,
-        " but got data type ",
-        expr.dtype().id(),
-        " for argument #",
-        pos,
-        " '",
-        name,
-        "'");
-  }
-  return expr;
-}
-
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
 static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const char * name, int pos, const char * api, bool allowNull, DeviceType device_type, ScalarType scalar_type) {

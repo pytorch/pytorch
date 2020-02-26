@@ -86,8 +86,8 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THCTensor_(setStorageNd)(state, self, storage != nullptr ? storage : new_storage, storageOffset, sizes.size(),
-                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
+  THCTensor_(setStorage)(state, self, storage != nullptr ? storage : new_storage, storageOffset,
+                         sizes, strides);
 
   return self;
 }
@@ -362,11 +362,6 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 }
 
 /*******************************************************************************/
-
-void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  THCTensor_setStorageNd(state, self, storage, storageOffset, nDimension, size, stride);
-}
 
 void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
