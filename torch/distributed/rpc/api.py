@@ -27,6 +27,7 @@ from . import (
     _set_and_start_rpc_agent,
     backend_registry,
 )
+from .constants import DEFAULT_RPC_TIMEOUT
 from .internal import (
     PythonUDF,
     RPCExecMode,
@@ -430,7 +431,7 @@ def remote(to, func, args=None, kwargs=None):
         return _invoke_remote_python_udf(dst_worker_info, pickled_python_udf, tensors, rf)
 
 
-def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, timeout=timedelta(seconds=0)):
+def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, timeout=DEFAULT_RPC_TIMEOUT):
     if not callable(func):
         raise TypeError("function should be callable.")
 
@@ -465,7 +466,7 @@ def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, timeout=timedelta(se
 
 
 @_require_initialized
-def rpc_sync(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
+def rpc_sync(to, func, args=None, kwargs=None, timeout=DEFAULT_RPC_TIMEOUT):
     r"""
     Make a blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -478,6 +479,8 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (datetime.timedelta): timeout for the RPC call. If the RPC is
+                        not completed in this timeframe, an exception will be raised indicating that the RPC has timed out.
 
     Returns:
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
@@ -527,7 +530,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
 
 
 @_require_initialized
-def rpc_async(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
+def rpc_async(to, func, args=None, kwargs=None, timeout=DEFAULT_RPC_TIMEOUT):
     r"""
     Make a non-blocking RPC call to run function ``func`` on worker ``to``. RPC
     messages are sent and received in parallel to execution of Python code. This
@@ -541,6 +544,8 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (datetime.timedelta): timeout for the RPC call. If the RPC is
+                        not completed in this timeframe, an exception will be raised indicating that the RPC has timed out.
 
     Returns:
         Returns a Future object that can be waited
@@ -606,7 +611,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=timedelta(seconds=0)):
 # torchscript function, they do not accept annotated torchscript class name or
 # script module class name or their class method name right now.
 @_require_initialized
-def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None, timeout=timedelta(seconds=0)):
+def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None, timeout=DEFAULT_RPC_TIMEOUT):
     r"""
     Make a blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -621,6 +626,8 @@ def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None, timeout=ti
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (datetime.timedelta): timeout for the RPC call. If the RPC is
+                        not completed in this timeframe, an exception will be raised indicating that the RPC has timed out.
 
     Returns:
         Returns the result of running ``func`` on ``args`` and ``kwargs``.
@@ -655,7 +662,7 @@ def _rpc_sync_torchscript(to, qualified_name, args=None, kwargs=None, timeout=ti
 
 
 @_require_initialized
-def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None, timeout=timedelta(seconds=0)):
+def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None, timeout=DEFAULT_RPC_TIMEOUT):
     r"""
     Make a non-blocking RPC call to run TorchScript function ``func`` on worker ``to``.
     RPC messages are sent and received in parallel to execution of Python code. This
@@ -671,6 +678,8 @@ def _rpc_async_torchscript(to, qualified_name, args=None, kwargs=None, timeout=t
         args (tuple): the argument tuple for the ``func`` invocation.
         kwargs (dict): is a dictionary of keyword arguments for the ``func``
                        invocation.
+        timeout (datetime.timedelta): timeout for the RPC call. If the RPC is
+                        not completed in this timeframe, an exception will be raised indicating that the RPC has timed out.
 
     Returns:
         Returns a _pyFuture object that can be waited
