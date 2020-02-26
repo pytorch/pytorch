@@ -546,8 +546,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     return SpecialFormValue::create(prim::annotate);
 #ifdef USE_DISTRIBUTED
   } else if (
+      // RPC module is only avaialble for Python3
+      // when build flag "USE_DISTRIBUTED" is on.
+      !py::module::import("torch._six").attr("PY2").cast<bool>() &&
       obj.ptr() ==
-      py::module::import("torch.distributed.rpc.api").attr("rpc_async").ptr()) {
+          py::module::import("torch.distributed.rpc.api")
+              .attr("rpc_async")
+              .ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
 #endif
   } else if (auto callee = as_module(obj)) {
