@@ -121,7 +121,7 @@ class JitRpcAsyncOpTest:
         self.assertEqual(ret, torch.tensor([9, 9]))
 
     @dist_init
-    def test_all_kwargs_are_populated_by_defaults(self):
+    def test_no_kwargs_are_populated_by_defaults(self):
         if self.rank != 0:
             return
 

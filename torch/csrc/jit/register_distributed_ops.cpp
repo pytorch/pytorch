@@ -102,10 +102,10 @@ RegisterOperators reg_rpc_ops({
              auto& functionSchema =
                  cuPtr->get_function(qualifiedName).getSchema();
 
-             // Build stack for the user function.
-             // It's the similar logic as
+             // Build Stack for the user callable.
+             // It's similar to
              // Stack createStackForSchema(FunctionSchema, py::args, py::kwargs).
-             // It's actually
+             // Instead, it's
              // Stack createStackForSchema(FunctionSchema, IValue<Tuple>, IValue<Dict>).
              Stack userCallableStack;
              userCallableStack.reserve(functionSchema.arguments().size());
