@@ -1229,7 +1229,7 @@ RegisterOperators reg(
      Operator(
          prim::fork,
          [](const Node* node) -> Operation {
-           Code code(node->g(attr::Subgraph));
+           Code code(node->g(attr::Subgraph), "<forked function>");
            int n_inputs = node->inputs().size();
            AT_ASSERT(node->blocks().size() == 0);
            AT_ASSERT(node->hasAttribute(attr::Subgraph));

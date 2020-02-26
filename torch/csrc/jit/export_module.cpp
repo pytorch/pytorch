@@ -151,7 +151,7 @@ class ScriptModuleSerializer {
       const auto& func = method.function();
       auto graph = func.graph()->copy();
       Inline(*graph);
-      torch::jit::Code code(graph);
+      torch::jit::Code code(graph, "<mobile interpreter>");
       // Make a copy of opnames. Some of them may be changed for mobile later.
       std::vector<c10::OperatorName> opnames;
       for (size_t i = 0; i < code.instructions().size(); ++i) {
