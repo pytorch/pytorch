@@ -2619,7 +2619,7 @@ class TestAutograd(TestCase):
             y = x * 2 + 4
             # Exit RecordFunctionAsync scope.
             rf.exit_scope()
-            # Verify that we can end() the RecordFunctionAsnc from a separate 
+            # Verify that we can end() the RecordFunctionAsnc from a separate
             # thread and ensure it shows up in the profile.
             t = threading.Thread(target=end_record_function, args=(rf,))
             t.start()
@@ -2653,6 +2653,19 @@ class TestAutograd(TestCase):
             "profiler::_record_function_exit",
         ]
         self.verify_expected_order(start_order, events)
+
+    def test_record_function_async_error_handling(self):
+        with profile() as p:
+            rf = torch.autograd._RecordFunctionAsync()
+            # We should not be able to exit scope without running start callbacks.
+            with self.assertRaisesRegex(RuntimeError, "Current RecordFunction is not initialized."):
+                rf.exit_scope()
+
+            torch.autograd._run_before_callbacks(rf, "foo")
+            rf.exit_scope()
+            with self.assertRaisesRegex(RuntimeError, "Cannot call exitScope twice"):
+                # we should not be able to double-call exit_scope
+                rf.exit_scope()
 
     def test_profiler_aggregation_fake(self):
         events = EventList()

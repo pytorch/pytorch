@@ -134,6 +134,14 @@ struct TORCH_API RecordFunction {
   // that it was not set with setThreadId() and this RecordFunction's callbacks
   // cannot be invoked from a separate thread.
   uint16_t threadId_ = 0;
+  // Tracks the state of the RecordFunction through its lifetime. Used for error
+  // handling and ensuring that users utilize RecordFunction's functions in the
+  // right way.
+  unsigned int state = 0;
+  static constexpr int BEFORE_CALLBACKS_RAN = 1 << 0;
+  static constexpr int END_CALLBACKS_RAN = 1 << 1;
+  // This is set when the tracked thread_local_func_ no longer points to this.
+  static constexpr int EXITED_SCOPE = 1 << 2;
 };
 
 struct TORCH_API RecordFunctionAsync : public RecordFunction {

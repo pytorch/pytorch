@@ -197,6 +197,7 @@ void RecordFunction::processCallbacks() {
       manager().start_callbacks[idx](*this);
     }
   }
+  state |= BEFORE_CALLBACKS_RAN;
 }
 
 RecordFunction::~RecordFunction() {
@@ -211,11 +212,16 @@ void RecordFunction::runEndCallbacks() {
   TORCH_INTERNAL_ASSERT(
       initialized_,
       "Cannot run end callbacks on an uninitialized RecordFunction.");
+
+  TORCH_INTERNAL_ASSERT(
+      state & BEFORE_CALLBACKS_RAN,
+      "Cannot run RecordFunction's end callbacks before beginning callbacks. Invoke RecordFunction::before first.")
   for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
     if (!manager().is_callback_sampled[idx] || run_sampled_) {
       manager().end_callbacks[idx](*this);
     }
   }
+  state |= END_CALLBACKS_RAN;
 }
 
 void RecordFunction::end() {
@@ -227,6 +233,7 @@ void RecordFunction::end() {
         name_,
         ": must be top of stack.");
     thread_local_func_ = parent_;
+    state |= EXITED_SCOPE;
     initialized_ = false;
   }
 }
@@ -254,13 +261,21 @@ void RecordFunctionAsync::exitScope() {
   // We should not be calling exitScope() on an uninitialized RecordFunction.
   TORCH_INTERNAL_ASSERT(
       initialized_, "Current RecordFunction is not initialized.")
+
+  // This function should only be called once, after RecordFunction::before.
+  TORCH_INTERNAL_ASSERT(
+      (state & BEFORE_CALLBACKS_RAN) && !(state & EXITED_SCOPE),
+      "Cannot call exitScope twice or call before RecordFunction::before.");
+
   // If the current RecordFunction is not the stored thread_local
   // RecordFunction, the scoping is in a bad state.
   TORCH_INTERNAL_ASSERT(
       thread_local_func_ == this, name_, ": must be top of stack.");
+
   // Resets the thread_local func to the parent_ RecordFunction that outlives
   // this RecordFunction, to correctly keep track of scopes.
   thread_local_func_ = parent_;
+  state |= EXITED_SCOPE;
 }
 
 void RecordFunctionAsync::end() {
@@ -281,6 +296,16 @@ void RecordFunctionAsync::setThreadId() {
 // toggle initialized so that RecordFunction destructor does not attempt to
 // reinvoke callbacks.
 RecordFunctionAsync::~RecordFunctionAsync() {
+  // Warn user if we have not exited scope or have not called end callbacks.
+  // We don't throw here since we should not throw in destructors.
+  if (!(state & EXITED_SCOPE)) {
+    LOG(WARNING)
+        << "RecordFunctionAsync's scope was not correctly exited, this can cause errors with nested scopes in the profiler.";
+  }
+  if (!(state & END_CALLBACKS_RAN)) {
+    LOG(WARNING)
+        << "RecordFunctionAsync's end callbacks were not run, this can cause errors gathering the profiler output.";
+  }
   initialized_ = false;
 }
 
