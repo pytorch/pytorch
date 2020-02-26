@@ -320,7 +320,7 @@ class Trainer:
             output = self.hybrid_module.forward(mini_batch)
             with torch.no_grad():
                 gLogger.debug(
-                    f"Output: {output} softmax: {torch.softmax(output, 0)} labels: {mini_batch.labels}"
+                    f"Output: {output} softmax: {torch.softmax(output, 1)} labels: {mini_batch.labels}"
                 )
             loss = self.criterion(output, mini_batch.labels)
             # grads will be stored in dist_autograd context
@@ -465,7 +465,7 @@ class TestDdpWithRpc(TestCase):
             log_loss = 0
             for future in futures:
                 log_loss += future.wait()
-            gLogger.info(f"Log loss at epoch #{epoch}: {log_loss}")
+            gLogger.info(f"Log loss at epoch #{epoch}: {log_loss / NUM_TRAINERS}")
 
     @classmethod
     def _master_process(
