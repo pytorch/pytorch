@@ -54,7 +54,7 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
       THTensor_stealAndSetStoragePtr(self, storage);
     }
     else {
-      THError("Tensor: invalid null new storage");
+      THError("Tensor: invalid new null storage");
     }
   }
 

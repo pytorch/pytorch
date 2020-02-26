@@ -157,7 +157,7 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     } else {
-      THError("Tensor: invalid null new storage");
+      THError("Tensor: invalid new null storage");
     }
   }
 
