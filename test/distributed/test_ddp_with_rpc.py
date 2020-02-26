@@ -57,6 +57,7 @@ class DdpMode(enum.Enum):
 
 def init_logger():
     logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
     console = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(process)s t:%(thread)s: %(message)s"
