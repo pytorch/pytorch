@@ -215,8 +215,6 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(fusion.origin(v4)->name() == 1);
   TORCH_CHECK(fusion.origin(v5)->name() == 2);
   TORCH_CHECK(fusion.origin(v6)->name() == 3);
-
-  fusion.print();
 }
 
 void testGPU_FusionTensor() {
