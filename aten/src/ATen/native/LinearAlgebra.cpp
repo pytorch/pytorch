@@ -159,7 +159,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
   check_1d(self, "self", "ger");
   check_1d(vec2, "vec2", "ger");
-  if (result.numel() == 0) {
+  if (result.dim() != 2 || result.size(0) != self.size(0) || result.size(1) != vec2.size(0)) {
     result.resize_({ self.size(0), vec2.size(0) });
   }
   return at::_addr_out(result, result, self, vec2, Scalar(0), Scalar(1));
