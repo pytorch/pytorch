@@ -71,6 +71,7 @@ def set_printoptions(
 class _Formatter(object):
     def __init__(self, tensor):
         self.floating_dtype = tensor.dtype.is_floating_point
+        self.complex_dtype = tensor.dtype.is_complex
         self.int_mode = True
         self.sci_mode = False
         self.max_width = 1
@@ -142,6 +143,9 @@ class _Formatter(object):
                     ret += '.'
             else:
                 ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+        elif self.complex_dtype:
+            p = PRINT_OPTS.precision
+            ret = '({{:.{}f}} {{}} {{:.{}f}}j)'.format(p, p).format(value.real, '+-'[value.imag < 0], abs(value.imag))
         else:
             ret = '{}'.format(value)
         return (self.max_width - len(ret)) * ' ' + ret

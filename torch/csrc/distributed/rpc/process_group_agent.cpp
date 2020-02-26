@@ -653,8 +653,10 @@ void ProcessGroupAgent::pollTimedOutRPCs() {
          << " milliseconds and timed out.";
       const auto exceptionMsg = createExceptionResponse(
           Message({}, {}, MessageType::EXCEPTION), ss.str());
-      timedOutFuture.future_->setError(std::string(
-          exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+      if (!timedOutFuture.future_->hasError()) {
+        timedOutFuture.future_->setError(std::string(
+            exceptionMsg.payload().begin(), exceptionMsg.payload().end()));
+      }
 
       const int dst = timedOutFuture.dstRank_;
       recvCounts_.increment(dst);

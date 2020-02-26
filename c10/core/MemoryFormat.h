@@ -216,7 +216,7 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
 // issues in our tests.
 //
 // We use Channels Last 2d as an example above.
-// This is a general problem for all the is_channels_last_strides implemention.
+// This is a general problem for all the is_channels_last_strides implementation.
 // Please check the helper functions (is_channels_last_strides_*d_s*) for more details.
 
 inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef strides, MemoryFormat memory_format) {

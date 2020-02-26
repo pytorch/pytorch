@@ -1482,14 +1482,23 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
-    is_channels_last_3d_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
-    // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
-    // Being channels_last_contiguous doesn't necessarily mean the tensor is
-    // strided like channels_last: for strides on channel dimension could suggest
-    // desired memory_layout, but it doesn't affect memory storage
-    is_channels_last_ = compute_strides_like_channels_last(MemoryFormat::ChannelsLast);
-    is_channels_last_3d_ = (!is_channels_last_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast3d));
+    if (!is_contiguous_) {
+      is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
+      is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
+
+      // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
+      // Being channels_last_contiguous doesn't necessarily mean the tensor is
+      // strided like channels_last: for strides on channel dimension could suggest
+      // desired memory_layout, but it doesn't affect memory storage
+      is_channels_last_ = is_channels_last_contiguous_ || (!is_channels_last_3d_contiguous_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast));
+      is_channels_last_3d_ = is_channels_last_3d_contiguous_ || (!is_channels_last_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast3d));
+    }
+    else {
+      is_channels_last_contiguous_ = false;
+      is_channels_last_3d_contiguous_ = false;
+      is_channels_last_ = false;
+      is_channels_last_3d_ = false;
+    }
     is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
   }
 
