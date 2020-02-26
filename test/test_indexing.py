@@ -82,7 +82,7 @@ class TestIndexing(TestCase):
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEquals(len(w), 2)
-    
+
     def test_index_put_accumulate_large_tensor(self, device): 
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1). 
         N = (1 << 31) + 5
