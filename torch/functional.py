@@ -922,7 +922,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 
 def _check_list_size(out_len, get_infos, out):
-    # type: (int, bool, List[Tensor])    
+    # type: (int, bool, List[Tensor]) -> None   
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError("expected tuple of {} elements but got {}"
