@@ -99,8 +99,8 @@ static PyObject * THPVariable_arange(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "arange(Scalar end, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
-    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "arange(Scalar end, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool requires_grad=False)",
+    "arange(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -162,7 +162,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "range(Scalar start, Scalar end, Scalar step=1, *, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device device?=None, bool requires_grad=False)",
   });
 
   ParsedArgs<8> parsed_args;
@@ -173,9 +173,9 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
         "not [start; end].", 1);
     if (r.isNone(3)) {
       const auto options = TensorOptions()
-          .dtype(r.scalartype(4))
-          .device(r.device(6))
-          .layout(r.layout(5))
+          .dtype(r.scalartypeOptional(4))
+          .device(r.deviceOptional(6))
+          .layout(r.layoutOptional(5))
           .requires_grad(r.toBool(7));
       return wrap(dispatch_range(r.scalar(0), r.scalar(1), r.scalar(2), options));
     } else {
@@ -230,8 +230,8 @@ static PyObject * THPVariable_randint(PyObject* self_, PyObject* args, PyObject*
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
-    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool requires_grad=False)",
+    "randint(int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)",
+    "randint(int64_t low, int64_t high, IntArrayRef size, *, Generator generator=None, Tensor out=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   ParsedArgs<9> parsed_args;
