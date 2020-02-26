@@ -303,8 +303,9 @@ class LOBPCG(object):
         """
         if self.ivars['istep'] == 0:
             X_norm = float(_utils.norm(self.X))
-            A_norm = float(_utils.norm(_utils.matmul(self.A, self.X)) / X_norm)
-            B_norm = float(_utils.norm(_utils.matmul(self.B, self.X)) / X_norm)
+            iX_norm = X_norm ** -1
+            A_norm = float(_utils.norm(_utils.matmul(self.A, self.X))) * iX_norm
+            B_norm = float(_utils.norm(_utils.matmul(self.B, self.X))) * iX_norm
             self.fvars['X_norm'] = X_norm
             self.fvars['A_norm'] = A_norm
             self.fvars['B_norm'] = B_norm
@@ -338,7 +339,7 @@ class LOBPCG(object):
         A_norm = self.fvars['A_norm']
         B_norm = self.fvars['B_norm']
         E, X, R = self.E, self.X, self.R
-        rerr = torch.norm(R, 2, (0, )) / (torch.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm))
+        rerr = torch.norm(R, 2, (0, )) * (torch.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm)) ** -1
 
         converged = rerr < tol
         count = 0
