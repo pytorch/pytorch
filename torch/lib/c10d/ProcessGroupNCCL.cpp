@@ -332,7 +332,8 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
 std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     std::vector<at::Tensor>& other,
-    size_t world_size) {
+    size_t world_size,
+    size_t rank) {
   if (tensor_lists.size() != other.size()) {
     throw std::runtime_error(
       "Tensor list operands to scatter/gather must have the same length"
@@ -367,8 +368,32 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
         );
       }
     }
-    // Flatten the tensors (from all ranks) into a single big tensor.
-    flattened[i] = newLikeFlat(tensor_lists, i);
+
+    //  Check if the tensors are already flattened to do inplace operation
+    bool inplace = true;
+    for (auto j = size_t{}; j < tensor_lists[i].size(); ++j) {
+        auto t = tensor_lists[i][j];
+        if (!t.storage().is_alias_of(other[i].storage()) ||
+                t.storage_offset() != (tensor_lists[i][0].storage_offset() +
+                    j * other[i].numel())) {
+            inplace = false;
+            break;
+        }
+    }
+    if (other[i].storage_offset() != (tensor_lists[i][0].storage_offset() +
+                rank * other[i].numel())) {
+        inplace = false;
+    }
+
+    if (inplace) {
+        flattened[i] = at::empty({0}, other[i].options()).set_(
+                tensor_lists[i][0].storage(),
+                tensor_lists[i][0].storage_offset(),
+                world_size * other[i].numel(), {});
+    } else {
+        // Flatten the tensors (from all ranks) into a single big tensor.
+        flattened[i] = newLikeFlat(tensor_lists, i);
+    }
   }
   return flattened;
 }
@@ -521,7 +546,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
   check_gpu_tensors(inputTensors);
 
   auto outputFlattened = flatten_for_scatter_gather(
-    outputTensors, inputTensors, size_
+    outputTensors, inputTensors, size_, rank_
   );
   check_gpu_tensors(outputFlattened);
 
@@ -546,6 +571,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
       for (size_t i = 0; i < outputTensors.size(); ++i) {
         at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
         for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+          // Skip copy if it's in-place operation, where the input and
+          // output tensors share the same storage
+          if (outputFlattened[i][j].storage().is_alias_of(
+              outputTensors[i][j].storage()) &&
+              outputTensors[i][j].storage_offset() ==
+              (outputTensors[i][0].storage_offset() +
+              outputTensors[i][j].numel() * j)) {
+             break;
+          }
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
             outputTensors[i][j].storage().data(), ncclStreams[i]);
@@ -564,7 +598,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
   check_gpu_tensors(outputTensors);
 
   auto inputFlattened = flatten_for_scatter_gather(
-    inputTensors, outputTensors, size_
+    inputTensors, outputTensors, size_, rank_
   );
   check_gpu_tensors(inputFlattened);
 
@@ -589,6 +623,15 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
       for (size_t i = 0; i < inputTensors.size(); ++i) {
         at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
         for (size_t j = 0; j < inputTensors[0].size(); ++j) {
+          // Skip copy if it's in-place operation, where the input and
+          // output tensors share the same storage
+          if (inputFlattened[i][j].storage().is_alias_of(
+              inputTensors[i][j].storage()) &&
+              inputTensors[i][j].storage_offset() ==
+              (inputTensors[i][0].storage_offset() +
+              inputTensors[i][j].numel() * j)) {
+             break;
+          }
           // See [Sync Streams].
           c10::cuda::CUDACachingAllocator::recordStream(
             inputTensors[i][j].storage().data(), ncclStreams[i]);
