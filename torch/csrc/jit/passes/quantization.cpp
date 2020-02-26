@@ -130,8 +130,10 @@ bool isFunctionNode(Node* n,
 }
 
 // If the op doesn't require observation, return
-// the number of Tensor inputs, otherwise
-// return null
+// the the list of input indexes that we should check to see
+// if they are observed/quantized, if so, we can say the output
+// of this op is observed/quantized as well, since for these ops we can derive
+// the quantization parameters for output given inputs
 std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
     "adaptive_avg_pool2d",
