@@ -191,6 +191,8 @@ struct RangeEventList {
                 "num_block_elements is calculated incorrectly");
   using block_type = std::vector<Event>;
 
+// allocBlock() assumes that mutex_ is held when called, in order to prevent
+  // multiple threads' block writes stomping over each other.
   void allocBlock() {
     blocks.emplace_front();
     auto & new_block = blocks.front();
