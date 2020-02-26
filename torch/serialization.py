@@ -517,7 +517,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
     object, already moved to the right device. Otherwise, :func:`torch.load` will
     fall back to the default behavior, as if :attr:`map_location` wasn't specified.
 
-    If :attr:`map_location` is a :class:`torch.device` object or a string contraining
+    If :attr:`map_location` is a :class:`torch.device` object or a string containing
     a device tag, it indicates the location where all tensors should be loaded.
 
     Otherwise, if :attr:`map_location` is a dict, it will be used to remap location tags

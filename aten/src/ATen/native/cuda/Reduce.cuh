@@ -11,6 +11,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/macros/Macros.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <functional>
 #include <iosfwd>
 #include <tuple>
@@ -631,7 +632,7 @@ struct AccumulationBuffer {
       numerator_ = 1;
       denominator_ = 1;
     } else {
-      auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
+      auto& allocator = *c10::cuda::CUDACachingAllocator::get();
       buffer_ = allocator.allocate(size);
       acc_ptr_ = (char*)buffer_.get();
       numerator_ = acc_t_size;
@@ -790,7 +791,7 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   at::DataPtr buffer;
   at::DataPtr semaphores;
   if (config.should_global_reduce()) {
-    auto& allocator = *at::globalContext().getTHCState()->cudaDeviceAllocator;
+    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
     buffer = allocator.allocate(config.global_memory_size());
     semaphores = allocator.allocate(config.semaphore_size());
 

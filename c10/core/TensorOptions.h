@@ -589,10 +589,6 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::HIP;
   } else if (tid == DispatchKey::MkldnnCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCPUTensorId) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCUDATensorId) {
-    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }
