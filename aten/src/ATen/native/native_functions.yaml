@@ -2135,6 +2135,9 @@
   use_c10_dispatcher: full
 
 - func: cdist(Tensor x1, Tensor x2, float p=2, int? compute_mode=None) -> Tensor
+  supports_named_tensor: True
+
+- func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
 
@@ -4264,13 +4267,13 @@
 - func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_fmod_
+    CPU: fmod_
     CUDA: legacy::cuda::_th_fmod_
 
 - func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU: legacy::cpu::_th_fmod_
+    CPU: fmod_
     CUDA: legacy::cuda::_th_fmod_
 
 - func: remainder_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -4389,12 +4392,12 @@
   use_c10_dispatcher: full
   variants: method, function
 
-- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: tril_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: tril_indices_cpu
     CUDA: tril_indices_cuda
 
-- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: triu_indices(int row, int col, int offset=0, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: triu_indices_cpu
     CUDA: triu_indices_cuda
@@ -5002,26 +5005,26 @@
 
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_fmod_out
+    CPU: fmod_out
     CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_fmod
+    CPU: fmod
     CUDA: legacy::cuda::_th_fmod
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_fmod_out
+    CPU: fmod_out
     CUDA: legacy::cuda::_th_fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_fmod
+    CPU: fmod
     CUDA: legacy::cuda::_th_fmod
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
@@ -5261,23 +5264,23 @@
 - func: _cumsum(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: legacy::cpu::_th_cumsum
+    CPU: _cumsum_cpu
     CUDA: legacy::cuda::_th_cumsum
 
 - func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cumsum_out
+    CPU: _cumsum_out_cpu
     CUDA: legacy::cuda::_th_cumsum_out
 
 - func: _cumprod(Tensor self, int dim) -> Tensor
   use_c10_dispatcher: full
   dispatch:
-    CPU: legacy::cpu::_th_cumprod
+    CPU: _cumprod_cpu
     CUDA: legacy::cuda::_th_cumprod
 
 - func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: legacy::cpu::_th_cumprod_out
+    CPU: _cumprod_out_cpu
     CUDA: legacy::cuda::_th_cumprod_out
 
 - func: _var(Tensor self, bool unbiased=True) -> Tensor
@@ -5293,6 +5296,16 @@
     CPU: legacy::cpu::_th_std
     CUDA: legacy::cuda::_th_std
   supports_named_tensor: True
+
+- func: _amp_non_finite_check_and_unscale_(Tensor(a!) self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
+  variants: function
+  dispatch:
+    CUDA: _amp_non_finite_check_and_unscale_cuda_
+
+- func: _amp_update_scale(Tensor(a!) growth_tracker, Tensor current_scale, Tensor found_inf, float scale_growth_factor, float scale_backoff_factor, int growth_interval) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _amp_update_scale_cuda
 
 - func: _cat(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:

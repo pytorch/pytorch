@@ -13,7 +13,7 @@ namespace jit{
 char const * toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
+InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
 
