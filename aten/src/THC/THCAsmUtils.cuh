@@ -87,7 +87,7 @@ __device__ __forceinline__ int getLaneId() {
   return __lane_id();
 #else
   int laneId;
-  asm("mov.s32 %0, %laneid;" : "=r"(laneId) );
+  asm("mov.s32 %0, %%laneid;" : "=r"(laneId) );
   return laneId;
 #endif
 }

@@ -592,13 +592,20 @@ Tensor hardshrink_backward(const Tensor & grad, const Tensor & self, Scalar lamb
   return out_tensor;
 }
 
+static inline void softshrink_check(Scalar lambd) {
+  double lamb = lambd.to<double>();
+  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
+}
+
 Tensor& softshrink_out(Tensor& result, const Tensor & self, Scalar lambd) {
+  softshrink_check(lambd);
   auto iter = TensorIterator::unary_op(result, self);
   softshrink_stub(iter.device_type(), iter, lambd);
   return result;
 }
 
 Tensor softshrink(const Tensor & self, Scalar lambd) {
+  softshrink_check(lambd);
   Tensor result;
   auto iter = TensorIterator::unary_op(result, self);
   softshrink_stub(iter.device_type(), iter, lambd);
