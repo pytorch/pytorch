@@ -303,7 +303,7 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         return pyRpcBuiltin(dst, opName, rf, args, kwargs);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -314,7 +314,7 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
       py::call_guard<py::gil_scoped_release>(),
@@ -359,7 +359,7 @@ If the future completes with an error, an exception is thrown.
          const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
@@ -389,7 +389,7 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -400,7 +400,7 @@ If the future completes with an error, an exception is thrown.
          const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
@@ -425,7 +425,7 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        TORCH_INTERNAL_ASSERT(!PyGILState_Check());
+        DCHECK(!PyGILState_Check());
         return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
       py::call_guard<py::gil_scoped_release>(),
