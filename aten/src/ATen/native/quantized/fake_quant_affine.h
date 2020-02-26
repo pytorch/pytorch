@@ -5,7 +5,7 @@
 
 namespace at {
 
-class TensorIterator;
+struct TensorIterator;
 
 namespace native {
 
