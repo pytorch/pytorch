@@ -32,7 +32,8 @@ class TestMathOps(serial.SerializedTestCase):
 
         self.assertReferenceChecks(gc, op, [X], powf,
                                    output_to_grad="Y",
-                                   grad_reference=powf_grad),
+                                   grad_reference=powf_grad,
+                                   ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(),
            exponent=st.floats(min_value=-3.0, max_value=3.0),
@@ -44,7 +45,8 @@ class TestMathOps(serial.SerializedTestCase):
         op = core.CreateOperator(
             "Sign", ["X"], ["Y"])
 
-        self.assertReferenceChecks(gc, op, [X], signf),
+        self.assertReferenceChecks(
+            gc, op, [X], signf, ensure_outputs_are_inferred=True)
         self.assertDeviceChecks(dc, op, [X], [0])
 
 
