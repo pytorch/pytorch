@@ -124,6 +124,9 @@ struct TORCH_API Operator {
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
     if (isC10Op()) {
+      // Update options_ because they might have changed if new c10 registrations came in
+      options_ = c10Handle_->options();
+
       const FunctionSchema& schemaRef = schema();
       TORCH_CHECK(
           options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
@@ -158,7 +161,7 @@ struct TORCH_API Operator {
   std::shared_ptr<Operation> op_;
   OperationCreator op_creator_;
   c10::optional<c10::OperatorHandle> c10Handle_;
-  c10::OperatorOptions options_;
+  mutable c10::OperatorOptions options_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);

@@ -383,26 +383,27 @@ public:
     }
     return ret;
   }
-#define DEFINE_COMP(binary_pred)                                              \
-  Vec256<T> operator binary_pred(const Vec256<T> &other) const {              \
-    Vec256<T> vec;                                                            \
-    for (int64_t i = 0; i != size(); i++) {                                   \
-      if (values[i] binary_pred other.values[i]) {                            \
-        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));     \
-      } else {                                                                \
-        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));        \
-      }                                                                       \
-    }                                                                         \
-    return vec;                                                               \
+private:
+  template <typename Op>
+  inline Vec256<T> binary_pred(const Vec256<T>& other, Op op) const {
+    Vec256<T> vec;
+    for (int64_t i = 0; i != size(); i++) {
+      if (op(values[i], other.values[i])) {
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
+      } else {
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
+      }
+    }
+    return vec;
   }
-  DEFINE_COMP(==)
-  DEFINE_COMP(!=)
-  DEFINE_COMP(>=)
-  DEFINE_COMP(<=)
-  DEFINE_COMP(>)
-  DEFINE_COMP(<)
-#undef DEFINE_COMP
 
+public:
+  Vec256<T> operator==(const Vec256<T>& other) const { return binary_pred(other, std::equal_to<T>()); }
+  Vec256<T> operator!=(const Vec256<T>& other) const { return binary_pred(other, std::not_equal_to<T>()); }
+  Vec256<T> operator>=(const Vec256<T>& other) const { return binary_pred(other, std::greater_equal<T>()); }
+  Vec256<T> operator<=(const Vec256<T>& other) const { return binary_pred(other, std::less_equal<T>()); }
+  Vec256<T> operator>(const Vec256<T>& other) const { return binary_pred(other, std::greater<T>()); }
+  Vec256<T> operator<(const Vec256<T>& other) const { return binary_pred(other, std::less<T>()); }
 };
 
 template <class T> Vec256<T> inline operator+(const Vec256<T> &a, const Vec256<T> &b) {

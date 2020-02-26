@@ -326,7 +326,7 @@ set of reviewers.
 
 ```
 use_c10_dispatcher: 'unboxed_only'
-use_c10_dipsatcher: 'with_codegenerated_unboxing_wrapper'
+use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
 use_c10_dispatcher: 'full'
 ```
 
