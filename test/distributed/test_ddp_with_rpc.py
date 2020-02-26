@@ -234,7 +234,7 @@ class ProcessGroupContext:
         )
         if exc_type is not None:
             raise exc_value
-        dist.destroy_process_group(self.group)
+        # dist.destroy_process_group(self.group)
 
 
 class Trainer:
@@ -376,8 +376,9 @@ class TestDdpWithRpc(TestCase):
             ranks=DDP_TRAINER_RANKS,
             group_name="trainers_ddp",
         ) as process_group:
-            gTrainerProcessGroup[rank] = process_group
             check_process_group_type(f"trainer #{rank}", process_group)
+            gTrainerProcessGroup[rank] = process_group
+            gLogger.info(f"Trainer #{rank} process group: {process_group}")
             dist.barrier()
             gLogger.info(f"Trainer #{rank} is running.")
 
@@ -403,9 +404,6 @@ class TestDdpWithRpc(TestCase):
         remote_em_rref: rpc.RRef,
         remote_net_rref: rpc.RRef,
     ):
-        # Wait for all trainers to get their own process group populated in
-        # 'gTrainerProcessGroup'
-        dist.barrier()
         trainer_rrefs = []
         for rank, trainer in zip(DDP_TRAINER_RANKS, TRAINER_NAMES):
             trainer_rrefs.append(
@@ -447,6 +445,9 @@ class TestDdpWithRpc(TestCase):
                 REMOTE_WORKER_NAME, RemoteNet, args=(D_DENSE + D_SPARSE, D_HID)
             )
             gLogger.info(f"Created remote rrefs on master")
+            # Wait for all trainers to get their own process group populated in
+            # 'gTrainerProcessGroup'
+            dist.barrier()
             cls.do_test_on_master(
                 ddp_mode, trainer_method, remote_em_rref, remote_net_rref
             )
