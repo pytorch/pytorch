@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
+<<<<<<< HEAD
 from typing import Callable, NamedTuple
 import enum
+=======
+>>>>>>> minor changes
 import logging
 import os
 <<<<<<< HEAD
