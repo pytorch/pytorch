@@ -11,6 +11,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kNoTimeoutDuration = std::chrono::seconds(0);
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 // Input is qualified name string, output is JIT StrongTypePtr
@@ -121,10 +122,7 @@ class TORCH_API RpcAgent {
   // NB: RpcAgent implementations should not start serving requests until
   // ``start()`` is called, as there could be other contexts that have not been
   // initialized yet at this time.
-  RpcAgent(
-      WorkerInfo id,
-      std::unique_ptr<RequestCallback> cb,
-      std::chrono::milliseconds rpcTimeout);
+  RpcAgent(WorkerInfo id, std::unique_ptr<RequestCallback> cb);
 
   virtual ~RpcAgent();
 
@@ -137,7 +135,8 @@ class TORCH_API RpcAgent {
   // should be ignored by the caller.
   virtual std::shared_ptr<FutureMessage> send(
       const WorkerInfo& to,
-      Message&& message) = 0;
+      Message&& message,
+      const std::chrono::milliseconds rpcTimeout = kNoTimeoutDuration) = 0;
 
   // Retries sending the message up to maxRetries times until an ACK is
   // receieved. The duration between consecutive sends is increased over
@@ -169,16 +168,6 @@ class TORCH_API RpcAgent {
   virtual const WorkerInfo& getWorkerInfo(worker_id_t id) const = 0;
 
   virtual std::vector<WorkerInfo> getWorkerInfos() const = 0;
-
-  // Retrieve the timeout for all RPCs.
-  inline std::chrono::milliseconds getRpcTimeout() const {
-    return rpcTimeout_.load();
-  }
-
-  // Set the timeout for all RPCs
-  inline void setRpcTimeout(const std::chrono::milliseconds& rpcTimeout) {
-    rpcTimeout_.store(rpcTimeout);
-  }
 
   // Call sync and join all internal threads. This method should be called
   // before every RPC process exits.
@@ -227,7 +216,6 @@ class TORCH_API RpcAgent {
  protected:
   const WorkerInfo workerInfo_;
   const std::unique_ptr<RequestCallback> cb_;
-  std::atomic<std::chrono::milliseconds> rpcTimeout_;
   std::atomic<bool> profilingEnabled_;
   std::shared_ptr<TypeResolver> typeResolver_;
 

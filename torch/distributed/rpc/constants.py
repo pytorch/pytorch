@@ -2,7 +2,7 @@ from datetime import timedelta
 from torch.distributed.constants import default_pg_timeout
 
 # For any RpcAgent.
-DEFAULT_RPC_TIMEOUT = timedelta(seconds=60)
+DEFAULT_RPC_TIMEOUT = timedelta()
 DEFAULT_INIT_METHOD = "env://"
 
 

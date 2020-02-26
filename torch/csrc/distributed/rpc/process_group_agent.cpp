@@ -89,12 +89,10 @@ void ProcessGroupAgent::collectNames() {
 ProcessGroupAgent::ProcessGroupAgent(
     std::string workerName,
     std::shared_ptr<c10d::ProcessGroup> pg,
-    int numSendRecvThreads,
-    std::chrono::milliseconds rpcTimeout)
+    int numSendRecvThreads)
     : RpcAgent(
           WorkerInfo(std::move(workerName), pg->getRank()),
-          std::make_unique<RequestCallbackImpl>(),
-          rpcTimeout),
+          std::make_unique<RequestCallbackImpl>()),
       pg_(std::move(pg)),
       sendCounts_(pg_->getSize()),
       recvCounts_(pg_->getSize()),
@@ -263,7 +261,8 @@ void ProcessGroupAgent::shutdown() {
 
 std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message) {
+    Message&& message,
+    const std::chrono::milliseconds rpcTimeout) {
   // Throw if we previously encountered an exception in ::listenLoop.
   {
     std::unique_lock<std::mutex> guard(listenLoopExceptionMutex_);
@@ -285,7 +284,10 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
     // Prepare endTime from timeout.
-    auto timeout = rpcTimeout_.load();
+    // HACK: using the passed in timeout now.
+    LOG(INFO) << "IN PG AGENT: send got passed in timeout of "
+              << rpcTimeout.count();
+    auto timeout = rpcTimeout;
     // Set infinite timeout if specified.
     steady_clock_time_point endTime = timeout.count() == 0
         ? kInfiniteTimeoutTimePoint

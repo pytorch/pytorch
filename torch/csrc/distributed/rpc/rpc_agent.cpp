@@ -12,13 +12,9 @@ constexpr size_t WorkerInfo::MAX_NAME_LEN;
 // overflow-related bug.
 constexpr auto kLargeTimeDuration = std::chrono::hours(10000);
 
-RpcAgent::RpcAgent(
-    WorkerInfo workerId,
-    std::unique_ptr<RequestCallback> cb,
-    std::chrono::milliseconds rpcTimeout)
+RpcAgent::RpcAgent(WorkerInfo workerId, std::unique_ptr<RequestCallback> cb)
     : workerInfo_(std::move(workerId)),
       cb_(std::move(cb)),
-      rpcTimeout_(rpcTimeout),
       profilingEnabled_(false),
       rpcAgentRunning_(true) {
   rpcRetryThread_ = std::thread(&RpcAgent::retryExpiredRpcs, this);

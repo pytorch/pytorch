@@ -214,15 +214,10 @@ If the future completes with an error, an exception is thrown.
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
-          py::init<
-              std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
-              int,
-              std::chrono::milliseconds>(),
+          py::init<std::string, std::shared_ptr<::c10d::ProcessGroup>, int>(),
           py::arg("name"),
           py::arg("process_group"),
-          py::arg("num_send_recv_threads"),
-          py::arg("rpc_timeout"))
+          py::arg("num_send_recv_threads"))
       .def(
           "get_worker_info",
           (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
@@ -300,9 +295,10 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          const std::string& opName,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::chrono::milliseconds rpcTimeout,
          const py::args& args,
          const py::kwargs& kwargs) {
-        return pyRpcBuiltin(dst, opName, rf, args, kwargs);
+        return pyRpcBuiltin(dst, opName, rf, rpcTimeout, args, kwargs);
       });
 
   module.def(
@@ -310,13 +306,15 @@ If the future completes with an error, an exception is thrown.
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
-         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
-        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
+         const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
+         const std::chrono::milliseconds timeout) {
+        return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf, timeout);
       },
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
-      py::arg("rf") = nullptr);
+      py::arg("rf") = nullptr,
+      py::arg("timeout") = std::chrono::seconds(0));
 
   // TODO This python future wrapper wraps c10::ivalue::Future.
   // Will merge with JIT PythonFutureWrapper while merging generic Future with
@@ -352,6 +350,7 @@ If the future completes with an error, an exception is thrown.
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
          const std::string& qualifiedNameStr,
+         const std::chrono::milliseconds rpcTimeout,
          const py::args& args,
          const py::kwargs& kwargs) {
         // No need to catch exception here, if function can not be found,
@@ -365,8 +364,8 @@ If the future completes with an error, an exception is thrown.
                                   .getSchema();
         auto stack = torch::jit::createStackForSchema(
             functionSchema, args, kwargs, c10::nullopt);
-        auto fut =
-            rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
+        auto fut = rpcTorchscript(
+            dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeout);
         return PythonFutureWrapper(fut);
       },
       py::call_guard<py::gil_scoped_release>());
@@ -414,16 +413,6 @@ If the future completes with an error, an exception is thrown.
       py::arg("rf") = nullptr);
 
   module.def(
-      "get_rpc_timeout",
-      []() { return RpcAgent::getCurrentRpcAgent()->getRpcTimeout(); },
-      R"(
-          Retrieve the timeout for all RPCs that was set during RPC initialization.
-
-          Returns:
-            `datetime.timedelta` instance indicating the RPC timeout.
-      )");
-
-  module.def(
       "enable_gil_profiling",
       [](bool flag) {
         RpcAgent::getCurrentRpcAgent()->enableGILProfiling(flag);
@@ -434,16 +423,6 @@ If the future completes with an error, an exception is thrown.
 
     Arguments:
         flag (bool): True to set GIL profiling, False to disable.
-      )");
-
-  module.def(
-      "_set_rpc_timeout",
-      [](const std::chrono::milliseconds& rpcTimeout) {
-        RpcAgent::getCurrentRpcAgent()->setRpcTimeout(rpcTimeout);
-      },
-      R"(
-          Set the timeout for all RPCs. If an RPC is not completed within this
-          time, an exception indicating it has timed out will be raised.
       )");
 
   Py_RETURN_TRUE;
