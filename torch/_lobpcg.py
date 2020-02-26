@@ -3,7 +3,6 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from __future__ import division
 import torch
 from . import _linalg_utils as _utils
 
@@ -510,6 +509,7 @@ class LOBPCG(object):
         d[:, 0] = d1
         dd = mm(d, _utils.transpose(d))
         d_ = mm(d, _utils.transpose(torch.ones_like(d)))
+
         R = torch.cholesky(dd * SBS, upper=True)
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
@@ -643,17 +643,17 @@ class LOBPCG(object):
                                     device=UBU.device,
                                     dtype=UBU.dtype)
                 R_norm = _utils.norm(R)
-                rerr = R_norm / (BU_norm * U_norm)
+                rerr = float(R_norm) / float(BU_norm * U_norm)
                 vkey = 'ortho_UBUmI_rerr[{}, {}]'.format(i, j)
-                self.fvars[vkey] = float(rerr)
+                self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
             VBU = mm(_utils.transpose(V), BU)
             VBU_norm = _utils.norm(VBU)
             U_norm = _utils.norm(U)
-            rerr = VBU_norm / (BV_norm * U_norm)
+            rerr = float(VBU_norm) / float(BV_norm * U_norm)
             vkey = 'ortho_VBU_rerr[{}]'.format(i)
-            self.fvars[vkey] = float(rerr)
+            self.fvars[vkey] = rerr
             if rerr < tau_ortho:
                 break
             if m < U.shape[-1] + V.shape[-1]:
