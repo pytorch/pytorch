@@ -30,7 +30,14 @@ D_DENSE = 2
 D_HID = 3
 D_OUT = 2
 
-NUM_TRAINERS = 2
+
+def get_env_int(key: str, default: int):
+    return int(os.environ[key]) if key in os.environ else default
+
+
+NUM_TRAINERS = get_env_int("trainers", 2)
+NUM_EPOCH = get_env_int("epoch", 3)
+
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
 
@@ -43,6 +50,8 @@ TRAINER_NAMES = [
     TRAINER_NAME_TEMPLATE.format(rank) for rank in DDP_TRAINER_RANKS
 ]
 REMOTE_WORKER_RANK = NUM_TRAINERS + 1
+
+LR = 0.1
 
 
 class DdpMode(enum.Enum):
@@ -59,7 +68,7 @@ def init_logger():
     logger.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
     console = logging.StreamHandler()
     formatter = logging.Formatter(
-        "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(process)s t:%(thread)s: %(message)s"
+        "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(processName)s t:%(threadName)s: %(message)s"
     )
     console.setFormatter(formatter)
     console.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
@@ -105,84 +114,6 @@ def check_process_group_type(
         gLogger.warning(
             f"The process group in {process_name} process is of type {type(process_group)}"
         )
-
-
-class RemoteEM(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int):
-        gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
-        super(RemoteEM, self).__init__()
-        init_em = [1] * embedding_dim
-        self.em = nn.EmbeddingBag(
-            num_embeddings,
-            embedding_dim,
-            _weight=torch.Tensor([init_em] * num_embeddings),
-        )
-
-    def forward(self, input: torch.Tensor):
-        gLogger.debug(f"Running RemoteEM.forward() on: {input}")
-        return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
-
-    def print_parameters(self):
-        gLogger.info(f"RemoteEM params: {self.parameters}")
-
-
-class RemoteNet(nn.Module):
-    def __init__(self, d_in: int, d_out: int):
-        gLogger.info(f"Initing RemoteNet with {d_in} {d_out}")
-        super(RemoteNet, self).__init__()
-        self.fc = nn.Linear(d_in, d_out)
-        self.relu = nn.ReLU()
-
-    def forward(self, input: torch.Tensor):
-        gLogger.debug(f"Running RemoteNet.forward() on: {input}")
-        return self.relu(self.fc(input))
-
-    def print_parameters(self):
-        gLogger.info(f"RemoteNet params: {self.parameters}")
-
-
-class HybridModel(nn.Module):
-    def __init__(
-        self,
-        remote_em_rref: rpc.RRef,
-        remote_net_rref: rpc.RRef,
-        process_group_for_ddp: dist.ProcessGroup = None,
-    ):
-        super(HybridModel, self).__init__()
-        self.remote_em_rref = remote_em_rref
-        self.remote_net_rref = remote_net_rref
-        self.fc1 = nn.Linear(D_DENSE, D_DENSE)
-        self.fc2 = nn.Linear(D_HID, D_OUT)
-
-        if process_group_for_ddp is not None:
-            gLogger.info(f"Use DDP for the local nets.")
-            self.fc1 = DistributedDataParallel(
-                self.fc1,
-                process_group=process_group_for_ddp,
-                check_reduction=True,
-            )
-            self.fc2 = DistributedDataParallel(
-                self.fc2,
-                process_group=process_group_for_ddp,
-                check_reduction=True,
-            )
-
-        gLogger.info(
-            f"HybridModel has {len(list(self.parameters()))} groups of parameters."
-        )
-
-    def forward(self, input: FeatureSet):
-        gLogger.debug(f"Running HybridModel.forward on {input}")
-        sparse = _remote_method(
-            RemoteEM.forward, self.remote_em_rref, input.sparse_features
-        )
-        # The same size of mini batch.
-        assert sparse.shape[0] == input.dense_features.shape[0]
-        dense = self.fc1(input.dense_features)
-        x = torch.cat((dense, sparse), 1)
-        gLogger.debug(f"Concatenated feature: {x}")
-        x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
-        return self.fc2(x)
 
 
 class RpcContext:
@@ -236,6 +167,95 @@ class ProcessGroupContext:
         dist.destroy_process_group(self.group)
 
 
+class RemoteEM(nn.Module):
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
+        super(RemoteEM, self).__init__()
+        init_em = [1] * embedding_dim
+        self.em = nn.EmbeddingBag(
+            num_embeddings,
+            embedding_dim,
+            _weight=torch.Tensor([init_em] * num_embeddings),
+        )
+
+    def forward(self, input: torch.Tensor):
+        gLogger.debug(f"Running RemoteEM.forward() on: {input}")
+        return self.em(input, offsets=torch.LongTensor(range(input.shape[0])))
+
+    def get_parameter_rrefs(self):
+        gLogger.debug(f"RemoteEM params: {list(self.parameters())}")
+        return [rpc.RRef(param) for param in self.parameters()]
+
+
+class RemoteNet(nn.Module):
+    def __init__(self, d_in: int, d_out: int):
+        gLogger.info(f"Initing RemoteNet with {d_in} {d_out}")
+        super(RemoteNet, self).__init__()
+        self.fc = nn.Linear(d_in, d_out)
+        self.relu = nn.ReLU()
+
+    def forward(self, input: torch.Tensor):
+        gLogger.debug(f"Running RemoteNet.forward() on: {input}")
+        return self.relu(self.fc(input))
+
+    def get_parameter_rrefs(self):
+        gLogger.debug(f"RemoteNet params: {list(self.parameters())}")
+        return [rpc.RRef(param) for param in self.parameters()]
+
+
+class HybridModel(nn.Module):
+    def __init__(
+        self,
+        remote_em_rref: rpc.RRef,
+        remote_net_rref: rpc.RRef,
+        process_group_for_ddp: dist.ProcessGroup = None,
+    ):
+        super(HybridModel, self).__init__()
+        self.remote_em_rref = remote_em_rref
+        self.remote_net_rref = remote_net_rref
+        self.remote_parameters_rrefs = _remote_method(
+            RemoteEM.get_parameter_rrefs, self.remote_em_rref
+        ) + _remote_method(RemoteNet.get_parameter_rrefs, self.remote_net_rref)
+        self.fc1 = nn.Linear(D_DENSE, D_DENSE)
+        self.fc2 = nn.Linear(D_HID, D_OUT)
+
+        if process_group_for_ddp is not None:
+            gLogger.info(f"Use DDP for the local nets.")
+            self.fc1 = DistributedDataParallel(
+                self.fc1,
+                process_group=process_group_for_ddp,
+                check_reduction=True,
+            )
+            self.fc2 = DistributedDataParallel(
+                self.fc2,
+                process_group=process_group_for_ddp,
+                check_reduction=True,
+            )
+
+        gLogger.info(
+            f"HybridModel has {len(list(self.parameters()))} groups of parameters."
+        )
+
+    def forward(self, input: FeatureSet):
+        gLogger.debug(f"Running HybridModel.forward on {input}")
+        sparse = _remote_method(
+            RemoteEM.forward, self.remote_em_rref, input.sparse_features
+        )
+        # The same size of mini batch.
+        assert sparse.shape[0] == input.dense_features.shape[0]
+        dense = self.fc1(input.dense_features)
+        x = torch.cat((dense, sparse), 1)
+        gLogger.debug(f"Concatenated feature: {x}")
+        x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
+        return self.fc2(x)
+
+    def print_parameters(self):
+        gLogger.debug(f"Local parameters: {list(self.parameters())}")
+        gLogger.debug(
+            f"Remote parameters: {[param_rref.to_here() for param_rref in self.remote_parameters_rrefs]}"
+        )
+
+
 class Trainer:
     def __init__(
         self,
@@ -270,6 +290,7 @@ class Trainer:
                 process_group=process_group_for_ddp,
                 check_reduction=True,
             )
+        self.local_optimizer = optim.SGD(self.hybrid_module.parameters(), lr=LR)
         gLogger.info(f"Succeeded in creating a HybridModel instance.")
 
     def __del__(self):
@@ -285,40 +306,38 @@ class Trainer:
         gLogger.info(f"Doing a mini batch on {mini_batch}")
         loss = 0
 
-        def optimize_remote_parameters():
-            gLogger.info(f"Optimizing the remote parameters.")
-            dist_optim = DistributedOptimizer(
-                optim.SGD, [self.remote_em_rref, self.remote_net_rref], lr=0.05
-            )
-            dist_optim.step()
-
         with dist_autograd.context() as context_id:
-            local_optim = optim.SGD(self.hybrid_module.parameters(), lr=0.05)
-            local_optim.zero_grad()
-
+            self.local_optimizer.zero_grad()
             output = self.hybrid_module.forward(mini_batch)
-            loss = self.criterion(output, mini_batch.labels)
-            dist_autograd.backward([loss])
-            grads_for_local_params = dist_autograd.get_gradients(context_id)
-            gLogger.info(f"Distributed grads: {grads_for_local_params}")
-            # TODO: use the local optimize to update local parameters
             with torch.no_grad():
-                for param in self.hybrid_module.parameters():
-                    if param in grads_for_local_params:
-                        param += 0.05 * grads_for_local_params[param]
-                    else:
-                        gLogger.error(
-                            f"Param not in distributed autograd: {param}"
-                        )
-
-            gLogger.info(
-                f"Optimizing the {len(list(self.hybrid_module.parameters()))} local parameters"
+                gLogger.debug(
+                    f"Output: {output} softmax: {torch.softmax(output, 0)} labels: {mini_batch.labels}"
+                )
+            loss = self.criterion(output, mini_batch.labels)
+            # grads will be stored in dist_autograd context
+            dist_autograd.backward([loss])
+            gLogger.debug(
+                f"Distributed grads: {dist_autograd.get_gradients(context_id)}"
             )
-            local_optim.step()
+            # The local optimize is unable to update the parameters
+            self.local_optimizer.step()
+            self.hybrid_module.print_parameters()
 
-        gLogger.info(
-            f"Local parameters: {list(self.hybrid_module.parameters())}"
-        )
+            gLogger.info(f"Running distributed optimizer...")
+            dist_optimizer = DistributedOptimizer(
+                optim.SGD,
+                self.hybrid_module.remote_parameters_rrefs
+                + [
+                    rpc.RRef(local_param)
+                    for local_param in self.hybrid_module.parameters()
+                ],
+                lr=LR,
+            )
+            dist_optimizer.step()
+
+            self.hybrid_module.print_parameters()
+
+        gLogger.info(f"Loss: {loss}.")
         return loss
 
 
@@ -337,7 +356,22 @@ def get_training_examples():
                 training_examples.sparse_features[idx] = z
                 training_examples.labels[idx] = x ^ y ^ z
                 idx += 1
-    return training_examples
+    # Split the examples among NUM_TRAINERS trainers
+    examples_per_trainer = int(n / NUM_TRAINERS)
+    return [
+        FeatureSet(
+            dense_features=training_examples.dense_features[
+                start : start + examples_per_trainer, :
+            ],
+            sparse_features=training_examples.sparse_features[
+                start : start + examples_per_trainer
+            ],
+            labels=training_examples.labels[
+                start : start + examples_per_trainer
+            ],
+        )
+        for start in range(0, n, examples_per_trainer)
+    ]
 
 
 class TestDdpWithRpc(TestCase):
@@ -410,12 +444,13 @@ class TestDdpWithRpc(TestCase):
                 )
             )
 
-        for epoch in range(3):
+        training_examples = get_training_examples()
+        for epoch in range(NUM_EPOCH):
             futures = []
-            for trainer_rref in trainer_rrefs:
+            for idx, trainer_rref in enumerate(trainer_rrefs):
                 futures.append(
                     _remote_method_async(
-                        trainer_method, trainer_rref, get_training_examples()
+                        trainer_method, trainer_rref, training_examples[idx]
                     )
                 )
             log_loss = 0
