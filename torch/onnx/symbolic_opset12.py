@@ -15,7 +15,7 @@ def einsum(g, equation, tensor_list):
 
 def broadcast_tensors(g, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
-    if (tensors.type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
+    if (tensors[0].type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
         return _unimplemented("broadcast_tensors", "cannot broadcast")
     #out = [g.op("Expand", t, shape) for t in tensors]
     return g.op("prim::ListConstruct", *tensors)
