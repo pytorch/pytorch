@@ -401,11 +401,11 @@ class TestScriptPy3(JitTestCase):
 
         scripted_M_mod = torch.jit.script(M())
         self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal', 'prim::Constant'])
+                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
         self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar', 'prim::Constant'])
+                         ['aten::add.Tensor', 'aten::mul.Scalar'])
 
 
 if __name__ == '__main__':

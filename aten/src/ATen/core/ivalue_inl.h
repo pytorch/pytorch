@@ -402,9 +402,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   const std::vector<IValue>& slots() const {
     return slots_;
   }
-  std::shared_ptr<ClassType> type() const {
-    return type_.type_;
-  }
+  std::shared_ptr<ClassType> type() const;
 
   std::shared_ptr<torch::jit::script::CompilationUnit> compilation_unit() {
     return type_.cu_;

@@ -203,6 +203,16 @@ ListTypePtr ListType::ofStrings() {
   return value;
 }
 
+AnyListTypePtr AnyListType::get() {
+  static auto value = AnyListType::create();
+  return value;
+}
+
+AnyTupleTypePtr AnyTupleType::get() {
+  static auto value = AnyTupleType::create();
+  return value;
+}
+
 
 c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
@@ -576,8 +586,12 @@ TupleType::TupleType(
 }
 
 bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
-  if (Type::isSubtypeOfExt(rhs_, why_not))
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
+  }
+  if (rhs_->kind() == AnyTupleType::Kind) {
+    return true;
+  }
   auto rhs = rhs_->cast<TupleType>();
   if (!rhs)
     return false;
@@ -604,6 +618,16 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
     return a->isSubtypeOfExt(b, why_not);
   });
+}
+
+bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyListType::Kind) {
+    return true;
+  }
+  return false;
 }
 
 bool TupleType::operator==(const Type& rhs) const {

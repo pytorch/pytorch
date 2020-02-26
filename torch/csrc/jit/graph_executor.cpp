@@ -707,7 +707,9 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
-void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+void runNondiffOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool strict_fuser_check) {
   // Run custom passes that different backends can register.
   for (const auto& pass : getCustomPreFusionPasses()) {
     pass(graph);
@@ -729,7 +731,7 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
 
-  FuseGraph(graph);
+  FuseGraph(graph, strict_fuser_check);
 
   // Run custom post-fusion passes
   for (const auto& pass : getCustomPostFusionPasses()) {

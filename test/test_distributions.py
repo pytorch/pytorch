@@ -59,7 +59,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             CatTransform, ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform, SigmoidTransform,
-                                            SoftmaxTransform,
+                                            TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform, StackTransform)
 from torch.distributions.utils import probs_to_logits, lazy_property
@@ -3946,6 +3946,7 @@ class TestTransforms(TestCase):
                 PowerTransform(exponent=torch.tensor(5.).normal_(),
                                cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
+                TanhTransform(cache_size=cache_size),
                 AffineTransform(0, 1, cache_size=cache_size),
                 AffineTransform(1, -2, cache_size=cache_size),
                 AffineTransform(torch.randn(5),
@@ -4000,6 +4001,10 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif domain is constraints.unit_interval:
             return x.uniform_()
+        elif isinstance(domain, constraints.interval):
+            x = x.uniform_()
+            x = x.mul_(domain.upper_bound - domain.lower_bound).add_(domain.lower_bound)
+            return x
         elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)

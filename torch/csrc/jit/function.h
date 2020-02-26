@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 
 using Kwargs = std::unordered_map<std::string, IValue>;
+struct RecursiveMethodCallError : public std::exception {};
 
 TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 
