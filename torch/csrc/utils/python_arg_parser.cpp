@@ -405,7 +405,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::SCALARTYPE) {
     if (str == "None") {
-      // do nothing
+      default_scalartype = at::ScalarType::Undefined;
     } else if (str == "torch.int64") {
       default_scalartype = at::ScalarType::Long;
     } else {
@@ -413,11 +413,11 @@ void FunctionParameter::set_default_str(const std::string& str) {
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
-      // do nothing
+      default_layout = nullptr;
     } else if (str == "torch.strided") {
-      default_layout = at::Layout::Strided;
+      default_layout = torch::getLayout(at::Backend::CPU);
     } else if (str == "torch.sparse_coo") {
-      default_layout = at::Layout::Sparse;
+      default_layout = torch::getLayout(at::Backend::SparseCPU);
     } else {
       throw std::runtime_error("invalid default value for layout: " + str);
     }
