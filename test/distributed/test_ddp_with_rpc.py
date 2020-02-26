@@ -12,7 +12,6 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import optim
 import torch.distributed.distributed_c10d as dist_c10d
-import torch.distributed as c10d
 import torch.distributed as dist
 import torch.nn as nn
 import torch.multiprocessing as multiprocessing
@@ -42,8 +41,6 @@ TRAINER_NAMES = [
     TRAINER_NAME_TEMPLATE.format(rank) for rank in DDP_TRAINER_RANKS
 ]
 REMOTE_WORKER_RANK = NUM_TRAINERS + 1
-
-gTrainerProcessGroup: [dist.ProcessGroup] = [None] * WORLD_SIZE
 
 
 class DdpMode(enum.Enum):
