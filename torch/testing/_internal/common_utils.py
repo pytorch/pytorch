@@ -776,7 +776,7 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=False):
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -798,6 +798,8 @@ class TestCase(expecttest.TestCase):
         elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
+                if exact_dtype:
+                    self.assertEqual(a.dtype, b.dtype)
                 if a.numel() > 0:
                     if (a.device.type == 'cpu' and (a.dtype == torch.float16 or a.dtype == torch.bfloat16)):
                         # CPU half and bfloat16 tensors don't have the methods we need below
