@@ -165,7 +165,7 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
             scales = torch.tensor(scales, dtype=torch.double)
             zero_points = torch.tensor(zero_points, dtype=torch.long)
         tensor = torch._empty_per_channel_affine_quantized(
-            size, scales, zero_points, axis=axis, dtype=storage.dtype)
+            size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
         raise RuntimeError("Can't deserialize quantized tensor with qscheme {}".format(qscheme))
     tensor.set_(storage, storage_offset, size, stride)
