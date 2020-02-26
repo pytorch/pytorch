@@ -106,22 +106,19 @@ std::string getFuncName(Value* func_value) {
   }
 }
 
-bool nodeQuantizable(Node* n) {
-  static std::vector<std::string> call_funcs = {
-      "conv2d",
-      "linear",
-      "relu",
-  };
-  std::vector<Symbol> aten_funcs = {
-      Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
+bool isFunctionNode(Node* n,
+                    const std::vector<std::string>& call_funcs,
+                    const std::vector<std::string>& aten_funcs) {
+  std::vector<Symbol> aten_func_symbols;
   std::transform(
-      call_funcs.begin(),
-      call_funcs.end(),
-      std::back_inserter(aten_funcs),
+      aten_funcs.begin(),
+      aten_funcs.end(),
+      std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
+
   bool is_quantizable =
-      std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
-      aten_funcs.end();
+      std::find(aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+      aten_func_symbols.end();
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
@@ -129,6 +126,23 @@ bool nodeQuantizable(Node* n) {
         call_funcs.end();
   }
   return is_quantizable;
+}
+
+bool nodeQuantizable(Node* n) {
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+    }, /* aten_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+      "addmm",
+      "matmul",
+      "add_"
+    });
 }
 
 bool valueNeedsToBeQuantized(Value* v) {

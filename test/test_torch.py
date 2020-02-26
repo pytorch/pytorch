@@ -13967,7 +13967,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
-        # # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
+        # # TODO: https://github.com/pytorch/pytorch/issues/33793
         # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
         #     return
 
@@ -13988,11 +13988,6 @@ class TestTorchDeviceType(TestCase):
         range_ = to_inc_ - from_ + 1
 
         t.random_(from_, None)
-
-        # TODO: remove it!
-        if device.startswith('cuda') and dtype == torch.bfloat16:
-            torch.cuda.synchronize()
-
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
         self.assertTrue((to_inc_ - alpha * range_) < t.to(torch.double).max() <= to_inc_)
 
@@ -14001,7 +13996,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
-        # # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
+        # # TODO: https://github.com/pytorch/pytorch/issues/33793
         # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
         #     return
 
@@ -14033,11 +14028,6 @@ class TestTorchDeviceType(TestCase):
                     range_ = to_ - from_
                     t = torch.empty(size, dtype=dtype, device=device)
                     t.random_(from_, to_)
-
-                    # TODO: remove it!
-                    if device.startswith('cuda') and dtype == torch.bfloat16:
-                        torch.cuda.synchronize()
-
                     self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
                     self.assertTrue((to_ - alpha * range_) < t.to(torch.double).max() < to_)
 
@@ -14046,7 +14036,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
-        # # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
+        # # TODO: https://github.com/pytorch/pytorch/issues/33793
         # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
         #     return
 
@@ -14065,11 +14055,6 @@ class TestTorchDeviceType(TestCase):
         for to_ in tos:
             t = torch.empty(size, dtype=dtype, device=device)
             t.random_(to_)
-
-            # TODO: remove it!
-            if device.startswith('cuda') and dtype == torch.bfloat16:
-                torch.cuda.synchronize()
-
             self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_)
             self.assertTrue((to_ - alpha * to_) < t.to(torch.double).max() < to_)
 
@@ -14078,7 +14063,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):
-        # # TODO(pbelevich): Figure out what's wrong with bfloat16 random_() on CUDA on Windows
+        # # TODO: https://github.com/pytorch/pytorch/issues/33793
         # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
         #     return
 
@@ -14098,11 +14083,6 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.empty(size, dtype=dtype, device=device)
         t.random_()
-
-        # TODO: remove it!
-        if device.startswith('cuda') and dtype == torch.bfloat16:
-            torch.cuda.synchronize()
-
         self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_inc)
         self.assertTrue((to_inc - alpha * to_inc) < t.to(torch.double).max() <= to_inc)
 
