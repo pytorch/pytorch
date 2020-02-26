@@ -170,7 +170,7 @@ template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::Half) {
+  if (iter.dtype() == ScalarType::BFloat16) {
     TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
   }
 #endif
@@ -216,7 +216,7 @@ template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIterator& iter, RNG* gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::Half) {
+  if (iter.dtype() == ScalarType::BFloat16) {
     TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
   }
 #endif
@@ -258,7 +258,7 @@ template<typename RNG>
 void random_kernel(TensorIterator& iter, RNG* gen) {
 #ifdef _WIN32
   // TODO: https://github.com/pytorch/pytorch/issues/33793
-  if (iter.dtype() == ScalarType::Half) {
+  if (iter.dtype() == ScalarType::BFloat16) {
     TORCH_CHECK(false, "random_() is not supported for bfloat16 CUDA tensors on Windows. Please see https://github.com/pytorch/pytorch/issues/33793");
   }
 #endif
