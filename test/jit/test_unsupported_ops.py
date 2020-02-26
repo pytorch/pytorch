@@ -70,14 +70,6 @@ class TestUnsupportedOps(JitTestCase):
             with self.assertRaisesRegex(Exception, "Unknown builtin op"):
                 cu = torch.jit.CompilationUnit(funcs_str)
 
-        def fn():
-            a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
-            b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
-            return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
-        fn()
-        with self.assertRaisesRegex(Exception, "Expected a value of type"):
-            torch.jit.script(fn)
-
         def unique_consec():
             x = torch.tensor([1])
             return torch.unique_consecutive(x, return_inverse=False, return_counts=True, dim=0)

@@ -135,7 +135,6 @@
   backends:
     - CUDA
   return: argument 0
-  scalar_check: self.dim() == 0
   arguments:
     - arg: THTensor* result
       output: True
@@ -583,7 +582,8 @@
 [[
   name: _th_cumsum
   cname: cumsum
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0
@@ -596,7 +596,8 @@
 [[
   name: _th_cumprod
   cname: cumprod
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
   variants: function
   return: argument 0
@@ -1190,20 +1191,4 @@
   arguments:
     - THTensor* self
     - THTensor* src
-]]
-
-[[
-  name: _th_cat
-  cname: catArray
-  variants: [function]
-  backends:
-    - CUDA
-  cuda_bool: True
-  cuda_bfloat16: True
-  return: self
-  arguments:
-    - arg: THTensor* self
-      output: True
-    - TensorList tensors
-    - int64_t dim
 ]]

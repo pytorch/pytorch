@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch
 from ._jit_internal import _overload as overload
+from typing import List
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -88,19 +89,19 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 # equivalent to itertools.product(indices)
-def indices_product(indices):
+def _indices_product(indices):
     # type: (List[int]) -> (List[List[int]])
-    empty_list : List[int] = []
+    empty_list = torch.jit.annotate(List[int], [])
     result = [empty_list]
     for idx in indices:
-        result_temp : List[List[int]] = []
+        result_temp = torch.jit.annotate(List[List[int]], [])
         for res in result:
             for i in range(idx):
                 result_temp.append(res + [i])
         result = result_temp
     return result
 
-def index_tensor_with_indices_list(tensor, indices):
+def _index_tensor_with_indices_list(tensor, indices):
     # type: (Tensor, List[int]) -> Tensor
     out = tensor
     for index in indices:
@@ -192,14 +193,14 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
                      .clone(memory_format=torch.contiguous_format)
 
             # TODO: rewrite when TorchScript supports product and map as
-            # product(*map(lambda x: list(range(x)), shape[:-2]))
-            indices = indices_product(shape[:-2])
+            # product(*map(lambda x: list(range(x)), shape[:-2])) when issue 33781 is fixed
+            indices = _indices_product(shape[:-2])
             for idx in indices:
                 final_order = [i for i in range(m)]  # noqa: C416 TODO: rewrite as list(range(m))
-                for k, j in enumerate(index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
+                for k, j in enumerate(_index_tensor_with_indices_list(LU_pivots_zero_idx, idx)):
                     final_order[k], final_order[j] = final_order[j], final_order[k]
-                # TODO: remove index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
-                p_idx = index_tensor_with_indices_list(P, idx)
+                # TODO: remove _index_tensor_with_indices_list when TorchScript supports indexing Tensor with list
+                p_idx = _index_tensor_with_indices_list(P, idx)
                 p_idx.copy_(p_idx.index_select(1, torch.as_tensor(final_order, device=LU_pivots.device)))
         else:
             P = torch.eye(m, device=LU_data.device, dtype=LU_data.dtype)
@@ -1012,6 +1013,7 @@ lu = boolean_dispatch(
     if_false=_lu_no_infos,
     module_name=__name__,
     func_name='lu')
+lu.__doc__ = _lu_impl.__doc__
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
