@@ -120,6 +120,39 @@ class TestFreezing(JitTestCase):
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
 
+    def test_freeze_module_with_helperfunction(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 11
+                self.b = 2
+
+            def forward(self, x):
+                return self.a + self.b
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub = SubModule()
+                self.a = 3
+                self.b = 4
+
+            def forward(self, x):
+                self.b = 20
+                return self._forward(x) + self.a + self.b
+
+            def _forward(self, x):
+                return self.sub(x)
+        m = torch.jit.script(TestModule())
+        m.eval()
+        input = torch.randn(2, 2)
+        mf = torch._C._freeze_module(m._c)
+        self.assertFalse(mf.hasattr('sub'))
+        self.assertFalse(mf.hasattr('a'))
+        self.assertTrue(mf.hasattr('b'))
+        with self.assertRaisesRegex(RuntimeError, "TestModule does not have a field with name '_forward'"):
+            mf._forward(x)
+
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):
             def __init__(self):

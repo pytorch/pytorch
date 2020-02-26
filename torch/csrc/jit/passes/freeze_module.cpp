@@ -339,6 +339,13 @@ class AttributePropagator {
       module_._ivalue()->unsafeRemoveAttr(name);
       module_.type()->unsafeRemoveAttribute(name);
     }
+    for (auto& fn : type->methods()) {
+      auto& name = fn->name();
+      if ("forward" == name)
+        continue;
+      type->unsafeRemoveMethod(name);
+      module_._ivalue()->compilation_unit()->unsafeRemoveMethod(fn->qualname());
+    }
   }
 
   // Contains attributes that can't be folded or user directs to keep them.
