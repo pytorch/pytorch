@@ -30,7 +30,10 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
             return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
 
     # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
-    nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none')
+    if weight.node().mustBeNone():
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none')
+    else:
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s='none')
 
     from symbolic_opset9 import zeros_like, ones_like, eq, where, index_select
     zeros = zeros_like(g, nllloss)
