@@ -108,7 +108,7 @@ def _index_tensor_with_indices_list(tensor, indices):
     return out
 
 def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    # type: (Tensor, Tensor, bool, bool)
+    # type: (Tensor, Tensor, bool, bool) ->  (Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]])
     r"""Unpacks the data and pivots from a LU factorization of a tensor.
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
@@ -682,7 +682,7 @@ def cartesian_prod(*tensors):
 
 
 def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
-    # type: (Tensor, Tensor, float, str)
+    # type: (Tensor, Tensor, float, str) -> (Tensor)
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
@@ -941,15 +941,11 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ...   print('LU factorization succeeded for all samples!')
         LU factorization succeeded for all samples!
     """
-    if not torch.jit.is_scripting():
-        if type(A) is not Tensor and has_torch_function((A,)):
-            return handle_torch_function(
-                lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     # If get_infos is True, then we don't need to check for errors and vice versa
     return torch._lu_with_info(A, pivot=pivot, check_errors=(not get_infos))
 
 def _check_list_size(out_len, get_infos, out):
-    # type: (int, bool, List[Tensor])    
+    # type: (int, bool, List[Tensor]) -> None   
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError("expected tuple of {} elements but got {}"
@@ -959,7 +955,11 @@ def _check_list_size(out_len, get_infos, out):
                         .format(type(out).__name__))
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor] 
+    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
+    if not torch.jit.is_scripting():
+        if type(A) is not Tensor and has_torch_function((A,)):
+            return handle_torch_function(
+                lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     result = _lu_impl(A, pivot, get_infos, out)
     if out is not None:
         _check_list_size(len(out), get_infos, out)
@@ -971,6 +971,11 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
 
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor] 
+    # need to check for torch_function here so that we exit if 
+    if not torch.jit.is_scripting():
+        if type(A) is not Tensor and has_torch_function((A,)):
+            return handle_torch_function(
+                lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out)
     result = _lu_impl(A, pivot, get_infos, out)
     if out is not None:
         _check_list_size(len(out), get_infos, out)
