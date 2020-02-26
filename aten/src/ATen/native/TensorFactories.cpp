@@ -491,7 +491,7 @@ Tensor randint(
     IntArrayRef size,
     Generator* generator,
     const TensorOptions& options) {
-  auto result = at::empty(size, at::dtype(at::kLong).merge_in(options));
+  auto result = at::empty(size, options);
   return result.random_(low, high, generator);
 }
 
@@ -544,7 +544,7 @@ Tensor randint_like(
     int64_t high,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, at::dtype(at::kLong).merge_in(options), optional_memory_format);
+  auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(0, high, nullptr);
   return native::randint(high, self.sizes(), nullptr, options);
 }
@@ -555,7 +555,7 @@ Tensor randint_like(
     int64_t high,
     const TensorOptions& options,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  auto result = at::empty_like(self, at::dtype(at::kLong).merge_in(options), optional_memory_format);
+  auto result = at::empty_like(self, options, optional_memory_format);
   return result.random_(low, high, nullptr);
 }
 
@@ -636,7 +636,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 }
 
 Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
-  auto tensor = at::empty(n, at::dtype(at::kLong).merge_in(options));
+  auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
 
@@ -679,10 +679,7 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto tril_size = get_tril_size(row, col, offset);
@@ -727,10 +724,7 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options_) {
-
-  TensorOptions options = options_.dtype(options_.dtype_opt().value_or(scalarTypeToTypeMeta(kLong)));
-
+    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
   check_args(row, col, options);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);

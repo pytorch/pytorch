@@ -218,10 +218,11 @@ UNPACK_METHODS = {
     'Generator *': 'generator',
     'Storage': 'storage',
     'Storage &': 'storage',
+    'const ScalarType &': 'scalartype',
+    'const THPLayout &': 'layout',
+    'const Device &': 'device',
     'c10::optional<DimnameList>': 'toDimnameListOptional',
     'c10::optional<ScalarType>': 'scalartypeOptional',
-    'c10::optional<Layout>': 'layoutOptional',
-    'c10::optional<Device>': 'deviceOptional',
     'c10::optional<MemoryFormat>': 'memoryformatOptional',
     'c10::optional<Scalar>': 'scalarOptional',
     'c10::optional<int64_t>': 'toInt64Optional',
@@ -424,7 +425,7 @@ TENSOR_OPTIONS_DECL = CodeTemplate("""\
 const auto ${name} = TensorOptions()
     .dtype(${dtype})
     .device(${device})
-    .layout(${layout})
+    .layout(${layout}.layout)
     .requires_grad(${requires_grad})
     .pinned_memory(${pin_memory});
 """)
@@ -433,10 +434,9 @@ const auto ${name} = TensorOptions()
 # (if present) are checked against properties of a tensor output param
 # TODO remove hardcoding, use unpack logic from emit_single_dispatch
 PY_VARIABLE_CHECK_OUT_TYPE_HACK = CodeTemplate("""\
-check_out_type_matches(_r.tensor(${out_idx}),
-                       _r.scalartypeOptional(${type_idx}),
-                       _r.layoutOptional(${layout_idx}),
-                       _r.deviceOptional(${device_idx}));
+check_out_type_matches(_r.tensor(${out_idx}), _r.scalartype(${type_idx}), _r.isNone(${type_idx}),
+                       _r.layout(${layout_idx}), _r.isNone(${layout_idx}),
+                       _r.device(${device_idx}), _r.isNone(${device_idx}));
 """)
 
 # Unpack parsed args to locals, call the op, and wrap the result.
@@ -629,9 +629,8 @@ def handle_python_binding_args(declaration, output_gap):
             raise RuntimeError(
                 '{}: expected "requires_grad" in python_binding_args absent tensor options arg but found [{}]'.
                 format(declaration['name'], [arg['name'] for arg in python_binding_args]))
-        # A little hack so we can reuse parse_binding_arg logic
         requires_grad = parse_binding_arg('requires_grad')
-        set_requires_grad = '.set_requires_grad({}.value_or(false))'.format(requires_grad)
+        set_requires_grad = '.set_requires_grad({})'.format(requires_grad)
 
     return argmap, inits, set_requires_grad
 
@@ -1302,6 +1301,14 @@ def make_python_arglists(declaration, is_python_method):
 # python binding args
 #
 
+# TODO blowtorch
+def dtype_default_type_hack(name):
+    if name.startswith('randperm') or name == 'tril_indices' or name == 'triu_indices':
+        return 'torch.int64'
+    else:
+        return 'None'
+
+
 def make_python_binding_args(declaration):
     """
     Given various properties of a declaration, build a set of scattered python binding args.
@@ -1338,52 +1345,59 @@ def make_python_binding_args(declaration):
     is_like_or_new_function_with_options = is_like_function_with_options or is_new_function_with_options
 
     if is_factory_function or has_options_arg:
+        default_type = dtype_default_type_hack(name)
+        py_default_dtype = 'self.scalar_type()' if is_like_or_new_function_with_options else None
         dtype_arg = {
-            'default': 'None',
-            'dynamic_type': 'c10::optional<ScalarType>',
+            'default': default_type,
+            'dynamic_type': 'ScalarType',
             'kwarg_only': True,
             'name': 'dtype',
-            'type': 'c10::optional<ScalarType>',
+            'type': 'const ScalarType &',
             'simple_type': 'ScalarType',
+            'python_default_init': py_default_dtype,
         }
         python_binding_arguments.append(dtype_arg)
 
     if is_factory_function or is_like_or_new_function_with_options:
+        py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
         layout_arg = {
-            'default': 'None',
-            'dynamic_type': 'c10::optional<Layout>',
+            'default': 'torch.strided',
+            'dynamic_type': 'Layout',
             'kwarg_only': True,
             'name': 'layout',
-            'type': 'c10::optional<Layout>',
+            'type': 'const THPLayout &',
             'simple_type': 'Layout',
+            'python_default_init': py_default_layout,
         }
         python_binding_arguments.append(layout_arg)
+        py_default_device = 'self.device()' if is_like_or_new_function_with_options else None
         device_arg = {
             'default': 'None',
-            'dynamic_type': 'c10::optional<Device>',
+            'dynamic_type': 'Device',
             'kwarg_only': True,
             'name': 'device',
-            'type': 'c10::optional<Device>',
+            'type': 'const Device &',
             'simple_type': 'Device',
+            'python_default_init': py_default_device
         }
         python_binding_arguments.append(device_arg)
         pin_memory_arg = {
-            'default': 'None',
-            'dynamic_type': 'c10::optional<bool>',
+            'default': False,
+            'dynamic_type': 'bool',
             'kwarg_only': True,
             'name': 'pin_memory',
-            'type': 'c10::optional<bool>',
+            'type': 'bool',
             'simple_type': 'bool',
         }
         python_binding_arguments.append(pin_memory_arg)
 
     if is_factory_or_like_or_new_function:
         requires_grad_arg = {
-            'default': 'None',
-            'dynamic_type': 'c10::optional<bool>',
+            'default': False,
+            'dynamic_type': 'bool',
             'kwarg_only': True,
             'name': 'requires_grad',
-            'type': 'c10::optional<bool>',
+            'type': 'bool',
             'simple_type': 'bool',
         }
         python_binding_arguments.append(requires_grad_arg)
