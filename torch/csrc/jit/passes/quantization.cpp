@@ -399,15 +399,31 @@ class InsertObserversHelper {
     script::Module& module,
     const std::string& method_name);
 
-  // Fill the map from value to the corresponding observer module
-  // this map is used in insertObservers to actually insert
-  // observers to the module
-  void fillValueObserverMap(script::Module& module, const std::string& method_name);
-
+  /**
+   * Recursively insert observers for the method, also we'll process
+   * the nodes in the graph in the order of execution of these nodes
+   * since we need the context information to decide whether we want to
+   * observe/quantize a value a not, we don't want to observe a value multiple
+   * times.
+   *
+   * arguemnt: is_entry_point means whether the current method is the forward
+   * method of the top level module.
+   *
+   *Since we want to insert observers in the call site instead of in the called
+   * graph, we'll postpone inserting observer to caller as much as possible, if
+   * we know the current method is the outer most method, then
+   * we will insert all observers in the graph instead of postpone this to the
+   * parent, note that this assumes we don't have recurisve method
+   * calls
+   *
+   * returns a tuple of vectors of observer modules for input and output, these
+   * are used for inserting observers for the input/output values
+   * since we need to insert these values at call site.
+   */
   std::tuple<OptionalModuleVector, OptionalModuleVector>
   insertObservers(script::Module& module,
                   const std::string& method_name,
-                  bool is_outermost = false);
+                  bool is_entry_point = false);
 
  private:
   script::Module getInvokedModule(script::Module& module, Node* n, Value* self);
@@ -417,6 +433,20 @@ class InsertObserversHelper {
 
   bool valueNeedsToBeQuantized(Value* v);
 
+  // Fill the map between the caller input/output to input/output
+  // of called graph, this is used to navigate through the graph
+  // to find the observer for a given value
+  void fillBoundaryValueMap(
+      script::Module& module, const std::string& method_name);
+
+  // Fill the map from value to the corresponding observer module
+  // this map is used in insertObservers to actually insert
+  // observers to the module
+  void fillValueObserverMap(script::Module& module, const std::string& method_name);
+
+
+  // Clone observer module and add it to the original module,
+  // and insert a call to observer forward function
   void insertObserverFor(
       Value* v,
       script::Module& module,
@@ -437,7 +467,7 @@ class InsertObserversHelper {
   // the middle of the ops that are supposed to be fused, e.g.
   // the output value of conv in the conv - relu pattern
   std::unordered_set<Value*> values_to_skip_;
-  std::unordered_set<Graph*> visited_graph_;
+  std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, script::Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
   std::unordered_map<Value*, std::vector<Value*>> boundary_value_map_;
@@ -644,8 +674,6 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
   return invoked_methods;
 }
 
-// Clone observer module and add it to the original module,
-// and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
     Value* v,
     script::Module& module,
@@ -716,23 +744,9 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   }
 }
 
-void InsertObserversHelper::preprocess(
-    script::Module& module,
-    const std::string& method_name) {
-  script::Method method = module.get_method(method_name);
-  auto graph = method.graph();
-  // To cleanup traced graph
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
-  // must do constant propagation first before replacement
-  replaceConvolutionWithConv2d(graph);
-  // fuse decomposed linear into aten::linear
-  FuseLinear(graph);
-  // We need to call this before calling insertObservers for
-  // invoked methods
-  addIntermediateValuesToSkipObserver(module, method_name);
-
-  // Fill the boundary_value_map_
+void InsertObserversHelper::fillBoundaryValueMap(
+    script::Module& module, const std::string& method_name) {
+  auto graph = module.get_method(method_name).graph();
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   auto* self = graph->inputs()[0];
@@ -758,6 +772,24 @@ void InsertObserversHelper::preprocess(
       }
     }
   }
+}
+
+void InsertObserversHelper::preprocess(
+    script::Module& module,
+    const std::string& method_name) {
+  script::Method method = module.get_method(method_name);
+  auto graph = method.graph();
+  // To cleanup traced graph
+  ConstantPooling(graph);
+  ConstantPropagation(graph);
+  // must do constant propagation first before replacement
+  replaceConvolutionWithConv2d(graph);
+  // fuse decomposed linear into aten::linear
+  FuseLinear(graph);
+  addIntermediateValuesToSkipObserver(module, method_name);
+
+  fillValueObserverMap(module, method_name);
+  fillBoundaryValueMap(module, method_name);
 
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_method);
@@ -789,10 +821,10 @@ void InsertObserversHelper::fillValueObserverMap(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
-  if (visited_graph_.count(graph.get())) {
+  if (visited_graph_of_observer_map_.count(graph.get())) {
     return;
   }
-  visited_graph_.insert(graph.get());
+  visited_graph_of_observer_map_.insert(graph.get());
 
   std::stack<Block*> blocks_to_visit;
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
@@ -823,12 +855,6 @@ void InsertObserversHelper::fillValueObserverMap(
       }
     }
   }
-
-  for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
-    auto& invoked_module = std::get<0>(invoked_methods);
-    const auto& invoked_method_name = std::get<1>(invoked_methods);
-    fillValueObserverMap(invoked_module, invoked_method_name);
-  }
 }
 
 c10::optional<script::Module>
@@ -842,7 +868,7 @@ InsertObserversHelper::getObserverFor(Value* v) {
     for (Value* next : boundary_value_map_.at(v)) {
       auto observer_opt = getObserverFor(next);
       if (observer_opt) {
-        // Need to make sure all boundary values are
+        // Need to make sure all values are
         // configured with same observer
         if (result) {
           TORCH_CHECK(
@@ -860,12 +886,20 @@ InsertObserversHelper::getObserverFor(Value* v) {
 std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name,
-    bool is_outermost) {
+    bool is_entry_point) {
   auto graph = module.get_method(method_name).graph();
+  // graph input/output values, used to skip inserting observers
+  // for input and output of the graph, we have to insert the observers
+  // at call site because the graph itself can be shared
   std::unordered_set<Value*> graph_inputs_outputs;
+  // list of observer modules for input values
   std::vector<c10::optional<script::Module>> graph_input_observers;
+  // list of observer modules for output values
   std::vector<c10::optional<script::Module>> graph_output_observers;
-  if (!is_outermost) {
+
+  // if the current graph is the entry point graph(the forward graph
+  // of the top level module), we can insert observers in the graph
+  if (!is_entry_point) {
     for (auto* v : graph->inputs()) {
       graph_inputs_outputs.insert(v);
       graph_input_observers.push_back(getObserverFor(v));
@@ -876,8 +910,14 @@ std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::in
       graph_output_observers.push_back(getObserverFor(v));
     }
   }
+
+  // We'll return this information to the call site of the graph
+  // since observers should be inserted at call site
   auto graph_observers = std::make_tuple(graph_input_observers, graph_output_observers);
 
+  // This means the graph is been processed before, we just
+  // need to attach observer modules and construct the information
+  // needed by call site here
   if (graph_observer_map_.count(graph.get())) {
     // instance clone of observer module and setAttr
     for (const auto& observer_attrs : graph_observer_map_.at(graph.get())) {
@@ -892,11 +932,17 @@ std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::in
     }
     return graph_observers;
   }
-  GRAPH_DUMP("inserting boundary val for:", graph);
+  GRAPH_DUMP("inserting observer for:", graph);
 
   std::stack<Block*> blocks_to_visit;
   blocks_to_visit.push(graph->block());
   auto* self = graph->inputs()[0];
+  // We first construct a map from value to the module, then
+  // insert observers for them later, this is to avoid interference
+  // of the inserted observers with the analysis to decide where
+  // to insert observers, also we only insert observers for
+  // "intermediate values" that is not the input/output of the
+  // graph
   std::unordered_map<Value*, script::Module> values_to_observe;
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
@@ -934,7 +980,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::in
       }
     }
   }
-  for (auto item : values_to_observe) {
+  for (const auto& item : values_to_observe) {
     auto* v = item.first;
     auto observer = item.second;
     if (!values_to_skip_.count(v)) {
@@ -1814,9 +1860,7 @@ TORCH_API script::Module InsertObservers(
   fillQConfigMap(module, qconfig_dict, module_qconfig_map);
   InsertObserversHelper helper(module_qconfig_map);
   helper.preprocess(module, method_name);
-  helper.fillValueObserverMap(module, method_name);
   helper.insertObservers(module, method_name, true);
-  GRAPH_DEBUG("after inserting observers for boundary vals");
   return module;
 }
 
@@ -1843,12 +1887,12 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
       if (n->kind() == Symbol::aten("dequantize") &&
           n->output()->uses().size() > 1) {
         dequant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
       }
     }
   }
@@ -1909,6 +1953,9 @@ void SwapDeQuant(std::shared_ptr<Graph>& graph) {
         std::vector<Use> uses = output->uses();
         // Insert new dequantize node for each use of the output
         insertDeQuantCall(graph.get(), output, output, uses);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
       }
     }
   }
