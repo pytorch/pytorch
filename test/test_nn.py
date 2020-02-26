@@ -7649,7 +7649,8 @@ class TestNN(NNTestCase):
     @skipIfRocm
     def test_conv_cudnn_nhwc_support(self):
         input = torch.randn((1, 16, 1, 1), dtype=torch.float16, device="cuda", requires_grad=True)
-        weight = torch.randn((8, 16, 3, 3), dtype=torch.float16, device="cuda", requires_grad=True).to(memory_format=torch.channels_last)
+        weight = torch.randn((8, 16, 3, 3), dtype=torch.float16, device="cuda", requires_grad=True)
+        weight = weight.to(memory_format=torch.channels_last)
         o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
         self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
         o.sum().backward()
