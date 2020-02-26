@@ -1680,12 +1680,12 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
-      for (Block* subblock : n->blocks()) {
-        blocks_to_visit.push(subblock);
-      }
       if (n->kind() == Symbol::aten("dequantize") &&
           n->output()->uses().size() > 1) {
         dequant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
       }
     }
   }
