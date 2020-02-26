@@ -621,6 +621,8 @@
   return: argument 0
   variants:
     - function
+  backends:
+    - CUDA
   options:
     - cname: fmod
       arguments:
@@ -640,6 +642,8 @@
   name: _th_fmod_
   return: argument 0
   variants: function
+  backends:
+    - CUDA
   options:
     - cname: fmod
       arguments:
