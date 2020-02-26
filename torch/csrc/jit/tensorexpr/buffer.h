@@ -9,15 +9,17 @@ namespace tensorexpr {
 class Buffer {
  public:
   Buffer(const VarHandle& data, const Dtype& dtype, const std::vector<ExprHandle>& dims)
-      : data_(data), dtype_(dtype), dims_(dims), strides_(dims.size()) {
+      : data_(data.node()), dtype_(dtype), dims_(ExprHandleVectorToExprVector(dims)) {
     CHECK_EQ(data.dtype(), kHandle);
+    std::vector<ExprHandle> stride_handles(dims.size());
     for (int i = ndim() - 1; i >= 0; i--) {
       if (i == ndim() - 1) {
-        strides_[i] = 1;
+        stride_handles[i] = 1;
       } else {
-        strides_[i] = strides_[i + 1] * dim(i + 1);
+        stride_handles[i] = stride_handles[i + 1] * ExprHandle(dim(i + 1));
       }
     }
+    strides_ = ExprHandleVectorToExprVector(stride_handles);
   }
   Buffer(
       const std::string& name,
@@ -25,7 +27,7 @@ class Buffer {
       const std::vector<ExprHandle>& dims)
       : Buffer(VarHandle(name, kHandle), dtype, dims) {}
 
-  const VarHandle& data() const {
+  const Var* data() const {
     return data_;
   }
   const Dtype& dtype() const {
@@ -34,7 +36,7 @@ class Buffer {
   int ndim() const {
     return dims_.size();
   }
-  const ExprHandle& dim(int index) const {
+  const Expr* dim(int index) const {
     return dims_[index];
   }
 
@@ -59,15 +61,15 @@ class Buffer {
   }
   ExprHandle Index(const ExprHandle& x, const ExprHandle& y) const {
     CHECK(ndim() == 2);
-    return x * strides_[0] + y;
+    return x * ExprHandle(strides_[0]) + y;
   }
   ExprHandle Index(const ExprHandle& x, const ExprHandle& y, const ExprHandle& z) const {
     CHECK(ndim() == 3);
-    return x * strides_[0] + y * strides_[1] + z;
+    return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) + z;
   }
   ExprHandle Index(const ExprHandle& x, const ExprHandle& y, const ExprHandle& z, const ExprHandle& w) const {
     CHECK(ndim() == 4);
-    return x * strides_[0] + y * strides_[1] + z * strides_[2] + w;
+    return x * ExprHandle(strides_[0]) + y * ExprHandle(strides_[1]) + z * ExprHandle(strides_[2]) + w;
   }
   ExprHandle Index(const std::vector<ExprHandle>& indices) const {
     CHECK(ndim() == (int)indices.size());
@@ -77,7 +79,7 @@ class Buffer {
       if (i == indices.size() - 1) {
         index = indices[i];
       } else {
-        index = indices[i] * strides_[i];
+        index = indices[i] * ExprHandle(strides_[i]);
       }
       if (i == 0) {
         total_index = index;
@@ -90,10 +92,10 @@ class Buffer {
 
   ExprHandle LoadValue(const ExprHandle& index) const;
 
-  VarHandle data_;
+  const Var* data_;
   Dtype dtype_;
-  std::vector<ExprHandle> dims_;
-  std::vector<ExprHandle> strides_;
+  std::vector<const Expr*> dims_;
+  std::vector<const Expr*> strides_;
   // TODO: add strides
 };
 

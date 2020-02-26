@@ -13,7 +13,7 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
 Load::Load(const Buffer& buffer, const Expr* index, const Expr* mask)
     : Load(
           ChooseDtype(buffer.dtype(), index->dtype()),
-          buffer.data().node(),
+          buffer.data(),
           index,
           mask) {}
 
@@ -36,7 +36,7 @@ Store::Store(
     const Expr* index,
     const Expr* value,
     const Expr* mask)
-    : Store(buffer.data().node(), index, value, mask) {
+    : Store(buffer.data(), index, value, mask) {
   CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
   CHECK_EQ(buffer.dtype().scalar_type(), value->dtype().scalar_type());
 }
@@ -99,6 +99,39 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
       throw std::runtime_error("invalid op_type: " + std::to_string(op_type));
   }
 }
+
+std::vector<const Expr*> ExprHandleVectorToExprVector(const std::vector<ExprHandle>& v) {
+  std::vector<const Expr*> result(v.size());
+  for (size_t i = 0; i < v.size(); i++) {
+    result[i] = v[i].node();
+  }
+  return std::move(result);
+}
+
+std::vector<ExprHandle> ExprVectorToExprHandleVector(const std::vector<const Expr*>& v) {
+  std::vector<ExprHandle> result(v.size());
+  for (size_t i = 0; i < v.size(); i++) {
+    result[i] = ExprHandle(v[i]);
+  }
+  return std::move(result);
+}
+
+std::vector<const Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
+  std::vector<const Var*> result(v.size());
+  for (size_t i = 0; i < v.size(); i++) {
+    result[i] = v[i].node();
+  }
+  return std::move(result);
+}
+
+std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<const Var*>& v) {
+  std::vector<VarHandle> result(v.size());
+  for (size_t i = 0; i < v.size(); i++) {
+    result[i] = VarHandle(v[i]);
+  }
+  return std::move(result);
+}
+
 
 } // namespace tensorexpr
 } // namespace jit

@@ -52,15 +52,12 @@ class CodeGen::BufferArg {
       : var_(buffer.data()), dtype_(buffer.dtype()) {}
   BufferArg(Tensor* tensor)
       : var_(tensor->function()->func_var()),
-        dtype_(tensor->function()->body().dtype()) {}
+        dtype_(tensor->function()->body()->dtype()) {}
   BufferArg(const Function& func)
-      : var_(func.func_var()), dtype_(func.body().dtype()) {}
-  BufferArg(const VarHandle& var) : var_(var), dtype_(var.dtype()), isVar_(true) {}
+      : var_(func.func_var()), dtype_(func.body()->dtype()) {}
+  BufferArg(const VarHandle& var) : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 
-  const VarHandle& var() const {
-    return var_;
-  }
-  VarHandle& var() {
+  const Var* var() const {
     return var_;
   }
   Dtype dtype() const {
@@ -72,7 +69,7 @@ class CodeGen::BufferArg {
   }
 
  private:
-  VarHandle var_;
+  const Var* var_;
   Dtype dtype_;
   bool isVar_{false};
 };

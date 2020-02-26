@@ -12,7 +12,7 @@ template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
   for (int i = 0; i < t->function()->ndim(); i++) {
-    sizes.push_back(t->function()->dim(i).template AsNode<IntImm>()->value());
+    sizes.push_back(dynamic_cast<const IntImm*>(t->function()->dim(i))->value());
   }
   return sizes;
 }
@@ -59,7 +59,7 @@ class TensorExprKernel {
 
   template <typename T, typename T1>
   ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
-    return t->call(computeIndicesToBroadcast(axes, t->function()->dims()));
+    return t->call(computeIndicesToBroadcast(axes, ExprVectorToExprHandleVector(t->function()->dims())));
   }
 
   template <typename T, typename T1>
@@ -120,6 +120,13 @@ class TensorExprKernel {
       const std::string& name,
       const torch::jit::Value* v,
       std::function<ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)> inner_expr);
+
+  Tensor* ComputeConditionWithTwoOperand(
+      const std::string& name,
+      const torch::jit::Value* v,
+      std::function<
+          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>
+          inner_expr);
 
   Tensor* ComputeFourOperand(
       const std::string& name,

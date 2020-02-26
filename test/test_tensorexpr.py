@@ -583,6 +583,21 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.pow(torch.add(x, y), 2.0)
             return c
 
+        def test_sigmoid_backward(x, y):
+            x_2 = torch.mul(x, x)
+            c = torch.sigmoid(x_2)
+            torch.autograd.backward(c, y)
+            return c.detach()
+
+        def test_tanh_backward(x, y):
+            x_2 = torch.mul(x, x)
+            c = torch.tanh(x_2)
+            torch.autograd.backward(c, y)
+            return c.detach()
+
+        def test_type_as(x, y):
+            return x.type_as(torch.add(x, y))
+
         fns = {
             test_atan2,
             test_gt,
@@ -594,12 +609,15 @@ class TestTensorExprFuser(BaseTestClass):
             test_ne,
             test_div,
             test_eq,
-            #test_fmod,
+            test_fmod,
             test_sub,
-            # test_remainder,
+            test_remainder,
             test_pow,
+            # to fix the backward path, need script instead of trace
+            # test_sigmoid_backward,
+            # test_tanh_backward,
+            test_type_as,
         }
-
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
         for torch_fn in fns:
             for dev in device_options:
@@ -613,6 +631,9 @@ class TestTensorExprFuser(BaseTestClass):
                 np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=2e-3)
 
     def test_unary_ops(self):
+        def test_cast_float(x, y):
+            c = torch.ops.aten._cast_Float(torch.add(x, y))
+            return c
 
         def test_round(x, y):
             c = torch.round(torch.add(x, y))
@@ -799,8 +820,10 @@ class TestTensorExprFuser(BaseTestClass):
     def test_rand_like(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
         N = 1 << 16
+
         def run_rand_like(x, y):
             return torch.rand_like(torch.add(x, y))
+
         for device in devices:
             x = torch.rand(N, device=device)
             traced = torch.jit.trace(run_rand_like, (x, x), check_trace=False)
@@ -1036,6 +1059,86 @@ class TestTensorExprFuser(BaseTestClass):
             res = test(x, y, z)
             np.testing.assert_allclose(ref.cpu().numpy(), res.cpu().numpy())
             assert cuda.elapsed_value() == 1
+      
+            # A wild broadcast appears.
+            x = torch.rand(4, 8).cuda()
+            y = torch.rand(1, 8).cuda()
+            z = torch.rand(4, 1).cuda()
+            res = test(x, y, z)
+            xn, yn, zn = [t.cpu().numpy() for t in (x, y, z)]
+            np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
+            assert cuda.elapsed_value() == 1
+
+            # Mismatched shapes shouldn't reach codegen.
+            x = torch.rand(4, 8).cuda()
+            y = torch.rand(4, 8).cuda()
+            z = torch.rand(5, 8).cuda()
+            try:
+                res = test(x, y, z)
+            except RuntimeError as e:
+                assert "The size of tensor a (4) must match" in e.args[0]
+            assert cuda.elapsed_value() == 1
+
+            # Changing a static dimension fails guards.
+            # x, y, z = [torch.rand(4, 7).cuda() for _ in range(3)]
+            # xn, yn, zn = [t.cpu().numpy() for t in (x, y, z)]
+            # res = test(x, y, z)
+            # print(test.graph_for(x, y, z))
+            # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
+            # assert cuda.elapsed_value() == 1
+
+    @unittest.skip("guarding on static shapes is not working")
+    def test_guard_fails():
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y * z
+        cuda = CudaCodeGenExecuted()
+        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        assert cuda.elapsed_value() == 0
+        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        assert cuda.elapsed_value() == 1
+        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        assert cuda.elapsed_value() == 2
+        _ = test(*[torch.rand(7).cuda() for _ in range(3)])
+        print(test.graph_for(*[torch.rand(7).cuda() for _ in range(3)]))
+        assert cuda.elapsed_value() == 2
+
+    def test_bitwise_ops(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+        def run_and(x, y):
+            return x & (x & y)
+
+        def run_xor(x, y):
+            return x ^ (x ^ y)
+
+        def run_lshift(x, y):
+            return x & (x << y)
+
+        def run_rshift(x, y):
+            return x & (x >> y)
+
+        fns = {run_and, run_xor, run_lshift, run_rshift}
+
+        for device in devices:
+            for fn in fns:
+                a = torch.ones(128, dtype=torch.int32, device=device)
+                b = torch.zeros(128, dtype=torch.int32, device=device)
+                inp = torch.ones(128, dtype=torch.int32, device=device)
+                traced = torch.jit.trace(fn, (inp, inp)) 
+                x = traced(a, b)
+                y = fn(a, b)
+                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())      
+
+    def test_where(self):
+        def run_where(x, y):
+            return torch.where(torch.gt(x, y), x, y)
+    
+        a = torch.rand(1024, dtype=float)
+        b = torch.rand(1024, dtype=float)
+        traced = torch.jit.trace(run_where, (torch.zeros(1024), torch.zeros(1024)))
+        x = traced(a, b)
+        y = run_where(a, b)
+        np.testing.assert_allclose(x.numpy(), y.numpy())
 
 if __name__ == '__main__':
     unittest.main()

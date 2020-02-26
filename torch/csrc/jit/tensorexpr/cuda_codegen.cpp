@@ -3,6 +3,7 @@
 #include "ATen/CUDAGenerator.h"
 #include "c10/cuda/CUDAFunctions.h"
 #include "torch/csrc/jit/tensorexpr/cuda_random.h"
+#include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/execution_counter.h"
 
 #define DEBUG_PRINT 0
@@ -51,7 +52,9 @@ class ScopedVarName {
 };
 
 static int as_int(const Expr* expr) {
-  return dynamic_cast<const IntImm*>(expr)->value();
+  auto v = dynamic_cast<const IntImm*>(expr);
+  TORCH_CHECK(v, "Expression is not an integer constant");
+  return v->value();
 }
 
 static bool is_zero(const Expr* expr) {
@@ -346,7 +349,7 @@ void CudaCodeGen::Initialize() {
       os() << ", ";
     }
     const BufferArg& buffer_arg = buffer_args[i];
-    const Var* var = buffer_arg.var().node();
+    const Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
     os() << dtype.ToCppString() << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
@@ -419,7 +422,6 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   CHECK_EQ(args.size(), buffer_args().size());
 
   // TODO: move as much of this into the constructors.
-  // TODO: handle dynamic shapes.
   const std::vector<const Expr*>& gpu_block_extents = printer_->gpu_block_extents();
   const std::vector<const Expr*>& gpu_thread_extents = printer_->gpu_thread_extents();
   CHECK(gpu_block_extents.size() <= 3);
@@ -427,11 +429,17 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   std::vector<int> gpu_block_extents_v(3, 1);
   std::vector<int> gpu_thread_extents_v(3, 1);
   // evaluate all the block/thread extents into values
+  // TODO: eventually, codegen these calculations and make them part of the
+  // module.
   for (int i = 0; i < gpu_block_extents.size(); i++) {
-    gpu_block_extents_v[i] = as_int(gpu_block_extents[i]);
+    ExprEval<SimpleIREvaluator> eval(
+        ExprHandle(gpu_block_extents[i]), buffer_args());
+    gpu_block_extents_v[i] = eval.value<int>(args);
   }
   for (int i = 0; i < gpu_thread_extents.size(); i++) {
-    gpu_thread_extents_v[i] = as_int(gpu_thread_extents[i]);
+    ExprEval<SimpleIREvaluator> eval(
+        ExprHandle(gpu_thread_extents[i]), buffer_args());
+    gpu_thread_extents_v[i] = eval.value<int>(args);
   }
 
   // Bind the buffer addresses into arguments

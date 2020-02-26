@@ -35,6 +35,14 @@ static const Expr* mutate_binary_op(
       return new Max(lhs_new, rhs_new, option);
     case IRNodeType::kMin:
       return new Min(lhs_new, rhs_new, option);
+    case IRNodeType::kAnd:
+      return new And(lhs_new, rhs_new);
+    case IRNodeType::kXor:
+      return new Xor(lhs_new, rhs_new);
+    case IRNodeType::kLshift:
+      return new Lshift(lhs_new, rhs_new);
+    case IRNodeType::kRshift:
+      return new Rshift(lhs_new, rhs_new);
     default:
       LOG(FATAL) << "unsupported expr_type: " << static_cast<int>(expr_type);
       return nullptr;
@@ -58,6 +66,22 @@ const Expr* IRMutator::mutate(const Div* v) {
 }
 
 const Expr* IRMutator::mutate(const Mod* v) {
+  return mutate_binary_op(v, this);
+}
+
+const Expr* IRMutator::mutate(const And* v) {
+  return mutate_binary_op(v, this);
+}
+
+const Expr* IRMutator::mutate(const Xor* v) {
+  return mutate_binary_op(v, this);
+}
+
+const Expr* IRMutator::mutate(const Lshift* v) {
+  return mutate_binary_op(v, this);
+}
+
+const Expr* IRMutator::mutate(const Rshift* v) {
   return mutate_binary_op(v, this);
 }
 

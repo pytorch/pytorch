@@ -31,43 +31,43 @@ class Function : public KernelScopedObject {
  public:
   Function(
       const std::string& func_name,
-      const std::vector<ExprHandle>& dims,
-      const std::vector<VarHandle>& args,
-      const ExprHandle& body)
-      : func_var_(func_name, kHandle), dims_(dims), args_(args), body_(body) {}
+      const std::vector<const Expr*>& dims,
+      const std::vector<const Var*>& args,
+      const Expr* body)
+      : func_var_(VarHandle(func_name, kHandle).node()), dims_(dims), args_(args), body_(body) {}
 
   int ndim() const {
     return dims_.size();
   }
-  const ExprHandle& dim(int index) const {
+  const Expr* dim(int index) const {
     CHECK_GE(index, 0) << "index out of lower bound";
     CHECK_LT(index, ndim()) << "index out of upper bound";
     return dims_[index];
   }
-  const std::vector<ExprHandle>& dims() const {
+  const std::vector<const Expr*>& dims() const {
     return dims_;
   }
-  const VarHandle& arg(int index) const {
+  const Var* arg(int index) const {
     CHECK_GE(index, 0) << "index out of lower bound";
     CHECK_LT(index, ndim()) << "index out of upper bound";
     return args_[index];
   }
-  const std::vector<VarHandle>& args() const {
+  const std::vector<const Var*>& args() const {
     return args_;
   }
-  const ExprHandle& body() const {
+  const Expr* body() const {
     return body_;
   }
-  const VarHandle& func_var() const {
+  const Var* func_var() const {
     return func_var_;
   }
   Stmt* ElementStmt();
 
  private:
-  VarHandle func_var_;
-  std::vector<ExprHandle> dims_;
-  std::vector<VarHandle> args_;
-  ExprHandle body_;
+  const Var* func_var_;
+  std::vector<const Expr*> dims_;
+  std::vector<const Var*> args_;
+  const Expr* body_;
 };
 
 } // namespace tensorexpr

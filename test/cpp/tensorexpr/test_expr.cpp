@@ -324,8 +324,8 @@ void testCond01() {
   PaddedBuffer<float> a_v(N);
   Buffer a_buf("a", kFloat32, {N});
   VarHandle index = VarHandle("index", kInt32);
-  Stmt* assign_x2 = Store::make(a_buf.data(), index, cast<float>(index) * 2, 1);
-  Stmt* assign_x3 = Store::make(a_buf.data(), index, cast<float>(index) * 3, 1);
+  Stmt* assign_x2 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
+  Stmt* assign_x3 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);

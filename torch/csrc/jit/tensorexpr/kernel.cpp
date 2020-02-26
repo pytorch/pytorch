@@ -43,7 +43,7 @@ static Dtype texprType(const c10::optional<at::ScalarType>& st) {
 }
 
 static at::ScalarType tensorType(Tensor* t) {
-  auto const& stype = t->function()->body().dtype().scalar_type();
+  auto const& stype = t->function()->body()->dtype().scalar_type();
   if (stype == kInt32) {
     return at::ScalarType::Int;
   } else if (stype == kFloat32) {
@@ -174,7 +174,7 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(const torch::jit::Value* v)
   if (it == tensors_.end()) {
     return {1};
   }
-  return it->second->function()->dims();
+  return ExprVectorToExprHandleVector(it->second->function()->dims());
 }
 
 Tensor* TensorExprKernel::ComputeOneOperand(
@@ -243,6 +243,35 @@ Tensor* TensorExprKernel::ComputeTwoOperandWithAlpha(
       });
 }
 
+Tensor* TensorExprKernel::ComputeConditionWithTwoOperand(
+    const std::string& name,
+    const torch::jit::Value* v,
+    std::function<
+        ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>
+        inner_expr) {
+  auto const& n = v->node();
+  auto const& shape = broadcastShapes(
+      valueShape(n->inputs()[0]),
+      valueShape(n->inputs()[1]),
+      valueShape(n->inputs()[2]));
+  return Compute(
+      name,
+      c10::fmap<DimArg>(shape),
+      [this, v, inner_expr](const std::vector<VarHandle>& axes) {
+        auto const& n = v->node();
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(n->inputs()[1], axes),
+            tensorOrConstant(n->inputs()[2], axes),
+        };
+
+        promoteInputs(inputs);
+        // First expr is the condition, which we don't promote
+        inputs.emplace(inputs.begin(), tensorOrConstant(n->inputs()[0], axes));
+        ExprHandle compute = inner_expr(inputs[0], inputs[1], inputs[2]);
+        return demoteOutput(compute, n->output());
+      });
+}
+
 Tensor* TensorExprKernel::ComputeThreeOperand(
     const std::string& name,
     const torch::jit::Value* v,
@@ -307,6 +336,12 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
           });
     } break;
 
+    case aten::_cast_Float: {
+      return ComputeOneOperand("aten_cast_float", v, [](const ExprHandle& a) {
+        return cast<float>(a);
+      });
+    } break;
+
     case aten::sub: {
       return ComputeTwoOperandWithAlpha(
           "aten_sub", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
@@ -325,6 +360,34 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
       return ComputeTwoOperand(
           "aten_div", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
             return lhs / rhs;
+          });
+    } break;
+
+    case aten::__and__: {
+      return ComputeTwoOperand(
+          "aten_and", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs & rhs;
+          });
+    } break;
+
+    case aten::__xor__: {
+      return ComputeTwoOperand(
+          "aten_xor", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs ^ rhs;
+          });
+    } break;
+
+    case aten::__lshift__: {
+      return ComputeTwoOperand(
+          "aten_lshift", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs << rhs;
+          });
+    } break;
+
+    case aten::__rshift__: {
+      return ComputeTwoOperand(
+          "aten_rshift", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs >> rhs;
           });
     } break;
 
@@ -495,6 +558,13 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
           "aten_tan", v, [](const ExprHandle& a) { return tan(a); });
     } break;
 
+    case aten::type_as: {
+      return ComputeTwoOperand(
+          "aten_type_as", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return Cast::make(rhs.dtype(), lhs);
+    });
+    } break;
+
     case aten::rand_like: {
       return ComputeOneOperand(
           "aten_rand_like", v, [](const ExprHandle& a) {
@@ -573,7 +643,7 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
     case aten::remainder: {
       return ComputeTwoOperand(
           "aten_remainder", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return remainder(lhs, rhs);
+            return fmod((rhs + fmod(lhs, rhs)), rhs);
           });
 
     } break;
@@ -658,6 +728,15 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
       });
     } break;
 
+    case aten::where: {
+      return ComputeConditionWithTwoOperand(
+          "aten_where",
+          v,
+          [](const ExprHandle& a0, const ExprHandle& a1, const ExprHandle& a2) {
+            return ifThenElse(a0, a1, a2);
+          });
+    } break;
+
     case aten::frac: {
       return ComputeOneOperand(
           "aten_frac", v, [](const ExprHandle& a) { return a - floor(a); });
@@ -739,6 +818,20 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
           });
     }
 
+    case aten::_sigmoid_backward: {
+      return ComputeTwoOperand(
+          "aten_sigmoid_backward", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs * rhs * (ExprHandle(1.0f) - rhs);
+          });
+    }
+
+    case aten::_tanh_backward: {
+      return ComputeTwoOperand(
+          "aten_tanh_backward", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs * (ExprHandle(1.0f) - rhs * rhs);
+          });
+    }
+
     default: {
       throw std::runtime_error("Unhandled node kind");
     }
@@ -751,14 +844,14 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
   if (backend_type == BackendType::kCudaCodeGen) {
     for (int i = 0; i < tensor_outputs_.size(); i++) {
       Tensor* tensor = tensor_outputs_[i];
-      ExprHandle total_count = tensor->function()->dim(0);
+      ExprHandle total_count = ExprHandle(tensor->function()->dim(0));
       for (int i = 1; i < tensor->function()->ndim(); i++) {
-        total_count = total_count * tensor->function()->dim(i);
+        total_count = total_count * ExprHandle(tensor->function()->dim(i));
       }
       // Flatten the index for GPU kernels.
       // TODO: move this to fusing axis when it is ready.
       Tensor* new_out = Compute(
-          tensor->function()->func_var().name_hint() + "_flat",
+          tensor->function()->func_var()->name_hint() + "_flat",
           {total_count},
           [tensor](const VarHandle& index) -> ExprHandle {
             std::vector<ExprHandle> dims;
@@ -766,10 +859,10 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
             for (int i = tensor->function()->ndim() - 1; i >= 0; i--) {
               ExprHandle idx = value;
               if (i > 0) {
-                idx = Mod::make(value, tensor->function()->dim(i));
+                idx = Mod::make(value, ExprHandle(tensor->function()->dim(i)));
               }
               dims.push_back(idx);
-              value = value / tensor->function()->dim(i);
+              value = value / ExprHandle(tensor->function()->dim(i));
             }
             std::reverse(dims.begin(), dims.end());
             return tensor->call(dims);
@@ -788,20 +881,8 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
     for (int i = 0; i < tensor_outputs_.size(); i++) {
       tensor_outputs_[i]->ComputeInline();
 
-      // TODO: implement splitting of variable axes.  Until then, skip this
-      // optimization when axes are dynamic.
-      bool dynamicShapes = false;
-      for (auto const& dim : tensor_outputs_[i]->function()->dims()) {
-        if (!dim.AsNode<IntImm>()) {
-          dynamicShapes = true;
-          break;
-        }
-      }
-      if (dynamicShapes) {
-        continue;
-      }
       Tensor* tensor = tensor_outputs[i];
-      VarHandle index = tensor->function()->arg(0);
+      const Var* index = tensor->function()->arg(0);
       int loop_levels = GetTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
       loop_levels = (loop_levels > 0) ? loop_levels : kDefaultLoopLevels;
@@ -815,7 +896,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 	if (block_size < 0) {
 	  block_size = kDefaultBlockSize;
 	}
-	tensor->SplitWithMask(index, block_size, true, &outer, &inner);
+	tensor->SplitWithMask(VarHandle(index), block_size, true, &outer, &inner);
 	tensor->GPUExecConfig({outer}, {inner});
       } else if (loop_levels == 3) {
 	VarHandle outer;
@@ -827,7 +908,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
 	const int kDefaultBlockSize = 256;
 	block_count = (block_count > 0) ? block_count : kDefaultBlockCount;
 	block_size = (block_size > 0) ? block_size : kDefaultBlockSize;
-	tensor->SplitWithMask(index, block_count * block_size, true, &outer, &inner);
+	tensor->SplitWithMask(VarHandle(index), block_count * block_size, true, &outer, &inner);
 	tensor->SplitWithMask(inner, block_size, true, &inner_1, &inner_2);
 	tensor->GPUExecConfig({inner_1}, {inner_2});
       } else {
@@ -944,7 +1025,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
     // For discontiguous tensors, create a parameter to represent stride.
     if (!*contiguity[i]) {
       VarHandle v =
-          VarHandle{"stride_" + buffer.data().name_hint() + "_" + std::to_string(i),
+          VarHandle{"stride_" + buffer.data()->name_hint() + "_" + std::to_string(i),
               kInt32};
       strideArgs.emplace_back(n - i, v);
       stride = v;
@@ -1088,12 +1169,12 @@ void TensorExprKernel::run(Stack& stack) {
   std::vector<at::Tensor> outputs;
   for (auto& o : tensor_outputs_) {
     std::vector<int64_t> tensorSize;
-    for (auto const& dim : o->function()->dims()) {
-      auto it = varToSize.find(dim.node());
+    for (const Expr* dim : o->function()->dims()) {
+      auto it = varToSize.find(dim);
       if (it != varToSize.end()) {
         tensorSize.push_back(it->second);
       } else {
-        auto const& s = dim.AsNode<IntImm>();
+        const IntImm* s = dynamic_cast<const IntImm*>(dim);
         TORCH_CHECK(s);
         tensorSize.push_back(s->value());
       }

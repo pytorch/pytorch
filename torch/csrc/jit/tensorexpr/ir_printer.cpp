@@ -47,6 +47,22 @@ void IRPrinter::visit(const Div* v) {
   visitBinaryOp(v, "/", this);
 }
 
+void IRPrinter::visit(const And* v) {
+  visitBinaryOp(v, "&", this);
+}
+
+void IRPrinter::visit(const Xor* v) {
+  visitBinaryOp(v, "^", this);
+}
+
+void IRPrinter::visit(const Lshift* v) {
+  visitBinaryOp(v, "<<", this);
+}
+
+void IRPrinter::visit(const Rshift* v) {
+  visitBinaryOp(v, ">>", this);
+}
+
 void IRPrinter::visit(const Mod* v) {
   if (v->dtype() == kInt32) {
     visitBinaryOp(v, "%", this);
@@ -228,15 +244,15 @@ void IRPrinter::visit(const Cond* v) {
   Stmt* false_stmt = v->false_stmt();
   if (!true_stmt) {
     os() << "if(!" << *cond << ") {" << std::endl;
-    os() << false_stmt << std::endl;
+    os() << *false_stmt << std::endl;
     os() << "}";
   } else {
-    os() << "if(" << cond << ") {" << std::endl;
-    os() << true_stmt << std::endl;
+    os() << "if(" << *cond << ") {" << std::endl;
+    os() << *true_stmt << std::endl;
     os() << "}";
     if (false_stmt) {
       os() << " else {" << std::endl;
-      os() << false_stmt << std::endl;
+      os() << *false_stmt << std::endl;
       os() << "}";
     }
   }

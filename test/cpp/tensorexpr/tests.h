@@ -29,6 +29,7 @@ namespace jit {
   _(ExprSimple01)               \
   _(ExprLower01)                \
   _(ExprSimple02)               \
+  _(ExprSplitWithTailNone)      \
   _(ExprSplitWithMask01)        \
   _(ScheduleBroadcastAddBuffer) \
   _(ScheduleFunctionCall01)     \
@@ -117,7 +118,8 @@ namespace jit {
   _(CudaTestVectorAdd01)        \
   _(CudaTestVectorAdd02)        \
   _(CudaDynamicShape2D)         \
-  _(CudaTestRand01)
+  _(CudaTestRand01)             \
+  _(CudaDynamicShapeSplit)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_TENSOREXPR_TEST)

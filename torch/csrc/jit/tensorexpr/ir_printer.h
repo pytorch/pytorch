@@ -24,6 +24,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Mod* v) override;
   void visit(const Max* v) override;
   void visit(const Min* v) override;
+  void visit(const And* v) override;
+  void visit(const Xor* v) override;
+  void visit(const Lshift* v) override;
+  void visit(const Rshift* v) override;
   void visit(const CompareSelect* v) override;
   void visit(const IntImm* v) override;
   void visit(const FloatImm* v) override;

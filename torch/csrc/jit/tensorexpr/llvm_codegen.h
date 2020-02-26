@@ -40,7 +40,7 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   llvm::Type* int32Ty_;
   llvm::Type* floatTy_;
 
-  std::unordered_map<const Expr*, int> varToArg_;
+  std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
 
   std::vector<void*> args_;
@@ -70,6 +70,10 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   void visit(const Mod* v) override;
   void visit(const Max* v) override;
   void visit(const Min* v) override;
+  void visit(const And* v) override;
+  void visit(const Xor* v) override;
+  void visit(const Lshift* v) override;
+  void visit(const Rshift* v) override;
   void visit(const CompareSelect* v) override;
   void visit(const IntImm* v) override;
   void visit(const FloatImm* v) override;

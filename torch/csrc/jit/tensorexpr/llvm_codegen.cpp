@@ -83,7 +83,7 @@ LLVMCodeGen::LLVMCodeGen(
     } else {
       params.push_back(dtypeToLLVMPtr(arg.dtype()));
     }
-    varToArg_[arg.var().node()] = i;
+    varToArg_[arg.var()] = i;
   }
   llvm::FunctionType* fntype = llvm::FunctionType::get(retTy, params, false);
   fn_ = llvm::Function::Create(
@@ -195,8 +195,8 @@ static void* argToPtr(
   if (bufferArg.dtype() == kFloat32) {
     return callArg.floatPtr();
   }
-  LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var().name_hint()
-             << "dtype=" << bufferArg.var().dtype();
+  LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
+             << "dtype=" << bufferArg.var()->dtype();
   return nullptr;
 }
 
@@ -284,6 +284,66 @@ void LLVMCodeGen::visit(const Div* v) {
     value_ = irb_.CreateSDiv(lhs, rhs);
   } else {
     LOG(FATAL) << "Unhandled mismatch div arg types";
+  }
+}
+
+void LLVMCodeGen::visit(const And* v) {
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateAnd(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch And arg types";
+  }
+}
+
+void LLVMCodeGen::visit(const Xor* v) {
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateXor(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch And arg types";
+  }
+}
+
+void LLVMCodeGen::visit(const Lshift* v) {
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateShl(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch And arg types";
+  }
+}
+
+void LLVMCodeGen::visit(const Rshift* v) {
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateLShr(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch And arg types";
   }
 }
 
@@ -856,6 +916,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
       BINARY_MATH_CASE(kRemainder, "remainderf", floatTy_)
       BINARY_MATH_CASE(kAtan2, "atan2f", floatTy_)
       BINARY_MATH_CASE(kPow, "powf", floatTy_)
+      BINARY_MATH_CASE(kFmod, "fmodf", floatTy_)
 #undef BINARY_MATH_CASE
 
     default: {

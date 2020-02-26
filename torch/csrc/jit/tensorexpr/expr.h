@@ -104,12 +104,17 @@ class TORCH_API ExprHandle {
   ExprHandle operator-(const ExprHandle& other) const;
   ExprHandle operator*(const ExprHandle& other) const;
   ExprHandle operator/(const ExprHandle& other) const;
+  ExprHandle operator%(const ExprHandle& other) const;
   ExprHandle operator==(const ExprHandle& other) const;
   ExprHandle operator!=(const ExprHandle& other) const;
   ExprHandle operator>(const ExprHandle& other) const;
   ExprHandle operator>=(const ExprHandle& other) const;
   ExprHandle operator<(const ExprHandle& other) const;
   ExprHandle operator<=(const ExprHandle& other) const;
+  ExprHandle operator&(const ExprHandle& other) const;
+  ExprHandle operator^(const ExprHandle& other) const;
+  ExprHandle operator<<(const ExprHandle& other) const;
+  ExprHandle operator>>(const ExprHandle& other) const;
 
  private:
   Expr* base_expr_node_ = nullptr;
@@ -167,6 +172,7 @@ TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
 
 TORCH_API ExprHandle ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
+
 
 } // namespace tensorexpr
 } // namespace jit

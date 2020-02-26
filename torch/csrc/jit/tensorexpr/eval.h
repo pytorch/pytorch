@@ -109,15 +109,15 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   void bind(const BufferArg& buf, const CallArg& data) {
     if (buf.isVar()) {
       if (buf.dtype() == kInt32) {
-        eval_context_[buf.var().node()] = data.intData();
+        eval_context_[buf.var()] = data.intData();
       } else if (buf.dtype() == kFloat32) {
-        eval_context_[buf.var().node()] = data.floatData();
+        eval_context_[buf.var()] = data.floatData();
       } else {
-        LOG(FATAL) << "Unhandled dtype for argument " << buf.var().name_hint()
+        LOG(FATAL) << "Unhandled dtype for argument " << buf.var()->name_hint()
                    << ": " << buf.dtype();
       }
     } else {
-      buffer_mapping_[buf.var().node()] = data.data();
+      buffer_mapping_[buf.var()] = data.data();
     }
   }
 
@@ -211,6 +211,35 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     return Value(result_v);
   }
 
+  Value bitwise_binary_op(
+      const Value& lhs,
+      const Value& rhs,
+      IRNodeType op_type) {
+    std::vector<int> lhs_v = lhs.as_vec<int>();
+    std::vector<int> rhs_v = rhs.as_vec<int>();
+    std::vector<int> result_v(lhs_v.size());
+    for (size_t i = 0; i < lhs_v.size(); i++) {
+      switch (op_type) {
+        case IRNodeType::kAnd:
+          result_v[i] = lhs_v[i] & rhs_v[i];
+          break;
+        case IRNodeType::kXor:
+          result_v[i] = lhs_v[i] ^ rhs_v[i];
+          break;
+        case IRNodeType::kLshift:
+          result_v[i] = lhs_v[i] << rhs_v[i];
+          break;
+        case IRNodeType::kRshift:
+          result_v[i] = lhs_v[i] >> rhs_v[i];
+          break;
+        default:
+          // TODO: change to a proper error report
+          throw std::runtime_error("invalid operator type");
+      }
+    }
+    return Value(result_v);
+  }
+
   template <typename T, typename R>
   Value compare_select_op(
       const Value& lhs,
@@ -232,10 +261,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = (lhs_v[i] != rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kGT:
-          result_v[i] = (lhs_v[i] != rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
+          result_v[i] = (lhs_v[i] > rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kGE:
-          result_v[i] = (lhs_v[i] > rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
+          result_v[i] = (lhs_v[i] >= rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
           break;
         case CompareSelectOperation::kLT:
           result_v[i] = (lhs_v[i] < rhs_v[i]) ? ret_val1_v[i] : ret_val2_v[i];
@@ -259,6 +288,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     Value rhs_v = value_;
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     IRNodeType expr_type = v->expr_type();
+    if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kXor ||
+        expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kLshift) {
+      value_ = bitwise_binary_op(lhs_v, rhs_v, expr_type);
+      return;
+    }
     if (lhs_v.dtype().scalar_type() == kFloat32) {
       value_ = binary_op<float>(lhs_v, rhs_v, expr_type);
     } else if (lhs_v.dtype().scalar_type() == kInt32) {
@@ -653,7 +687,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
   Value value_;
   std::unordered_map<const Expr*, Value> eval_context_;
-  std::unordered_map<const Expr*, void*> buffer_mapping_;
+  std::unordered_map<const Var*, void*> buffer_mapping_;
   std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;
 };
@@ -697,7 +731,7 @@ class ExprEval {
       : dtype_(expr.dtype()) {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Buffer ret_buf("ret_val", dtype_, {1});
-    Stmt* store_stmt = Store::make(ret_buf.data(), 0, expr);
+    Stmt* store_stmt = Store::make(VarHandle(ret_buf.data()), 0, expr);
     buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }

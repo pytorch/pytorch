@@ -17,6 +17,10 @@ enum IRNodeType {
   kMod,
   kMax,
   kMin,
+  kAnd,
+  kLshift,
+  kRshift,
+  kXor,
   kCompareSelect,
 };
 
@@ -123,6 +127,42 @@ class Mod : public BinaryOpNode<Mod> {
       : BinaryOpNode(lhs, rhs, IRNodeType::kMod) {}
 };
 
+class And : public BinaryOpNode<And> {
+ public:
+  And(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
+    CHECK_EQ(lhs->dtype().scalar_type(), kInt32);
+    CHECK_EQ(lhs->dtype(), rhs->dtype());
+  }
+};
+
+class Xor : public BinaryOpNode<Xor> {
+ public:
+  Xor(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kXor) {
+    CHECK_EQ(lhs->dtype().scalar_type(), kInt32);
+    CHECK_EQ(lhs->dtype(), rhs->dtype());
+  }
+};
+
+class Lshift : public BinaryOpNode<Lshift> {
+ public:
+  Lshift(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kLshift) {
+    CHECK_EQ(lhs->dtype().scalar_type(), kInt32);
+    CHECK_EQ(lhs->dtype(), rhs->dtype());
+  }
+};
+
+class Rshift : public BinaryOpNode<Rshift> {
+ public:
+  Rshift(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kRshift) {
+    CHECK_EQ(lhs->dtype().scalar_type(), kInt32);
+    CHECK_EQ(lhs->dtype(), rhs->dtype());
+  }
+};
+
 class Max : public BinaryOpNode<Max> {
  private:
   bool propagate_nans_;
@@ -170,9 +210,9 @@ class IntImm : public ExprNode<IntImm> {
   static ExprHandle make(int value) {
     return ExprHandle(new IntImm(value));
   }
+  IntImm(int value) : ExprNodeBase(kInt32), value_(value) {}
 
  private:
-  IntImm(int value) : ExprNodeBase(kInt32), value_(value) {}
   int value_;
 };
 
@@ -1026,6 +1066,12 @@ class Cond : public StmtNode<Cond> {
   Stmt* true_stmt_;
   Stmt* false_stmt_;
 };
+
+TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(const std::vector<ExprHandle>&);
+TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(const std::vector<const Expr*>&);
+TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>&);
+TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<const Var*>&);
+
 
 } // namespace tensorexpr
 } // namespace jit
