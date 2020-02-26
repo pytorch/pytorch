@@ -792,7 +792,11 @@ Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
 Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    const TensorOptions& options_) {
+  // Explicitly reify dtype, so that arange doesn't decide
+  // to return us an int64_t tensor (which it is in its rights
+  // to do, since window_length is an integer.)
+  auto options = options_.dtype(options_.dtype());
   window_function_checks("bartlett_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);
@@ -818,7 +822,11 @@ Tensor blackman_window(int64_t window_length, const TensorOptions& options) {
 Tensor blackman_window(
     int64_t window_length,
     bool periodic,
-    const TensorOptions& options) {
+    const TensorOptions& options_) {
+  // Explicitly reify dtype, so that arange doesn't decide
+  // to return us an int64_t tensor (which it is in its rights
+  // to do, since window_length is an integer.)
+  auto options = options_.dtype(options_.dtype());
   window_function_checks("blackman_window", options, window_length);
   if (window_length == 1) {
     return native::ones({1}, options);
@@ -860,7 +868,11 @@ Tensor hamming_window(
     bool periodic,
     double alpha,
     double beta,
-    const TensorOptions& options) {
+    const TensorOptions& options_) {
+  // Explicitly reify dtype, so that arange doesn't decide
+  // to return us an int64_t tensor (which it is in its rights
+  // to do, since window_length is an integer.)
+  auto options = options_.dtype(options_.dtype());
   window_function_checks("hamming_window", options, window_length);
   if (window_length == 0) {
     return at::empty({0}, options);

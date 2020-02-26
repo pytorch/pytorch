@@ -6537,12 +6537,12 @@ class TestTorchDeviceType(TestCase):
         matrices = random_fullrank_matrix_distinct_singular_value(5, 256, 256).to(device)
         matrices_inverse = torch.inverse(matrices)
         self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                         torch.eye(5).to(device).expand_as(matrices))
+                         torch.eye(5, dtype=torch.float64).to(device).expand_as(matrices))
 
         matrices = random_fullrank_matrix_distinct_singular_value(3, 512, 512).to(device)
         matrices_inverse = torch.inverse(matrices)
         self.assertEqual(torch.matmul(matrices, matrices_inverse),
-                         torch.eye(3).to(device).expand_as(matrices))
+                         torch.eye(3, dtype=torch.float64).to(device).expand_as(matrices))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -7339,8 +7339,9 @@ class TestTorchDeviceType(TestCase):
             for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
                     res = torch_method(size, periodic=periodic, device=device)
+                    # NB: scipy always returns a float32 result
                     ref = torch.from_numpy(signal.get_window(name, size, fftbins=periodic))
-                    self.assertEqual(res, ref)
+                    self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
                 torch_method(3, layout=torch.sparse_coo)
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
@@ -11705,8 +11706,10 @@ class TestTorchDeviceType(TestCase):
                 window = None
             if expected_error is None:
                 result = x.stft(n_fft, hop_length, win_length, window, center=center)
+                # NB: librosa defaults to np.complex64 output, no matter what
+                # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
-                self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa')
+                self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa', exact_dtype=False)
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
@@ -14448,7 +14451,7 @@ class TestDevicePrecision(TestCase):
 # appropriate.
 class TestViewOps(TestCase):
     def assertEqual(self, *args, **kwargs):
-        kwargs.set_default('exact_dtype', True)
+        kwargs.setdefault('exact_dtype', True)
         # NB: Hard-code the super class due to instantiation
         TestCase.assertEqual(self, *args, **kwargs)
 
@@ -15299,7 +15302,8 @@ def generate_not_implemented_tests(cls):
 class TestTensorDeviceOps(TestCase):
     def assertEqual(self, *args, **kwargs):
         kwargs.setdefault('exact_dtype', True)
-        super(TestTensorDeviceOps, self).assertEqual(*args, **kwargs)
+        # NB: Hard-code the super class due to instantiation
+        TestCase.assertEqual(*args, **kwargs)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
         cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
