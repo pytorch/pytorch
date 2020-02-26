@@ -739,12 +739,12 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
 
 # TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
 @overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
     pass
 
