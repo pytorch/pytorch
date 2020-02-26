@@ -56,8 +56,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_pop_range", []() { popRange(); });
   m.def("_run_before_callbacks", runBeforeCallbacks);
 
-  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(m, "_RecordFunction")
-    .def(py::init<>());
+  py::class_<RecordFunction, std::shared_ptr<RecordFunction>>(
+      m, "_RecordFunction")
+      .def(py::init<>());
 
   py::class_<
       RecordFunctionAsync,
@@ -68,9 +69,16 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
           "before",
           [](RecordFunctionAsync& recordFunctionAsync, std::string name) {
             recordFunctionAsync.before(std::move(name));
-          })
-      .def("exit_scope", &RecordFunctionAsync::exitScope)
-      .def("end", &RecordFunctionAsync::end);
+          },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "exit_scope",
+          &RecordFunctionAsync::exitScope,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "end",
+          &RecordFunctionAsync::end,
+          py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }
