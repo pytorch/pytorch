@@ -24,17 +24,28 @@ CPU and CUDA)::
 
 There are some PyTorch functions that use CUDA functions that can be a source
 of non-determinism. One class of such CUDA functions are atomic operations,
-in particular :attr:`atomicAdd`, where the order of parallel additions to the
-same value is undetermined and, for floating-point variables, a source of
-variance in the result. PyTorch functions that use :attr:`atomicAdd` in the forward
-include :meth:`torch.Tensor.index_add_`, :meth:`torch.Tensor.scatter_add_`,
+in particular :attr:`atomicAdd`, which can lead to the order of additions being
+non-determnistic. Because floating-point addition is not perfectly associative
+for floating-point operands, :attr:`atomicAdd` with floating-point operands can
+introduce different floating-point rounding errors on each evaluation, which
+introduces a source of non-deterministic variance (aka noise) in the result.
+
+PyTorch functions that use :attr:`atomicAdd` in the forward kernels include
+:meth:`torch.Tensor.index_add_`, :meth:`torch.Tensor.scatter_add_`,
 :meth:`torch.bincount`.
 
-A number of operations have backwards that use :attr:`atomicAdd`, in particular
-:meth:`torch.nn.functional.embedding_bag`,
-:meth:`torch.nn.functional.ctc_loss` and many forms of pooling, padding, and sampling.
-There currently is no simple way of avoiding non-determinism in these functions.
+A number of operations have backwards kernels that use :attr:`atomicAdd`, in
+particular :meth:`torch.nn.functional.embedding_bag`,
+:meth:`torch.nn.functional.ctc_loss` and many forms of pooling, padding, and
+sampling.
 
+There is currently no simple way of avoiding non-determinism in these functions.
+
+In PyTorch version 1.4, :meth:`torch.nn.BCELoss` was found to operate
+non-deterministically when training (with backprop) on the CUDA backend. Whether
+this is due to the use of :attr:`atomicAdd` and whether non-determinism is
+injected in only the foward path or only the backward path is not currently
+known.
 
 CuDNN
 .....
@@ -45,7 +56,13 @@ When running on the CuDNN backend, two further options must be set::
 
 .. warning::
 
-    Deterministic mode can have a performance impact, depending on your model. This means that due to the deterministic nature of the model, the processing speed (i.e. processed batch items per second) can be lower than when the model is non-deterministic.
+    Deterministic operation may have a negative single-run performance impact,
+    depending on the composition of your model. Due to different underlying
+    operations, which may be slower, the processing speed (e.g. the number of
+    batches trained per second) may be lower than when the model functions
+    non-deterministically. However, even though single-run speed may be
+    slower, depending on your application determinism may save time by
+    facilitating experimentation, debugging, and anti-regression testing.
 
 Numpy
 .....
