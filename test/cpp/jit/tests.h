@@ -114,6 +114,7 @@ namespace jit {
   _(GPU_FusionComputeAt2)        \
   _(GPU_FusionComputeAt3)        \
   _(GPU_FusionDependency)        \
+  _(GPU_FusionTwoAdds)           \
   _(GPU_FusionParser)            \
 
 

@@ -140,8 +140,7 @@ struct TORCH_API DummyExpr : public Expr {
       : Expr(ExprType::BinaryOp) // Not terribly safe...
   {
     addOutput(_outlhs);
-    addOutput(_outrhs);
-    addInput(_lhs);
+    addOutput(_outrhs); addInput(_lhs);
     addInput(_rhs);
     this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
   }
@@ -216,6 +215,8 @@ void testGPU_FusionTopoSort() {
   TORCH_CHECK(fusion.origin(v4)->name() == 1);
   TORCH_CHECK(fusion.origin(v5)->name() == 2);
   TORCH_CHECK(fusion.origin(v6)->name() == 3);
+
+  fusion.print();
 }
 
 void testGPU_FusionTensor() {
@@ -712,6 +713,52 @@ void testGPU_FusionDependency() {
 
   dep_chain = DependencyCheck::getDependencyChain(f11, f2);
   TORCH_CHECK(dep_chain.empty());
+}
+
+void testGPU_FusionTwoAdds() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // This is the beginning of an example where two Adds are fused where their computation
+  // is unrolled and vectorized per thread.
+
+  /**** Tensor Storage       ****/
+
+  // All Tensors have TensorDomain Shapes of [16]
+  // T3 is notably the only intermediate that is not I/O
+  const auto T0  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T1  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T2  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T3  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T4  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+
+  fusion.addInput(T0);
+  fusion.addInput(T1);
+  fusion.addInput(T2);
+  fusion.addOutput(T4);
+
+  auto TV0 = new TensorView(T0);
+  auto TV1 = new TensorView(T1);
+  auto TV2 = new TensorView(T2);
+  auto TV3 = new TensorView(T3);
+  auto TV4 = new TensorView(T4);
+
+  /**** Tensor Expressions   ****/ 
+ 
+  // [x] -> [16/4=4, 4]
+  auto TV4_s1 = split(TV4, -1, 4);
+  // [x/4, 4] -> [16/4=4, 4/2=2, 2]
+  auto TV4_s2 = split(TV4_s1, -1, 2); 
+
+  // Compute T3 at inner loop of T4 but allow vectorization.
+  auto TV3_ca = TV3->computeAt(TV4_s2, 1);
+  
+  /**** Operator Expressions ****/ 
+
+  new BinaryOp(BinaryOpType::Add, TV3_ca, T0, T1);
+  new BinaryOp(BinaryOpType::Add, TV4_s2, TV3_ca, T2);
+
+  //fusion.print();
 }
 
 void testGPU_Fusion() {}
