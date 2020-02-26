@@ -408,6 +408,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return numel_;
   }
 
+  virtual int64_t element_size() const {
+    return static_cast<int64_t>(storage_.itemsize());
+  }
+
   bool unique_version() const {
     return version_counter_.unique();
   }
