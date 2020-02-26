@@ -3,7 +3,7 @@ import io
 import tempfile
 import unittest
 import sys
-from itertools import repeat
+from itertools import repeat, chain
 import os
 import gc
 from contextlib import contextmanager
@@ -25,7 +25,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -1977,6 +1977,373 @@ t1.start()
 t2.start()
 """])
 
+    def test_grad_scaling_builtins(self, device="cuda", dtype=torch.float):
+        inv_scale = torch.tensor([0.25], dtype=dtype, device=device)
+
+        found_inf = torch.tensor([0.0], dtype=dtype, device=device)
+        g = torch.tensor([4.0], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 0.0)
+        self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
+
+        found_inf.zero_()
+        g = torch.tensor([float('inf')], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 1.0)
+
+        found_inf.zero_()
+        g = torch.tensor([float('nan')], dtype=dtype, device=device)
+        torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
+        self.assertEqual(found_inf, 1.0)
+
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.tensor([4.0], dtype=dtype, device=device)
+        growth_tracker = torch.tensor([0], dtype=torch.int32, device=device)
+
+        found_inf.zero_()
+        # Simulates 2 consecutive unskipped iterations
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
+
+        # Simulates a skipped iteration
+        found_inf.fill_(1.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_device_as_key(self):
+        # Ensure that different instances of "device" objects that point to the same device
+        # are treated as identical keys by dicts.  GradScaler relies on this behavior, and may
+        # error otherwise in a way that's difficult to detect (a silent performance hit).
+        d = {}
+        dev0a = torch.device("cuda:0")
+        dev0b = torch.device("cuda:0")
+        dev1a = torch.device("cuda:1")
+        dev1b = torch.device("cuda:1")
+
+        self.assertTrue(hash(dev0a) == hash(dev0b))
+        self.assertTrue(hash(dev1a) == hash(dev1b))
+
+        d[dev0a] = "0a"
+        d[dev0b] = "0b"
+        self.assertTrue(len(d) == 1)
+        self.assertTrue(d[dev0a] == "0b")
+
+        d[dev1a] = "1a"
+        d[dev1b] = "1b"
+        self.assertTrue(len(d) == 2)
+        self.assertTrue(d[dev1a] == "1b")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_scale(self):
+        scaler = torch.cuda.amp.GradScaler(init_scale=2.)
+        t0 = torch.tensor([4.0], dtype=torch.float32, device="cuda:0")
+        t1 = torch.tensor([4.0], dtype=torch.float32, device="cuda:1")
+        # Create some nested iterables of tensors on different devices.
+        outputs = (t1.clone(), (t0.clone(), t1.clone()), [t0.clone(), (t1.clone(), t0.clone())])
+        outputs = scaler.scale(outputs)
+        self.assertTrue(outputs[0] == 8.0 and outputs[1][0] == 8.0 and outputs[1][1] == 8.0 and
+                        outputs[2][0] == 8.0 and outputs[2][1][0] == 8.0 and outputs[2][1][1] == 8.0)
+        self.assertTrue(scaler._scale.device == t1.device)
+
+    def test_grad_scaling_state_dict(self):
+        for lazy_init_scale in True, False:
+            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
+
+            # sets a random value for load_state_dict to overwrite
+            s1._init_growth_tracker = 7
+
+            if lazy_init_scale:
+                # Dummy scale() call to ensure the scale tensor is lazily initialized.
+                s1.scale(torch.tensor([4.0], dtype=torch.float32, device="cuda:0"))
+                self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
+
+            s1.load_state_dict(s0.state_dict())
+
+            self.assertEqual(s1.get_scale(), 3.)
+            self.assertEqual(s1.get_growth_factor(), 4.)
+            self.assertEqual(s1.get_backoff_factor(), .5)
+            self.assertEqual(s1.get_growth_interval(), 2)
+            self.assertEqual(s1._init_growth_tracker, 0)
+
+    def _create_scaling_models_optimizers(self, device="cuda"):
+        # Create a module+optimizer that will use scaling, and a control module+optimizer
+        # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
+        mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+        mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+            s.data.copy_(c.data)
+
+        opt_control = torch.optim.SGD(mod_control.parameters(), lr=1.0)
+        opt_scaling = torch.optim.SGD(mod_scaling.parameters(), lr=1.0)
+
+        return mod_control, mod_scaling, opt_control, opt_scaling
+
+    def _create_scaling_case(self, device="cuda", dtype=torch.float):
+        data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+                (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
+
+        loss_fn = torch.nn.MSELoss().cuda()
+
+        skip_iter = 2
+
+        return self._create_scaling_models_optimizers(device=device) + (data, loss_fn, skip_iter)
+
+    # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
+    def _run_scaling_case(self, run, unskipped, skipped):
+        # Ensure scaling can be disabled without changing user control flow.
+        for enabled in True, False:
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
+
+            # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
+            # so any potential errors with the growth factor handling will be magnified.
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
+            run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
+
+            # If scaling was enabled, the scale factor should have been multiplied by the growth factor
+            # len(data) - skipped times and the backoff factor "skipped" times.
+            if enabled:
+                net_growth = scaler.get_growth_factor()**unskipped if unskipped > 0 else 1.0
+                net_backoff = scaler.get_backoff_factor()**skipped if skipped > 0 else 1.0
+                self.assertTrue(scaler.get_scale() == (128. * net_growth * net_backoff))
+            else:
+                self.assertTrue(scaler.get_scale() == 1.0)
+
+            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+
+    def test_grad_scaling_clipping(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * scaler.get_scale())
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+
+        self._run_scaling_case(run, unskipped=3, skipped=1)
+
+    def test_grad_scaling_clipping_separate_unscale(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+
+        self._run_scaling_case(run, unskipped=3, skipped=1)
+
+    def test_grad_scaling_penalty(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                output = model(input)
+                loss = loss_fn(output, target)
+
+                if try_scaling_api:
+                    grad_params = torch.autograd.grad(scaler.scale(loss),
+                                                      model.parameters(), create_graph=True)
+                    inv_scale = 1. / scaler.get_scale()
+                    grad_params = [p * inv_scale for p in grad_params]
+                else:
+                    grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
+
+                grad_norm = 0
+                for grad in grad_params:
+                    grad_norm += grad.pow(2).sum()
+                grad_norm = grad_norm.sqrt()
+                loss = loss + grad_norm
+
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        model[1].weight.grad.data.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+
+        self._run_scaling_case(run, unskipped=3, skipped=1)
+
+    def test_grad_scaling_accumulation(self):
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            iters_to_accumulate = 2
+            for i, (input, target) in enumerate(data):
+                output = model(input)
+                loss = loss_fn(output, target)
+                loss = loss / iters_to_accumulate
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+                if (i + 1) % iters_to_accumulate == 0:
+                    if try_scaling_api:
+                        scaler.step(optimizer)
+                        scaler.update()
+                        optimizer.zero_grad()
+                    else:
+                        optimizer.step()
+                        optimizer.zero_grad()
+
+        self._run_scaling_case(run, unskipped=2, skipped=0)
+
+    def test_grad_scaling_multiple(self):
+        # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
+        # Some of the logic here cannot reuse the generic helper functions created for the 1-optimizer cases.
+        for enabled in True, False:
+            mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
+                self._create_scaling_case()
+            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
+                self._create_scaling_models_optimizers()
+
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
+                for i, (input, target) in enumerate(data):
+                    optimizer0.zero_grad()
+                    optimizer1.zero_grad()
+                    output0 = model0(input)
+                    output1 = model1(input)
+                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1, target)
+                    loss1 = loss_fn(0.6 * output0 - 0.4 * output1, target)
+
+                    if try_scaling_api:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
+                            model1[1].weight.grad.data.fill_(float('inf'))
+
+                        # As an additional stress test, separately unscale for one of the optimizers.
+                        scaler.unscale_(optimizer0)
+
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+                        scaler.update()
+                    else:
+                        loss0.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer0.step()
+                        if (not scaler.is_enabled()) or (i != skip_iter):
+                            optimizer1.step()
+
+            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
+            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
+
+            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
+            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
+                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
+
+            for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
+                            chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_grad_scaling_multigpu(self):
+        # Same as above, but runs some of the models on device 1.
+        # GradScaler should transparently handle losses and gradients on multiple devices.
+        # This test could be combined with the test above, but I think it makes sense to treat
+        # multi-GPU operations separately.
+        dev0 = torch.device("cuda:0")
+        dev1 = torch.device("cuda:1")
+
+        for enabled in True, False:
+            mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
+                self._create_scaling_case()
+            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
+                self._create_scaling_models_optimizers(device=dev1)
+
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
+
+            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
+                for i, (input, target) in enumerate(data):
+                    optimizer0.zero_grad()
+                    optimizer1.zero_grad()
+                    output0 = model0(input)
+                    output1 = model1(input.to(dev1))
+                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1.to(dev0), target)
+                    loss1 = loss_fn(0.6 * output0.to(dev1) - 0.4 * output1, target.to(dev1))
+
+                    if try_scaling_api:
+                        scaler.scale(loss0).backward(retain_graph=True)
+                        scaler.scale(loss1).backward()
+                        if i == skip_iter and scaler.is_enabled():
+                            model1[1].weight.grad.data.fill_(float('inf'))
+
+                        # As an additional stress test, separately unscale for one of the optimizers.
+                        scaler.unscale_(optimizer0)
+
+                        scaler.step(optimizer0)
+                        scaler.step(optimizer1)
+
+                        # Make sure the found_infs were collected properly across optimizers and devices.
+                        if scaler.is_enabled():
+                            self.assertTrue(len(scaler._found_inf_per_device(optimizer0)) == 1)
+                            self.assertTrue(len(scaler._found_inf_per_device(optimizer1)) == 1)
+                            self.assertTrue(scaler._found_inf_per_device(optimizer0)[dev0].item() == 0.)
+                            self.assertTrue(scaler._found_inf_per_device(optimizer1)[dev1].item() ==
+                                            float(i == skip_iter))
+
+                        scaler.update()
+                    else:
+                        loss0.backward(retain_graph=True)
+                        loss1.backward()
+                        optimizer0.step()
+                        if (not scaler.is_enabled()) or (i != skip_iter):
+                            optimizer1.step()
+
+            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
+            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
+
+            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
+            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
+                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
+
+            # Copy mod_control1 and mod_scaling1 back the device 0 for comparison
+            mod_control1.to(dev0)
+            mod_scaling1.to(dev0)
+
+            for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
+                            chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
+                self.assertTrue(torch.allclose(c, s, atol=1e-7))
+
     @skipIfRocm
     @unittest.skipIf(not PY3, "Barrier is unavailable before Python3")
     def test_cublas_multiple_threads_same_device(self):
@@ -2147,6 +2514,11 @@ t2.start()
         val, idx = x.max(0)
         self.assertEqual(val, 1)
         self.assertEqual(idx, x.shape[0] - 1)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_to_numpy(self):
+        self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
 
 if __name__ == '__main__':
     run_tests()
