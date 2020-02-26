@@ -99,7 +99,6 @@ libtorch_sources = [
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/irparser.cpp",
     "torch/csrc/jit/jit_log.cpp",
-    "torch/csrc/jit/netdef_converter.cpp",
     "torch/csrc/jit/register_c10_ops.cpp",
     "torch/csrc/jit/subgraph_matcher.cpp",
     "torch/csrc/jit/symbolic_script.cpp",

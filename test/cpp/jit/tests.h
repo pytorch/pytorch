@@ -42,7 +42,6 @@ namespace jit {
   _(MemoryDAG)                         \
   _(IRParser)                          \
   _(ConstantPooling)                   \
-  _(NetDefConverter)                   \
   _(THNNConv)                          \
   _(ATenNativeBatchNorm)               \
   _(NoneSchemaMatch)                   \
