@@ -2,8 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from ._overrides import has_torch_function, handle_torch_function
-from ._jit_internal import boolean_dispatch
-from typing import List
+from ._jit_internal import boolean_dispatch, List
 
 Tensor = torch.Tensor
 from torch import _VF
