@@ -316,7 +316,7 @@ class TestDdpWithRpc(TestCase):
             group_name="trainers_ddp",
         ) as process_group:
             if not isinstance(process_group, dist.ProcessGroup):
-                gLogger.error(
+                gLogger.warning(
                     f"The process group in the remote worker is of type {type(process_group)}"
                 )
             dist.barrier()
@@ -347,8 +347,8 @@ class TestDdpWithRpc(TestCase):
             group_name="trainers_ddp",
         ) as process_group:
             gTrainerProcessGroup[rank] = process_group
-            if isinstance(process_group, dist.ProcessGroup):
-                gLogger.error(
+            if not isinstance(process_group, dist.ProcessGroup):
+                gLogger.warning(
                     f"The process group in the trainer #{rank} is of type {type(process_group)}"
                 )
             dist.barrier()
@@ -433,8 +433,8 @@ class TestDdpWithRpc(TestCase):
             p.join()
 
     def create_trainers(self, ddp_mode: DdpMode):
-        if isinstance(self.process_group, dist.ProcessGroup):
-            gLogger.error(
+        if not isinstance(self.process_group, dist.ProcessGroup):
+            gLogger.warning(
                 f"The process group in the master process is of type {type(self.process_group)}"
             )
         # Wait for all trainers to get their own process group populated in
