@@ -760,8 +760,8 @@ struct PackedBidirectionalLayer
       const param_type& params,
       const bool& type_2,
       const int64_t& layer_num) const override {
-    auto fw_result = layer_(input, input_hidden.first, params.first, type_2);
-    auto rev_result = rev_layer_(input, input_hidden.second, params.second, type_2);
+    auto fw_result = layer_(input, input_hidden.first, params.first, type_2, layer_num);
+    auto rev_result = rev_layer_(input, input_hidden.second, params.second, type_2, layer_num);
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
