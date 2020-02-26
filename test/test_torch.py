@@ -10359,7 +10359,10 @@ class TestTorchDeviceType(TestCase):
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
 
-            if dt in {torch.half} and device == 'cpu':
+            if dt == torch.bfloat16 and device == 'cuda' and IS_WINDOWS:
+                # TODO: https://github.com/pytorch/pytorch/issues/33793
+                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+            elif dt == torch.half and device == 'cpu':
                 # fix once random is implemented for Half on CPU
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             else:
@@ -10449,7 +10452,10 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt in {torch.half} and device == "cpu":
+                if dt == torch.bfloat16 and device == 'cuda' and IS_WINDOWS:
+                    # TODO: https://github.com/pytorch/pytorch/issues/33793
+                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
+                elif dt in {torch.half} and device == "cpu":
                     # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
@@ -13967,9 +13973,9 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
-        # # TODO: https://github.com/pytorch/pytorch/issues/33793
-        # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-        #     return
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
 
         size = 2000
         alpha = 0.1
@@ -13996,9 +14002,9 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
-        # # TODO: https://github.com/pytorch/pytorch/issues/33793
-        # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-        #     return
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
 
         size = 2000
         alpha = 0.1
@@ -14036,9 +14042,9 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
-        # # TODO: https://github.com/pytorch/pytorch/issues/33793
-        # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-        #     return
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
 
         size = 2000
         alpha = 0.1
@@ -14063,9 +14069,9 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):
-        # # TODO: https://github.com/pytorch/pytorch/issues/33793
-        # if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
-        #     return
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
 
         size = 2000
         alpha = 0.1
