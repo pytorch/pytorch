@@ -4,12 +4,9 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
   TORCH_CHECK(
      !options.has_memory_format(),
-     "'memory_format' argument is incompatible with mkldnn tensor");
-  TORCH_CHECK(
-     !optional_memory_format.has_value(),
      "'memory_format' argument is incompatible with mkldnn tensor");
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
@@ -21,7 +18,7 @@ Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::option
 
 #else
 
-Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options) {
   AT_ERROR("empty_mkldnn: MKL-DNN build is disabled");
 }
 
