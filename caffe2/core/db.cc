@@ -131,7 +131,6 @@ class MiniDB : public DB {
         break;
       case WRITE:
         file_ = fopen(source.c_str(), "ab");
-        fseek(file_, 0, SEEK_END);
         break;
       case READ:
         file_ = fopen(source.c_str(), "rb");
