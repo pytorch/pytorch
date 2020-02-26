@@ -3760,7 +3760,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
         # convert ByteTensor attn_mask to float
         if attn_mask.dtype == torch.bool:
-            attn_mask = torch.zeros(attn_mask.size()).masked_fill(attn_mask, float('-inf'))
+            attn_mask = torch.zeros(attn_mask.size(),
+                                    device=attn_mask.device).masked_fill_(attn_mask, float('-inf'))
 
         if attn_mask.dim() == 2:
             attn_mask = attn_mask.unsqueeze(0)
