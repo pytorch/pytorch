@@ -491,6 +491,37 @@ class LOBPCG(object):
         C = (S^TBS) C E` to a standard eigenvalue problem :math: `(Ri^T
         S^TAS Ri) Z = Z E` where `C = Ri Z`.
 
+        .. note:: In the original Rayleight-Ritz procedure in
+          [DuerschEtal2018], the problem is formulated as follows::
+
+            SAS = S^T A S
+            SBS = S^T B S
+            D = (<diagonal matrix of SBS>) ** -1/2
+            R^T R = Cholesky(D SBS D)
+            Ri = D R^-1
+            solve Ri^T SAS Ri Z = Theta Z
+            C = Ri Z
+
+          To reduce the number of matrix products (denoted by empty
+          space between matrices), here we incorporate the diagonal
+          matrix D into Ri and introduce element-wise products
+          (denoted by symbol `*`) so that the Rayleight-Ritz procedure
+          becomes::
+
+            SAS = S^T A S
+            SBS = S^T B S
+            d = (<diagonal of SBS>) ** -1/2    # this is 1-d column vector
+            dd = d d^T                         # this is 2-d matrix
+            R^T R = Cholesky(dd * SBS)
+            Ri = R'^-1 * d                     # broadcasting
+            solve Ri^T SAS Ri Z = Theta Z
+            C = Ri Z
+
+          where `dd` is 2-d matrix that replaces matrix products `D M
+          D` with one element-wise product `M * dd`; and `d` replaces
+          matrix product `D M` with element-wise product `M *
+          d`. Also, creating the diagonal matrix `D` is avoided.
+
         Arguments:
         S (Tensor): the matrix basis for the search subspace, size is
                     :math:`(m, n)`.
@@ -498,22 +529,20 @@ class LOBPCG(object):
         Returns:
         Ri (tensor): upper-triangular transformation matrix of size
                      :math:`(n, n)`.
+
         """
         B = self.B
         mm = torch.matmul
         SBS = _utils.qform(B, S)
-        d1 = SBS.diagonal(0, -2, -1) ** -0.5
-        d = torch.zeros(d1.shape + (1, ),
-                        device=d1.device,
-                        dtype=d1.dtype)
-        d[:, 0] = d1
-        dd = mm(d, _utils.transpose(d))
-        d_ = mm(d, _utils.transpose(torch.ones_like(d)))
 
+        d1 = SBS.diagonal(0, -2, -1) ** -0.5
+        d = d1.reshape(d1.shape[0], 1)
+
+        dd = mm(d, _utils.transpose(d))
         R = torch.cholesky(dd * SBS, upper=True)
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
-        return Rinv * d_
+        return Rinv * d
 
     def _get_svqb(self,
                   U,     # Tensor
@@ -643,7 +672,8 @@ class LOBPCG(object):
                                     device=UBU.device,
                                     dtype=UBU.dtype)
                 R_norm = _utils.norm(R)
-                rerr = float(R_norm) / float(BU_norm * U_norm)
+                # https://github.com/pytorch/pytorch/issues/33810 workaround:
+                rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
                 vkey = 'ortho_UBUmI_rerr[{}, {}]'.format(i, j)
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
@@ -651,7 +681,7 @@ class LOBPCG(object):
             VBU = mm(_utils.transpose(V), BU)
             VBU_norm = _utils.norm(VBU)
             U_norm = _utils.norm(U)
-            rerr = float(VBU_norm) / float(BV_norm * U_norm)
+            rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
             vkey = 'ortho_VBU_rerr[{}]'.format(i)
             self.fvars[vkey] = rerr
             if rerr < tau_ortho:
