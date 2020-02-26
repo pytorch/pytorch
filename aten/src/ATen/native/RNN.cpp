@@ -513,7 +513,8 @@ struct Layer {
       const io_type& input,
       const hidden_type& input_hidden,
       const param_type& params,
-      const bool& type_2) const = 0;
+      const bool& type_2,
+      const int64_t& layer_num) const = 0;
 };
 
 template<typename hidden_type, typename cell_params>
@@ -543,7 +544,8 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const Tensor& inputs,
       const hidden_type& input_hidden,
       const cell_params& params,
-      const bool& type_2) const override {
+      const bool& type_2,
+      const int64_t& layer_num) const override {
     if (inputs.device().is_cpu()) {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
@@ -573,22 +575,25 @@ struct FullBidirectionalLayer
       const Tensor& input,
       const hidden_type& input_hidden,
       const param_type& params,
-      const bool& type_2) const override {
+      const bool& type_2,
+      const int64_t& layer_num) const override {
     std::vector<Tensor> step_inputs;
     if (input.device().is_cpu()) {
-      auto actual_input = input;
-      if(!type_2) {
-        std::cout << std::to_string(input.dim()) << "\n";
-        std::cout << std::to_string(input.size(input.dim() - 1)) << "\n";
-        std::cout << std::to_string(params.first.b_ih.size(params.first.b_ih.dim() - 1)) << "\n";
-        // at::print(std::cout, input, 80);
+      auto input_fwd = input;
+      auto input_bwd = input;
+      if(!type_2 && layer_num > 0) {
+        // Split the input {fwd, bwd} in order to apply RNN as Type-1.
+        // See pytorch/pytorch#4930
+        auto split_input = input.chunk(2, input.dim() - 1);
+        input_fwd = split_input[0];
+        input_bwd = split_input[1];
       }
-      auto input_w = params.first.linear_ih(input);
+      auto input_w = params.first.linear_ih(input_fwd);
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
       auto fw_output = at::stack(fw_result.outputs, 0);
-      input_w = params.second.linear_ih(input);
+      input_w = params.second.linear_ih(input_bwd);
       step_inputs = input_w.unbind(0);
       auto rev_step_inputs = reverse(std::move(step_inputs));
       auto rev_result =
@@ -631,7 +636,8 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const cell_params& params,
-      const bool& type_2) const override {
+      const bool& type_2,
+      const int64_t& layer_num) const override {
 
     std::vector<at::Tensor> step_outputs;
     std::vector<hidden_type> hiddens;
@@ -693,7 +699,8 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const cell_params& params,
-      const bool& type_2) const override {
+      const bool& type_2,
+      const int64_t& layer_num) const override {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
@@ -751,7 +758,8 @@ struct PackedBidirectionalLayer
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const param_type& params,
-      const bool& type_2) const override {
+      const bool& type_2,
+      const int64_t& layer_num) const override {
     auto fw_result = layer_(input, input_hidden.first, params.first, type_2);
     auto rev_result = rev_layer_(input, input_hidden.second, params.second, type_2);
     PackedSequence output{
@@ -794,7 +802,7 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
   auto weight_it = weights.begin();
   std::vector<hidden_type> final_hiddens;
   for (int64_t l = 0; l < num_layers; ++l) {
-    auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++), type_2);
+    auto layer_output = layer(layer_input, *(hidden_it++), *(weight_it++), type_2, l);
     final_hiddens.push_back(layer_output.final_hidden);
     layer_input = layer_output.outputs;
 
