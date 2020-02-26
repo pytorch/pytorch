@@ -500,22 +500,21 @@ class LOBPCG(object):
             D = (<diagonal matrix of SBS>) ** -1/2
             R^T R = Cholesky(D SBS D)
             Ri = D R^-1
-            solve Ri^T SAS Ri Z = Theta Z
+            solve symeig problem Ri^T SAS Ri Z = Theta Z
             C = Ri Z
 
           To reduce the number of matrix products (denoted by empty
-          space between matrices), here we incorporate the diagonal
-          matrix D into Ri and introduce element-wise products
-          (denoted by symbol `*`) so that the Rayleight-Ritz procedure
-          becomes::
+          space between matrices), here we introduce element-wise
+          products (denoted by symbol `*`) so that the Rayleight-Ritz
+          procedure becomes::
 
             SAS = S^T A S
             SBS = S^T B S
             d = (<diagonal of SBS>) ** -1/2    # this is 1-d column vector
             dd = d d^T                         # this is 2-d matrix
             R^T R = Cholesky(dd * SBS)
-            Ri = R'^-1 * d                     # broadcasting
-            solve Ri^T SAS Ri Z = Theta Z
+            Ri = R^-1 * d                      # broadcasting
+            solve symeig problem Ri^T SAS Ri Z = Theta Z
             C = Ri Z
 
           where `dd` is 2-d matrix that replaces matrix products `D M

@@ -13800,12 +13800,31 @@ class TestTorchDeviceType(TestCase):
         # Standard eigenvalue problem
         E1, V1 = torch.lobpcg(A1, X=X1, niter=niter)
         E2, V2 = scipy_lobpcg(A2, X2, maxiter=niter)
-        self.assertEqual(E1, torch.from_numpy(E2))
+
+        print()
+        print('std: E1=', E1)
+        print('std: E2=', E2)
+
+        eq_err = torch.norm((A1 @ V1 - V1 * E1), 2) / E1.max()
+        eq_err_scipy = (abs(A2 @ V2 - V2 * E2)**2).sum() ** 0.5 / E2.max()
+        self.assertLess(eq_err, 1e-4)        # std
+        self.assertLess(eq_err_scipy, 1e-4)  # std
+
+        self.assertEqual(E1, torch.from_numpy(E2.copy()))
 
         # Generalized eigenvalue problem
         E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter)
         E2, V2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter)
-        self.assertEqual(E1, torch.from_numpy(E2))
+
+        print('gen: E1=', E1)
+        print('gen: E2=', E2)
+
+        eq_err = torch.norm((A1 @ V1 - B1 @ V1 * E1), 2) / E1.max()
+        eq_err_scipy = (abs(A2 @ V2 - B2 @ V2 * E2)**2).sum() ** 0.5 / E2.max()
+        self.assertLess(eq_err, 1e-5)        # general
+        self.assertLess(eq_err_scipy, 1e-5)  # general
+
+        self.assertEqual(E1, torch.from_numpy(E2.copy()))
 
         # Timings
         elapsed_ortho = 0

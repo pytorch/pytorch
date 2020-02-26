@@ -65,7 +65,7 @@ def norm(A):
     """
     if A.is_cuda:
         # e.g. conj is not available in CUDA
-        return matmul(transpose(A), A).trace() ** 0.5
+        return (abs(A) ** 2).sum().sqrt()
     return A.norm(2, [-2, -1])
 
 
