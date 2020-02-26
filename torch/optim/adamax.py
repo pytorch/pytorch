@@ -69,10 +69,10 @@ class Adamax(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
 
                 # Update biased first moment estimate.
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
                 # Update the exponentially weighted infinity norm.
                 norm_buf = torch.cat([
                     exp_inf.mul_(beta2).unsqueeze(0),
@@ -83,6 +83,6 @@ class Adamax(Optimizer):
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction
 
-                p.data.addcdiv_(-clr, exp_avg, exp_inf)
+                p.data.addcdiv_(exp_avg, exp_inf, value=-clr)
 
         return loss
