@@ -6,7 +6,6 @@
 #include <c10/core/ScalarType.h>
 
 #include <torch/csrc/jit/fuser/common/type.h>
-#include <torch/csrc/jit/fuser/common/visitor.h>
 
 #include <cstdint>
 #include <unordered_map>
