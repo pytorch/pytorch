@@ -459,7 +459,7 @@ class TestList(JitTestCase):
 
         def fn(x):
             # type: (int)
-            return [i for i in range(x)]
+            return [i for i in range(x)]  # noqa: C416
 
         test_func(fn, (9,))
         test_func(fn, (0,))
