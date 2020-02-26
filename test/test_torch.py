@@ -13412,6 +13412,23 @@ class TestTorchDeviceType(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2, prec)
 
+    @dtypes(torch.float, torch.double)
+    def test_addmm_sizes(self, device, dtype):
+        for m in [0, 1, 25]:
+            for n in [0, 1, 10]:
+                for k in [0, 1, 8]:
+                    M = torch.randn(n, m, device=device, dtype=dtype)
+                    m1 = torch.randn(n, k, device=device, dtype=dtype)
+                    m2 = torch.randn(k, m, device=device, dtype=dtype)
+                    res1 = torch.addmm(M, m1, m2)
+                    res2 = torch.zeros(n, m, device=device, dtype=dtype)
+                    res2 += M
+                    for i in range(n):
+                        for j in range(m):
+                            for l in range(k):
+                                res2[i, j] += m1[i, l] * m2[l, j]
+                    self.assertEqual(res1, res2)
+
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_dot(self, device, dtype):
