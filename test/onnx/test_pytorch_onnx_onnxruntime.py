@@ -1085,6 +1085,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_random_dynamic_size(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
