@@ -469,7 +469,7 @@ struct Environment {
           {"all", std::make_shared<BuiltinFunction>(aten::all, at::nullopt)},
           {"divmod",
            std::make_shared<BuiltinFunction>(aten::divmod, at::nullopt)},
-          {"list", std::make_shared<BuiltinFunction>(aten::list, at::nullopt)},
+          {"list", SpecialFormValue::create(prim::list)},
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
@@ -2615,6 +2615,17 @@ struct to_ir {
           iterable_tree->addChild(apply.range(), method, iterable);
         }
         return iterable_tree;
+      }
+      case prim::list: {
+        // list(iter) desugars to [_elem for _elem in iter]
+        checkApplyNumInputs(apply, 1);
+        auto iter = apply.inputs()[0];
+        const std::string& elem_name = createTempName("$_elem");
+        auto ident =
+            Var::create(apply.range(), Ident::create(apply.range(), elem_name));
+        auto lc = ListComp::create(apply.range(), ident, ident, iter);
+        return std::make_shared<SimpleValue>(
+            emitListComprehension(lc, nullptr));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);

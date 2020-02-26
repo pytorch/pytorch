@@ -10032,6 +10032,12 @@ a")
             self.checkModule(M(), (inp, name))
             self.checkModule(M2(), (inp, name))
 
+    def test_list_keyword(self):
+        def foo():
+            return list([1, 2, 3]), list(("a", "b")), list(range(5)), list("abcdefg")  # noqa: C410
+
+        self.checkScript(foo, ())
+
     def test_custom_container_forward(self):
         class Inner(torch.nn.Module):
             def forward(self, x):
