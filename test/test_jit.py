@@ -5463,7 +5463,7 @@ def foo(x):
                 # type: (SomeClass) -> bool
                 return self.num == other.num
 
-        def fn():
+        def fn2():
             a = SomeClass()
             a_copy = a
             a += 20
@@ -5483,7 +5483,7 @@ def foo(x):
             assert d is d_copy
             return a, b, c, d
 
-        self.checkScript(fn, [])
+        self.checkScript(fn2, [])
 
     def test_nested_list_construct(self):
         def foo():
