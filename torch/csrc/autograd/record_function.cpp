@@ -207,13 +207,20 @@ RecordFunction::~RecordFunction() {
   }
 }
 
+void RecordFunction::runEndCallbacks() {
+  TORCH_INTERNAL_ASSERT(
+      initialized_,
+      "Cannot run end callbacks on an uninitialized RecordFunction.");
+  for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
+    if (!manager().is_callback_sampled[idx] || run_sampled_) {
+      manager().end_callbacks[idx](*this);
+    }
+  }
+}
+
 void RecordFunction::end() {
   if (initialized_) {
-    for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
-      if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
-      }
-    }
+    runEndCallbacks();
 
     TORCH_INTERNAL_ASSERT(
         (thread_local_func_ == this),
@@ -258,11 +265,7 @@ void RecordFunctionAsync::exitScope() {
 
 void RecordFunctionAsync::end() {
   if (initialized_) {
-    for (size_t idx = 0; idx < manager().end_callbacks.size(); ++idx) {
-      if (!manager().is_callback_sampled[idx] || run_sampled_) {
-        manager().end_callbacks[idx](*this);
-      }
-    }
+    runEndCallbacks();
     initialized_ = false;
   }
 }
@@ -280,8 +283,6 @@ void RecordFunctionAsync::setThreadId() {
 RecordFunctionAsync::~RecordFunctionAsync() {
   initialized_ = false;
 }
-
-
 
 } // namespace profiler
 } // namespace autograd

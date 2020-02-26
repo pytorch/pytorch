@@ -117,6 +117,9 @@ struct TORCH_API RecordFunction {
 
  protected:
   void processCallbacks();
+  // Runs the end callbacks that were pushed to the callback manager. Throws if
+  // the current RecordFunction is not initialized.
+  void runEndCallbacks();
 
   Node* fn_ = nullptr;
   StringView name_;
