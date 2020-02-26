@@ -140,7 +140,11 @@ static c10::optional<std::vector<Value*>> build_script_grad(
     Node* node,
     const ArrayRef<Value*>& grads) {
   auto graph = node->owningGraph();
-  auto compiled_graphs = gradientInfoForSchema(node->schema());
+  auto maybe_schema = node->maybeSchema();
+  if (!maybe_schema) {
+    return c10::nullopt;
+  }
+  auto compiled_graphs = gradientInfoForSchema(*maybe_schema);
   if (!compiled_graphs) {
     return c10::nullopt;
   }
