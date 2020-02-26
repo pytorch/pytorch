@@ -14,6 +14,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/Version.h>
 #include <ATen/core/ATenGeneral.h>
@@ -25,4 +26,3 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/UnsafeFromTH.h>
-#include <ATen/native/TensorIndexing.h>
