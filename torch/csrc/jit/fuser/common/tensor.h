@@ -207,25 +207,19 @@ struct TORCH_API TensorView : public Val {
 
   TensorView(Tensor* _tensor)
       : Val(ValType::TensorView, _tensor->getDataType().value())
-      , tensor_(_tensor)
-      , compute_at_view_(nullptr)
-      , compute_at_axis_(-1) {
+      , tensor_(_tensor) {
         copyDomain(_tensor->domain());
       }
 
   TensorView(Tensor* _tensor, TensorDomain* _domain)
       : Val(ValType::TensorView, _tensor->getDataType().value())
-      , tensor_(_tensor)
-      , compute_at_view_(nullptr)
-      , compute_at_axis_(-1) {
+      , tensor_(_tensor) {
         copyDomain(_domain);
       }
 
   TensorView(TensorDomain* _domain, DataType dtype)
       : Val(ValType::TensorView, dtype)
-      , tensor_(nullptr)
-      , compute_at_view_(nullptr)
-      , compute_at_axis_(-1) {
+      , tensor_(nullptr) {
         copyDomain(_domain);
   }
 
@@ -248,6 +242,9 @@ struct TORCH_API TensorView : public Val {
     );
   }
 
+  bool referencesTensor() const { return tensor_ == nullptr; }
+  bool hasComputeAt() const { return compute_at_view_ != nullptr; }
+
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
 
   int getComputeAtAxis() const noexcept { return compute_at_axis_; }
@@ -265,8 +262,8 @@ protected:
 private:
   Tensor* const tensor_;
   TensorDomain* domain_;
-  TensorView* compute_at_view_;
-  int compute_at_axis_;
+  TensorView* compute_at_view_ = nullptr;
+  int compute_at_axis_ = 0;
 
   void copyDomain(const TensorDomain* td){
     std::vector<IterDomain*> idv;

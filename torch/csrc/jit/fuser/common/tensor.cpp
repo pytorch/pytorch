@@ -316,7 +316,10 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   // Dep chain doesn't contain this, try to run on replay, as it may be merging
   // two independent loop nests of the same sizes.
-  return TransformReplay::replay(running_consumer, this, axis);
+  TransformReplay::replay(running_consumer, this, axis);
+  this->compute_at_view_ = running_consumer;
+  this->compute_at_axis_ = axis;
+  return this;
 }
 
 } // namespace fuser
