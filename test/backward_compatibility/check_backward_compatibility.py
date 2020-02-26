@@ -53,6 +53,10 @@ white_list = [
     ('prim::Constant', datetime.date(2020, 3, 1)),
     ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
     ('_aten::format', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::leaky_relu_backward.grad_input', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward.grad_input', datetime.date(2020, 3, 6)),
 ]
 
 
