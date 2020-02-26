@@ -62,7 +62,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, \
+    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     get_forward, get_forward_graph, get_module_method, \
     RUN_CUDA, RUN_CUDA_MULTI_GPU
@@ -247,16 +247,6 @@ def get_fn(file_name, script_path):
     spec.loader.exec_module(module)
     fn = module.fn
     return fn
-
-
-def get_execution_plan(graph_executor_state):
-    execution_plans = list(graph_executor_state.execution_plans.values())
-    num_plans = len(execution_plans)
-    if num_plans != 1:
-        raise RuntimeError('This test assumes this GraphExecutor should '
-                           'only have one execution plan, got: {}'.format(num_plans))
-    return execution_plans[0]
-
 
 def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
     if diff_graph_idx is None:
@@ -1473,7 +1463,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1509,9 +1498,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_trivial_nobias(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1519,6 +1507,9 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 super(TestModule, self).__init__()
                 self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
                 self.bn = torch.nn.BatchNorm2d(num_features=20)
+                # to make sure new bias is not zero
+                self.bn.eps = 0.0027
+                self.bn.bias = torch.nn.Parameter(torch.rand([20]))
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1546,9 +1537,8 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
 
         # Check that the transformation doesn't change numerics
         x = torch.rand(1, 1, 6, 6)
-        self.assertAlmostEqual(eager(x), scripted(x), delta=1e-5)
+        self.assertEqual(eager(x), scripted(x))
 
-    @_tmp_donotuse_dont_inline_everything
     def test_foldbn_in_submodule(self):
         # Test that we find Conv-BN patterns in submodules
         class SubModule(torch.nn.Module):
@@ -1571,14 +1561,53 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                 x = self.sub(x)
                 return x
 
-        m = torch.jit.script(TestModule())
-        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+        eager = TestModule()
+        scripted = torch.jit.script(eager)
+        eager.eval()
+        scripted.eval()
 
-        m = wrap_cpp_module(torch._C._jit_pass_fold_convbn(m._c))
+        FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        scripted = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
 
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 1, exactly=True) \
-            .run(str(get_forward_graph(m.sub._c)))
+            .run(str(get_forward_graph(scripted.sub._c)))
+
+        x = torch.rand(1, 1, 10, 10)
+        self.assertEqual(eager(x), scripted(x))
+
+    def test_foldbn_shared_classtype(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, bias=False):
+                super(TestModule, self).__init__()
+                self.conv1 = torch.nn.Conv2d(5, 5, 3, bias=bias)
+                self.bn1 = torch.nn.BatchNorm2d(num_features=5)
+                self.bn1.running_mean.fill_(-0.2)
+                self.bn1.bias = torch.nn.Parameter(torch.rand([5]))
+                # to make sure new bias is not zero
+                self.bn1.eps = 0.0023
+                self.conv2 = torch.nn.Conv2d(5, 5, 3, bias=bias)
+                self.bn2 = torch.nn.BatchNorm2d(num_features=5)
+                self.bn2.eps = 0.0029
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.bn1(x)
+                x = self.relu(x)
+                x = self.conv2(x)
+                x = self.bn2(x)
+                x = self.relu(x)
+                return x
+        for bias in [True, False]:
+            eager = TestModule(bias).eval()
+            scripted = torch.jit.script(eager).copy()
+            torch._C._jit_pass_dedup_module_uses(scripted._c)
+
+            folded = wrap_cpp_module(torch._C._jit_pass_fold_convbn(scripted._c))
+            x = torch.rand(1, 5, 6, 6)
+            self.assertEqual(eager(x), scripted(x))
 
     def test_fuse_linear(self):
         input_strs = ["""
@@ -1973,7 +2002,7 @@ graph(%Ra, %Rb):
 
         trace_graph, _ = torch.jit._get_trace_graph(fn, (x,), _force_outplace=True)
         self.run_pass('dce', trace_graph)
-        ops = [n for n in trace_graph.nodes()]
+        ops = list(trace_graph.nodes())
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -3808,6 +3837,14 @@ graph(%Ra, %Rb):
                 warnings.warn("x is less than 2")
             return x
 
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if bool(x < 2):
+                    warnings.warn("x is less than 2")
+                return x
+
+
+        scripted_mod = torch.jit.script(M())
         scripted_fn = torch.jit.script(fn)
 
         with warnings.catch_warnings(record=True) as warns:
@@ -3816,7 +3853,12 @@ graph(%Ra, %Rb):
         with warnings.catch_warnings(record=True) as script_warns:
             scripted_fn(torch.ones(1))
 
+        with warnings.catch_warnings(record=True) as script_mod_warns:
+            scripted_mod(torch.ones(1))
+
         self.assertEqual(str(warns[0]), str(script_warns[0]))
+        self.assertEqual(len(script_mod_warns), 1)
+        self.assertEqual(str(warns[0].message), str(script_mod_warns[0].message))
 
     def test_no_erroneous_warnings(self):
         import warnings
@@ -3889,23 +3931,23 @@ graph(%Ra, %Rb):
         slstm(*inputs).sum().backward()
         global fw_graph
         fw_graph = slstm.graph_for(*inputs)
-        nodes = [n for n in fw_graph.nodes()]
+        nodes = list(fw_graph.nodes())
         tested_blocks = False
         for node in nodes:
-            for output in [o for o in node.outputs()]:
+            for output in node.outputs():
                 self.assertTrue(hasattr(output, 'type'))
                 self.assertTrue(output.type() is not None)
-            for input in [i for i in node.inputs()]:
+            for input in node.inputs():
                 self.assertTrue(hasattr(input, 'type'))
                 self.assertTrue(input.type() is not None)
-            for block in [b for b in node.blocks()]:
+            for block in node.blocks():
                 tested_blocks = True
                 self.assertTrue(hasattr(block, 'inputs'))
                 self.assertTrue(hasattr(block, 'outputs'))
-                for output in [o for o in block.outputs()]:
+                for output in block.outputs():
                     self.assertTrue(hasattr(output, 'type'))
                     self.assertTrue(output.type() is not None)
-                for input in [i for i in block.inputs()]:
+                for input in block.inputs():
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
@@ -4014,6 +4056,39 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+    def test_inlined_graph(self):
+        """
+        Check that the `inlined_graph` property correctly returns an inlined
+        graph, both through function calls and method calls.
+        """
+        @torch.jit.script
+        def foo(x):
+            return torch.add(x, x)
+
+        class MyNestedMod(torch.nn.Module):
+            def __init__(self):
+                super(MyNestedMod, self).__init__()
+
+            def forward(self, x):
+                return torch.sub(x, x)
+
+
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.nested = MyNestedMod()
+
+            def forward(self, x):
+                x = self.nested(x)  # sub
+                x = foo(x)  # add
+                return torch.mul(x, x)
+
+        m = torch.jit.script(MyMod())
+        FileCheck().check("aten::sub") \
+            .check("aten::add") \
+            .check("aten::mul") \
+            .run(m.inlined_graph)
+
     def test_oneline_func(self):
         def fn(x): return x  # noqa: E704
 
@@ -5260,6 +5335,88 @@ def foo(x):
             x, y = z
             return y[0][1]
         self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
+
+    def test_nested_aug_assign(self):
+        @torch.jit.script
+        class SomeClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __iadd__(self, x):
+                # type: (int)
+                self.num += x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        @torch.jit.script
+        class SomeOutOfPlaceClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __add__(self, x):
+                # type: (int)
+                self.num = x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        class Child(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 2
+                self.o = SomeClass()
+                self.oop = SomeOutOfPlaceClass()
+                self.list = [1, 2, 3]
+
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child = Child()
+
+            def forward(self):
+                self.child.x += 1
+                self.child.o += 5
+                self.child.oop += 5
+                some_list = [1, 2]
+                self.child.list += some_list
+                self.child.list *= 2
+                return self.child.x, self.child.o, self.child.list, self.child.oop
+
+        a = A()
+        sa = torch.jit.script(A())
+        eager_result = a()
+        script_result = sa()
+        self.assertEqual(eager_result, script_result)
+        self.assertEqual(a.child.x, sa.child.x)
+        self.assertEqual(a.child.o, sa.child.o)
+        self.assertEqual(a.child.list, sa.child.list)
+
+        @torch.jit.script
+        class SomeNonAddableClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        # with self.assertRaisesRegex(RuntimeError, "")
+        class A(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = SomeNonAddableClass()
+
+            def forward(self):
+                self.x += SomeNonAddableClass()
+                return self.x
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
+            torch.jit.script(A())
 
     def test_nested_list_construct(self):
         def foo():
@@ -9980,7 +10137,7 @@ a")
             self.assertEqual(o, v)
 
             with self.assertRaisesRegex(Exception, "object is not iterable"):
-                print([val for val in m])
+                print(list(m))
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
@@ -10813,30 +10970,32 @@ a")
             bar()
 
     def test_tuples(self):
-        def foo(i):
-            a = (i + 4, i * 2)
-            c = a
-            # some nonsense with if-statements and loops to check
-            # that tuple lowering doesn't fail
-            if True:
-                c = (i * 9, i + 1)
-            t0, t1 = c
-            while False:
-                t0, t1 = c
-                c = (t1, t0)
-            x = (1,)
-            y = 1,
-            return t0, x, y
-
-        v = torch.rand(10, 3)
-        self.checkScript(foo, (v,))
-
-        with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
-            @torch.jit.script
-            def mixtypes(x):
-                a = (x, x)
+        # TODO: jitter issue.
+        with torch.jit._disable_emit_hooks():  # TODO: Python print broadcasting list
+            def foo(i):
+                a = (i + 4, i * 2)
+                c = a
+                # some nonsense with if-statements and loops to check
+                # that tuple lowering doesn't fail
                 if True:
-                    a = 4
+                    c = (i * 9, i + 1)
+                t0, t1 = c
+                while False:
+                    t0, t1 = c
+                    c = (t1, t0)
+                x = (1,)
+                y = 1,
+                return t0, x, y
+
+            v = torch.rand(10, 3)
+            self.checkScript(foo, (v,))
+
+            with self.assertRaisesRegex(RuntimeError, r"Variable 'a' previously has type Tuple"):
+                @torch.jit.script
+                def mixtypes(x):
+                    a = (x, x)
+                    if True:
+                        a = 4
 
     def test_if_tuple_sizes(self):
         with self.assertRaisesRegex(RuntimeError, "Type mismatch"):
@@ -12722,7 +12881,7 @@ a")
         self.assertEqual(torch.jit.script(mod)(torch.tensor(.5)), [])
 
         def bad_type_annotation():
-            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])
+            out = torch.jit.annotate(int, [x for x in [1, 2, 3]])  # noqa: C416
             return out
 
         with self.assertRaisesRegex(Exception, "Expected list type annotation"):

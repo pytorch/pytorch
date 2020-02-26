@@ -15,8 +15,6 @@
 #include <initializer_list>
 #include <utility>
 
-using at::DimnameList;
-
 namespace torch {
 
 /// NOTE: Currently `torch::tensor(...)` doesn't support mixed data types

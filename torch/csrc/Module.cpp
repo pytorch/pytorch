@@ -450,6 +450,12 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
+#ifdef __HIP_PLATFORM_HCC__
+  if (arg == Py_False) {
+    TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
+    arg = Py_True;
+  }
+#endif
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -731,7 +737,7 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#ifdef USE_CUDNN
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;

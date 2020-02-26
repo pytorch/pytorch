@@ -572,7 +572,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (py::isinstance<ScriptClass>(obj)) {
     auto script_class = py::cast<ScriptClass>(obj);
     return std::make_shared<PythonClassValue>(
-        script_class.class_type_.type_, obj);
+        script_class.class_type_.type_->expect<ClassType>(), obj);
   }
 
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);
