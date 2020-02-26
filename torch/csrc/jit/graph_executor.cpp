@@ -37,7 +37,6 @@
 #include <torch/csrc/jit/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/cuda_fuser/interface.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -730,10 +729,6 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
 
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
-
-  if (getCudaFusionGroupOptimizationPassMode()) {
-    CudaFuseGraph(graph);
-  }
 
   FuseGraph(graph);
 

@@ -1,8 +1,9 @@
-#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/pass_manager.h>
 #include <torch/csrc/jit/fuser/interface.h>
 #include <torch/csrc/jit/operator.h>
 #include <torch/csrc/jit/passes/alias_analysis.h>
@@ -184,7 +185,9 @@ struct GraphFuser {
     if ((*device).is_cpu()) {
       return false;
     } else if ((*device).is_cuda()) {
-      return canFuseOnGPU();
+      // We want to introduce minimal knobs exposed to user;
+      // turn on/off CUDA fuser through custom pass registration.
+      return true;
     }
     throw std::runtime_error("Unknown device");
   }
@@ -1134,9 +1137,9 @@ struct GraphFuser {
     replaceIntermediateBroadcastingChunks();
 
     // Fuse starting chunks into the group.
-    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-      it = scanNodeForChunks(*it);
-    }
+    //for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+      //it = scanNodeForChunks(*it);
+    //}
 
     // Remove outputs that have been added only because we need their size
     for (Node* n : block_->nodes()) {
@@ -1214,6 +1217,14 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   EliminateDeadCode(graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+}
+
+void registerCudaFuseGraph() {
+  static bool not_registered = true;
+  if (not_registered) {
+    RegisterPostFusionPass pass(CudaFuseGraph);
+    not_registered = false;
+  }
 }
 
 } // namespace jit

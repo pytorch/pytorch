@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/autodiff.h>
 #include <torch/csrc/jit/export.h>
 #include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/cuda_fuser/interface.h>
 #include <torch/csrc/jit/fuser/kernel_cache.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/import.h>
@@ -21,6 +20,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -341,19 +341,7 @@ void initJITBindings(PyObject* module) {
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
       .def(
-          "_jit_set_cuda_fusion_group_executor",
-          [](bool pass_flag) {
-            bool oldState = getCudaFusionGroupExecutorMode();
-            getCudaFusionGroupExecutorMode() = pass_flag;
-            return oldState;
-          })
-      .def(
-          "_jit_set_cuda_fusion_group_pass",
-          [](bool pass_flag) {
-            bool oldState = getCudaFusionGroupOptimizationPassMode();
-            getCudaFusionGroupOptimizationPassMode() = pass_flag;
-            return oldState;
-          })
+          "_jit_register_cuda_fuser", &registerCudaFuseGraph)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
