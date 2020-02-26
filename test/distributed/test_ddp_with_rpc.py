@@ -8,10 +8,7 @@ from typing import Callable, List, NamedTuple
 import torch.distributed.autograd as dist_autograd
 from torch.distributed import rpc
 from torch.nn.parallel import DistributedDataParallel
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
+from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import optim
 import torch.distributed.distributed_c10d as dist_c10d
@@ -207,10 +204,9 @@ class ProcessGroupContext:
 
     def __enter__(self) -> dist.ProcessGroup:
         gLogger.info(
-            f"Initing process group [{self.group_name}] by {self.name} with ranks {self.ranks}",
+            f"Initing process group [{self.group_name}] by {self.name} with ranks {self.ranks}"
         )
-        self.group = dist_c10d.new_group(ranks=self.ranks,)
-        gLogger.info(f"{type(self.group)}")
+        self.group = dist_c10d.new_group(ranks=self.ranks)
         return self.group
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -219,8 +215,7 @@ class ProcessGroupContext:
         )
         if exc_type is not None:
             raise exc_value
-        # Don't destroy it because it's a synchronous point among all processes.
-        # dist.destroy_process_group(self.group)
+        dist.destroy_process_group(self.group)
 
 
 class Trainer:
@@ -266,7 +261,7 @@ class Trainer:
         def optimize_remote_parameters():
             gLogger.info(f"Optimizing the remote parameters.")
             dist_optim = DistributedOptimizer(
-                optim.SGD, [self.remote_em_rref, self.remote_net_rref], lr=0.05,
+                optim.SGD, [self.remote_em_rref, self.remote_net_rref], lr=0.05
             )
             dist_optim.step()
 
@@ -315,19 +310,17 @@ class TestDdpWithRpc(TestCase):
             rank=cls.REMOTE_WORKER_RANK,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
-        ):
-            with ProcessGroupContext(
-                cls.REMOTE_WORKER_NAME,
-                ranks=cls.DDP_TRAINER_RANKS,
-                group_name="trainers_ddp",
-            ) as process_group:
-                if isinstance(process_group, dist.ProcessGroup):
-                    process_group.barrier().wait()
-                else:
-                    gLogger.error(
-                        f"The process group in the remote worker is of type {type(process_group)}"
-                    )
-                gLogger.info(f"The remote worker is running.")
+        ), ProcessGroupContext(
+            cls.REMOTE_WORKER_NAME,
+            ranks=cls.DDP_TRAINER_RANKS,
+            group_name="trainers_ddp",
+        ) as process_group:
+            if not isinstance(process_group, dist.ProcessGroup):
+                gLogger.error(
+                    f"The process group in the remote worker is of type {type(process_group)}"
+                )
+            dist.barrier()
+            gLogger.info(f"The remote worker is running.")
 
         gLogger.info(f"Exiting remote worker.")
         # exit to avoid run teardown() for fork processes
@@ -335,7 +328,7 @@ class TestDdpWithRpc(TestCase):
 
     def spawn_remote_worker(self):
         remote_worker_process = multiprocessing.Process(
-            target=self._remote_worker_process, name=self.REMOTE_WORKER_NAME,
+            target=self._remote_worker_process, name=self.REMOTE_WORKER_NAME
         )
         remote_worker_process.start()
         self.processes.append(remote_worker_process)
@@ -348,20 +341,18 @@ class TestDdpWithRpc(TestCase):
             rank=rank,
             world_size=WORLD_SIZE,
             group_name="trainers/remote RPC",
-        ):
-            with ProcessGroupContext(
-                name=cls.TRAINER_NAME_TEMPLATE.format(rank),
-                ranks=cls.DDP_TRAINER_RANKS,
-                group_name="trainers_ddp",
-            ) as process_group:
-                gTrainerProcessGroup[rank] = process_group
-                if isinstance(process_group, dist.ProcessGroup):
-                    process_group.barrier().wait()
-                else:
-                    gLogger.error(
-                        f"The process group in the trainer #{rank} is of type {type(process_group)}"
-                    )
-                gLogger.info(f"Trainer #{rank} is running.")
+        ), ProcessGroupContext(
+            name=cls.TRAINER_NAME_TEMPLATE.format(rank),
+            ranks=cls.DDP_TRAINER_RANKS,
+            group_name="trainers_ddp",
+        ) as process_group:
+            gTrainerProcessGroup[rank] = process_group
+            if isinstance(process_group, dist.ProcessGroup):
+                gLogger.error(
+                    f"The process group in the trainer #{rank} is of type {type(process_group)}"
+                )
+            dist.barrier()
+            gLogger.info(f"Trainer #{rank} is running.")
 
         gLogger.info(f"Exiting trainer #{rank}...")
         # exit to avoid run teardown() for fork processes
@@ -442,14 +433,13 @@ class TestDdpWithRpc(TestCase):
             p.join()
 
     def create_trainers(self, ddp_mode: DdpMode):
-        # Wait for all trainers to get their own process group populated in
-        # 'gTrainerProcessGroup'
         if isinstance(self.process_group, dist.ProcessGroup):
-            self.process_group.barrier().wait()
-        else:
             gLogger.error(
                 f"The process group in the master process is of type {type(self.process_group)}"
             )
+        # Wait for all trainers to get their own process group populated in
+        # 'gTrainerProcessGroup'
+        dist.barrier()
         for rank, trainer in enumerate(self.trainer_names):
             self.trainer_rrefs.append(
                 rpc.remote(
@@ -473,7 +463,7 @@ class TestDdpWithRpc(TestCase):
             for trainer_rref in self.trainer_rrefs:
                 futures.append(
                     _remote_method_async(
-                        trainer_method, trainer_rref, self.training_examples,
+                        trainer_method, trainer_rref, self.training_examples
                     )
                 )
             log_loss = 0
