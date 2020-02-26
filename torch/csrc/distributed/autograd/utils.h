@@ -51,7 +51,8 @@ sendMessageWithAutograd(
     bool forceGradRecording = false,
     const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf =
         nullptr,
-    const std::chrono::milliseconds rpcTimeout = std::chrono::seconds(0));
+    const std::chrono::milliseconds rpcTimeout =
+        torch::distributed::rpc::kNoTimeoutDuration);
 
 } // namespace autograd
 } // namespace distributed

@@ -1528,7 +1528,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_rpc_timeouts(self):
-        # TODO: enable timeouts for rpc.remote/RRef ()
+        # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
         dst_rank = (self.rank + 1) % self.world_size
         dst_worker = "worker{}".format(dst_rank)
         timeout = timedelta(milliseconds=100)

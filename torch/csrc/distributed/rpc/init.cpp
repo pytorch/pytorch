@@ -314,7 +314,7 @@ If the future completes with an error, an exception is thrown.
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
       py::arg("rf") = nullptr,
-      py::arg("timeout") = std::chrono::seconds(0));
+      py::arg("timeout") = torch::distributed::rpc::kNoTimeoutDuration);
 
   // TODO This python future wrapper wraps c10::ivalue::Future.
   // Will merge with JIT PythonFutureWrapper while merging generic Future with

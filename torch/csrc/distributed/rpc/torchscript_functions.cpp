@@ -88,7 +88,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         nullptr /* RecordFunction */,
-        std::chrono::milliseconds(0) /* infinite timeout */);
+        torch::distributed::rpc::kNoTimeoutDuration /* infinite timeout */);
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
     fm->addCallback(callback::confirmPendingUser);
@@ -111,7 +111,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         nullptr /* RecordFunction */,
-        std::chrono::milliseconds(0) /* infinite timeout */);
+        torch::distributed::rpc::kNoTimeoutDuration /* infinite timeout */);
 
     fm->addCallback(callback::finishCreatingOwnerRRef);
     return ownerRRefPtr;
