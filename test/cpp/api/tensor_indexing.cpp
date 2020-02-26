@@ -688,12 +688,41 @@ TEST(NumpyTests, TestEllipsisIndex) {
   // Slicing with ellipsis can skip an
   // arbitrary number of dimensions
   assert_tensor_equal(a.index({0, "..."}), a.index({0}));
-#if defined(__clang__)
-  assert_tensor_equal(a.index({0, "..."}), a.index({0, Slice()}));
-  assert_tensor_equal(a.index({"...", 0}), a.index({Slice(), 0}));
-#else
+#if !defined(__clang__)
+  // NOTE: `a.index({0, {}})` and `a.index({{}, 0})` fail to compile with Clang:
+  // ```
+  // ../test/cpp/api/tensor_indexing.cpp:694:46: error: call to member function 'index' is ambiguous
+  //   assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
+  //                                            ~~^~~~~
+  // aten/src/ATen/core/TensorBody.h:400:10: note: candidate function
+  //   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
+  //          ^
+  // aten/src/ATen/core/TensorBody.h:399:10: note: candidate function
+  //   Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
+  //          ^
+  // aten/src/ATen/core/TensorMethods.h:1386:23: note: candidate function
+  // inline Tensor Tensor::index(TensorList indices) const {
+  //                       ^
+  // ../test/cpp/api/tensor_indexing.cpp:695:46: error: call to member function 'index' is ambiguous
+  //   assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
+  //                                            ~~^~~~~
+  // aten/src/ATen/core/TensorBody.h:400:10: note: candidate function
+  //   Tensor index(std::initializer_list<at::indexing::TensorIndex> indices) const;
+  //          ^
+  // aten/src/ATen/core/TensorBody.h:399:10: note: candidate function
+  //   Tensor index(ArrayRef<at::indexing::TensorIndex> indices) const;
+  //          ^
+  // aten/src/ATen/core/TensorMethods.h:1386:23: note: candidate function
+  // inline Tensor Tensor::index(TensorList indices) const {
+  //                       ^
+  // ```
+  // To get around this problem, we explicitly require Clang users to use `Slice()`
+  // instead of `{}` to represent an empty slice.
   assert_tensor_equal(a.index({0, "..."}), a.index({0, {}}));
   assert_tensor_equal(a.index({"...", 0}), a.index({{}, 0}));
+#else
+  assert_tensor_equal(a.index({0, "..."}), a.index({0, Slice()}));
+  assert_tensor_equal(a.index({"...", 0}), a.index({Slice(), 0}));
 #endif
 
   // In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch
