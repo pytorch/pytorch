@@ -246,24 +246,6 @@ static void or_kernel_impl(TensorIterator& iter) {
     /*ident=*/false);
 }
 
-static void min_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "min_values_cpu", [&iter] {
-    binary_kernel_reduce_vec(
-      iter,
-      [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); });
-  });
-}
-
-static void max_values_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "max_values_cpu", [&iter] {
-    binary_kernel_reduce_vec(
-      iter,
-      [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
-      [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); });
-  });
-}
-
 // Maximum and minimum possible scalar values, including infinities
 
 template <typename scalar_t>
@@ -276,6 +258,54 @@ template <typename scalar_t>
 constexpr scalar_t lower_bound() {
   using lim = std::numeric_limits<scalar_t>;
   return lim::has_infinity ? -lim::infinity() : lim::lowest();
+}
+
+static void min_values_kernel_impl(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    binary_kernel_reduce_vec(
+      iter,
+      [](bool a, bool b) -> bool { return a && b; },
+      [](Vec256<bool> a, Vec256<bool> b) {
+        Vec256<bool> c = Vec256<bool>();
+        for (int i = 0; i != Vec256<bool>::size(); i++) {
+          c[i] = a[i] && b[i];
+        }
+        return c;
+      },
+      true);
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "min_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); },
+        upper_bound<scalar_t>());
+    });
+  }
+}
+
+static void max_values_kernel_impl(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Bool) {
+    binary_kernel_reduce_vec(
+      iter,
+      [](bool a, bool b) -> bool { return a || b; },
+      [](Vec256<bool> a, Vec256<bool> b) {
+        Vec256<bool> c = Vec256<bool>();
+        for (int i = 0; i != Vec256<bool>::size(); i++) {
+          c[i] = a[i] || b[i];
+        }
+        return c;
+      },
+      false);
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "max_values_cpu", [&iter] {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); },
+        lower_bound<scalar_t>());
+    });
+  }
 }
 
 static void argmax_kernel_impl(TensorIterator &iter) {

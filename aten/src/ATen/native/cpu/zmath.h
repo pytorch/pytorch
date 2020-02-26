@@ -3,6 +3,7 @@
 // Complex number math operations that act as no-ops for other dtypes.
 #include <complex>
 #include <c10/util/math_compat.h>
+#include<ATen/NumericUtils.h>
 
 namespace at { namespace native {
 namespace {
@@ -199,32 +200,56 @@ inline std::complex<double> trunc_impl (std::complex<double> z) {
 
 template <typename TYPE>
 inline TYPE max_impl (TYPE a, TYPE b) {
-  return std::max(a, b);
+  if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
+    return std::numeric_limits<TYPE>::quiet_NaN();
+  } else {
+    return std::max(a, b);
+  }
 }
 
 template <>
 inline std::complex<float> max_impl (std::complex<float> a, std::complex<float> b) {
-  return std::complex<float>(std::abs(a) > std::abs(b) ? a : b);
+  if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
+    return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
+  } else {
+    return std::complex<float>(std::abs(a) > std::abs(b) ? a : b);
+  }
 }
 
 template <>
 inline std::complex<double> max_impl (std::complex<double> a, std::complex<double> b) {
-  return std::complex<double>(std::abs(a) > std::abs(b) ? a : b);
+  if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
+    return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    return std::complex<double>(std::abs(a) > std::abs(b) ? a : b);
+  }
 }
 
 template <typename TYPE>
 inline TYPE min_impl (TYPE a, TYPE b) {
-  return std::min(a, b);
+  if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
+    return std::numeric_limits<TYPE>::quiet_NaN();
+  } else {
+    return std::min(a, b);
+  }
 }
 
 template <>
 inline std::complex<float> min_impl (std::complex<float> a, std::complex<float> b) {
-  return std::complex<float>(std::abs(a) < std::abs(b) ? a : b);
+  if (_isnan<std::complex<float>>(a) || _isnan<std::complex<float>>(b)) {
+    return std::complex<float>(std::numeric_limits<float>::quiet_NaN());
+  } else {
+    return std::complex<float>(std::abs(a) < std::abs(b) ? a : b);
+  }
 }
 
 template <>
 inline std::complex<double> min_impl (std::complex<double> a, std::complex<double> b) {
-  return std::complex<double>(std::abs(a) < std::abs(b) ? a : b);
+  if (_isnan<std::complex<double>>(a) || _isnan<std::complex<double>>(b)) {
+    return std::complex<double>(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    return std::complex<double>(std::abs(a) < std::abs(b) ? a : b);
+  }
 }
 
 } // end namespace
