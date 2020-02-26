@@ -536,7 +536,8 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
 
         d1 = SBS.diagonal(0, -2, -1) ** -0.5
-        d = d1.reshape(d1.shape[0], 1)
+        d = torch.zeros((d1.shape[0], 1), dtype=d1.dtype, device=d1.device)
+        d[:, 0] = d1
 
         dd = mm(d, _utils.transpose(d))
         R = torch.cholesky(dd * SBS, upper=True)
