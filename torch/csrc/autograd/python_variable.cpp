@@ -23,7 +23,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
 
 #include <ATen/ATen.h>
