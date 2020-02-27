@@ -102,6 +102,33 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   Value* the_list_;
 };
 
+struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
+  explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
+      : iterable_(iterable), name_(name){};
+
+  std::string kind() const override {
+    return name_;
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& f,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override {
+    if (inputs.size() || attributes.size()) {
+      throw ErrorReport(loc)
+          << name_ << " method does not accept any arguments";
+    }
+    return iterable_;
+  }
+
+  SugaredValuePtr iterable_;
+  const std::string name_;
+};
+
+struct SugaredModuleDict;
+
 // defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
@@ -136,6 +163,10 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
         ->call(loc, caller, inputs, attributes, n_binders);
   }
 
+  std::shared_ptr<SugaredModuleDict> getSugaredModuleDict(
+      const SourceRange& loc,
+      Function& m);
+
   void setAttr(
       const SourceRange& loc,
       Function& m,
@@ -144,40 +175,46 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
   SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
 
-  SugaredValuePtr desugarModuleContainer(
-      bool get_keys,
-      bool get_values,
-      const SourceRange& loc,
-      Function& m);
-
  private:
   Value* self_;
   std::shared_ptr<ConcreteModuleType> concreteType_;
 };
 
-struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
-  explicit ModuleDictMethod(SugaredValuePtr iterable, const std::string& name)
-      : iterable_(iterable), name_(name){};
+void recurseThroughNestedModules(
+    const SourceRange& loc,
+    Function& m,
+    std::vector<SugaredValuePtr>& keys,
+    std::vector<SugaredValuePtr>& values,
+    std::shared_ptr<ModuleValue> self,
+    const std::string& prefix);
+
+// Used to support named_modules()
+struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
+  explicit SugaredModuleDict(
+      std::shared_ptr<ModuleValue> self,
+      std::shared_ptr<SugaredTupleValue> keys,
+      std::shared_ptr<SugaredTupleValue> modules) {
+    self_ = std::move(self);
+    keys_ = std::move(keys);
+    modules_ = std::move(modules);
+  }
 
   std::string kind() const override {
-    return name_;
+    return "ModuleDict";
   }
 
-  std::shared_ptr<SugaredValue> call(
+  std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& f,
-      at::ArrayRef<NamedValue> inputs,
-      at::ArrayRef<NamedValue> attributes,
-      size_t n_binders) override {
-    if (inputs.size() || attributes.size()) {
-      throw ErrorReport(loc)
-          << name_ << " method does not accept any arguments";
-    }
-    return iterable_;
-  }
+      Function& m,
+      const std::string& field) override;
 
-  SugaredValuePtr iterable_;
-  const std::string name_;
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
+    return keys_;
+  };
+
+  std::shared_ptr<ModuleValue> self_;
+  std::shared_ptr<SugaredTupleValue> keys_;
+  std::shared_ptr<SugaredTupleValue> modules_;
 };
 
 struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
