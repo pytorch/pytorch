@@ -91,18 +91,21 @@ void RNNImplBase<Derived>::to(
     torch::Dtype dtype,
     bool non_blocking) {
   nn::Module::to(device, dtype, non_blocking);
+  std::cout << "to() number 1\n";
   flatten_parameters();
 }
 
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Dtype dtype, bool non_blocking) {
   nn::Module::to(dtype, non_blocking);
+  std::cout << "to() number 2\n";
   flatten_parameters();
 }
 
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
+  std::cout << "to() number 3\n";
   const auto num_directions = options.bidirectional() ? 2 : 1;
   for (int64_t layer = 0; layer < options.layers(); layer++) {
     for (auto direction = 0; direction < num_directions; direction++) {
