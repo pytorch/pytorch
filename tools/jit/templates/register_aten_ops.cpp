@@ -1,7 +1,7 @@
 
 #include "torch/csrc/jit/runtime/operator.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/script/function_schema_parser.h"
+#include "torch/csrc/jit/frontend/function_schema_parser.h"
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
