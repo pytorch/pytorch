@@ -695,7 +695,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -835,7 +835,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -947,7 +947,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     const Tensor& output_r,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, bool type_2, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve
     ) {
 
@@ -958,7 +958,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
 
   RNNParams fn;
   auto datatype = getCudnnDataType(input);
-  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
