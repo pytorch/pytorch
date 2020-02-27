@@ -486,7 +486,6 @@ Tensor randint_like(
     const TensorOptions& options) {
   auto result = at::empty_like(self, options);
   return result.random_(0, high, nullptr);
-  return native::randint(high, self.sizes(), nullptr, options);
 }
 
 Tensor randint_like(
