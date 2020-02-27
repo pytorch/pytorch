@@ -74,11 +74,12 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
   if (strides.data()) {
     TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
+  THStorage *new_storage = THStorage_(new)();
   THTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THStorage_(new)()),
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CPUTensorId
   ).release();
-  THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
+  THTensor_(setStorageNd)(self, storage != nullptr ? storage : new_storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
   return self;
