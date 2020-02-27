@@ -296,8 +296,9 @@ class TestAutograd(TestCase):
         z = x ** 2 + y * x + y ** 2
         z.backward(torch.ones(2, 2), create_graph=True)
 
-        x_grad = 2 * x + y
-        y_grad = x + 2 * y
+        with torch.no_grad():
+            x_grad = 2 * x + y
+            y_grad = x + 2 * y
         self.assertEqual(x.grad, x_grad)
         self.assertEqual(y.grad, y_grad)
 
@@ -618,10 +619,10 @@ class TestAutograd(TestCase):
         z.sum().backward()
 
     def test_backward(self):
-        v = torch.randn(5, 5).requires_grad_(True)
-        x = torch.randn(5, 5).requires_grad_(True)
+        v = torch.randn(5, 5, requires_grad=True)
+        x = torch.randn(5, 5, requires_grad=True)
         y = (torch.rand(5, 5) + 0.1).requires_grad_(True)
-        z = torch.randn(5, 5).requires_grad_(True)
+        z = torch.randn(5, 5, requires_grad=True)
         grad_output = torch.randn(5, 5)
 
         v.backward(grad_output)
@@ -629,9 +630,9 @@ class TestAutograd(TestCase):
 
         a = x + (y * z) + 4 * z ** 2 * x / y
         a.backward(grad_output)
-        x_grad = 4 * z_t.pow(2) / y_t + 1
-        y_grad = z_t - 4 * x_t * z_t.pow(2) / y_t.pow(2)
-        z_grad = 8 * x_t * z_t / y_t + y_t
+        x_grad = 4 * z.pow(2) / y + 1
+        y_grad = z - 4 * x * z.pow(2) / y.pow(2)
+        z_grad = 8 * x * z / y + y
         self.assertEqual(x.grad, x_grad * grad_output)
         self.assertEqual(y.grad, y_grad * grad_output)
         self.assertEqual(z.grad, z_grad * grad_output)
@@ -925,7 +926,7 @@ class TestAutograd(TestCase):
         y = Variable(x, requires_grad=True)
 
         def compare(x, y, idx, indexed_tensor, indexed_var):
-            indexed_var_t = indexed_var
+            indexed_var_t = indexed_var.data
             if not isinstance(indexed_tensor, torch.Tensor):
                 indexed_var_t = indexed_var_t[0]
             self.assertEqual(indexed_tensor, indexed_var_t)
@@ -1173,9 +1174,9 @@ class TestAutograd(TestCase):
         del x.grad
         self.assertIsNone(x.grad)
         with self.assertRaises(RuntimeError):
-            del x
+            del x.data
         with self.assertRaises(TypeError):
-            x = None
+            x.data = None
         with self.assertRaises(RuntimeError):
             del x.requires_grad
         with self.assertRaises(RuntimeError):
@@ -3314,13 +3315,13 @@ class TestAutograd(TestCase):
         x = torch.randn(1, 2)
         x_s = torch.sparse_coo_tensor(torch.zeros([1, 1]), torch.ones([1]))
         with self.assertRaisesRegex(RuntimeError, 'incompatible tensor type'):
-            x = x_s
+            x.data = x_s
 
     def test_set_data_preserve_pyobj(self):
         a = torch.randn(1, 2)
         b = torch.randn(1, 2)
         b_id_saved = id(b)
-        b = a
+        b.data = a
         self.assertTrue(b_id_saved == id(b))
 
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
@@ -3350,7 +3351,7 @@ for shape in [(1,), ()]:
             @staticmethod
             def forward(ctx, x):
                 with torch.enable_grad():
-                    ctx.x = Variable(x, requires_grad=True)
+                    ctx.x = Variable(x.detach(), requires_grad=True)
                     ctx.x = ctx.x - 1
                 return ctx.x.detach()
 
@@ -3384,7 +3385,7 @@ for shape in [(1,), ()]:
             @staticmethod
             def forward(ctx, x):
                 with torch.enable_grad():
-                    ctx.x = Variable(x, requires_grad=True)
+                    ctx.x = Variable(x.detach(), requires_grad=True)
                     ctx.x = ctx.x - 1
                 return ctx.x.detach()
 
