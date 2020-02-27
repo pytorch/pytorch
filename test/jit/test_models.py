@@ -396,8 +396,6 @@ class TestModels(JitTestCase):
         self._test_snli(self, device='cpu')
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
         def test_snli_quantized(self):
             self._test_snli(self, device='cpu', quantized=True)
 
@@ -542,8 +540,6 @@ class TestModels(JitTestCase):
         self._test_vae(self, device='cpu')
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
         def test_vae_quantized(self):
             self._test_vae(self, device='cpu', quantized=True)
 
