@@ -3,9 +3,9 @@
 
 #include <sstream>
 
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_source.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
