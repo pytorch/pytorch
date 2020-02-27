@@ -1852,34 +1852,34 @@ struct to_ir {
     const auto lhsValue =
         lhsSugaredVar->attr(lhs.range(), method, lhs.selector().name())
             ->asValue(lhs.range(), method);
-    if (lhsValue->type()->kind() == TypeKind::ClassType) {
-        // Call `__iadd__` so updates happen in place on class types
-        // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
-        std::string in_place_method_name;
-        std::string out_of_place_method_name;
-        std::tie(in_place_method_name, out_of_place_method_name) =
-            getAugMagicMethod(stmt);
-        const auto rhs = emitExpr(stmt.rhs());
+  if (lhsValue->type()->kind() == TypeKind::ClassType) {
+      // Call `__iadd__` so updates happen in place on class types
+      // https://docs.python.org/3/reference/datamodel.html#object.__iadd__
+      std::string in_place_method_name;
+      std::string out_of_place_method_name;
+      std::tie(in_place_method_name, out_of_place_method_name) =
+          getAugMagicMethod(stmt);
+      const auto rhs = emitExpr(stmt.rhs());
 
-        // Determine whether to use __iadd__ or __add__ (use __add__ only if
-        // __iadd__ is not present)
-        auto type = lhsValue->type()->expect<ClassType>();
-        std::string magic_method_name;
-        if (type->getMethod(in_place_method_name)) {
-          magic_method_name = in_place_method_name;
-        } else if (type->getMethod(out_of_place_method_name)) {
-          magic_method_name = out_of_place_method_name;
-        } else {
-          throw ErrorReport(stmt.range())
-              << "Cannot emit inplace op on " << type->python_str()
-              << " since it does not define an " << in_place_method_name << " or "
-              << out_of_place_method_name << " method";
-        }
+      // Determine whether to use __iadd__ or __add__ (use __add__ only if
+      // __iadd__ is not present)
+      auto type = lhsValue->type()->expect<ClassType>();
+      std::string magic_method_name;
+      if (type->getMethod(in_place_method_name)) {
+        magic_method_name = in_place_method_name;
+      } else if (type->getMethod(out_of_place_method_name)) {
+        magic_method_name = out_of_place_method_name;
+      } else {
+        throw ErrorReport(stmt.range())
+            << "Cannot emit inplace op on " << type->python_str()
+            << " since it does not define an " << in_place_method_name << " or "
+            << out_of_place_method_name << " method";
+      }
 
-        // Insert call to the magic method
-        MethodValue method_value(lhsValue, magic_method_name);
-        auto result = method_value.call(stmt.range(), method, {rhs}, {}, 0)
-                          ->asValue(stmt.range(), method);
+      // Insert call to the magic method
+      MethodValue method_value(lhsValue, magic_method_name);
+      auto result = method_value.call(stmt.range(), method, {rhs}, {}, 0)
+                        ->asValue(stmt.range(), method);
 
         // x += y is equivalent to x = x.__iadd__(y) or x = x.__add__(y) if
         // __iadd__ is not present, so set the value to the function's return

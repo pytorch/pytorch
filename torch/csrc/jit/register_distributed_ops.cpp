@@ -44,29 +44,29 @@ c10::OperatorOptions aliasAnalysisSpecialCase() {
 
 RegisterOperators reg_rpc_ops({
     Operator(
-       "aten::to_here(RRef(t) self) -> t",
-       [](Stack& stack) {
-         auto rref = pop(stack).toRRef();
-         IValue res;
-         if (rref->isOwner()) {
-           res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
-                     ->getValue();
-         } else {
-           res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
-                     ->toHere();
-         }
-         push(stack, std::move(res));
-         return 0;
-       },
-       aliasAnalysisFromSchema()),
-    Operator(
-       "aten::is_owner(RRef(t) self) -> bool",
-       [](Stack& stack) {
-         auto rref = pop(stack).toRRef();
-         push(stack, rref->isOwner());
-         return 0;
-       },
-       aliasAnalysisFromSchema()),
+        "aten::to_here(RRef(t) self) -> t",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          IValue res;
+          if (rref->isOwner()) {
+            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::OwnerRRef>(rref)
+                      ->getValue();
+          } else {
+            res = c10::dynamic_intrusive_pointer_cast<dist_rpc::UserRRef>(rref)
+                      ->toHere();
+          }
+          push(stack, std::move(res));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+     Operator(
+        "aten::is_owner(RRef(t) self) -> bool",
+        [](Stack& stack) {
+          auto rref = pop(stack).toRRef();
+          push(stack, rref->isOwner());
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
      Operator(
          prim::rpc_async,
          [](const Node* node) -> Operation {
