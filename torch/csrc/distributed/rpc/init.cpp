@@ -380,6 +380,7 @@ If the future completes with an error, an exception is thrown.
             kwargsDict.cast<py::kwargs>(),
             c10::nullopt);
         py::gil_scoped_release release;
+        DCHECK(!PyGILState_Check());
         c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);

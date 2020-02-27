@@ -2732,20 +2732,30 @@ struct to_ir {
           << "does not support kwargs yet";
     }
     // TODO: Make rpc_async(..) support taking kwargs,
-    // like rpc_async(to=, dst_worker_name="", args=(), kwargs={})
+    // like rpc_async(to="worker1", func=my_func, args=(), kwargs={})
 
     auto& input_trees = apply.inputs().tree()->trees();
     Value* dst_worker_name_value = emitExpr(Expr(input_trees[0]));
-    std::shared_ptr<FunctionValue> user_callable_sugared_value =
-        std::dynamic_pointer_cast<FunctionValue>(
-            emitSugaredExpr(Expr(input_trees[1]), 1));
+    std::shared_ptr<SugaredValue> user_callable_sugared_value =
+        emitSugaredExpr(Expr(input_trees[1]), 1);
+    TORCH_CHECK(
+        user_callable_sugared_value->kind() == "function",
+        "user_callable should be a FunctionValue, it's now a ",
+        user_callable_sugared_value->kind())
+    // NB: This should be done using `std::dynamic_pointer_cast`
+    // and assert `user_callable_function_value != nullptr`. But somehow on
+    // macos std::dynamic_pointer_cast always returns
+    // `user_callable_function_value` as a `nullptr`, even if
+    // `user_callable_sugared_value->kind() == "function"`.
+    std::shared_ptr<FunctionValue> user_callable_function_value =
+        std::static_pointer_cast<FunctionValue>(user_callable_sugared_value);
     // If `kwargs` is an empty dict, users are allowed to not pass `kwargs`.
     // If `args` and `kwargs` are an empty tuple and an empty dict,
     // respectively, users are allowed to not pass `args` and `kwargs`.
     TreeList args_kwargs_trees(input_trees.begin() + 2, input_trees.end());
 
     // Get user callable.
-    auto& callablePtrs = user_callable_sugared_value->callees();
+    const auto& callablePtrs = user_callable_function_value->callees();
     TORCH_INTERNAL_ASSERT(
         callablePtrs.size() == 1,
         "User-provided callable size should be 1. Now it's",
