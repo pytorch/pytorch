@@ -462,6 +462,7 @@ def gen_jit_dispatch(declarations, out, template_path, disable_autograd=False, s
         ('strides', 'aten::strides(Tensor self) -> int'),
         ('dim', 'aten::dim(Tensor self) -> int'),
         ('numel', 'aten::numel(Tensor self) -> int'),
+        ('element_size', 'aten::element_size(Tensor self) -> int'),
     ]]
 
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods

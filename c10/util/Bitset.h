@@ -4,6 +4,11 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Optional.h>
 #include <iostream>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
+#include <strings.h>
+#endif
 
 namespace c10 {
 namespace utils {
@@ -18,9 +23,17 @@ namespace utils {
  * to exist is that std::bitset misses a find_first_set() method.
  */
 struct bitset final {
- public:
+private:
+  #if defined(_MSC_VER)
+    // MSVCs _BitScanForward64 expects int64_t
+    using bitset_type = int64_t;
+  #else
+    // POSIX ffsll expects long long int
+    using bitset_type = long long int;
+  #endif
+public:
   static constexpr size_t NUM_BITS() {
-    return 8 * sizeof(long long int);
+    return 8 * sizeof(bitset_type);
   }
 
   constexpr bitset() noexcept : bitset_(0) {}
@@ -45,19 +58,34 @@ struct bitset final {
   template <class Func>
   void for_each_set_bit(Func&& func) const {
     bitset cur = *this;
-    size_t index = ffsll(cur.bitset_);
+    size_t index = cur.find_first_set();
     while (0 != index) {
-      // -1 because ffsll() is not zero-indices but the first bit
-      // is returned as index 1.
+      // -1 because find_first_set() is not one-indiced.
       index -= 1;
       func(index);
       cur.unset(index);
-      index = ffsll(cur.bitset_);
+      index = cur.find_first_set();
     }
   }
 
- private:
-  long long int bitset_;
+private:
+  // Return the index of the first set bit. The returned index is one-indiced
+  // (i.e. if the very first bit is set, this function returns '1'), and a return
+  // of '0' means that there was no bit set.
+  size_t find_first_set() const {
+    #if defined(_MSC_VER)
+      unsigned long result;
+      bool has_bits_set = (0 == _BitScanForward64(&result, bitset_));
+      if (!has_bits_set) {
+        return 0;
+      }
+      return result + 1;
+    #else
+      return ffsll(bitset_);
+    #endif
+  }
+  
+  bitset_type bitset_;
 };
 
 } // namespace utils
