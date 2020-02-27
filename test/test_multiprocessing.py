@@ -356,7 +356,7 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
-    @unittest.skipIf(IS_WINDOWS, "Test need to use fork multiprocessing")
+    @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
         ctx = mp.get_context('fork')
         simple_autograd_function()
@@ -364,7 +364,7 @@ class TestMultiprocessing(TestCase):
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test need to use spawn multiprocessing")
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing")
     def test_autograd_fine_with_spawn(self):
         ctx = mp.get_context('spawn')
         simple_autograd_function()
