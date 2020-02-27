@@ -4474,6 +4474,12 @@ class TestAutogradDeviceType(TestCase):
         with torch.backends.cudnn.flags(enabled=False):
             torch.autograd.gradcheck(gradcheckfunc, inp)
             torch.autograd.gradgradcheck(gradcheckfunc, inp)
+        if inp.is_cuda:
+            # Assert that we have good error message around unsupported CuDNN double backward
+            with torch.backends.cudnn.flags(enabled=True):
+                with self.assertRaisesRegex(RuntimeError,
+                                            "please disable the CuDNN backend temporarily"):
+                    torch.autograd.gradgradcheck(gradcheckfunc, inp)
 
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
