@@ -175,8 +175,28 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
   auto& rrefId = rrefForkData.rrefId_;
   auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
+    // We have found the rref through the rrefId
     auto ownerRRef = getOwnerRRef(rrefId);
-    TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    // Now double check if the two types are matched
+    //
+    // Why we are special casing the check for tensor type here?
+    // this is because tensor types might get specialized on tensors when
+    // we pass inputs to the function, i.e. TensorType can filled with
+    // specific shape info, requires_grad info, etc. so the OwerRRef we
+    // found might already have those infos, but the `type` we passed in
+    // here is a plain TensorType, they are not equal relationship:
+    // specialized TensorType <: plain TensorType
+    //
+    // In RPC we don't care the difference as we ser/de with just the
+    // plain TensorType. This is not a issue for UserRRef creation either,
+    // since Tensor can only get specialized with a previous run of local
+    // JIT function, and we shouldn't preserve the specialized SubTensorType
+    // information on other workers because it's only information only.
+    if(type == TensorType::get()) {
+      TORCH_INTERNAL_ASSERT(ownerRRef->type()->isSubtypeOf(TensorType::get()));
+    } else {
+      TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
+    }
     return ownerRRef;
   } else {
     return createUserRRef(ownerId, rrefId, forkId, type);

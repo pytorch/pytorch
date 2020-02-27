@@ -73,7 +73,7 @@ class Adagrad(Optimizer):
                 if group['weight_decay'] != 0:
                     if p.grad.data.is_sparse:
                         raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
 
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
@@ -91,10 +91,10 @@ class Adagrad(Optimizer):
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum'].sparse_mask(grad)
                     std_values = std._values().sqrt_().add_(group['eps'])
-                    p.data.add_(-clr, make_sparse(grad_values / std_values))
+                    p.data.add_(make_sparse(grad_values / std_values), alpha=-clr)
                 else:
-                    state['sum'].addcmul_(1, grad, grad)
+                    state['sum'].addcmul_(grad, grad, value=1)
                     std = state['sum'].sqrt().add_(group['eps'])
-                    p.data.addcdiv_(-clr, grad, std)
+                    p.data.addcdiv_(grad, std, value=-clr)
 
         return loss

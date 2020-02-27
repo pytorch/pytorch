@@ -85,6 +85,15 @@ TORCH_API script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace = false);
 
+/** Swap functional linear CallFunctions to aten::linear
+ *  so that it can survive inline, since quant fusion need to
+ *  recognize linear as one op instead of a complicated if block
+ */
+TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
+/** Swap all functional linear CallFunctions in module
+ */
+TORCH_API void SwapFunctionalLinearInModule(script::Module& module);
+
 /** Replicate dequantize node for each use, so that we can match
  *  quantization patterns
  */

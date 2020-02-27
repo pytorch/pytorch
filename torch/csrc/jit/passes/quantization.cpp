@@ -138,7 +138,18 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
     "adaptive_avg_pool2d",
     "max_pool2d",
+    "avg_pool2d",
     "flatten",
+    "max",
+    "min",
+    "mean",
+    // TODO: sort returns a tuple of Tensors, we have
+    // to extend the API to support that
+    // "sort",
+    "__interpolate",
+    "__upsample",
+    "__upsample_bilinear",
+    "__upsample_nearest",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
@@ -611,7 +622,8 @@ bool isBiasOfConvOrLinear(Value* v) {
   if (result) {
     TORCH_CHECK(
         v->uses().size() == 1,
-        "We only support conv/linear bias being used by one node.");
+        "Graph mode quantization only supports conv/linear bias being used by"
+        " one node.");
   }
   return result;
 }
@@ -624,7 +636,8 @@ bool isWeightOfConvOrLinear(Value* v) {
   if (result) {
     TORCH_CHECK(
         v->uses().size() == 1,
-        "We only support conv/linear weight being used by one node.");
+        "Graph mode quantization only supports conv/linear weight being used by"
+        " one node.");
   }
   return result;
 }
@@ -838,6 +851,8 @@ void InsertObserversHelper::preprocess(
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // TODO: remove constant prop, add separate graph
+  // cleanup step before insert observers
   // To cleanup traced graph
   ConstantPooling(graph);
   ConstantPropagation(graph);
@@ -860,7 +875,8 @@ void InsertObserversHelper::preprocess(
 }
 
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get())) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      isBiasOfConvOrLinear(v)) {
     return false;
   }
   // Check whether producer is quantizable
@@ -869,7 +885,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) && !isBiasOfConvOrLinear(v)) {
+    if (nodeQuantizable(use.user)) {
       return true;
     }
   }
@@ -1974,6 +1990,39 @@ script::Module InsertQuantDeQuant(
 
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
+}
+
+void SwapFunctionalLinearInModule(
+    script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    std::shared_ptr<Graph> g = method.graph();
+    SwapFunctionalLinear(g);
+  }
+  for (script::Module m : module.children()) {
+    SwapFunctionalLinearInModule(m);
+  }
+}
+
+void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
+  std::string functional_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = prim::CallFunction(%linear, %input, %weight, %bias)
+  return (%r) )";
+  std::string aten_linear = R"(
+graph(%linear, %input, %weight, %bias):
+  %r = aten::linear(%input, %weight, %bias)
+  return (%r) )";
+  auto filter = [](const Match& match,
+                   const std::unordered_map<std::string, Value*>& vmap) {
+    const auto& match_vmap = match.values_map;
+    auto linear = getValue("linear", match_vmap, vmap);
+    auto func_name = getFuncName(linear);
+    return func_name == "linear";
+  };
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
+  // TODO: runOnGraph takes const ref?
+  rewriter.runOnGraph(graph);
 }
 
 void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
