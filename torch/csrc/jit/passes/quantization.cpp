@@ -233,6 +233,13 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   return path;
 }
 
+script::Module getInvokedModule(
+    script::Module& module, Node* n, Value* self) {
+  auto* instance = n->inputs()[0];
+  auto path = getModuleAccessPath(instance, self);
+  return findChildModule(module, path);
+}
+
 class ModuleCloneHelper {
  public:
   /** Clone according to module qconfig map, this is for handling the case
@@ -439,7 +446,6 @@ class InsertObserversHelper {
                   bool is_entry_point = false);
 
  private:
-  script::Module getInvokedModule(script::Module& module, Node* n, Value* self);
   ModuleMethodVector getInvokedMethods(
       script::Module& module,
       const std::string& method_name);
@@ -654,12 +660,6 @@ graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %g
   rewriter.runOnGraph(graph, filter);
 }
 
-script::Module InsertObserversHelper::getInvokedModule(
-    script::Module& module, Node* n, Value* self) {
-  auto* instance = n->inputs()[0];
-  auto path = getModuleAccessPath(instance, self);
-  return findChildModule(module, path);
-}
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
     script::Module& module,
     const std::string& method_name) {
