@@ -99,9 +99,9 @@ namespace detail {
 struct CAFFE2_API DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
-    TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS,
+    TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
         "The function schema has ", schema.arguments().size(),
-        " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS);
+        " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
     for (size_t index = 0; index < schema.arguments().size(); ++index) {
       if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) || schema.arguments()[index].type()->isSubtypeOf(ListType::ofTensors())) {

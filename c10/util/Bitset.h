@@ -19,7 +19,9 @@ namespace utils {
  */
 struct bitset final {
  public:
-  static constexpr size_t NUM_BITS = 8 * sizeof(long long int);
+  static constexpr size_t NUM_BITS() {
+    return 8 * sizeof(long long int);
+  }
 
   constexpr bitset() noexcept : bitset_(0) {}
   constexpr bitset(const bitset&) noexcept = default;

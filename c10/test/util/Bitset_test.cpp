@@ -6,7 +6,7 @@ using c10::utils::bitset;
 
 TEST(BitsetTest, givenEmptyBitset_whenGettingBit_thenIsZero) {
   bitset b;
-  for (size_t i = 0; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 0; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
@@ -14,7 +14,7 @@ TEST(BitsetTest, givenEmptyBitset_whenGettingBit_thenIsZero) {
 TEST(BitsetTest, givenEmptyBitset_whenUnsettingBit_thenIsZero) {
   bitset b;
   b.unset(4);
-  for (size_t i = 0; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 0; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
@@ -23,7 +23,7 @@ TEST(BitsetTest, givenEmptyBitset_whenSettingAndUnsettingBit_thenIsZero) {
   bitset b;
   b.set(4);
   b.unset(4);
-  for (size_t i = 0; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 0; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
@@ -40,7 +40,7 @@ TEST(BitsetTest, givenEmptyBitset_whenSettingBit_thenOthersStayUnset) {
   for (size_t i = 0; i < 6; ++i) {
     EXPECT_FALSE(b.get(i));
   }
-  for (size_t i = 7; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 7; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
@@ -62,7 +62,7 @@ TEST(BitsetTest, givenNonemptyBitset_whenSettingBit_thenOthersStayAtOldValue) {
   for (size_t i = 7; i < 30; ++i) {
     EXPECT_FALSE(b.get(i));
   }
-  for (size_t i = 31; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 31; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
@@ -86,7 +86,7 @@ TEST(
     EXPECT_FALSE(b.get(i));
   }
   EXPECT_TRUE(b.get(30));
-  for (size_t i = 31; i < bitset::NUM_BITS; ++i) {
+  for (size_t i = 31; i < bitset::NUM_BITS(); ++i) {
     EXPECT_FALSE(b.get(i));
   }
 }
