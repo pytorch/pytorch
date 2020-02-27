@@ -90,6 +90,8 @@ TORCH_API script::Module InsertQuantDeQuant(
  */
 TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
 
+TORCH_API void SwapDeQuant(std::shared_ptr<Graph>& graph);
+
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
  *
