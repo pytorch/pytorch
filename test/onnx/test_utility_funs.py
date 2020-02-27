@@ -342,14 +342,16 @@ class TestUtilityFuns(TestCase):
         model.eval()
         old_state = model.training
         torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=True)
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
+        # verify that the model state is preserved
         assert model.training == old_state
 
         # set mode to training mode and export in inference mode
         model.train()
         old_state = model.training
         torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=False)
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
+        # verify that the model state is preserved
         assert model.training == old_state
 
     # TODO: Enable test when BatchNorm is implemented in ORT for opset 12.
@@ -383,7 +385,7 @@ class TestUtilityFuns(TestCase):
         model_export = MyModule()
         f = io.BytesIO()
         torch.onnx.export(model_export, (x,), f,
-                          opset_version=self.opset_version, training=True)
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
 
         ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
@@ -409,7 +411,7 @@ class TestUtilityFuns(TestCase):
 
         f = io.BytesIO()
         torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=True)
+                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name : x.cpu().numpy()}
         ort_outs = ort_sess.run(None, ort_inputs)

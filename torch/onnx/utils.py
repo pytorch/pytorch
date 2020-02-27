@@ -17,7 +17,7 @@ import numbers
 import warnings
 from torch._six import string_classes
 from torch.jit import _unique_state_dict
-from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
 from torch._C import ListType, _propagate_and_assign_input_shapes, _assign_output_shapes, _check_onnx_proto
 
 
@@ -31,40 +31,46 @@ def is_in_onnx_export():
 
 
 @contextlib.contextmanager
-def set_training(model, mode):
+def select_model_mode_for_export(model, mode):
     if not isinstance(model, torch.jit.ScriptFunction):
-        old_mode = model.training
+        is_originally_training = model.training
 
         if mode is None:
-            mode = False
+            mode = TrainingMode.EVAL
             # if the model is in training mode but the user did not specify
             # to export the model in training mode, export the model in inference
             # mode (default) and warn them
-            if old_mode is True:
+            if is_originally_training:
                 warnings.warn("You are exporting the model to ONNX while in training mode with "
-                              "train=None param. The model will default to inference mode export. "
-                              "If you wish to export a training amenable ONNX model, specify train=True "
-                              "in torch.onnx.export().")
+                              "'train' parameter not specified. The model will default to inference mode export. "
+                              "If you wish to export a training amenable ONNX model, specify train=TrainingMode.TRAIN or "
+                              "train=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export().")
 
-        from torch.onnx.symbolic_helper import _set_training_mode
-        _set_training_mode(mode)
+        # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
+        is_export_training = False
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
-        if mode is True:
+        if mode == TrainingMode.TRAINING or (mode == TrainingMode.PRESERVE and is_originally_training):
             from torch.onnx.symbolic_helper import _export_onnx_opset_version
             if _export_onnx_opset_version < 12:
                 warnings.warn("You are exporting the model in training mode with onnx opset version {}. "
-                              "Note that onnx opset version 12 was updated for better support of training "
-                              "amenable mode.".format(_export_onnx_opset_version))
+                              "Opset versions lower than opset 12 will not be able to export nodes such as"
+                              "Dropout and BatchNorm correctly.".format(_export_onnx_opset_version))
+            is_export_training = True
 
-        if old_mode != mode:
-            model.train(mode)
+        from torch.onnx.symbolic_helper import _set_training_mode
+        _set_training_mode(is_export_training)
+
+        if is_originally_training != is_export_training:
+            assert mode != TrainingMode.PRESERVE
+            model.train(is_export_training)
     try:
         yield
     finally:
         if not isinstance(model, torch.jit.ScriptFunction):
-            if old_mode != mode:
-                model.train(old_mode)
+            if is_originally_training != is_export_training:
+                assert mode != TrainingMode.PRESERVE
+                model.train(is_originally_training)
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
@@ -303,11 +309,11 @@ def _trace_and_get_graph_from_model(model, args, training):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
 
-    # By default, training=False, which is good because running a model in
+    # By default, training=TrainingMode.EVAL, which is good because running a model in
     # training mode could result in internal buffers getting updated, dropout
     # getting applied, etc.  If you really know what you're doing, you
-    # can turn training=True (or None, to preserve whatever the original
-    # training mode was.)
+    # can turn training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
+    # to preserve whatever the original training mode was.)
     trace_graph, torch_out, inputs_states = \
         torch.jit._get_trace_graph(model, args, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
@@ -442,7 +448,7 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         custom_opsets = {}
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
-    with set_training(model, training):
+    with select_model_mode_for_export(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -489,7 +495,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             else:
                 operator_export_type = OperatorExportTypes.ONNX
 
-        with set_training(model, training):
+        with select_model_mode_for_export(model, training):
             _set_opset_version(opset_version)
             _set_operator_export_type(operator_export_type)
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
