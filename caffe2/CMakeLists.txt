@@ -481,8 +481,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/testing/hooks_for_testing.cpp
     ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
     ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
-<<<<<<< HEAD
-<<<<<<< HEAD
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/kernel_cache.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/compiler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
@@ -502,13 +500,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
-=======
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/utils.cpp
-=======
->>>>>>> Build fixes
-    ${TORCH_SRC_DIR}/csrc/jit/function.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/vararg_functions.cpp
->>>>>>> Removes (most) old code, updates README
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -586,6 +577,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND Caffe2_GPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -615,7 +607,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 >>>>>>> Removes (most) old code, updates README
 =======
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
+<<<<<<< HEAD
 >>>>>>> Parser implemented that lowers JIT IR to codegen IR
+=======
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
+>>>>>>> refactoring interface
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
