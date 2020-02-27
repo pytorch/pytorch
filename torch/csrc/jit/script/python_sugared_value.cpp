@@ -219,9 +219,41 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
-SugaredValuePtr ModuleValue::desugarModuleContainer(
-    bool get_keys,
-    bool get_values,
+void recurseThroughNestedModules(
+    const SourceRange& loc,
+    Function& m,
+    std::vector<SugaredValuePtr>& keys,
+    std::vector<SugaredValuePtr>& values,
+    std::shared_ptr<ModuleValue> self,
+    const std::string& prefix) {
+  auto prefix_value =
+      std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
+
+  keys.push_back(prefix_value);
+  values.push_back(self);
+
+  auto module_dict = self->getSugaredModuleDict(loc, m);
+  auto keys_iter = module_dict->keys_;
+  auto module_values_iter = module_dict->modules_;
+  for (size_t i = 0; i < keys_iter->tup_.size(); ++i) {
+    std::shared_ptr<SugaredValue> module_sugared_value =
+        module_values_iter->tup_.at(i);
+    auto module_value =
+        std::dynamic_pointer_cast<ModuleValue>(module_sugared_value);
+
+    auto keys_value = keys_iter->tup_.at(i);
+    auto key_string = toIValue(keys_value->asValue(loc, m))->toStringRef();
+    std::string submodule_prefix = prefix;
+    if (prefix != "") {
+      submodule_prefix = prefix + ".";
+    }
+    submodule_prefix = submodule_prefix + key_string;
+    recurseThroughNestedModules(
+        loc, m, keys, values, module_value, submodule_prefix);
+  };
+}
+
+std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     const SourceRange& loc,
     Function& m) {
   std::vector<std::string> submoduleNames;
@@ -242,28 +274,39 @@ SugaredValuePtr ModuleValue::desugarModuleContainer(
     auto mod_v = std::make_shared<ModuleValue>(
         module_v, concreteType_->findSubmoduleConcreteType(name));
 
-    if (get_keys) {
-      keys.push_back(name_v);
-    }
-    if (get_values) {
-      values.push_back(mod_v);
-    }
+    keys.push_back(name_v);
+    values.push_back(mod_v);
   }
 
-  if (get_keys && !get_values) {
-    return std::make_shared<SugaredTupleValue>(keys);
-  } else if (get_values && !get_keys) {
-    return std::make_shared<SugaredTupleValue>(values);
-  } else if (get_values && get_keys) {
-    auto key_list = std::make_shared<SugaredTupleValue>(keys);
-    auto value_list = std::make_shared<SugaredTupleValue>(values);
+  return std::make_shared<SugaredModuleDict>(
+      std::make_shared<ModuleValue>(self_, concreteType_),
+      std::make_shared<SugaredTupleValue>(keys),
+      std::make_shared<SugaredTupleValue>(values));
+}
+
+std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  if (field == "keys") {
+    return std::make_shared<ModuleDictMethod>(keys_, "keys");
+  } else if (field == "values") {
+    return std::make_shared<ModuleDictMethod>(modules_, "values");
+  } else if (field == "items") {
     auto iterator = std::make_shared<IterableTree>();
-    iterator->addChild(loc, m, key_list);
-    iterator->addChild(loc, m, value_list);
-    return iterator->iter(loc, m);
-  } else {
-    TORCH_INTERNAL_ASSERT(false);
-  }
+    iterator->addChild(loc, m, keys_);
+    iterator->addChild(loc, m, modules_);
+    return std::make_shared<ModuleDictMethod>(iterator, "items");
+  } else if (field == "named_modules") {
+    auto iterator = std::make_shared<IterableTree>();
+    std::vector<SugaredValuePtr> keys;
+    std::vector<SugaredValuePtr> values;
+    recurseThroughNestedModules(loc, m, keys, values, self_, "");
+    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(keys));
+    iterator->addChild(loc, m, std::make_shared<SugaredTupleValue>(values));
+    return std::make_shared<ModuleDictMethod>(iterator, "named_modules");
+  };
+  TORCH_INTERNAL_ASSERT(false);
 }
 
 // helper function for instantiating a SugaredValue from an IValue
@@ -316,22 +359,14 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // 2. Special case: for module dicts we manually desugar items(), keys(),
   // values() calls into the appropriate method.
-  // TODO: These could be represented as first class methods probably.
   if (concreteType_->getIterableModuleKind() == IterableModuleKind::DICT) {
     if (field == "items" || field == "keys" || field == "values") {
-      bool get_keys = false;
-      bool get_values = false;
-      if (field == "items") {
-        get_keys = true;
-        get_values = true;
-      } else if (field == "values") {
-        get_values = true;
-      } else {
-        get_keys = true;
-      }
-      return std::make_shared<ModuleDictMethod>(
-          desugarModuleContainer(get_keys, get_values, loc, m), field);
+      return getSugaredModuleDict(loc, m)->attr(loc, m, field);
     }
+  }
+
+  if (field == "named_modules") {
+    return getSugaredModuleDict(loc, m)->attr(loc, m, "named_modules");
   }
 
   // 3. Check if this is the name of an overloaded method.
@@ -403,11 +438,14 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
         << "Only constant Sequential, ModueList, or ModuleDict can be used as an iterable";
   }
 
-  // iterating over a dictionary returns the keys, iterating over a
-  // list returns the values
-  const bool get_keys = iterableModuleKind == IterableModuleKind::DICT;
-  const bool get_values = iterableModuleKind == IterableModuleKind::LIST;
-  return desugarModuleContainer(get_keys, get_values, loc, m);
+  auto module_dict = getSugaredModuleDict(loc, m);
+  if (iterableModuleKind == IterableModuleKind::DICT) {
+    return module_dict->keys_;
+  } else if (iterableModuleKind == IterableModuleKind::LIST) {
+    return module_dict->modules_;
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 }
 
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
