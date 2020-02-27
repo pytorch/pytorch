@@ -23,6 +23,7 @@
 #include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #endif
 
 #include <ATen/core/function_schema.h>
@@ -718,6 +719,15 @@ inline py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    auto RRefPtr =
+        c10::dynamic_intrusive_pointer_cast<torch::distributed::rpc::RRef>(
+            std::move(ivalue).toRRef());
+    return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
+#else
+    AT_ERROR("RRef is only supported with the distributed package");
+#endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     if (obj->type()->is_module()) {
