@@ -1732,7 +1732,7 @@ class _DistTestBase(object):
         for param in model.parameters():
             if param.grad is not None:
                 with torch.no_grad():
-                  param += param.grad
+                    param += param.grad
                 param.grad = None
 
     def _prepare_dummy_data(self, local_bs):
