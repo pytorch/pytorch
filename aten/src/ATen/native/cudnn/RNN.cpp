@@ -680,10 +680,11 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& weight_buf_r, const Tensor& hx, const Tensor& cx,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, bool type_2, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
 
+  std::cout << std::to_string(weight.size()) << "\n";
   check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;
@@ -1248,7 +1249,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   auto cudnn_output = at::_cudnn_rnn(
       input, params, has_biases ? 4 : 2, weight_buf,
       hx, cx, static_cast<int>(mode), hidden_size, num_layers, /*batch_first=*/false,
-      dropout_p, train, bidirectional, batch_sizes, dropout_state.buffer);
+      dropout_p, train, bidirectional, type_2, batch_sizes, dropout_state.buffer);
 
   return {std::get<0>(cudnn_output),
           pack_hidden<hidden_type>(std::get<1>(cudnn_output), std::get<2>(cudnn_output))};

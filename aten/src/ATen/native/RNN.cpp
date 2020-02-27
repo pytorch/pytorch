@@ -764,6 +764,8 @@ struct PackedBidirectionalLayer
     auto input_fwd = input;
     auto input_bwd = input;
     if(!type_2 && layer_num > 0) {
+      // Split the input {fwd, bwd} in order to apply RNN as Type-1.
+      // See pytorch/pytorch#4930
       auto input_split = input.data.chunk(2, input.data.dim() - 1);
       PackedSequence input_fwd {
         input_split[0],
