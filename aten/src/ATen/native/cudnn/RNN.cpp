@@ -44,7 +44,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
+    bool train, bool bidirectional, bool type_2, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
@@ -1056,7 +1056,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const Tensor& grad_cy_r,
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool batch_first, double dropout,
-    bool train, bool bidirectional, IntArrayRef batch_sizes,
+    bool train, bool bidirectional, bool type_2, IntArrayRef batch_sizes,
     const Tensor& dropout_state, const Tensor& reserve,
     std::array<bool, 4> output_mask
     ) {
