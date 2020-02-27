@@ -2777,36 +2777,9 @@ struct to_ir {
         callablePtrs.size())
     Function* callablePtr = callablePtrs.at(0);
 
+    const auto& functionSchema = callablePtr->getSchema();
     const SourceRange& loc = apply.range();
     auto graphPtr = method.graph();
-
-    // Graph insert the QualifiedName as an constant input IR Value.
-    const auto& qualname = callablePtr->qualname();
-    IValue userCallableQualNameIValue(qualname.qualifiedName());
-    Value* userCallableQualNameValue =
-        graphPtr->insertConstant(userCallableQualNameIValue, loc);
-
-    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
-    Node* rpc_async_node =
-        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
-            ->setSourceRange(loc);
-    {
-      WithInsertPoint insert(rpc_async_node);
-      rpc_async_node->addInput(dst_worker_name_value);
-      rpc_async_node->addInput(userCallableQualNameValue);
-
-      for (const auto& tree : args_kwargs_trees) {
-        rpc_async_node->addInput(emitExpr(Expr(tree)));
-      }
-    }
-    Value* rpc_async_node_output = rpc_async_node->output();
-
-    // Set output type from FunctionSchema.
-    const auto& functionSchema = callablePtr->getSchema();
-    const std::vector<Argument>& returns = functionSchema.returns();
-    TORCH_INTERNAL_ASSERT(returns.size() == 1);
-    auto output_type = returns[0].type();
-    rpc_async_node_output->setType(FutureType::create(output_type));
 
     // Match FunctionSchema.
     std::vector<NamedValue> args;
@@ -2832,6 +2805,33 @@ struct to_ir {
       // rpc_async(to, user_callable, arg_0, arg_1, kwarg_0="foo", kwarg_1="bar")
     }
     matchSchema(functionSchema, loc, *graphPtr, args, kwargs);
+
+    // Graph insert the QualifiedName as an constant input IR Value.
+    const auto& qualname = callablePtr->qualname();
+    IValue userCallableQualNameIValue(qualname.qualifiedName());
+    Value* userCallableQualNameValue =
+        graphPtr->insertConstant(userCallableQualNameIValue, loc);
+
+    // Graph insert a Node, prim::rpc_async jit::Operator, to the Graph.
+    Node* rpc_async_node =
+        graphPtr->insertNode(graphPtr->create(prim::rpc_async, 1))
+            ->setSourceRange(loc);
+    {
+      WithInsertPoint insert(rpc_async_node);
+      rpc_async_node->addInput(dst_worker_name_value);
+      rpc_async_node->addInput(userCallableQualNameValue);
+
+      for (const auto& tree : args_kwargs_trees) {
+        rpc_async_node->addInput(emitExpr(Expr(tree)));
+      }
+    }
+    Value* rpc_async_node_output = rpc_async_node->output();
+
+    // Set output type from FunctionSchema.
+    const std::vector<Argument>& returns = functionSchema.returns();
+    TORCH_INTERNAL_ASSERT(returns.size() == 1);
+    auto output_type = returns[0].type();
+    rpc_async_node_output->setType(FutureType::create(output_type));
 
     return std::make_shared<SimpleValue>(rpc_async_node_output);
   }

@@ -371,7 +371,7 @@ If the future completes with an error, an exception is thrown.
         auto stack = torch::jit::createStackForSchema(
             functionSchema,
             argsTuple.cast<py::args>(),
-            kwargsDict.cast<py::dict>(),
+            kwargsDict.cast<py::kwargs>(),
             c10::nullopt);
         {
           py::gil_scoped_release release;

@@ -550,7 +550,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       // when build flag "USE_DISTRIBUTED" is on.
       !py::module::import("torch._six").attr("PY2").cast<bool>() &&
       obj.ptr() ==
-          py::module::import("torch.distributed.rpc.api")
+          py::module::import("torch.distributed.rpc")
               .attr("rpc_async")
               .ptr()) {
     return SpecialFormValue::create(prim::rpc_async);
