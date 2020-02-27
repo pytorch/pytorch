@@ -830,8 +830,10 @@ class TestCase(expecttest.TestCase):
                                 diff[inf_mask] = 0
                         # TODO: implement abs on CharTensor (int8)
                         # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
-                        if diff.dtype.is_complex or (diff.is_signed() and diff.dtype != torch.int8):
+                        if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
+                            # if diff is complex, the imaginary component for diff will be 0
+                            # from the previous step, hence converting it to float and double is fine.
                             if diff.dtype == torch.complex64:
                                 diff = diff.to(torch.float)
                             elif diff.dtype == torch.complex128:
