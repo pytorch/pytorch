@@ -232,7 +232,6 @@ class Conv2d(_ConvNd):
             assert hasattr(mod, 'activation_post_process'), \
                 'Input QAT module must have observer attached'
             weight_post_process = mod.weight_fake_quant
-            weight_post_process(mod.weight)
             activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, \
@@ -248,7 +247,7 @@ class Conv2d(_ConvNd):
             else:
                 activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
-            weight_post_process(mod.weight)
+        weight_post_process(mod.weight)
         act_scale, act_zp = activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'

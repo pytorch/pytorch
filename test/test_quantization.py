@@ -311,7 +311,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
-    def test_eval_after_train(self):
+    def test_train_save_load_eval(self):
         model = AnnotatedTwoLayerLinearModel()
         model = prepare(model)
         # calibrate
@@ -813,7 +813,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
-    def test_eval_after_train(self):
+    def test_train_save_load_eval(self):
         qengine = 'fbgemm'
         model = ManualLinearQATModel()
         model = prepare_qat(model)

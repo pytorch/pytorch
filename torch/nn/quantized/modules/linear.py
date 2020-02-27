@@ -204,7 +204,6 @@ class Linear(torch.nn.Module):
         if hasattr(mod, 'weight_fake_quant'):
             # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
             weight_post_process = mod.weight_fake_quant
-            weight_post_process(mod.weight)
             activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
@@ -216,7 +215,7 @@ class Linear(torch.nn.Module):
             else:
                 activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
-            weight_post_process(mod.weight)
+        weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
         act_scale, act_zp = activation_post_process.calculate_qparams()
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
