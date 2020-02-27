@@ -12,7 +12,7 @@ def get_approximate_basis(A,        # type: Tensor
                           q,        # type: int
                           niter=2,  # type: Optional[int]
                           M=None    # type: Optional[Tensor]
-                         ):
+                          ):
     # type: (...) -> Tensor
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
     that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is

@@ -13822,11 +13822,6 @@ class TestTorchDeviceType(TestCase):
         E2, V2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True)
         E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
 
-        print()
-        print('std: E1=', E1)
-        print('std: E2=', E2)
-        print('std: E2a=', E2a)
-
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-4)        # std
@@ -13838,10 +13833,6 @@ class TestTorchDeviceType(TestCase):
         E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True)
         E2, V2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True)
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
-
-        print('gen: E1=', E1)
-        print('gen: E2=', E2)
-        print('gen: E2a=', E2a)
 
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
