@@ -3,6 +3,7 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
+#include <torch/csrc/jit/script/compilation_unit.h>
 #include <torch/csrc/jit/function.h>
 #include <torch/csrc/jit/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
