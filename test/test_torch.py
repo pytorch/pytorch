@@ -13768,7 +13768,6 @@ class TestTorchDeviceType(TestCase):
                              prec=prec)
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
-    @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
@@ -13783,18 +13782,18 @@ class TestTorchDeviceType(TestCase):
 
         def toscipy(A):
             if A.layout == torch.sparse_coo:
-                values = A.coalesce().values().numpy().copy()
-                indices = A.coalesce().indices().numpy().copy()
+                values = A.coalesce().values().cpu().numpy().copy()
+                indices = A.coalesce().indices().cpu().numpy().copy()
                 return scipy.sparse.coo_matrix((values, (indices[0], indices[1])), A.shape)
-            return A.numpy().copy()
+            return A.cpu().numpy().copy()
 
         niter = 1000
         repeat = 10
         m = 500  # size of the square matrix
         k = 7     # the number of requested eigenpairs
-        A1 = random_sparse_pd_matrix(m, density=2.0 / m)
-        B1 = random_sparse_pd_matrix(m, density=2.0 / m)
-        X1 = torch.randn((m, k), dtype=torch.double)
+        A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        B1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
+        X1 = torch.randn((m, k), dtype=dtype, device=device)
 
         A2 = toscipy(A1)
         B2 = toscipy(B1)

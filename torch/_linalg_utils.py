@@ -63,6 +63,7 @@ def transjugate(A):
 def norm(A):
     """Return Frobenius norm of a real matrix.
     """
+    return torch.norm(A, 2)
     if A.is_cuda:
         # e.g. conj is not available in CUDA
         return (abs(A) ** 2).sum().sqrt()
