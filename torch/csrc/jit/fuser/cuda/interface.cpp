@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/fuser/cuda/interface.h>
+#include <torch/csrc/jit/fuser/cuda/partition.h>
 #include <torch/csrc/jit/fuser/common/management.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
@@ -86,9 +87,17 @@ std::vector<bool> canCollapseDimsDown(const std::shared_ptr<c10::TensorType> ten
   return canCollapseDown;
 }
 
+bool CUDAFusionBackend::isFusible(const Node* const node) {
+  return isFusibleCudaFusionGroup(node);
+}
+
+bool CUDAFusionBackend::isFusible(const Node* const fusion, const Node* const node) {
+  return isFusibleCudaFusionGroup(fusion, node);
+}
+/*
+/*
 // Returns true if the node is added to the fusion group, false o.w.
 bool CUDAFusionBackend::isFusible(const Node* const node) {
-  /*
 
   int64_t ndims = *(node->inputs()[0]->type()->expect<TensorType>()->dim());
   std::vector< std::vector<bool> > collapse_vecs;
@@ -138,7 +147,6 @@ bool CUDAFusionBackend::isFusible(const Node* const node) {
     }
   }
   if(!first) std::cout<<")"<<std::endl;
-  */
 
 
   if(node->kind() == aten::add || node->kind() == prim::FusionGroup){
@@ -148,6 +156,7 @@ bool CUDAFusionBackend::isFusible(const Node* const node) {
 
   return false;
 }
+*/
 
 // dummy kernel
 const char *saxpy = "                                           \n\

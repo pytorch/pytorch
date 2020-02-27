@@ -23,6 +23,9 @@ namespace jit {
 class FusionBackend {
 public:
   virtual bool isFusible(const Node* const node) = 0;
+  virtual bool isFusible(
+      const Node* const fusion,
+      const Node* const node) = 0;
   virtual int fuse(const Node* const node) = 0;
   virtual void compileFusion(Node* fusion) = 0;
   virtual void callFusion(
