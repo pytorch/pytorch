@@ -704,7 +704,7 @@ class TestJit(JitTestCase):
 
         x = torch.rand(3, 4)
         numel = get_numel_script(x)
-        self.assertEqual(numel, 3 * 4)
+        self.assertEqual(numel, x.numel())
 
     def test_element_size(self):
         @torch.jit.script
@@ -713,7 +713,7 @@ class TestJit(JitTestCase):
 
         x = torch.rand(3, 4)
         element_size = get_element_size_script(x)
-        self.assertEqual(element_size, 4)
+        self.assertEqual(element_size, x.element_size())
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
