@@ -143,12 +143,10 @@ def replicate(network, devices, detach=False):
                 for j in range(num_replicas):
                     replica = module_copies[j][i]
                     param = param_copies[j][param_idx]
-                    setattr(replica, key, Parameter(param, requires_grad=param.requires_grad))
-                    # TODO: We need to manually set _parameters with a bare
-                    # non-parameter Tensor, otherwise gradients don't
-                    # accumulate in the original parameters when you call
-                    # backwards() on the DataParallel module.
-                    replica._parameters[key] = param
+                    # parameters in replicas are no longer leaves, so remove them from _parameters
+                    # and setattr them as non-parameter attributes
+                    del replica._parameters[key]
+                    setattr(replica, key, param)
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
