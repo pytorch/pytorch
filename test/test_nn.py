@@ -10788,10 +10788,13 @@ class TestNNDeviceType(NNTestCase):
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
 
+    # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
+    # returning CUDNN_STATUS_BAD_PARAM
+    # Disabling that specific test for now [see issue # 33918]
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
-    @dtypes(torch.half, torch.float, torch.double)
+    @dtypes(torch.float, torch.double)
     def test_conv_cudnn_nhwc_support(self, device, dtype):
         input = torch.randn((1, 16, 1, 1), dtype=dtype, device="cuda", requires_grad=True)
         weight = torch.randn((8, 16, 3, 3), dtype=dtype, device="cuda", requires_grad=True)
