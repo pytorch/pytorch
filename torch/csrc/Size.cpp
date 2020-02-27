@@ -6,7 +6,7 @@
 #include <torch/csrc/utils/python_tuples.h>
 
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 struct THPSize {
   PyTupleObject tuple;
