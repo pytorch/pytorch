@@ -61,9 +61,9 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
 
 template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
-  std::string msg = std::string("the derivative for '") + name + "' is not implemented.";
+  std::string msg = c10::str("the derivative for '", name, "' is not implemented.");
   if (strlen(reason) > 0) {
-    msg = msg + " " + reason;
+    msg = c10::str(msg, " ", reason);
   };
   throw std::runtime_error(msg);
 }
