@@ -144,6 +144,10 @@ void IterVisitor::traverse(
   traverse(fusion, outputs_to_visit);
 }
 
+  void IterVisitor::handle(Statement* s) { Statement::dispatch(this, s); }
+  void IterVisitor::handle(Expr* e) { Expr::dispatch(this, e); }
+  void IterVisitor::handle(Val* v) { Val::dispatch(this, v); }
+
 //Debug function
 /*
 std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {

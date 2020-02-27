@@ -331,7 +331,14 @@ TensorView* TransformReplay::runReplay(
     TensorView* replay_ref,
     TensorView* replay_target,
     int compute_at_axis) {
+
+  if (compute_at_axis < 0)
+    compute_at_axis += replay_ref->domain()->size() + 1;
+
+  assert(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1 );
+
   this->compute_at_axis = compute_at_axis;
+  
   /* STEP 1 */
   // Trace back to the root TensorDomain's of ref and target
   TensorDomain* target_root = get_root(replay_target->domain());
@@ -389,6 +396,14 @@ TensorView* TransformReplay::replay(
     int compute_at_axis) {
   TransformReplay tr;
   tr.runReplay(replay_ref, replay_target, compute_at_axis);
+  return replay_target;
+}
+
+TensorView* TransformReplay::fullReplay(
+    TensorView* replay_ref,
+    TensorView* replay_target) {
+  TransformReplay tr;
+  tr.runReplay(replay_ref, replay_target, -1);
   return replay_target;
 }
 

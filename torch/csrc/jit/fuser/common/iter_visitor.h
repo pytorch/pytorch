@@ -51,9 +51,9 @@ public:
 
 
   //Hierarchal dispatch functions for handle
-  virtual void handle(Statement* s) { Statement::dispatch(this, s); }
-  virtual void handle(Expr* e) { Expr::dispatch(this, e); }
-  virtual void handle(Val* v) { Val::dispatch(this, v); }
+  virtual void handle(Statement* s);
+  virtual void handle(Expr* e);
+  virtual void handle(Val* v);
 
   //Handle functions to be over written by inheriting classes. These functions
   //Will be called on nodes in topological order

@@ -14,7 +14,7 @@ TORCH_API Val* new_val_like(const Val* const val, DataType dtype){
     case (ValType::Tensor):
       throw std::runtime_error("Tensors cannot be intermediate values in this IR, must use TensorViews.");
     case(ValType::TensorView):
-      return static_cast<const TensorView* const>(val)->cloneForOutput(dtype);
+      return static_cast<const TensorView* const>(val)->newForOutput(dtype);
     case (ValType::Scalar):
       switch (dtype) {
         case (DataType::Float):

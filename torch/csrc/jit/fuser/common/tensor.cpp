@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
 
+#include <torch/csrc/jit/fuser/common/iriostream.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -82,9 +84,12 @@ Reorder::Reorder(
 
 TensorView* split(TensorView* tv, int axis, int factor) {
   TensorDomain* td = tv->domain();
+
   if (axis < 0)
-    axis += tv->domain()->size();
+    axis += td->size();
+
   assert(axis >= 0 && axis < td->size());
+
   IterDomain* id = td->axis(axis);
 
   if (id->parallel_method() != ParallelType::Serial)
@@ -127,14 +132,18 @@ TensorView* split(TensorView* tv, int axis, int factor) {
 
 TensorView* merge(TensorView* tv, int axis) {
   TensorDomain* td = tv->domain();
+  
+  if (axis < 0)
+    axis += td->size();
+
   assert(axis >= 0 && axis + 1 < td->size());
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
       throw std::runtime_error("Cannot split axis within compute at range.");
 
-  IterDomain* first = tv->domain()->axis(axis);
-  IterDomain* second = tv->domain()->axis(axis + 1);
+  IterDomain* first = td->axis(axis);
+  IterDomain* second = td->axis(axis + 1);
 
   assert(first->isReduction() == second->isReduction());
   assert(first->parallel_method() == second->parallel_method());
@@ -239,7 +248,16 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   return tv;
 }
 
-TensorView* TensorView::cloneForOutput(DataType dtype) const {
+TensorView* TensorView::clone() const {
+    TensorView* new_view = new TensorView(tensor_, domain_);
+    std::cout<<FusionGuard::getCurFusion()->origin(domain_)<<std::endl;
+    std::cout<<FusionGuard::getCurFusion()->origin(new_view->domain())<<std::endl;
+    new_view->compute_at_view_ = compute_at_view_;
+    new_view->compute_at_axis_ = compute_at_axis_;
+    return new_view;
+  }
+
+TensorView* TensorView::newForOutput(DataType dtype) const {
   std::vector<IterDomain*> domain_copy;
   for(decltype(this->domain()->size()) i = 0; i<this->domain()->size(); i++){
     //If reduction axis, don't copy it over. Reduction axes are owned by consumers
@@ -249,7 +267,7 @@ TensorView* TensorView::cloneForOutput(DataType dtype) const {
     domain_copy.push_back(new IterDomain(this->domain()->axis(i)->size()));
   }
   TensorDomain *td = new TensorDomain(domain_copy);
-  return new TensorView(td, dtype);;
+  return new TensorView(td, dtype);
 };
 
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
