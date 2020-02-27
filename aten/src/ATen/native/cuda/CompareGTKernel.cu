@@ -16,7 +16,7 @@ void gt_kernel_cuda(TensorIterator& iter) {
       return a > b;
     });
   });
-}}
+}
 
 REGISTER_DISPATCH(gt_stub, &gt_kernel_cuda);
 
