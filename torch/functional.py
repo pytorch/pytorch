@@ -5,6 +5,7 @@ from itertools import product
 from ._overrides import has_torch_function, handle_torch_function
 
 Tensor = torch.Tensor
+from torch import _VF
 
 __all__ = [
     'align_tensors',
@@ -301,7 +302,6 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return torch._C._VariableFunctions.meshgrid(tensors)
 
 
-
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     # type: (Tensor, int, Optional[int], Optional[int], Optional[Tensor], bool, str, bool, bool) -> Tensor
@@ -399,7 +399,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
+    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 del torch.unique_dim
