@@ -110,10 +110,7 @@ class TestTensorBuiltins(JitTestCase):
                 continue
             code = code_template.format(p)
             cu = torch.jit.CompilationUnit()
-            try:
-                cu.define(code)
-                if p in EQUALITY_MISMATCH:
-                    continue
-                self.assertEqual(getattr(tensor, p), cu.fn(tensor))
-            except RuntimeError as e:
-                print(p, "failed")
+            cu.define(code)
+            if p in EQUALITY_MISMATCH:
+                continue
+            self.assertEqual(getattr(tensor, p), cu.fn(tensor))
