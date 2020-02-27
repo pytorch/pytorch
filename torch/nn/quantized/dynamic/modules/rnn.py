@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 from torch import Tensor  # noqa: F401
-from torch.nn import _VF
+from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 import numbers

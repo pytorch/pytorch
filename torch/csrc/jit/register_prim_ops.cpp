@@ -2933,7 +2933,6 @@ RegisterOperators reg2({
     DEFINE_DIVMOD_MIXED_OP(float, int),
 
 #undef DEFINE_DIVMOD_MIXED_OP
-
     Operator(
         "aten::hash(str t) -> int",
         hashValue<std::string>,
