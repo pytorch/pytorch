@@ -17,6 +17,23 @@ def one_arg(value):
     return value + 1
 
 
+class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
+    def __init__(self, dst_worker):
+        super().__init__()
+        self.rrefs = []
+        for _ in range(4):
+            self.rrefs.append(rpc_return_rref(dst_worker))
+
+    @torch.jit.script_method
+    def forward(self):
+        # type: () -> Tensor
+        res_tensor = torch.ones(2, 2)
+        for rref in self.rrefs:
+            res_tensor += rref.to_here()
+
+        return res_tensor
+
+
 @torch.jit.script
 class MyScriptClass:
     def __init__(self):
@@ -204,3 +221,12 @@ class JitRpcTest(RpcAgentTestFixture):
 
         res = rref_tensor_is_owner(rref_var)
         self.assertEqual(res, False)
+
+    @dist_init
+    def test_my_script_module_with_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
+        res = module_with_rrefs()
+        self.assertEqual(res, torch.ones(2, 2) * 9)
