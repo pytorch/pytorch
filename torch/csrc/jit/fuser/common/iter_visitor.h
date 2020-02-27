@@ -29,6 +29,8 @@ struct Reorder;
 struct FusionGurad;
 struct Fusion;
 
+enum class ValType;
+
 struct TORCH_API IterVisitor {
   virtual ~IterVisitor() = default;
 
@@ -77,9 +79,14 @@ public:
   //Callback function when a Stmt is added to the "to_visit" queue
   virtual void toVisitCallback(Statement* stmt) {}
 
+  // This version of traverse collects the points of the graph to start from
+  // The "from_outputs_only" argument forces the graph to start from outputs
+  // instead of search for Val typed nodes that have no uses.
+  // The output type set limits further the set of Val nodes to search by type.
   void traverse(
       const Fusion* const _fusion,
       bool from_outputs_only,
+      std::unordered_set<ValType> val_types,
       bool breadth_first);
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes

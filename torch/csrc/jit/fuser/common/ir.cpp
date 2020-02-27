@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/ir_printer.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/ir.h>
@@ -257,6 +258,13 @@ template Statement* Val::dispatch_mutator(BaseMutator, Val*);
 template Statement* Val::dispatch_mutator(BaseMutator*, Val*);
 template Statement* Expr::dispatch_mutator(BaseMutator, Expr*);
 template Statement* Expr::dispatch_mutator(BaseMutator*, Expr*);
+
+template void Statement::dispatch(IRPrinter, Statement*);
+template void Statement::dispatch(IRPrinter*, Statement*);
+template void Val::dispatch(IRPrinter, Val*);
+template void Val::dispatch(IRPrinter*, Val*);
+template void Expr::dispatch(IRPrinter, Expr*);
+template void Expr::dispatch(IRPrinter*, Expr*); 
 
 /*
  * Val member definitions
