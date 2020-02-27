@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/pybind_utils.h
-copyrev: fee0bf4439090f9b8539ea1b99d4cecff61b05c2
-
 #pragma once
 
 #include <ATen/core/ivalue.h>

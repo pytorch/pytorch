@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/python_tracer.cpp
-copyrev: 166a9f97db87403329b0bd8a149afa7b8613a43c
-
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/jit/serialization/export.h>

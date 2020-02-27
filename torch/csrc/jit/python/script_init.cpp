@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/script/init.cpp
-copyrev: 3c379541927bf4bb29338b0768b5bf4fe8b62d46
-
 #include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>

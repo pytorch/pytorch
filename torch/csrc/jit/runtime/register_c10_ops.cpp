@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/register_c10_ops.cpp
-copyrev: 86c71ae23dc41ae258b4cac3228be77ce6b4e237
-
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <torch/csrc/autograd/record_function.h>

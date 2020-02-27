@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/python_tracer.h
-copyrev: 4cf00205ba3fa7d514e5ee47d2d6282938675c4b
-
 #pragma once
 
 #include <torch/csrc/jit/frontend/tracer.h>

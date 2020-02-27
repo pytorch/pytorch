@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/init.cpp
-copyrev: e9725b855596bc36bec6fcf3012e10df9b4da242
-
 #include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/jit/runtime/argument_spec.h>

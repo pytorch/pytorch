@@ -1,7 +1,3 @@
-
-copy: fbcode/caffe2/torch/csrc/jit/graph_executor.cpp
-copyrev: f4588c9424e0a3fa0611ffd769b32776e9eb3715
-
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <ATen/core/ivalue.h>
