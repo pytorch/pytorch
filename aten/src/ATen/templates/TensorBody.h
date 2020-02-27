@@ -241,8 +241,8 @@ class CAFFE2_API Tensor {
   }
 
   // Same as itemsize().  This is the PyTorch naming.
-  size_t element_size() const {
-    return impl_->itemsize();
+  int64_t element_size() const {
+    return static_cast<int64_t>(impl_->itemsize());
   }
 
   C10_DEPRECATED_MESSAGE("Tensor.type() is deprecated. Instead use Tensor.options(), which in many cases (e.g. in a constructor) is a drop-in replacement. If you were using data from type(), that is now available from Tensor itself, so instead of tensor.type().scalar_type(), use tensor.scalar_type() instead and instead of tensor.type().backend() use tensor.device().")
