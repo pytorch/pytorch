@@ -581,6 +581,55 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::is_leaf(Tensor a) -> bool",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_leaf());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::T(Tensor(a) a) -> Tensor(a)",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.numpy_T());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::output_nr(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.output_nr());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::ndim(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.dim());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::name(Tensor a) -> str?",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           if (a.name() == "") {
+             push(stack, IValue());
+           } else {
+             push(stack, a.name());
+           }
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::layout(Tensor a) -> int",
          [](Stack& stack) {
            at::Tensor a;
