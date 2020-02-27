@@ -9824,6 +9824,28 @@ a")
             m2 = M2()
             m2(torch.zeros(4, 3))
 
+    def test_named_modules(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = (nn.ReLU())
+                self.mod2 = (nn.ReLU())
+                self.mod3 = nn.Sequential(nn.Sequential(nn.ReLU()))
+
+            @torch.jit.export
+            def method(self, x):
+                mod_names = ""
+                for name, mod in self.named_modules():
+                    mod_names = mod_names + " " + name
+                    x = mod(x)
+                return mod_names, x
+
+            def forward(self, x):
+                return x + 2
+
+        mod = torch.jit.script(MyMod())
+        self.assertEqual(mod.method(torch.tensor(2)), MyMod().method(torch.tensor(2)))
+
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
 
