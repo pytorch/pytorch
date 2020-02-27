@@ -138,7 +138,18 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
   std::vector<std::string> single_input_aten_funcs = {
     "adaptive_avg_pool2d",
     "max_pool2d",
+    "avg_pool2d",
     "flatten",
+    "max",
+    "min",
+    "mean",
+    // TODO: sort returns a tuple of Tensors, we have
+    // to extend the API to support that
+    // "sort",
+    "__interpolate",
+    "__upsample",
+    "__upsample_bilinear",
+    "__upsample_nearest",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
@@ -611,7 +622,8 @@ bool isBiasOfConvOrLinear(Value* v) {
   if (result) {
     TORCH_CHECK(
         v->uses().size() == 1,
-        "We only support conv/linear bias being used by one node.");
+        "Graph mode quantization only supports conv/linear bias being used by"
+        " one node.");
   }
   return result;
 }
@@ -624,7 +636,8 @@ bool isWeightOfConvOrLinear(Value* v) {
   if (result) {
     TORCH_CHECK(
         v->uses().size() == 1,
-        "We only support conv/linear weight being used by one node.");
+        "Graph mode quantization only supports conv/linear weight being used by"
+        " one node.");
   }
   return result;
 }
@@ -836,6 +849,8 @@ void InsertObserversHelper::preprocess(
     const std::string& method_name) {
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // TODO: remove constant prop, add separate graph
+  // cleanup step before insert observers
   // To cleanup traced graph
   ConstantPooling(graph);
   ConstantPropagation(graph);
@@ -858,7 +873,8 @@ void InsertObserversHelper::preprocess(
 }
 
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get())) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      isBiasOfConvOrLinear(v)) {
     return false;
   }
   // Check whether producer is quantizable
@@ -867,7 +883,7 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   }
   // Check whether user is quantizable
   for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user) && !isBiasOfConvOrLinear(v)) {
+    if (nodeQuantizable(use.user)) {
       return true;
     }
   }
