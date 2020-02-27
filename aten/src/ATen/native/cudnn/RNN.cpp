@@ -824,7 +824,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& grad_cy,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first, double fn_dropout,
-    bool fn_train, bool fn_bidirectional, IntArrayRef fn_batch_sizes,
+    bool fn_train, bool fn_bidirectional, bool type_2, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state, const Tensor& fn_reserve,
     std::array<bool, 3> output_mask
     ) {
@@ -1067,7 +1067,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
   Tensor dx, dhx, dcx;
   // NB: unconditionally compute this gradient, because it mutates reserve
-  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+  std::tie(dx, dhx, dcx) = at::native::_cudnn_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, type_2, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
   std::vector<Tensor> dw;
   if (output_mask[3]) {
     dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, type_2, batch_sizes, dropout_state, reserve);
