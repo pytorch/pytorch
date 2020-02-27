@@ -1,9 +1,9 @@
 #include "import.h"
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 
 #include <fstream>

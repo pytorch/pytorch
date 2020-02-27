@@ -10,10 +10,10 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/csrc/jit/custom_class.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/api/custom_class.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
