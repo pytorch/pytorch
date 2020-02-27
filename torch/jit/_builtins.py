@@ -83,8 +83,25 @@ _builtin_ops = [
     (torch.nn.init._no_grad_zero_, "aten::_no_grad_zero_"),
     (torch._C._get_tracing_state, "aten::_get_tracing_state"),
     (warnings.warn, "aten::warn"),
+    (torch._VF.stft, "aten::stft")
 ]
 
+# ops in torch.functional are bound to torch 
+# in these cases, we want to resolve the function to their python implementation 
+# instead looking up a builtin "aten::" schema
+
+def _gen_torch_functional_registered_ops():
+    # eventually ops should encompass all of torch/functional.py, (torch.functional.__all__) 
+    # but we are currently only able to compile some of the functions. additionally, 
+    # some functions directly map to their aten:: implementations. 
+    # TODO: add support for more ops
+    ops = ["stft"]
+    return set(getattr(torch.functional, name) for name in ops)
+
+_functional_registered_ops = _gen_torch_functional_registered_ops()
+
+def _is_special_functional_bound_op(fn):
+    return fn in _functional_registered_ops
 
 # lazily built to ensure the correct initialization order
 def _get_builtin_table():
@@ -96,7 +113,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v):
+            if callable(v) and not _is_special_functional_bound_op(v):
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
