@@ -177,6 +177,14 @@ void DistAutogradContainer::eraseContextIdAndReset(int64_t context_id) {
   }
 }
 
+void DistAutogradContainer::isValidContext(int64_t context_id) {
+  std::lock_guard<std::mutex> guard(autograd_context_lock_);
+  TORCH_CHECK(
+      autograd_context_.find(context_id) != autograd_context_.end(),
+      "Could not find autograd context with id: ",
+      context_id);
+}
+
 ContextPtr DistAutogradContainer::retrieveContext(int64_t context_id) {
   std::lock_guard<std::mutex> guard(autograd_context_lock_);
   TORCH_CHECK(
