@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h
+copyrev: 2d527b9482fe1e50c0177ad50a1a0ee2b47d3bc6
+
 #pragma once
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/fused_kernel.h>
+#include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 #include <cstdint>

@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/string_to_type.cpp
+copyrev: 68c020df541aec10a5678c004176ffb65612f821
+
 #include <ATen/core/jit_type.h>
 
 namespace torch {

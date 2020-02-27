@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/profiling_record.h
+copyrev: 0398e0be0f41f3a66ea4be5953d1fcc0f9e547fa
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -5,7 +9,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <list>
 #include <vector>

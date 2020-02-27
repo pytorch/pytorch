@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/hooks_for_testing.h>
-#include <torch/csrc/jit/script/module.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/testing/hooks_for_testing.cpp
+copyrev: e54110712a0f009ce90d7a1a125b7f7ef5ed3a87
+
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace torch {
 namespace jit {

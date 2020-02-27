@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/pickle.h
+copyrev: 357c886d4ec4f3b293b732f4b5f244f45e1450f0
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
 
 namespace torch {

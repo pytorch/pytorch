@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/partition_desc.h
+copyrev: 9be12f47c44c9436e5b8392c319e9e231857ce74
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/fuser/tensor_desc.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 
 #include <cstdint>
 #include <memory>

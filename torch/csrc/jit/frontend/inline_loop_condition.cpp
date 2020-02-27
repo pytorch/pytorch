@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/inline_loop_condition.cpp
+copyrev: c9e4756685defe5636c7e5b8a028b996541b498a
+
 #include <functional>
 #include <memory>
 #include <string>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/inline_loop_condition.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/frontend/inline_loop_condition.h>
 
 namespace torch {
 namespace jit {

@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/scope.h
+copyrev: 0343524c8df07601ecf4fe6b91ee334ec0bca9c4
+
 #pragma once
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <unordered_map>
 
 namespace torch {

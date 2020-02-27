@@ -1,11 +1,15 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/schema_type_parser.cpp
+copyrev: c04fbafdf806750fe83c84e6e584f3675c0bef71
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
-#include <torch/csrc/jit/custom_class.h>
-#include <torch/csrc/jit/script/lexer.h>
-#include <torch/csrc/jit/script/parse_string_literal.h>
-#include <torch/csrc/jit/script/schema_type_parser.h>
+#include <torch/csrc/jit/api/custom_class.h>
+#include <torch/csrc/jit/frontend/lexer.h>
+#include <torch/csrc/jit/frontend/parse_string_literal.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <string>
 
 using c10::AliasInfo;

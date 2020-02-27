@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/logging.h
+copyrev: 9725d536a3d164f094e63fb0402ff34f8ce47f3b
+
 #pragma once
 
 #include <mutex>

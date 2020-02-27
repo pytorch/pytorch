@@ -1,9 +1,13 @@
-#include <torch/csrc/jit/constants.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/constants.cpp
+copyrev: 119752ae74c11234feffe777560c9a4c2d8c2bbe
+
+#include <torch/csrc/jit/ir/constants.h>
 #include <ATen/core/functional.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
 namespace jit {

@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/operator.h
+copyrev: 566703c16fa8436971b434212053cdf3935dc00a
+
 // in memory description of all ATen Ops similar to Caffe2 schema
 // once C10 exists this can be removed, or stubbed out, but we need
 // it now to implement correct semantic checking for script
@@ -5,8 +9,8 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/script/function_schema_parser.h>
-#include <torch/csrc/jit/operator_options.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/runtime/operator_options.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/OperatorOptions.h>

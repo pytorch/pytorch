@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/schema_matching.h
+copyrev: 3984d9d52301c27708c89ac8a1141d2687307ef3
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/named_value.h>
 
 #include <ATen/core/function_schema.h>
 

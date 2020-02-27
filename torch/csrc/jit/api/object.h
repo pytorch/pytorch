@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/object.h
+copyrev: be06479a5211f2ec26f67060dfd6986199888f4c
+
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/method.h>
+#include <torch/csrc/jit/api/method.h>
 
 namespace torch {
 namespace jit {

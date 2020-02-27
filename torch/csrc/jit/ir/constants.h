@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/constants.h
+copyrev: b1cb7b99707f39dfc6afd38b76f852a46f6e26de
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/scope.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/ir/scope.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 // helpers for handling constants in the IR
 // - create constant nodes from ints, floats, intlist, Tensors, and other types

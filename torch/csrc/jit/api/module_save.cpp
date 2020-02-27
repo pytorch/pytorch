@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/export.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/api/module_save.cpp
+copyrev: 5207f6ba4be86ce3f51317252f380acfd01b232d
+
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/serialization/export.h>
 
 namespace torch {
 namespace jit {

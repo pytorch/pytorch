@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/exception_message.h
+copyrev: 4b1e25c34bb22f5c402fc273525db8757bbea193
+
 #pragma once
 #include <c10/util/Exception.h>
 #include <stdexcept>

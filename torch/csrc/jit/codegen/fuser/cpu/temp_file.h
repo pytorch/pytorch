@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cpu/temp_file.h
+copyrev: fdd0668c5119ebe29f84414464965c24ef8f446f
+
 #pragma once
 
 #include <ATen/ATen.h>

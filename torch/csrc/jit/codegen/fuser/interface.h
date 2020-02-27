@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/interface.h
+copyrev: f455af6c3dc3361bf1297cdfd3596ae79087687f
+
 #pragma once
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <ATen/core/stack.h>
 
 #include <cstdint>

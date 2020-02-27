@@ -1,11 +1,15 @@
-#include <torch/csrc/jit/fuser/fallback.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/fallback.cpp
+copyrev: c9978012bbd90dcf19ef98f4100d114052897c48
+
+#include <torch/csrc/jit/codegen/fuser/fallback.h>
 
 #include <ATen/core/functional.h> //fmap
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <stdexcept>
 

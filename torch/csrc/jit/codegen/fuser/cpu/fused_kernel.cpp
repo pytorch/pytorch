@@ -1,9 +1,13 @@
-#include <torch/csrc/jit/fuser/cpu/fused_kernel.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
+copyrev: 3ab40e52a04565f484b2e768c685d7943b145c02
+
+#include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/code_template.h>
-#include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/cpu/temp_file.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/codegen/fuser/compiler.h>
+#include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>

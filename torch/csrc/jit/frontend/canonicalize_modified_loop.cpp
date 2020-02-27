@@ -1,11 +1,15 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/canonicalize_modified_loop.cpp
+copyrev: 66547e14491e0992cbd2ae116272377cbd581c95
+
 #include <functional>
 #include <memory>
 #include <string>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ir_views.h>
-#include <torch/csrc/jit/script/canonicalize_modified_loop.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 
 namespace torch {
 namespace jit {

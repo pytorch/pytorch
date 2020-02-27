@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/vararg_functions.h
+copyrev: af1d07571c84bd4906c269061759c4e6f7c67457
+
 #pragma once
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>

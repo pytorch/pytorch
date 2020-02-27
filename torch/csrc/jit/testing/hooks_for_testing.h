@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/testing/hooks_for_testing.h
+copyrev: 6229002a7361585bee261171e5c91b5cc15b32cb
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <functional>
 #include <memory>
 

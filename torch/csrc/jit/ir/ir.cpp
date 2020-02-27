@@ -1,13 +1,17 @@
-#include <torch/csrc/jit/ir.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/ir.cpp
+copyrev: 2d9578d2d3b815d56ae32cc3e0e561fe28343ea4
+
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <algorithm>
 #include <iostream>

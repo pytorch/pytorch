@@ -1,11 +1,15 @@
-#include <torch/csrc/jit/export.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/export_module.cpp
+copyrev: cf25ae220e90092cb36cf45f3936f32fb873381d
+
+#include <torch/csrc/jit/serialization/export.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/import_export_helpers.h>
-#include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/source_range_serialization.h>
-#include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <caffe2/serialize/inline_container.h>

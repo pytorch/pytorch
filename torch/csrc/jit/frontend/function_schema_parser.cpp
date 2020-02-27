@@ -1,7 +1,11 @@
-#include <torch/csrc/jit/script/function_schema_parser.h>
-#include <torch/csrc/jit/script/lexer.h>
-#include <torch/csrc/jit/script/parse_string_literal.h>
-#include <torch/csrc/jit/script/schema_type_parser.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/function_schema_parser.cpp
+copyrev: 066084bae23bfdefb46a5e44e8c549939b7c522d
+
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/lexer.h>
+#include <torch/csrc/jit/frontend/parse_string_literal.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <c10/util/string_utils.h>
 #include <ATen/core/Reduction.h>
 

@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/subgraph_matcher.h
+copyrev: 98fc42607aa08a9cab6d9e65305566eae2c2100a
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <unordered_map>
 #include <vector>

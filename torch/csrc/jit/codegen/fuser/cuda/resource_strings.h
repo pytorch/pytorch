@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cuda/resource_strings.h
+copyrev: 2873ef6cc07906c6e6ba965951b38e24eeb4a8fe
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 
 namespace torch {
 namespace jit {

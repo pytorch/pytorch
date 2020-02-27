@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/subgraph_matcher.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/subgraph_matcher.cpp
+copyrev: 6b5d47a8747f729f580cb4fac532b1b2baf8de59
+
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <stack>
 

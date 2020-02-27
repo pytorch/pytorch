@@ -1,6 +1,10 @@
-#include <torch/csrc/jit/symbolic_script.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/symbolic_script.cpp
+copyrev: c656fb64d011596aaf404cb1b50ac54691d61a22
+
+#include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
 namespace jit {

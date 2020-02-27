@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_distributed_ops.cpp
+copyrev: 0a36bf89b2cf7140521eed200fad8a77445b3571
+
 #include <ATen/ATen.h>
-#include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 #include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/csrc/distributed/autograd/context/container.h>

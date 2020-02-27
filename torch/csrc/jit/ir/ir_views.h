@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/ir_views.h
+copyrev: 1396dbbdecdaf0ec7408ca624965c4796731b8f1
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

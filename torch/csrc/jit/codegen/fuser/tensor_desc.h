@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/tensor_desc.h
+copyrev: 86d747dc4be45058d7ba795de1d2316a9bff966b
+
 #pragma once
 
 #include <ATen/ATen.h>

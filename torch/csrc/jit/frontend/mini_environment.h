@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/mini_environment.h
+copyrev: 8b6ca12bacf2b4599b49235f61557e7a7f5eef2f
+
 #pragma once
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

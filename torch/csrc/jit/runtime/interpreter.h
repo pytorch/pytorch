@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/interpreter.h
+copyrev: 783b338f1dcdf6ab9499bf2a79cc07e51204aec0
+
 #pragma once
 #include <c10/util/Optional.h>
 #include <memory>

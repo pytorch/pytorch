@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_export_helpers.h
+copyrev: 5547f08425e62c8abb179218406dcda9c522397e
+
 #pragma once
 
 #include <memory>

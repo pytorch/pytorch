@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_c10_ops.cpp
+copyrev: 86c71ae23dc41ae258b4cac3228be77ce6b4e237
+
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/tracer.h>
 #include <unordered_set>
 

@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/method.h
+copyrev: c2b41662d2f37c3f48a6047823753fe137389415
+
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/api/function.h>
 
 namespace torch {
 namespace jit {

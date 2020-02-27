@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/code_template.h
+copyrev: 0bbd7efb32e9ce6337c9c203adaacbf02a891a23
+
 #pragma once
 #include <sstream>
 #include <string>

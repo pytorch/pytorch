@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/concrete_module_type.h
+copyrev: b32823344d383d9527aed9a084831ed5aaf5a381
+
 #pragma once
 
-#include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/api/module.h>
 #include <aten/src/ATen/core/ivalue.h>
 #include <memory>
 #include <string>

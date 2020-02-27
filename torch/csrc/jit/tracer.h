@@ -6,7 +6,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/Dimname.h>
 
-#include <torch/csrc/jit/script/object.h>
+#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <cstdint>

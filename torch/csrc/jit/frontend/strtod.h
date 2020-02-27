@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/strtod.h
+copyrev: d9babb5a74c1fccda2c3b5ac50df717f731fbfcf
+
 #pragma once
 
 #include <ATen/core/Macros.h>

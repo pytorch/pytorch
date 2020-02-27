@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/pybind_utils.h
+copyrev: fee0bf4439090f9b8539ea1b99d4cecff61b05c2
+
 #pragma once
 
 #include <ATen/core/ivalue.h>
@@ -9,14 +13,14 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/python_custom_class.h>
-#include <torch/csrc/jit/python_ivalue.h>
-#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_ivalue.h>
+#include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/python/module_python.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>

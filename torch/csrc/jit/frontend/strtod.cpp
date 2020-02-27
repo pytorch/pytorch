@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/strtod.cpp
+copyrev: 9cd7e6e3bc5c4afbcea040fd0a78fa83e263e16b
+
 // Taken from https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 
 #include <stdlib.h>

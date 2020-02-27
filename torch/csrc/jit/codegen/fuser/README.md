@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/README.md
+copyrev: 2ca08962d4d36b2f706976157b06da49df9b1757
+
 # PyTorch Fuser
 
 The fuser accepts subgraphs wrapped in "fusion nodes" and tries to execute them by just-in-time (JIT) compiling kernels that run all the graph operations. 

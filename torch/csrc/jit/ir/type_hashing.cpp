@@ -1,8 +1,12 @@
-#include <torch/csrc/jit/type_hashing.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/type_hashing.cpp
+copyrev: dabef196257971b3a7abcb575f8ec92fbd005942
+
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/hash.h>
 
 namespace torch {

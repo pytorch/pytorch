@@ -1,13 +1,17 @@
-#include <torch/csrc/jit/passes/python_print.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/python_print.cpp
+copyrev: 9e637520a9fc6eb8183ef9dcaf7b5aa202bc04f5
+
+#include <torch/csrc/jit/serialization/python_print.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ir_views.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/api/module.h>
 
 using c10::QualifiedName;
 

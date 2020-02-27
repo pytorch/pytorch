@@ -1,8 +1,12 @@
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/lexer.h>
-#include <torch/csrc/jit/script/parse_string_literal.h>
-#include <torch/csrc/jit/script/schema_type_parser.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/irparser.cpp
+copyrev: f24d692248843f542920b42b789ff1a3920d89b9
+
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/frontend/lexer.h>
+#include <torch/csrc/jit/frontend/parse_string_literal.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 
 #include <string>
 #include <vector>

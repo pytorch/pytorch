@@ -1,7 +1,11 @@
-#include <torch/csrc/jit/passes/alias_analysis.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/alias_analysis.cpp
+copyrev: cb7ad6402fabcfb5bf458e2b83531f71a7caf0fc
+
+#include <torch/csrc/jit/ir/alias_analysis.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {

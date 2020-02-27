@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/testing/catch_utils.hpp
+copyrev: e8aa988be6efb035d53511bcab777a7d3e789a34
+
 #pragma once
 
 #define CATCH_CONFIG_PREFIX_ALL

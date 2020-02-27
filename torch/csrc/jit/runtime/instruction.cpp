@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/instruction.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/instruction.cpp
+copyrev: fa7f80e7eb1661e9efbb9378bb9cbcb07d3fcbdd
+
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <iostream>
 #include <cstring>
 

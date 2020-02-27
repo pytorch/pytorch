@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/ir.h
+copyrev: 59e5d152e9b1d6b2bac2fd892ffa2a5dc475379b
+
 #pragma once
 
-#include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/graph_node_list.h>
-#include <torch/csrc/jit/named_value.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/scope.h>
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/graph_node_list.h>
+#include <torch/csrc/jit/ir/named_value.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/scope.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/disallow_copy.h>

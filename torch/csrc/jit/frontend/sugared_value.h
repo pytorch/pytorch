@@ -1,12 +1,16 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/sugared_value.h
+copyrev: 58c0f4dabe38120030f61f64dc13ed3b5f7cf45d
+
 #pragma once
 #include <functional>
 #include <memory>
 #include <string>
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 
 namespace torch {
 namespace jit {

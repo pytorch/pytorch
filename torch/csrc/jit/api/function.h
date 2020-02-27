@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/function.h
+copyrev: 13411b803e3b2abfe4c7cd3a83617de3cb028b51
+
 #pragma once
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 #include <mutex>
 

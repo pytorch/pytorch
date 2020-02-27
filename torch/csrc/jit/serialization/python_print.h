@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/python_print.h
+copyrev: f52d2bdbe53763aa24b5819aac2efe9fda4d1b17
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <iostream>
 #include <vector>
 

@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_arg_flatten.h
+copyrev: 10fe366737122d7d803776b6ac74fe6a37847daf
+
 #pragma once
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <ATen/ATen.h>

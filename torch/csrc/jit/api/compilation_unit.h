@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/compilation_unit.h
+copyrev: 82738370da97831e234fd9b16203abd2b62eaad5
+
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/utils/memory.h>

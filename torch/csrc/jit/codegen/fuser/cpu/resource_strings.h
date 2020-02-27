@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cpu/resource_strings.h
+copyrev: b330da88bc70a4c38ee485db0ea6447859340157
+
 #pragma once
 
-#include <torch/csrc/jit/code_template.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 
 namespace torch {
 namespace jit {

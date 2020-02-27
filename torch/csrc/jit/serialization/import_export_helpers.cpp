@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_export_helpers.cpp
+copyrev: 9e5e68c2a80dcab83d1c3cfbb25b0ce0b1eec57f
+
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/import_export_helpers.h>
-#include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/jit/source_range_serialization_impl.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
 #include <c10/util/Exception.h>
 

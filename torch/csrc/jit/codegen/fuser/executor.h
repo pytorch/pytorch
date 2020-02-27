@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/executor.h
+copyrev: d068e0c5f3826ab934a0b8d0c3a4a8a7fdec96ac
+
 #pragma once
 
 #include <ATen/core/stack.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/fused_kernel.h>
-#include <torch/csrc/jit/fuser/kernel_spec.h>
+#include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
 
 #include <cstdint>
 

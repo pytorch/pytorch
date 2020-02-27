@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/schema_type_parser.h
+copyrev: db86b465653f2a38fb464317530245233bf9e278
+
 #pragma once
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <ATen/core/Macros.h>
 
 namespace torch {

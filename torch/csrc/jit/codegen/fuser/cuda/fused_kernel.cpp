@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/fuser/cuda/fused_kernel.h>
-#include <torch/csrc/jit/fuser/compiler.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
+copyrev: 3cca76ae20f5a33bbf154b33b2e1ccff3d6c3485
+
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
+#include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>

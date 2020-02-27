@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/attributes.h
+copyrev: 18ab502868b4a74447c80152f9256c7dd586cfd8
+
 #pragma once
 #include <ATen/ATen.h>
 #include <string>

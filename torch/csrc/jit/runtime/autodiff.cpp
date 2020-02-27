@@ -1,16 +1,20 @@
-#include <torch/csrc/jit/autodiff.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/autodiff.cpp
+copyrev: c0f43c045dd34036874a1227f92c0ecb6d138c6b
+
+#include <torch/csrc/jit/runtime/autodiff.h>
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
-#include <torch/csrc/jit/symbolic_script.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/runtime/symbolic_script.h>
 
 #include <algorithm>
 #include <memory>

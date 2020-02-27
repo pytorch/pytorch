@@ -5,13 +5,13 @@
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 #include <c10/core/QScheme.h>
 
@@ -210,7 +210,7 @@ class ModuleCloneHelper {
   /** Clone according to module qconfig map, this is for handling the case
    *  where we have two module instances sharing the same ClassType
    *  but configured with different QConfig
-   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/script/module.cpp
+   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/api/module.cpp
    */
   script::Module clone(
       const script::Module& module,

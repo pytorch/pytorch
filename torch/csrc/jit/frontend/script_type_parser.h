@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/script_type_parser.h
+copyrev: 85ae4ba0ffb8224ce8293c41585d383b2572a716
+
 #pragma once
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 
 namespace torch {
 namespace jit {

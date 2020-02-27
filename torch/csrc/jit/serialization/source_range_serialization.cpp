@@ -1,8 +1,12 @@
-#include <torch/csrc/jit/source_range_serialization.h>
-#include <torch/csrc/jit/source_range_serialization_impl.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/source_range_serialization.cpp
+copyrev: 80e8c630f640d0754d986a541898fe513028fa1c
+
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace jit {

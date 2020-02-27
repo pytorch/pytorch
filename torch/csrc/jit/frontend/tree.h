@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/tree.h
+copyrev: cb34f5eb66a17b809809a9a5ee035c6496e1d32a
+
 #pragma once
 
 #include <functional>
@@ -5,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/SmallVector.h>
 

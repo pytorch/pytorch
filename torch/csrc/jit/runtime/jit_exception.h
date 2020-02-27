@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/jit_exception.h
+copyrev: 8b49cbcc8447cf73ba8af191ac0cf4e0dfd58b29
+
 #pragma once
 
 #include <stdexcept>

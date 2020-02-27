@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/script/lexer.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/lexer.cpp
+copyrev: 81b0c00efc8294f9e045a3a861bc34161938a954
+
+#include <torch/csrc/jit/frontend/lexer.h>
 
 #include <c10/util/Exception.h>
 

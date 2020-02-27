@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/instruction.h
+copyrev: a221935298a055ee29d352801450fd117bced5b4
+
 #pragma once
 #include <typeinfo>
 #include <stdint.h>

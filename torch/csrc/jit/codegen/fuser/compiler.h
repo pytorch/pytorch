@@ -1,11 +1,15 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/compiler.h
+copyrev: 55979c2833361d9ef38b1a984e8ba09a6fbdb79b
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/arg_spec.h>
-#include <torch/csrc/jit/fuser/fused_kernel.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/kernel_spec.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/codegen/fuser/arg_spec.h>
+#include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <ATen/core/stack.h>
 
 #include <cstdint>

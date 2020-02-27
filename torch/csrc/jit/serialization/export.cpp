@@ -1,12 +1,16 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/export.cpp
+copyrev: f214210c804e3242e0292cc5e9f720d9be6dc560
+
 #include <torch/csrc/autograd/symbolic.h>
-#include <torch/csrc/jit/export.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/onnx/onnx.h>
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>

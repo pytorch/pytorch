@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/script/logging.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/logging.cpp
+copyrev: c0630f06cdd9422b0af75b34a34e795ed654e3a3
+
+#include <torch/csrc/jit/runtime/logging.h>
 
 #include <atomic>
 #include <mutex>

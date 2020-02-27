@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/named_value.h
+copyrev: 59cdb138e6971ef87c2ccb471688807a174fdab2
+
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/utils/variadic.h>
 
 namespace torch {

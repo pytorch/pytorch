@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_ir.h
+copyrev: 0f4a68fee23c95d5610769a1dd293364976f4caa
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 namespace torch {

@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/source_range.h>
-#include <torch/csrc/jit/source_range_serialization.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/source_range.cpp
+copyrev: e1dcb11ebd30adbf32529639f18a485d214b5fba
+
+#include <torch/csrc/jit/frontend/source_range.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 namespace torch {
 namespace jit {

@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/graph_node_list.h
+copyrev: ca9b166636cb4efa2a03cab7183cf48dcffc0217
+
 #pragma once
 
 #include <c10/util/Exception.h>

@@ -1,11 +1,15 @@
-#include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/ir_views.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/convert_to_ssa.cpp
+copyrev: 5161f4246700928d095c838c3e5fe39ecf38003c
+
+#include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
-#include <torch/csrc/jit/script/exit_transforms.h>
-#include <torch/csrc/jit/script/inline_loop_condition.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
-#include <torch/csrc/jit/script/mini_environment.h>
+#include <torch/csrc/jit/frontend/exit_transforms.h>
+#include <torch/csrc/jit/frontend/inline_loop_condition.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/mini_environment.h>
 
 namespace torch {
 namespace jit {

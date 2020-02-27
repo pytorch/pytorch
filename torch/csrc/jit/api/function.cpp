@@ -1,7 +1,11 @@
-#include <torch/csrc/jit/function.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/api/function.cpp
+copyrev: daacfe907ee978cfa03a49534b6c0fdeb00c8526
+
+#include <torch/csrc/jit/api/function.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 namespace torch {
 namespace jit {

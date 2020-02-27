@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/custom_operator.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_string_ops.cpp
+copyrev: 6ff12c0b1e441fd1920d89974ff6b7c307a84012
+
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace torch {
 namespace jit {

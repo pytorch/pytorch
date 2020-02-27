@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/argument_spec.h
+copyrev: b6f35850280526f21abfbbc73f89b9e3d483d48e
+
 #pragma once
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/hash.h>
 #include <iostream>
 #include <vector>

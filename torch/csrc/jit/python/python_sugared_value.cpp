@@ -1,9 +1,13 @@
-#include <torch/csrc/jit/script/python_sugared_value.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_sugared_value.cpp
+copyrev: 21f296005e1dae7b2ba1feff24ef688c2d448549
+
+#include <torch/csrc/jit/python/python_sugared_value.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/python/module_python.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <memory>
 #include <sstream>
 #include <string>

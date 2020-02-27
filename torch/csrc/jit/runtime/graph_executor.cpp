@@ -1,16 +1,20 @@
-#include <torch/csrc/jit/graph_executor.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/graph_executor.cpp
+copyrev: f4588c9424e0a3fa0611ffd769b32776e9eb3715
+
+#include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/graph_executor_impl.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/pass_manager.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -32,14 +36,14 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
-#include <torch/csrc/jit/profiling_graph_executor_impl.h>
-#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/jit/script/logging.h>
+#include <torch/csrc/jit/runtime/logging.h>
 
 #include <cstdint>
 #include <iterator>

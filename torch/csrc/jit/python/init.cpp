@@ -1,14 +1,18 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/init.cpp
+copyrev: e9725b855596bc36bec6fcf3012e10df9b4da242
+
 #include <torch/csrc/utils/pybind.h>
 
-#include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -44,17 +48,17 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/check_alias_annotation.h>
-#include <torch/csrc/jit/print_handler.h>
-#include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/python_arg_flatten.h>
-#include <torch/csrc/jit/python_custom_class.h>
-#include <torch/csrc/jit/python_ir.h>
-#include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/script/init.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
-#include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/python_tree_views.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
+#include <torch/csrc/jit/python/python_custom_class.h>
+#include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/script_init.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/python/python_tree_views.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <c10/macros/Export.h>

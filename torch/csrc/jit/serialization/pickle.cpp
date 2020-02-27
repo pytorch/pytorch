@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/pickle.cpp
+copyrev: dfc060ea38944dba9019cb6035af2ba5aef3478c
+
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <caffe2/serialize/inline_container.h>
 
 namespace torch {

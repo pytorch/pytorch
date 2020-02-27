@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/arg_spec.h
+copyrev: 12bc0ae40cbb38dd587ec40dd4a025668b5ccf39
+
 #pragma once
 #include <ATen/ATen.h>
 #include <ATen/core/functional.h> // fmap
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/tensor_desc.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 #include <torch/csrc/utils/hash.h>
 
 #include <cstdint>

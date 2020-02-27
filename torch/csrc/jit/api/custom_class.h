@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/custom_class.h
+copyrev: 4fec30269bfacce9299f2afc33f629802b2d348b
+
 #pragma once
 
 #include <ATen/core/ivalue.h>

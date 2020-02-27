@@ -1,13 +1,17 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/graph_executor.h
+copyrev: bef0fac3e61192f7badee54518bc36d253b4810c
+
 #pragma once
 
 #include <atomic>
 #include <memory>
 
-#include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/variable_tensor_list.h>
-#include <torch/csrc/jit/update_graph_executor_opt.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/variable_tensor_list.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 
 namespace torch {
 namespace jit {

@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/resolver.h
+copyrev: ebc1704f04197d34b8ed5003b2048c60281f3ba7
+
 #pragma once
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/frontend/sugared_value.h>
 
 namespace torch {
 namespace jit {

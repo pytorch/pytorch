@@ -1,27 +1,31 @@
-#include <torch/csrc/jit/script/init.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/script_init.cpp
+copyrev: 3c379541927bf4bb29338b0768b5bf4fe8b62d46
+
+#include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/python_ivalue.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/module_python.h>
-#include <torch/csrc/jit/script/python_sugared_value.h>
-#include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/python/python_ivalue.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/python/module_python.h>
+#include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/hooks_for_testing.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/script/logging.h>
-#include <torch/csrc/jit/script/parser.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/runtime/logging.h>
+#include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>

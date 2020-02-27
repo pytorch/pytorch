@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/kernel_cache.h
+copyrev: 721ccd0ab9eb291e9fb0d36f3268ddfaa154a4c0
+
 #pragma once
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/kernel_spec.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <cstdint>
 #include <functional>

@@ -1,9 +1,13 @@
-#include <torch/csrc/jit/script/object.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/api/object.cpp
+copyrev: c9ab1fa444a7ee65e518b3204e49d283329597b4
+
+#include <torch/csrc/jit/api/object.h>
 
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/sugared_value.h>
 
 namespace torch {
 namespace jit {

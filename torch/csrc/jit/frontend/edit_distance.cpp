@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/script/edit_distance.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/edit_distance.cpp
+copyrev: 755f4a03068531c3976e358e8718be387dfd66f3
+
+#include <torch/csrc/jit/frontend/edit_distance.h>
 #include <algorithm>
 #include <cstring>
 #include <memory>

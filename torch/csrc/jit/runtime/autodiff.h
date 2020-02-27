@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/autodiff.h
+copyrev: ce1d984976590b5a4b1d69eace75553cbfdd99f3
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <ATen/ATen.h>
 

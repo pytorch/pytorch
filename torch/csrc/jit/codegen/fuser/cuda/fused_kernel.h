@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h
+copyrev: a60bed594cf8816e61925f0e0d99eea84beececd
+
 #pragma once
 
 #include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/fused_kernel.h>
+#include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 
 #include <cuda.h>
 #include <cuda_runtime.h>

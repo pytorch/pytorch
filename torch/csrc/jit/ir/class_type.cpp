@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/class_type.cpp
+copyrev: 5fd54b8a03c3f126955b73b3389f448b1ca77c55
+
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace c10 {
 

@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/tensor_info.h
+copyrev: e0a21352c98113f0c745a8538d9b7229cdf8a98b
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
 

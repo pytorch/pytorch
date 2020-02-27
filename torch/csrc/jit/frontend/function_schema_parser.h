@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/function_schema_parser.h
+copyrev: e9832ed1df4279d3298e4948a9bd08ada8f8c5d7
+
 #pragma once
 
 #include <ATen/core/function_schema.h>

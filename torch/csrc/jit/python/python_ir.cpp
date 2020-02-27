@@ -1,14 +1,18 @@
-#include <torch/csrc/jit/python_ir.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_ir.cpp
+copyrev: b06e643220654b07e4ecc8a1bcf0d6c33b0579ea
+
+#include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
-#include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/passes/python_print.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/pybind.h>
-#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/python/pybind.h>
+#include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>

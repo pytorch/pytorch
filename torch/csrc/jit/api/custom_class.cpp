@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/custom_class.cpp
+copyrev: 28f2cb76598b222c99387d3d6e3477de9cf24d48
+
 #include <torch/custom_class.h>
 
 #include <atomic>

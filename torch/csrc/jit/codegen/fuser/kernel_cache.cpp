@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/fuser/kernel_cache.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/kernel_cache.cpp
+copyrev: 4daa2354e0d487b0a7569def7ac5085831965b73
+
+#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 

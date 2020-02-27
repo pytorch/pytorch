@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/interpreter.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/interpreter.cpp
+copyrev: c552ce78622184ffa0aebe99f833e87da05141ed
+
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
@@ -7,17 +11,17 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/exception_message.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/instruction.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/runtime/exception_message.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/vararg_functions.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <exception>
 #include <iostream>

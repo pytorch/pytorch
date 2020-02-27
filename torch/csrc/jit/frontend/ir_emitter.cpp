@@ -1,10 +1,14 @@
-#include <torch/csrc/jit/script/ir_emitter.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/ir_emitter.cpp
+copyrev: 0da5d94d9d94f038255d7db041a114950e2bb748
+
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/hooks_for_testing.h>
-#include <torch/csrc/jit/interpreter.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/testing/hooks_for_testing.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -13,13 +17,13 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/script/canonicalize_modified_loop.h>
-#include <torch/csrc/jit/script/convert_to_ssa.h>
-#include <torch/csrc/jit/script/parser.h>
-#include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
+#include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
 
 #include <c10/util/Optional.h>
 

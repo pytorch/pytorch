@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/source_range_serialization.h
+copyrev: eb2e6dc173564b050658d8c0b3348ac67c8ff730
+
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 #include <unordered_map>
 #include <vector>

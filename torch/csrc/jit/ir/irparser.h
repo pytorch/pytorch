@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/irparser.h
+copyrev: 9cded40c7c296e5935090c22060cc1701a5da5ab
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>

@@ -1,6 +1,10 @@
-#include <torch/csrc/jit/script/python_tree_views.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_tree_views.cpp
+copyrev: 21aba2ed860003c429d6452fad4d3bfac8458b92
+
+#include <torch/csrc/jit/python/python_tree_views.h>
 
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

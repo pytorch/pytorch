@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/script/concrete_module_type.h>
-#include <torch/csrc/jit/pybind_utils.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/concrete_module_type.cpp
+copyrev: 38331a1c4cb09b444eb541a6dbd2639cb21ed77b
+
+#include <torch/csrc/jit/frontend/concrete_module_type.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace jit {

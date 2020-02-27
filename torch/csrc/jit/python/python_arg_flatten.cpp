@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/python_arg_flatten.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_arg_flatten.cpp
+copyrev: 95d5c87defd1ca48fa17fb9a94c743789efab5c3
+
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/utils/python_strings.h>
 

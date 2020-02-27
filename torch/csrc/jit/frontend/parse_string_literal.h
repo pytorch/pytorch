@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/parse_string_literal.h
+copyrev: c21125c2f35095016d99477bcac86335c7558f85
+
 #pragma once
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/lexer.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {

@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/source_range_serialization_impl.h
+copyrev: ca26b16cfebfd8ab7a7d5c1d7569522d604b00e1
+
 #pragma once
 
-#include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 namespace torch {
 namespace jit {

@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/print_handler.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/print_handler.cpp
+copyrev: 4277b4f4547133cf73e9fc8037accf2014e418a1
+
+#include <torch/csrc/jit/runtime/print_handler.h>
 
 #include <iostream>
 #include <string>

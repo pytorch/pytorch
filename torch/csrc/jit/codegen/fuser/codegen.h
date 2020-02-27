@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/codegen.h
+copyrev: cd53c1ad7904e4d23c10a2d538de4ca27a069e44
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/arg_spec.h>
-#include <torch/csrc/jit/fuser/partition_desc.h>
-#include <torch/csrc/jit/fuser/tensor_desc.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/codegen/fuser/arg_spec.h>
+#include <torch/csrc/jit/codegen/fuser/partition_desc.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 #include <iostream>
 #include <string>

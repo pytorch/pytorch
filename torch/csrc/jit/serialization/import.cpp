@@ -1,16 +1,20 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import.cpp
+copyrev: 57798097ceae8fad60d46cb4092a3846f2766f14
+
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #ifndef C10_MOBILE
-#include <torch/csrc/jit/import_legacy.h>
+#include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/unpickler.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/jit/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 #include "caffe2/serialize/file_adapter.h"
 #include "caffe2/serialize/inline_container.h"

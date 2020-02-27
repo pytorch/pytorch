@@ -1,9 +1,13 @@
-#include <torch/csrc/jit/script/parser.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/parser.cpp
+copyrev: c42a7e415089b8981a83e14e5049c7cef2aabe51
+
+#include <torch/csrc/jit/frontend/parser.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/script/lexer.h>
-#include <torch/csrc/jit/script/parse_string_literal.h>
-#include <torch/csrc/jit/script/tree.h>
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/frontend/lexer.h>
+#include <torch/csrc/jit/frontend/parse_string_literal.h>
+#include <torch/csrc/jit/frontend/tree.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 
 namespace torch {
 namespace jit {

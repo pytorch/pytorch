@@ -1,16 +1,20 @@
-#include <torch/csrc/jit/interpreter.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_interpreter.cpp
+copyrev: 03107c2784c6fb12324b4550ca7c055eb68fb882
+
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/python/python_ir.h>
 
 #include <typeinfo>
 
@@ -18,7 +22,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_engine.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/jit/pybind.h>
+#include <torch/csrc/jit/python/pybind.h>
 
 namespace py = pybind11;
 

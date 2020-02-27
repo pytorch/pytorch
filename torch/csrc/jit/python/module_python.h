@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/module_python.h
+copyrev: 13b7fa2fc8bd5da53444df8026cf42458c195705
+
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace py = pybind11;
 

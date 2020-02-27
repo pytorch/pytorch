@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_prim_ops.cpp
+copyrev: af6e5e2a3073e98453c57ca7b3754f6cd79f9034
+
 #include <aten/src/ATen/Context.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
@@ -5,19 +9,19 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/print_handler.h>
-#include <torch/csrc/jit/profiling_record.h>
-#include <torch/csrc/jit/vararg_functions.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/jit_exception.h>
-#include <torch/csrc/jit/script/logging.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/logging.h>
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>

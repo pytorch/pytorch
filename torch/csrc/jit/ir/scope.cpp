@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/scope.h>
-#include <torch/csrc/jit/function.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/scope.cpp
+copyrev: 6d18c30e955d1761e0ec1246c2ea791c7bceabdb
+
+#include <torch/csrc/jit/ir/scope.h>
+#include <torch/csrc/jit/api/function.h>
 
 namespace torch {
 namespace jit {

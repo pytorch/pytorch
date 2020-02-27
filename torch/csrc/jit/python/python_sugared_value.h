@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_sugared_value.h
+copyrev: ac92926776f680cddf7bd4e8048835e2035bc9f3
+
 #pragma once
 
-#include <torch/csrc/jit/pybind_utils.h>
-#include <torch/csrc/jit/script/concrete_module_type.h>
-#include <torch/csrc/jit/script/module.h>
-#include <torch/csrc/jit/script/sugared_value.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/jit/frontend/concrete_module_type.h>
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/frontend/sugared_value.h>
 #include <memory>
 #include <sstream>
 #include <string>

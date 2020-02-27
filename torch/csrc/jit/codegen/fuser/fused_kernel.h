@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/fused_kernel.h
+copyrev: ead4e26c5e47f4723f67b54e2bcc92fc71f6ffb8
+
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/fuser/partition_desc.h>
-#include <torch/csrc/jit/fuser/tensor_desc.h>
+#include <torch/csrc/jit/codegen/fuser/partition_desc.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
 #include <torch/csrc/utils/disallow_copy.h>
 
 #include <cstdint>

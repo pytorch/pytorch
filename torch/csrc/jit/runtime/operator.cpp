@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/operator.cpp
+copyrev: 0b5fb77c57fe032c31ab367b8c99c6e30ead94cf
+
 #include <ATen/ATen.h>
 #include <torch/csrc/jit/alias_info.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/edit_distance.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/edit_distance.h>
 
 #include <queue>
 #include <utility>

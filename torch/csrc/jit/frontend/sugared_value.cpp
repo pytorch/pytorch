@@ -1,8 +1,12 @@
-#include <torch/csrc/jit/script/sugared_value.h>
-#include <torch/csrc/jit/ir.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/sugared_value.cpp
+copyrev: 0975b13bbff012c165613b80bff72238089a1834
+
+#include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 
 namespace torch {
 namespace jit {

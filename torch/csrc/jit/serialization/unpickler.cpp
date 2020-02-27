@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/unpickler.cpp
+copyrev: f7498ec63710a6bb97f34a3902d20761dd7ba222
+
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <string>
 #include "unpickler.h"
 

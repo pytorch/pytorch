@@ -1,11 +1,15 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/lexer.h
+copyrev: fda236a032e7d50f17b7cc62c8a902d8b1dc3cd4
+
 #pragma once
 #include <ATen/core/Macros.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/strtod.h>
-#include <torch/csrc/jit/script/parser_constants.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/frontend/strtod.h>
+#include <torch/csrc/jit/frontend/parser_constants.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <algorithm>
 #include <clocale>
 #include <cstdlib>

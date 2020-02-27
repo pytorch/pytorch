@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_source.h
+copyrev: 19b2c520d4bfb4edfa6ae475fb326e7ab889947c
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
 #include <functional>
 #include <memory>
 #include <string>

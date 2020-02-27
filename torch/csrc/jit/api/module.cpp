@@ -1,13 +1,17 @@
-#include <torch/csrc/jit/script/module.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/api/module.cpp
+copyrev: 50f683f3afb53abb8c2568d675d5d0074be8e66e
+
+#include <torch/csrc/jit/api/module.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 
 namespace torch {
 namespace jit {

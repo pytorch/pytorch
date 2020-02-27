@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_legacy.h
+copyrev: e8fb519d2f7dedef18480af9b75d64524040ea49
+
 #pragma once
 
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace caffe2 {
 namespace serialize {

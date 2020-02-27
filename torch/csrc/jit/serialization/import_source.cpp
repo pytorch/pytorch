@@ -1,11 +1,15 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_source.cpp
+copyrev: 45f081b8cd10434491ee17d616edd2b61a7d3412
+
 #include "import_source.h"
 
 #include <ATen/core/qualified_name.h>
-#include <torch/csrc/jit/custom_class.h>
-#include <torch/csrc/jit/export.h>
-#include <torch/csrc/jit/script/parser.h>
-#include <torch/csrc/jit/script/resolver.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/api/custom_class.h>
+#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 
 namespace torch {
 namespace jit {

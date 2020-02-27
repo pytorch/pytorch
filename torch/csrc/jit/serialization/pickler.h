@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/pickler.h
+copyrev: fe35f80213ecc1970c900ec21d5ad39841d4898e
+
 #pragma once
 
 #include <string>

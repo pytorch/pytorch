@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/parser.h
+copyrev: e398d6b7cae5b88de39d343c787be6274f8f765a
+
 #pragma once
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/script/tree.h>
-#include <torch/csrc/jit/script/tree_views.h>
+#include <torch/csrc/jit/frontend/tree.h>
+#include <torch/csrc/jit/frontend/tree_views.h>
 #include <memory>
 
 namespace torch {

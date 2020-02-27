@@ -1,5 +1,9 @@
-#include <torch/csrc/jit/attributes.h>
-#include <torch/csrc/jit/ir.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/ir/attributes.cpp
+copyrev: d5d62177f7f9998c9fe8fd55b12dfc3ab48b6691
+
+#include <torch/csrc/jit/ir/attributes.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {

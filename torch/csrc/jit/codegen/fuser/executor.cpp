@@ -1,15 +1,19 @@
-#include <torch/csrc/jit/fuser/executor.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/executor.cpp
+copyrev: 1665c0603c868dfd09433b3c333bd0b40e61e406
+
+#include <torch/csrc/jit/codegen/fuser/executor.h>
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/kernel_cache.h>
-#include <torch/csrc/jit/fuser/kernel_spec.h>
-#include <torch/csrc/jit/fuser/tensor_info.h>
+#include <torch/csrc/jit/codegen/fuser/compiler.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
+#include <torch/csrc/jit/codegen/fuser/kernel_spec.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_info.h>
 
 #include <algorithm>
 #include <iostream> // TODO: remove, debugging only

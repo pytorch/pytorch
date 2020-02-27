@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_prim_ops_c10.cpp
+copyrev: 9e052366277190a2287df5e5cc1cbfdb0c0fea98
+
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>

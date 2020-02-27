@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python/python_ivalue.h
+copyrev: 58666a76867b35a5488f6135e667ea9b4fdeec7a
+
 #pragma once
 #include <pybind11/pybind11.h>
 #include <torch/csrc/python_headers.h>

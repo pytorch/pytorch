@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/schema_matching.cpp
+copyrev: 4934639e064a984de7c07a01542af2bcae23da4d
+
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/builtin_functions.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/schema_matching.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/builtin_functions.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 
 namespace torch {
 namespace jit {

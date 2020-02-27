@@ -1,17 +1,21 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/register_special_ops.cpp
+copyrev: eb9d368d63cf5a16e3f10183ecd2b0bf716411a7
+
 #include <aten/src/ATen/Context.h>
 
 #include <ATen/core/jit_type.h>
 #include <aten/src/ATen/ExpandUtils.h>
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/vararg_functions.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <regex>
 #include <sstream>

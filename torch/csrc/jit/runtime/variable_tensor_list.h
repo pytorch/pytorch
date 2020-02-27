@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/variable_tensor_list.h
+copyrev: 93f578c4e600b804b2352c6d71ff40047c47dc6d
+
 #pragma once
 #include <ATen/ATen.h>
 

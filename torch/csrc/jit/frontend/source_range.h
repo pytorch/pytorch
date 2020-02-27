@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/source_range.h
+copyrev: 7ec0e729b2bd3af23e0db18e30475451beed3259
+
 #pragma once
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>

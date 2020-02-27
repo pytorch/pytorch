@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/script/jit_exception.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/jit_exception.cpp
+copyrev: 9983ae6f81fe94da6112d5815fd879f6e830770e
+
+#include <torch/csrc/jit/runtime/jit_exception.h>
 
 namespace torch {
 namespace jit {

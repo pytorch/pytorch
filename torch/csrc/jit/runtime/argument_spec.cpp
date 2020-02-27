@@ -1,5 +1,9 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/argument_spec.cpp
+copyrev: c58454340580a0917c9a7562923f52ee2f1a6a8f
+
 
-#include <torch/csrc/jit/argument_spec.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
 
 namespace torch {
 namespace jit {

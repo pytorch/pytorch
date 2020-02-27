@@ -1,9 +1,13 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import.h
+copyrev: c3a0029b0272c1307cdfbfadd70236cc3cf6f75d
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <istream>
 

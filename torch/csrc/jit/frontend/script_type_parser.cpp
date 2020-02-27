@@ -1,6 +1,10 @@
-#include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/parser.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/script_type_parser.cpp
+copyrev: 9d604f105077d66c5e9ed03c74ed396c1fc6ed87
+
+#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/frontend/parser.h>
 
 namespace torch {
 namespace jit {

@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/operator_options.h
+copyrev: 67bf8fa84ca93b56e7dbacc59d525bca99dc02d0
+
 #pragma once
 
 #include <ATen/core/dispatch/OperatorOptions.h>

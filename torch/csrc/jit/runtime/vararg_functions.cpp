@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/vararg_functions.cpp
+copyrev: 0a483c5afb6cf5ee0548daaf334fe8448459e199
+
 #include "vararg_functions.h"
 
 namespace torch {

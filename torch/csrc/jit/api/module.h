@@ -1,17 +1,21 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/api/module.h
+copyrev: c822a19e05a62c116c8a303a71acd4b9d447339f
+
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/argument_spec.h>
-#include <torch/csrc/jit/graph_executor.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/named_value.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/named_value.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
-#include <torch/csrc/jit/script/object.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/api/object.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>

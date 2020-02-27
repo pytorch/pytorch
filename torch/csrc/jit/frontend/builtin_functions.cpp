@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/builtin_functions.cpp
+copyrev: 88c82319b509f8147e7f779a75986839b767a493
+
 #include <torch/csrc/api/include/torch/jit.h>
-#include <torch/csrc/jit/code_template.h>
-#include <torch/csrc/jit/script/builtin_functions.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/frontend/builtin_functions.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {

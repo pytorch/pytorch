@@ -1,10 +1,14 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/pickler.cpp
+copyrev: b3dc8ec1cf4b15f162f170fa70de7cbb9ab36aa1
+
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 #include <aten/src/ATen/quantized/Quantizer.h>
 #include <string>
 

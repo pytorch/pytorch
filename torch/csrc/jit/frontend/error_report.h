@@ -1,7 +1,11 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/error_report.h
+copyrev: ccae8bc956f8282e9cf0632e7d739ad4b52105b0
+
 #pragma once
 
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/frontend/tree.h>
 
 namespace torch {
 namespace jit {

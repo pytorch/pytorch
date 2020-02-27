@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/runtime/custom_operator.h
+copyrev: f4e809f9aee1322d64049cdb92632261a88805a2
+
 #pragma once
 
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/op_registration/op_registration.h>
 

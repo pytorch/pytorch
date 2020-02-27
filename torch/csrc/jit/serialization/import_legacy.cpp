@@ -1,13 +1,17 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/serialization/import_legacy.cpp
+copyrev: c1653082060c1a799f1c195e3971b93862a362a1
+
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
-#include <torch/csrc/jit/import_export_helpers.h>
-#include <torch/csrc/jit/import_legacy.h>
-#include <torch/csrc/jit/import_source.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
-#include <torch/csrc/jit/source_range_serialization.h>
-#include <torch/csrc/jit/source_range_serialization_impl.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/import_legacy.h>
+#include <torch/csrc/jit/serialization/import_source.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
+#include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/types.h"

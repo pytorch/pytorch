@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/canonicalize_modified_loop.h
+copyrev: 4d92033813960ebaaf4a564f4a0aa30c67e95e19
+
 #pragma once
 #include <memory>
 

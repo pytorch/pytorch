@@ -1,4 +1,8 @@
-#include <torch/csrc/jit/pass_manager.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/passes/pass_manager.cpp
+copyrev: 34dd1a8534b0a639e22828718fa438f2c66d26c4
+
+#include <torch/csrc/jit/passes/pass_manager.h>
 
 namespace torch {
 namespace jit {

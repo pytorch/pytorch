@@ -1,8 +1,12 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/tree_views.h
+copyrev: b3f5de9b54aa746373be51f8797562b8b39eaed8
+
 #pragma once
 #include <c10/util/string_utils.h>
-#include <torch/csrc/jit/script/error_report.h>
-#include <torch/csrc/jit/script/strtod.h>
-#include <torch/csrc/jit/script/tree.h>
+#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/strtod.h>
+#include <torch/csrc/jit/frontend/tree.h>
 
 #include <functional>
 #include <iostream>

@@ -1,15 +1,19 @@
-#include <torch/csrc/jit/fuser/codegen.h>
+
+copy: fbcode/caffe2/torch/csrc/jit/codegen/fuser/codegen.cpp
+copyrev: 01b246f0451ec5501c2c5dbe8f3e9939a8c7d0ae
+
+#include <torch/csrc/jit/codegen/fuser/codegen.h>
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/code_template.h>
-#include <torch/csrc/jit/fuser/compiler.h>
-#include <torch/csrc/jit/fuser/interface.h>
-#include <torch/csrc/jit/fuser/tensor_info.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/code_template.h>
+#include <torch/csrc/jit/codegen/fuser/compiler.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
+#include <torch/csrc/jit/codegen/fuser/tensor_info.h>
+#include <torch/csrc/jit/ir/ir.h>
 
-#include <torch/csrc/jit/fuser/cpu/resource_strings.h>
-#include <torch/csrc/jit/fuser/cuda/resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 
 #include <cmath>
 #include <cstdint>

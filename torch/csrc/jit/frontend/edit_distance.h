@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/frontend/edit_distance.h
+copyrev: 9f89d2af0bdec85411b767bca7477ae733ac6d50
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>

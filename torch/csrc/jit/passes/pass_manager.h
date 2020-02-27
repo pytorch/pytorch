@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/passes/pass_manager.h
+copyrev: df84f01c7cbe91388b846610eb8b5740ad62a2db
+
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 /* `getCustomPreFusionPasses()` returns a vector of passes that will be executed
  * after differentiation but before any fusion. This is the de-facto location
