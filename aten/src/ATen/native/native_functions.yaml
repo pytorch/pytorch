@@ -689,17 +689,10 @@
 - func: block_diag(Tensor[] tensors) -> Tensor
   supports_named_tensor: True
   variants: function
-  dispatch:
-    CPU: block_diag
-    CUDA: block_diag
 
 - func: block_diag.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
   variants: function
-  dispatch:
-    CPU: block_diag_out
-    CUDA: block_diag_out
-
 
 - func: ceil(Tensor self) -> Tensor
   use_c10_dispatcher: full
