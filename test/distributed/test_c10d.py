@@ -1980,6 +1980,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def update_parameters(model):
             for param in model.parameters():
+                with torch.no_grad():
+                  param -= param.grad
                 param.grad = None
 
         # check two model parameters over 2 iterations

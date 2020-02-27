@@ -132,8 +132,9 @@ class TestDataParallel(TestCase):
         gvar2_exp = var2.grad.clone()
 
         def local_test(out):
-            var1.grad.fill_(0.0)
-            var2.grad.fill_(0.0)
+            with torch.no_grad():
+                var1.grad.fill_(0.0)
+                var2.grad.fill_(0.0)
             loss = out.sum()
             loss.backward()
             self.assertEqual(out, expected)
@@ -149,8 +150,9 @@ class TestDataParallel(TestCase):
         out = dp.data_parallel(m, (var1, var2, float1), (0,))
         local_test(out)
 
-        var1.grad.fill_(0.0)
-        var2.grad.fill_(0.0)
+        with torch.no_grad():
+            var1.grad.fill_(0.0)
+            var2.grad.fill_(0.0)
         expected = m(var1, var2, float1, var3=var3)
         loss = expected.sum()
         loss.backward()
@@ -531,7 +533,7 @@ class TestDataParallel(TestCase):
         self.assertEqual(result[0].get_device(), 0)
         self.assertEqual(result[1], x[2:])
         self.assertEqual(result[1].get_device(), 1)
-        grad = result[0].clone().fill_(2)
+        grad = result[0].detach().clone().fill_(2)
         result[0].backward(grad)
         self.assertEqual(x.grad[:2], grad)
         self.assertEqual(x.grad[2:], grad.clone().zero_())
