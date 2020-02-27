@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/graph_executor.cpp
+copyrev: f4588c9424e0a3fa0611ffd769b32776e9eb3715
+
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <ATen/core/ivalue.h>
@@ -35,7 +39,7 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>

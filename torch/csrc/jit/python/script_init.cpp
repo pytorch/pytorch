@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/script/init.cpp
+copyrev: 3c379541927bf4bb29338b0768b5bf4fe8b62d46
+
 #include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>
@@ -22,7 +26,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 

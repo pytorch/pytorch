@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <ATen/Backtrace.h>
 #include <ATen/core/Dict.h>

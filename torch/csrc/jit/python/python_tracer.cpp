@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python_tracer.cpp
+copyrev: 166a9f97db87403329b0bd8a149afa7b8613a43c
+
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/jit/serialization/export.h>
@@ -6,7 +10,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/Exception.h>

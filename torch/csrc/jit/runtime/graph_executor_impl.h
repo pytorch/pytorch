@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/graph_executor_impl.h
+copyrev: 37a8fe4c858c967616af85359d1ea75ad6a15f8f
+
 #pragma once
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
@@ -11,7 +15,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>

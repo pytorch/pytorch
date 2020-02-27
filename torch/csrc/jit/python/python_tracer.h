@@ -1,6 +1,10 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/python_tracer.h
+copyrev: 4cf00205ba3fa7d514e5ee47d2d6282938675c4b
+
 #pragma once
 
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/jit/frontend/source_range.h>

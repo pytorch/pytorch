@@ -1,3 +1,7 @@
+
+copy: fbcode/caffe2/torch/csrc/jit/pybind.h
+copyrev: 639104c612762920add7c7a7753e0e88085662e6
+
 #pragma once
 
 #include <torch/csrc/python_headers.h>
@@ -8,7 +12,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <pybind11/functional.h>
