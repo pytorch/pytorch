@@ -557,6 +557,7 @@ bool isWeightOfConvOrLinear(Value* v) {
         "Graph mode quantization only supports conv/linear weight being used by"
         " one node.");
   }
+  return result;
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
