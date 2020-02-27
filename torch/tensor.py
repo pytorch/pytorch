@@ -72,6 +72,8 @@ class Tensor(torch._C._TensorBase):
                     new_tensor = self.new()
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     new_tensor.requires_grad = self.requires_grad
+            if self.grad is not None:
+                new_tensor.grad = self.grad.__deepcopy__(memo)
             memo[id(self)] = new_tensor
             return new_tensor
 
