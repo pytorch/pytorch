@@ -224,9 +224,9 @@ extern "C" {
     unsigned _Line);
 }
 #endif
-#define CUDA_ALWAYS_ASSERT(cond)                                                                                  \
-  if (C10_UNLIKELY(!(cond))) {                                                                                    \
-    (void)((!!(expression)) || (_wassert(_CRT_WIDE(#expression), _CRT_WIDE(__FILE__), (unsigned)(__LINE__)), 0)); \
+#define CUDA_ALWAYS_ASSERT(cond)                                                                                             \
+  if (C10_UNLIKELY(!(cond))) {                                                                                               \
+    (void)((!!(expression)) || (_wassert(_CRT_WIDE(#expression), _CRT_WIDE(__FILE__), static_cast<unsigned>(__LINE__)), 0)); \
   }
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
