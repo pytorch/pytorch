@@ -12423,10 +12423,8 @@ a")
             return torch.randint(0, 5, [1, 2])
 
         out = randint(profile_and_replay=True)
-        self.assertEqual(out.dtype, torch.double)
-        # although the type should be int here, testing that the runtime dtype
-        # and shape analysis dtype is the same.
-        FileCheck().check("Double(1, 2)").check_not("Float(1, 2)").run(randint.graph_for())
+        self.assertEqual(out.dtype, torch.int64)
+        FileCheck().check("Long(1, 2)").check_not("Doubble(1, 2)").run(randint.graph_for())
 
     def test_erase_number_types(self):
         def func(a):
