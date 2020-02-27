@@ -433,7 +433,7 @@ static struct pthreadpool* pthreadpool_allocate(size_t threads_count) {
   return threadpool;
 }
 
-struct pthreadpool* pthreadpool_create(size_t threads_count) {
+struct pthreadpool* pthreadpool_create_xnnpack(size_t threads_count) {
 #if defined(__native_client__)
   pthread_once(&nacl_init_guard, nacl_init);
 #endif
@@ -477,7 +477,7 @@ struct pthreadpool* pthreadpool_create(size_t threads_count) {
   return threadpool;
 }
 
-size_t pthreadpool_get_threads_count(struct pthreadpool* threadpool) {
+size_t pthreadpool_get_threads_count_xnnpack(struct pthreadpool* threadpool) {
   if (threadpool == NULL) {
     return 1;
   } else {
@@ -1160,7 +1160,7 @@ void pthreadpool_parallelize_6d_tile_2d(
   }
 }
 
-void pthreadpool_destroy(struct pthreadpool* threadpool) {
+void pthreadpool_destroy_xnnpack(struct pthreadpool* threadpool) {
   if (threadpool != NULL) {
     if (threadpool->threads_count > 1) {
       #if PTHREADPOOL_USE_FUTEX

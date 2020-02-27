@@ -50,6 +50,17 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
+# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
+if (NOT MSVC)
+  IF(NOT TARGET fxdiv)
+    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${FXDIV_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/FXdiv")
+  ENDIF()
+endif()
+
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
@@ -678,6 +689,9 @@ ELSEIF(USE_CUDA)
 ENDIF()
 
 
+if (NOT MSVC)
+  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
+endif()
 
 # ==========================================================
 # formerly-libtorch flags
@@ -909,17 +923,6 @@ if (USE_OPENMP AND OPENMP_FOUND)
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
   target_link_libraries(torch_cpu PRIVATE ${OpenMP_CXX_LIBRARIES})
-endif()
-
-if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
-  IF(NOT TARGET fxdiv)
-    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
-    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
-    ADD_SUBDIRECTORY(
-      "${FXDIV_SOURCE_DIR}"
-      "${CMAKE_BINARY_DIR}/FXdiv")
-  ENDIF()
-  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
 endif()
 
 target_link_libraries(torch_cpu PUBLIC c10)

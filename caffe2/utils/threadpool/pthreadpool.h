@@ -91,7 +91,7 @@ extern "C" {
  */
 
 //Returns internal threadpool impl.
-pthreadpool_t pthreadpool_create_c2(size_t threads_count);
+pthreadpool_t pthreadpool_create(size_t threads_count);
 
 /**
  * Queries the number of threads in a thread pool.
@@ -100,7 +100,7 @@ pthreadpool_t pthreadpool_create_c2(size_t threads_count);
  *
  * @returns  The number of threads in the thread pool.
  */
-size_t pthreadpool_get_threads_count_c2(pthreadpool_t threadpool);
+size_t pthreadpool_get_threads_count(pthreadpool_t threadpool);
 
 /**
  * Processes items in parallel using threads from a thread pool.
@@ -178,7 +178,7 @@ void pthreadpool_compute_4d_tiled(
  *
  * @param[in,out]  threadpool  The thread pool to destroy.
  */
-void pthreadpool_destroy_c2(pthreadpool_t threadpool);
+void pthreadpool_destroy(pthreadpool_t threadpool);
 
 // New interface copy/pasted from pthreadpool.
 // We will merge the internal and third-party/pthreadpool eventually.
@@ -187,13 +187,13 @@ void pthreadpool_destroy_c2(pthreadpool_t threadpool);
 #define PTHREADPOOL_FLAG_DISABLE_DENORMALS 0x00000001
 
 // Returns the copied threadpool impl of third-party/pthreadpool
-pthreadpool_t pthreadpool_create(size_t threads_count);
+pthreadpool_t pthreadpool_create_xnnpack(size_t threads_count);
 
 // Copied third-party impl.
-size_t pthreadpool_get_threads_count(pthreadpool_t threadpool);
+size_t pthreadpool_get_threads_count_xnnpack(pthreadpool_t threadpool);
 
 // Copied third-party impl.
-void pthreadpool_destroy(pthreadpool_t threadpool);
+void pthreadpool_destroy_xnnpack(pthreadpool_t threadpool);
 
 /**
  * Processes items in parallel using threads from a thread pool.

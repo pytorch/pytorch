@@ -106,7 +106,7 @@ static pthreadpool_t nnpack_threadpool() {
     const uint32_t threads = std::thread::hardware_concurrency();
 #endif
 
-    nnpack_threadpool_ = pthreadpool_create_c2(threads);
+    nnpack_threadpool_ = pthreadpool_create(threads);
     if (!nnpack_threadpool_) {
       LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
     }
