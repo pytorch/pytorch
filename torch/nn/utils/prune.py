@@ -109,9 +109,6 @@ class BasePruningMethod(ABC):
                     and hook._tensor_name == name
                 ):
                     old_method = hook
-                    # # reset the tensor reparametrization
-                    # module = remove_pruning(module, name)
-                    # del module._forward_pre_hooks[k]
                     hooks_to_remove.append(k)
                     found += 1
             assert (
@@ -1116,8 +1113,8 @@ def remove(module, name):
             will act.
 
     Examples:
-        >>> m = random_pruning(nn.Linear(5, 7), name='weight', amount=0.2)
-        >>> m = remove_pruning(m, name='weight')
+        >>> m = random_unstructured(nn.Linear(5, 7), name='weight', amount=0.2)
+        >>> m = remove(m, name='weight')
     """
     for k, hook in module._forward_pre_hooks.items():
         if isinstance(hook, BasePruningMethod) and hook._tensor_name == name:
@@ -1146,7 +1143,7 @@ def is_pruned(module):
         >>> m = nn.Linear(5, 7)
         >>> print(prune.is_pruned(m))
         False
-        >>> prune.random_pruning(m, name='weight', amount=0.2)
+        >>> prune.random_unstructured(m, name='weight', amount=0.2)
         >>> print(prune.is_pruned(m))
         True
     """

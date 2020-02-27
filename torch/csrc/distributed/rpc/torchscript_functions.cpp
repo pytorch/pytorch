@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
 namespace distributed {
@@ -16,6 +17,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack) {
+  DCHECK(!PyGILState_Check());
   auto scriptCall =
       std::make_unique<ScriptCall>(qualifiedName, std::move(stack));
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
