@@ -150,7 +150,8 @@ void RNNImplBase<Derived>::flatten_parameters() {
       options.hidden_size(),
       options.layers(),
       /*batch_first=*/options.batch_first(),
-      /*bidirectional=*/options.bidirectional());
+      /*bidirectional=*/options.bidirectional(),
+      /*type_2=*/options.cat_layer_fwd_bwd_states());
 }
 
 template <typename Derived>

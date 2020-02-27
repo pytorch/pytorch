@@ -21,7 +21,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t input_size,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first,
-    bool fn_bidirectional
+    bool fn_bidirectional, bool fn_type_2
     ) {
   AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
@@ -138,11 +138,11 @@ namespace {
       this->algo = algo;
     }
 
-    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
+    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, bool type_2, cudnnDataType_t datatype, cudnnDataType_t input_datatype) {
       this->set_mode(mode);
       this->hidden_size = hidden_size;
       this->num_layers = num_layers;
-      this->set_bidirectional(bidirectional);
+      this->set_bidirectional(bidirectional && type_2);
       this->datatype = datatype;
       this->input_datatype = input_datatype;
     }
@@ -624,7 +624,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t input_size,
     int64_t fn_mode, int64_t fn_hidden_size,
     int64_t fn_num_layers, bool batch_first,
-    bool fn_bidirectional
+    bool fn_bidirectional, bool fn_type_2
     ) {
 
   TORCH_CHECK(weight_arr.size() > 0,
@@ -634,7 +634,7 @@ Tensor _cudnn_rnn_flatten_weight(
   auto datatype = getCudnnDataType(any_param);
 
   RNNDescriptorParams rnn;
-  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, promote_rnn_math_type(datatype), datatype);
+  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, fn_type_2, promote_rnn_math_type(datatype), datatype);
 
   auto handle = getCudnnHandle();
   RNNDescriptor rnn_desc = rnn.descriptor(handle);

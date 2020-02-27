@@ -140,7 +140,7 @@
   dispatch:
     CUDA: _cudnn_ctc_loss
 
-- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional) -> Tensor
+- func: _cudnn_rnn_flatten_weight(Tensor[] weight_arr, int weight_stride0, int input_size, int mode, int hidden_size, int num_layers, bool batch_first, bool bidirectional, bool type_2) -> Tensor
   dispatch:
     CUDA: _cudnn_rnn_flatten_weight
 
