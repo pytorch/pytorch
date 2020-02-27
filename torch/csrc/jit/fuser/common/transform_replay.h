@@ -195,6 +195,10 @@ struct TORCH_API TransformReplay : public IterVisitor {
       TensorView* replay_ref,
       TensorView* replay_target,
       int compute_at_axis);
+
+  static TensorView* fullReplay(
+    TensorView* replay_ref,
+    TensorView* replay_target);
 };
 
 } // namespace fuser

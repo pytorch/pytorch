@@ -136,6 +136,14 @@ struct TORCH_API TensorDomain : public Val {
       
   }
 
+  TensorDomain* noReductions() const {
+    std::vector<IterDomain*> noReductionDomain;
+    for(IterDomain* id : domain)
+      if(!id->isReduction())
+        noReductionDomain.push_back(id);
+    return new TensorDomain(noReductionDomain);
+  }
+
   //i here is int, as we want to accept negative value and ::size_type can be a uint.
   IterDomain* axis(int i) const {
     if(i < 0)
@@ -205,28 +213,23 @@ struct TORCH_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(Tensor* _tensor)
+  TensorView(Tensor* _tensor, TensorDomain* _domain = nullptr)
       : Val(ValType::TensorView, _tensor->getDataType().value())
-      , tensor_(_tensor) {
-        copyDomain(_tensor->domain());
-      }
-
-  TensorView(Tensor* _tensor, TensorDomain* _domain)
-      : Val(ValType::TensorView, _tensor->getDataType().value())
-      , tensor_(_tensor) {
-        copyDomain(_domain);
+      , tensor_(_tensor)
+      , domain_(_domain) {
+        if(_domain == nullptr)
+          copyDomain(_tensor->domain());
       }
 
   TensorView(TensorDomain* _domain, DataType dtype)
       : Val(ValType::TensorView, dtype)
-      , tensor_(nullptr) {
-        copyDomain(_domain);
-  }
+      , tensor_(new Tensor(dtype, _domain))
+      , domain_(_domain) {}
 
   //We'll copy the TensorView with some minor modifications
   //Reduction axes won't get copied over.
-  TensorView* cloneForOutput(DataType dtype) const;
-  TensorView* clone() const{ return cloneForOutput(getDataType().value());}
+  TensorView* newForOutput(DataType dtype) const;
+  TensorView* clone() const;
 
   Tensor* tensor() const noexcept { return tensor_; }
   TensorDomain* domain() const noexcept { return domain_; }
@@ -242,7 +245,6 @@ struct TORCH_API TensorView : public Val {
     );
   }
 
-  bool referencesTensor() const { return tensor_ == nullptr; }
   bool hasComputeAt() const { return compute_at_view_ != nullptr; }
 
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
