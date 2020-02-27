@@ -93,23 +93,33 @@ RegisterFusionBackendEx::RegisterFusionBackendEx(
 
 // Returns true iff the node is fusible
 bool isFusible(const Node* const node) {
+  const auto device_type = c10::kCUDA;
+  return (getFusionBackendsEx().count(device_type) > 0) &&
+      getFusionBackendsEx()[device_type]->isFusible(node);
+
   //if (!validateNode(node)) {
     //return false;
   //}
 
   //const auto device_type = getFusionDeviceType(node);
+  //switch (device_type) {
+  //  case c10::kCPU:
+  //  case c10::kCUDA:
+  //    return (getFusionBackendsEx().count(device_type) > 0) &&
+  //      getFusionBackendsEx()[device_type]->isFusible(node);
+  //  default:
+  //    return false;
+  //}
+
+  //TORCH_CHECK(false, "End of non-void function");
+}
+
+bool isFusible(
+    const Node* const fusion,
+    const Node* const node) {
   const auto device_type = c10::kCUDA;
-
-  switch (device_type) {
-    case c10::kCPU:
-    case c10::kCUDA:
-      return (getFusionBackendsEx().count(device_type) > 0) &&
-        getFusionBackendsEx()[device_type]->isFusible(node);
-    default:
-      return false;
-  }
-
-  TORCH_CHECK(false, "End of non-void function");
+  return (getFusionBackendsEx().count(device_type) > 0) &&
+      getFusionBackendsEx()[device_type]->isFusible(fusion, node);
 }
 
 // Returns the key corresponding to the fusion

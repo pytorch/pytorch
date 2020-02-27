@@ -10,6 +10,9 @@ namespace cuda {
 class CUDAFusionBackend : public FusionBackend {
 public:
   virtual bool isFusible(const Node* const node) override;
+  virtual bool isFusible(
+      const Node* const fusion,
+      const Node* const node) override;
   virtual int fuse(const Node* const node) override;
   virtual void compileFusion(Node* fusion) override;
   virtual void callFusion(
