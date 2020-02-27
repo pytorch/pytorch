@@ -1,7 +1,6 @@
 import torch
 import torch.cuda.comm as comm
 from torch.cuda._utils import _get_device_index
-from torch.nn import Parameter
 
 
 def _is_script_module(module):
