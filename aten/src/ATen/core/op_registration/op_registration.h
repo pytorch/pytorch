@@ -9,7 +9,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 
