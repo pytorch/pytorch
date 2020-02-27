@@ -216,6 +216,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
         input_instructions_(input_size) {}
 
   variable_list apply(variable_list&& inputs) override {
+    std::lock_guard<std::mutex> lock(mutex_);
     Stack stack;
     stack.reserve(captures_.size() + inputs.size());
 

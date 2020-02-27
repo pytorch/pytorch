@@ -74,12 +74,19 @@ void DistEngine::computeDependencies(
     bool retainGraph) {
   TORCH_INTERNAL_ASSERT(graphRoot, "graphRoot is null!");
 
+  // Build a CPU ready queue that is used by the graphTask in local
+  // autograd engine, since Distributed Autograd Engine calls
+  // Engine::execute_with_graph_task instead of Engine::execute, we
+  // need to allocate our own CPU ReadyQueue for the GraphTask.
+  std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
+  engine_.init_local_ready_queue(cpu_ready_queue);
+
   // Build the graph task and graph root.
   auto graphTask = std::make_shared<GraphTask>(
       /* keep_graph */ retainGraph,
       /* create_graph */ false,
       /* depth */ 0,
-      /* cpu_ready_queue */ nullptr,
+      /* cpu_ready_queue */ cpu_ready_queue,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -185,8 +192,10 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
     const ContextPtr& autogradContext,
     const std::shared_ptr<Node>& graphRoot,
     const edge_list& outputEdges) {
-  auto futureGrads = engine_.execute_with_graph_task(
-      autogradContext->retrieveGraphTask(), graphRoot);
+
+  std::shared_ptr<FutureVariableList> futureGrads = std::make_shared<FutureVariableList>();
+  auto grads = engine_.execute_with_graph_task(autogradContext->retrieveGraphTask(), graphRoot);
+  futureGrads->markCompleted(grads);
 
   // Build a future that waits for the callbacks to execute (since callbacks
   // execute after the original future is completed). This ensures we return a

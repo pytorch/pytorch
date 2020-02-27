@@ -385,12 +385,30 @@ HistogramNetObserver::HistogramNetObserver(
     const string& out_file_name,
     int nbins,
     int dump_freq,
-    bool mul_nets)
+    bool mul_nets,
+    string op_filter)
     : NetObserver(subject),
       dump_freq_(dump_freq),
       cnt_(0),
       mul_nets_(mul_nets),
+      op_filter_(op_filter),
       out_file_name_(out_file_name) {
+  net_name_ = subject->Name();
+  if (op_filter != "") {
+    bool has_op = false;
+    for (auto* op : subject->GetOperators()) {
+      if (op->debug_def().type() == op_filter) {
+        has_op = true;
+        break;
+      }
+    }
+    if (!has_op) {
+      LOG(INFO) << "Net " << net_name_ << " doesn't include operator "
+                << op_filter;
+      return;
+    }
+  }
+
   hist_infos_.resize(subject->GetOperators().size());
 
   int i = 0;
@@ -414,8 +432,12 @@ HistogramNetObserver::HistogramNetObserver(
 void HistogramNetObserver::DumpAndReset_(
     const string& out_file_name,
     bool print_total_min_max) {
+  if (hist_infos_.size() == 0) {
+    return;
+  }
   stringstream file_name;
   file_name << out_file_name;
+  LOG(INFO) << "Dumping histograms of net " << net_name_ << " in " << this;
   if (mul_nets_) {
     file_name << ".";
     file_name << this;
@@ -466,11 +488,12 @@ void HistogramNetObserver::DumpAndReset_(
       }
     }
   }
+  f.flush();
   f.close();
 }
 
 HistogramNetObserver::~HistogramNetObserver() {
-  DumpAndReset_(out_file_name_, true);
+  DumpAndReset_(out_file_name_, false);
 }
 
 void HistogramNetObserver::Stop() {

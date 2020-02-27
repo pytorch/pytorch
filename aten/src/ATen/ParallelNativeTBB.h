@@ -27,9 +27,15 @@ inline void parallel_for(
     f(begin, end);
     return;
   }
+
+  // Choose number of tasks based on grain size and number of threads.
+  int64_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max(grain_size, chunk_size);
+
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
-  tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, grain_size),
+  tbb::parallel_for(tbb::blocked_range<int64_t>(begin, end, chunk_size),
     [&eptr, &err_flag, f](const tbb::blocked_range<int64_t>& r) {
       try {
         f(r.begin(), r.end());
@@ -59,12 +65,18 @@ inline scalar_t parallel_reduce(
   if ((end - begin) < grain_size || get_num_threads() == 1) {
     return f(begin, end, ident);
   }
+
+  // Choose number of tasks based on grain size and number of threads.
+  int64_t chunk_size = divup((end - begin), get_num_threads());
+  // Make sure each task is at least grain_size size.
+  chunk_size = std::max(grain_size, chunk_size);
+
   scalar_t result;
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
   result = tbb::parallel_reduce(
-    tbb::blocked_range<int64_t>(begin, end, grain_size), ident,
-    [&eptr, &err_flag, f, ident]
+    tbb::blocked_range<int64_t>(begin, end, chunk_size), ident,
+    [&eptr, &err_flag, f]
         (const tbb::blocked_range<int64_t>& r, scalar_t ident) {
       try {
         return f(r.begin(), r.end(), ident);

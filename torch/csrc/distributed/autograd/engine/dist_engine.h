@@ -3,6 +3,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include <c10/core/thread_pool.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>

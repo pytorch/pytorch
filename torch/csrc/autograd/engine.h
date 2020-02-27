@@ -116,7 +116,7 @@ struct GraphTask {
       bool keep_graph,
       bool grad_mode,
       int reentrant_depth,
-      const std::shared_ptr<ReadyQueue>& cpu_ready_queue,
+      std::shared_ptr<ReadyQueue> cpu_ready_queue,
       bool exit_on_error = false)
       : has_error_(false),
         outstanding_tasks_(0),
@@ -125,7 +125,7 @@ struct GraphTask {
         owner_(NO_DEVICE),
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
-        cpu_ready_queue_(cpu_ready_queue),
+        cpu_ready_queue_(std::move(cpu_ready_queue)),
         future_result_(std::make_shared<FutureVariableList>()) {}
 };
 
@@ -153,6 +153,46 @@ struct NodeTask {
         isShutdownTask_(isShutdownTask) {}
 };
 
+
+struct ReadyQueue {
+ private:
+  // Returns true when t2 should be (weakly) BEFORE t1 in the queue.
+  // Shutdown tasks are first and then empty NodeTask are next.
+  struct CompareNodeTaskTime {
+    bool operator()(NodeTask const & t1, NodeTask const & t2) {
+      if (t2.isShutdownTask_) {
+        return true;
+      } else if (!t1.fn_ || t1.isShutdownTask_) {
+        return false;
+      } else if (!t2.fn_) {
+        return true;
+      } else if (t1.getReentrantDepth() == t2.getReentrantDepth()) {
+        return t1.fn_->sequence_nr() < t2.fn_->sequence_nr();
+      } else {
+        return t1.getReentrantDepth() < t2.getReentrantDepth();
+      }
+    }
+  };
+
+  // To notify threads waiting on the ReadyQueue of available tasks on the heap_
+  std::condition_variable not_empty_;
+  // To protect read and writes to heap_
+  mutable std::mutex mutex_;
+
+  std::priority_queue<NodeTask, std::vector<NodeTask>, CompareNodeTaskTime> heap_;
+
+ public:
+  // incrementOutstandingTasks indicates whether or not we should increment
+  // 'outstanding_tasks_' for the associated GraphTask. This should mostly
+  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
+  // might set this to false.
+  void push(NodeTask item, bool incrementOutstandingTasks = true);
+  void pushShutdownTask();
+  NodeTask pop();
+  bool empty() const;
+  size_t size() const;
+};
+
 // A single instance of this struct should be created through the whole process lifetime.
 // The worker thread creation logic and Engine's destructor rely on this.
 struct TORCH_API Engine {
@@ -174,7 +214,14 @@ struct TORCH_API Engine {
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific
   // machinery and shouldn't be exposed to users in anyway.
-  virtual std::shared_ptr<FutureVariableList> execute_with_graph_task(
+  // virtual variable_list execute_until_ready(
+  //     const std::shared_ptr<GraphTask>& graph_task,
+  //     std::shared_ptr<Node> graph_root);
+
+  // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
+  // for the graph. This API should only be used by internal autograd specific
+  // machinery and shouldn't be exposed to users in anyway.
+  virtual variable_list execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
       std::shared_ptr<Node> graph_root);
 
@@ -200,6 +247,11 @@ struct TORCH_API Engine {
 
   bool is_checkpoint_valid();
 
+  // initialize the thread local ready queue with the ready queue that is created
+  // elsewhere, i.e. thread_init, reentrant_thread_init, initialization in the
+  // distributed autograd engine, etc.
+  void init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue);
+
   size_t ready_queue_size(const std::shared_ptr<GraphTask>& graph_task, at::Device device);
 
  protected:
@@ -214,9 +266,10 @@ struct TORCH_API Engine {
   ReadyQueue& ready_queue_by_index(
       const std::shared_ptr<GraphTask>& graph_task,
       int device_index);
-  // start device threads in Engine,
+  // start device threads (CUDA, XLA, etc.) in Engine,
+  // note that it does NOT start CPU thread.
   void start_device_threads();
-  virtual void thread_init(int device);
+  virtual void thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue);
   virtual void thread_on_exception(
       std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
@@ -231,7 +284,7 @@ struct TORCH_API Engine {
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_device_threads_flag_;
   // Safe to read ready_queues_ without synchronization after intialization
-  std::vector<std::shared_ptr<ReadyQueue>> ready_queues_;
+  std::vector<std::shared_ptr<ReadyQueue>> device_ready_queues_;
   std::vector<std::function<void()>> final_callbacks_;
   // To protect reads and writes to final_callbacks_
   std::mutex post_callbacks_lock_;
