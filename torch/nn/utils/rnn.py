@@ -2,7 +2,7 @@ from collections import namedtuple
 import warnings
 
 import torch
-from .. import _VF
+from ... import _VF
 from ..._jit_internal import Optional
 
 

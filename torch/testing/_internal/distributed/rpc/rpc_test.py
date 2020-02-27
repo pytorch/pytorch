@@ -257,6 +257,14 @@ def clear_global_rref():
     global_rref = None
 
 
+# load_tests from common_utils is used to automatically filter tests for
+# sharding on sandcastle. This line silences flake warnings
+load_tests = load_tests
+
+
+@unittest.skipIf(
+    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
+)
 class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_worker_id(self):

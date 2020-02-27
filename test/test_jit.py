@@ -60,7 +60,7 @@ from torch.testing._internal import jit_utils
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
     skipIfRocm, suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
-    enable_profiling_mode
+    enable_profiling_mode, TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
@@ -696,6 +696,24 @@ class TestJit(JitTestCase):
         y = torch.rand(3, 4)
 
         self.assertTrue(check(x, y))
+
+    def test_numel(self):
+        @torch.jit.script
+        def get_numel_script(x):
+            return x.numel()
+
+        x = torch.rand(3, 4)
+        numel = get_numel_script(x)
+        self.assertEqual(numel, x.numel())
+
+    def test_element_size(self):
+        @torch.jit.script
+        def get_element_size_script(x):
+            return x.element_size()
+
+        x = torch.rand(3, 4)
+        element_size = get_element_size_script(x)
+        self.assertEqual(element_size, x.element_size())
 
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
@@ -1763,6 +1781,115 @@ graph(%input, %weight):
                     if x.startswith('relu')]) == 2, \
             "Expected to have 2 relu modules after dedup module uses"
         self.assertEqual(res, ref_res)
+
+    def test_replicate_dequantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                r = self.conv(x)
+                r += x
+                return r
+        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
+        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        m = torch.jit.script(M())
+        ref_res = m(x)
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
+                   .run(m.graph)
+        torch._C._jit_pass_replicate_dequantize(m.graph)
+        FileCheck().check_count("aten::dequantize", 2, exactly=True) \
+                   .run(m.graph)
+        res = get_forward(m._c)(x)
+        self.assertEqual(res, ref_res)
+
+    def test_swap_dequantize(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                x = self.maxpool(x)
+                x = self.avgpool(x)
+                return x
+        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
+        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        m = torch.jit.script(M())
+        ref_res = m(x)
+        torch._C._jit_pass_inline(m.graph)
+        FileCheck().check("aten::dequantize") \
+                   .check("aten::max_pool2d") \
+                   .check("aten::adaptive_avg_pool2d") \
+                   .run(m.graph)
+        torch._C._jit_pass_swap_dequantize(m.graph)
+        FileCheck().check("aten::max_pool2d") \
+                   .check("aten::adaptive_avg_pool2d") \
+                   .check("dequantize") \
+                   .run(m.graph)
+        res = get_forward(m._c)(x)
+        self.assertEqual(res, ref_res)
+
+    def test_swap_dequantize_all_ops(self):
+        """ A test that checks dequantize will be swapped for
+        all supported general ops without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.maxpool = torch.nn.MaxPool2d(kernel_size=3)
+                self.adaptive_avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.avgpool = torch.nn.AvgPool2d(3)
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                x = self.maxpool(x)
+                x = self.adaptive_avgpool(x)
+                x = self.avgpool(x)
+                x = torch.flatten(x)
+                x = torch.max(x)
+                x = torch.min(x)
+                x = torch.mean(x)
+                # TODO: uncomment when sort is supported
+                # x, _ = torch.sort(x)
+                x = F.interpolate(x, 4, mode='nearest')
+                x = F.upsample(x, (32, 32))
+                x = F.upsample_bilinear(x, (32, 32))
+                x = F.upsample_nearest(x, (32, 32))
+                return x
+        m = torch.jit.script(M())
+        torch._C._jit_pass_inline(m.graph)
+        FileCheck().check("aten::dequantize") \
+                   .check("aten::max_pool2d") \
+                   .check("aten::adaptive_avg_pool2d") \
+                   .check("aten::avg_pool2d") \
+                   .check("aten::flatten") \
+                   .check("aten::max") \
+                   .check("aten::min") \
+                   .check("aten::mean") \
+                   .check("aten::__interpolate") \
+                   .check("aten::__upsample") \
+                   .check("aten::__upsample_bilinear") \
+                   .check("aten::__upsample_nearest") \
+                   .run(m.graph)
+        torch._C._jit_pass_swap_dequantize(m.graph)
+        FileCheck().check("aten::max_pool2d") \
+                   .check("aten::adaptive_avg_pool2d") \
+                   .check("aten::avg_pool2d") \
+                   .check("aten::flatten") \
+                   .check("aten::max") \
+                   .check("aten::min") \
+                   .check("aten::mean") \
+                   .check("aten::__interpolate") \
+                   .check("aten::__upsample") \
+                   .check("aten::__upsample_bilinear") \
+                   .check("aten::__upsample_nearest") \
+                   .check("dequantize") \
+                   .run(m.graph)
 
     def test_pattern_based_rewrite(self):
         # mul(mul(mul(mul(x,y),z),x),y) --> mul(mul(mulmul(x,y,z), x), y) -->
@@ -5417,6 +5544,73 @@ def foo(x):
 
         with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
             torch.jit.script(A())
+
+    def test_var_aug_assign(self):
+        @torch.jit.script
+        class SomeNonAddableClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __eq__(self, other):
+                # type: (SomeNonAddableClass) -> bool
+                return self.num == other.num
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot emit inplace op"):
+            @torch.jit.script
+            def fn():
+                a = SomeNonAddableClass()
+                a += SomeNonAddableClass()
+                return a
+
+        @torch.jit.script
+        class SomeClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __iadd__(self, x):
+                # type: (int)
+                self.num += x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        @torch.jit.script
+        class SomeOutOfPlaceClass(object):
+            def __init__(self):
+                self.num = 99
+
+            def __add__(self, x):
+                # type: (int)
+                self.num = x
+                return self
+
+            def __eq__(self, other):
+                # type: (SomeClass) -> bool
+                return self.num == other.num
+
+        def fn2():
+            a = SomeClass()
+            a_copy = a
+            a += 20
+            assert a is a_copy
+            b = SomeOutOfPlaceClass()
+            b_copy = b
+            b += 99
+            assert b is b_copy
+            c = [1, 2, 3]
+            c_copy = c
+            c *= 2
+            assert c is c_copy
+            c += [4, 5, 6]
+            d = torch.ones(2, 2)
+            d_copy = d
+            d += torch.ones(2, 2)
+            assert d is d_copy
+            return a, b, c, d
+
+        self.checkScript(fn2, [])
 
     def test_nested_list_construct(self):
         def foo():
@@ -9824,6 +10018,28 @@ a")
             m2 = M2()
             m2(torch.zeros(4, 3))
 
+    def test_named_modules(self):
+        class MyMod(torch.nn.Module):
+            def __init__(self):
+                super(MyMod, self).__init__()
+                self.mod = (nn.ReLU())
+                self.mod2 = (nn.ReLU())
+                self.mod3 = nn.Sequential(nn.Sequential(nn.ReLU()))
+
+            @torch.jit.export
+            def method(self, x):
+                mod_names = ""
+                for name, mod in self.named_modules():
+                    mod_names = mod_names + " " + name
+                    x = mod(x)
+                return mod_names, x
+
+            def forward(self, x):
+                return x + 2
+
+        mod = torch.jit.script(MyMod())
+        self.assertEqual(mod.method(torch.tensor(2)), MyMod().method(torch.tensor(2)))
+
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
 
@@ -10223,6 +10439,42 @@ a")
         # Test load paths
         self.assertTrue(imported.unpack_called.item())
         torch.testing.assert_allclose(imported(x), x + torch.neg(torch.ones(3, 4, dtype=torch.float)))
+
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_torch_functional(self):
+        def foo(input, n_fft):
+            # type: (Tensor, int) -> Tensor
+            return torch.stft(input, n_fft)
+
+        inps = (torch.randn(10), 7)
+        self.assertEqual(foo(*inps), torch.jit.script(foo)(*inps))
+
+        def lu(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor]
+            return torch.lu(x)
+
+        self.checkScript(lu, (torch.randn(2, 3, 3),))
+
+        def lu_infos(x):
+            # type: (Tensor) -> Tuple[Tensor, Tensor, Tensor]
+            return torch.lu(x, get_infos=True)
+
+        self.checkScript(lu_infos, (torch.randn(2, 3, 3),))
+
+        def lu_unpack(x):
+            A_LU, pivots = torch.lu(x)
+            return torch.lu_unpack(A_LU, pivots)
+
+        for shape in ((3, 3), (5, 3, 3), (7, 3, 5, 5), (7, 5, 3, 3, 3)):
+            a = torch.randn(*shape)
+            self.checkScript(lu_unpack, (a,))
+
+        def cdist_fn():
+            a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
+            b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
+            return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
+
+        self.checkScript(cdist_fn, ())
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
