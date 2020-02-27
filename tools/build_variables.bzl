@@ -199,6 +199,7 @@ libtorch_sources = [
     "torch/csrc/jit/fuser/common/ir.cpp",
     "torch/csrc/jit/fuser/common/iriostream.cpp",
     "torch/csrc/jit/fuser/common/iter_visitor.cpp",
+    "torch/csrc/jit/fuser/common/ir_printer.cpp",
     "torch/csrc/jit/fuser/common/manager.cpp",
     "torch/csrc/jit/fuser/common/mutator.cpp",
     "torch/csrc/jit/fuser/common/tensor.cpp",

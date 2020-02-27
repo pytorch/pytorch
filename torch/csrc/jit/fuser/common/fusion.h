@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/ir_printer.h>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -75,7 +76,7 @@ struct ExprSort : public IterVisitor{
 
   static std::vector<Expr*> getExprs(const Fusion* const fusion, bool from_outputs_only, bool breadth_first){
     ExprSort es;
-    es.traverse(fusion, from_outputs_only, breadth_first);
+    es.traverse(fusion, from_outputs_only, {}, breadth_first);
     return es.exprs;
   }
 
@@ -230,6 +231,11 @@ struct TORCH_API Fusion : public IRInputOutput {
 
     return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 
+  }
+
+  void print() const {
+    IRPrinter irp(std::cout); 
+    irp.print(this); 
   }
 
   /*

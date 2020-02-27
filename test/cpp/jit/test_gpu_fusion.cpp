@@ -740,23 +740,23 @@ void testGPU_FusionTwoAdds() {
   auto TV2 = new TensorView(T2);
   auto TV3 = new TensorView(T3);
   auto TV4 = new TensorView(T4);
+  
+  /**** Operator Expressions ****/ 
+
+  new BinaryOp(BinaryOpType::Add, TV3, T0, T1);
+  new BinaryOp(BinaryOpType::Add, TV4, TV3, T2);
 
   /**** Tensor Expressions   ****/ 
  
   // [x] -> [16/4=4, 4]
-  auto TV4_s1 = split(TV4, -1, 4);
+  TV4 = split(TV4, -1, 4);
   // [x/4, 4] -> [16/4=4, 4/2=2, 2]
-  auto TV4_s2 = split(TV4_s1, -1, 2); 
+  TV4 = split(TV4, -1, 2); 
 
   // Compute T3 at inner loop of T4 but allow vectorization.
-  auto TV3_ca = TV3->computeAt(TV4_s2, 1);
+  TV3->computeAt(TV4, 1);
   
-  /**** Operator Expressions ****/ 
-
-  new BinaryOp(BinaryOpType::Add, TV3_ca, T0, T1);
-  new BinaryOp(BinaryOpType::Add, TV4_s2, TV3_ca, T2);
-
-  //fusion.print();
+  fusion.print();
 }
 
 void testGPU_Fusion() {}
