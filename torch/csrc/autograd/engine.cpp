@@ -389,7 +389,7 @@ void GraphTask::set_exception(
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack();
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
     // Careful: setting the future_result_ can trigger DistAutogradContext to
