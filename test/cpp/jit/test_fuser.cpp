@@ -25,7 +25,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
-#include "torch/csrc/jit/frontend/tracer.h"
+#include "torch/csrc/jit/tracer.h"
 
 
 

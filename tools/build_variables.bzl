@@ -174,7 +174,7 @@ libtorch_sources = [
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/api/object.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
-    "torch/csrc/jit/frontend/tracer.cpp",
+    "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/codegen/fuser/kernel_cache.cpp",
     "torch/csrc/jit/codegen/fuser/compiler.cpp",
     "torch/csrc/jit/codegen/fuser/executor.cpp",

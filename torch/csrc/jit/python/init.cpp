@@ -55,7 +55,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/python_tree_views.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>

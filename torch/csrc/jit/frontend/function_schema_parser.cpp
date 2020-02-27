@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/runtime/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>

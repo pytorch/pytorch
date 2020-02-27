@@ -22,7 +22,7 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/frontend/parser.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 

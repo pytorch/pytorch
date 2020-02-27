@@ -17,7 +17,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>

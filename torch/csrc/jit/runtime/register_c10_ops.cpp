@@ -3,7 +3,7 @@
 #include <torch/csrc/autograd/record_function.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 #include <unordered_set>
 
 namespace torch {

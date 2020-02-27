@@ -13,7 +13,7 @@
 #include <torch/csrc/jit/api/custom_class.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>

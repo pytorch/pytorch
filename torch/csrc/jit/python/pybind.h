@@ -8,7 +8,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/tracer.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <pybind11/functional.h>

@@ -5,7 +5,7 @@
 
 #include <ATen/core/stack.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/runtime/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/dispatch/Dispatcher.h>

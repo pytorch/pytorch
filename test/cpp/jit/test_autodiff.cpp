@@ -11,7 +11,7 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/frontend/tracer.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <ATen/ATen.h>
 #include "torch/csrc/autograd/engine.h"

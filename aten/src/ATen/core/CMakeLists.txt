@@ -9,7 +9,7 @@ EXCLUDE(ATen_CORE_SRCS "${ATen_CORE_SRCS}" ${ATen_CORE_TEST_SRCS})
 # Add files needed from jit folders
 LIST(APPEND ATen_CORE_HEADERS
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/source_range.h
-    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/runtime/function_schema_parser.h
+    ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/function_schema_parser.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/lexer.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/strtod.h
     ${Caffe2_SOURCE_DIR}/torch/csrc/jit/frontend/parse_string_literal.h
