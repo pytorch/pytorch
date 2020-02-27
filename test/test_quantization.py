@@ -311,6 +311,26 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
 
         checkQuantized(model)
 
+    def test_eval_after_train(self):
+        model = AnnotatedTwoLayerLinearModel()
+        model = prepare(model)
+        # calibrate
+        test_only_eval_fn(model, self.calib_data)
+        model = convert(model)
+        x = torch.rand(2, 5, dtype=torch.float)
+        ref = model(x)
+
+        quant_state_dict = model.state_dict()
+
+        # Check eval
+        model = AnnotatedTwoLayerLinearModel()
+        model = prepare(model)
+        model = convert(model)
+        model.load_state_dict(quant_state_dict)
+
+        out = model(x)
+        self.assertEqual(ref, out)
+
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
                      " with instruction set support avx2 or newer.")
@@ -793,6 +813,31 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
+    def test_eval_after_train(self):
+        qengine = 'fbgemm'
+        model = ManualLinearQATModel()
+        model = prepare_qat(model)
+        self.checkObservers(model)
+        test_only_train_fn(model, self.train_data)
+        model = convert(model)
+
+        model = quantize_qat(ManualLinearQATModel(), test_only_train_fn,
+                             self.train_data)
+        quant_state_dict = model.state_dict()
+
+        x = torch.rand(2, 5, dtype=torch.float)
+        ref = model(x)
+
+        # Check eval using quantized state_dict
+        model = ManualLinearQATModel()
+
+        model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        torch.quantization.prepare_qat(model, inplace=True)
+        torch.quantization.convert(model, inplace=True)
+        model.load_state_dict(quant_state_dict)
+
+        out = model(x)
+        self.assertEqual(ref, out)
 
 @unittest.skipUnless(
     'fbgemm' in torch.backends.quantized.supported_engines,

@@ -232,6 +232,7 @@ class Conv2d(_ConvNd):
             assert hasattr(mod, 'activation_post_process'), \
                 'Input QAT module must have observer attached'
             weight_post_process = mod.weight_fake_quant
+            weight_post_process(mod.weight)
             activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == cls._FLOAT_MODULE, \
