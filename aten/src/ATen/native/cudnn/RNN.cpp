@@ -1233,6 +1233,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
+  std::cout << "CUDNN implementation is called\n";
 
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
