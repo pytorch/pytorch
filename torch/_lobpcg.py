@@ -536,8 +536,12 @@ class LOBPCG(object):
         SBS = _utils.qform(B, S)
 
         d1 = SBS.diagonal(0, -2, -1) ** -0.5
-        d = torch.zeros((d1.shape[0], 1), dtype=d1.dtype, device=d1.device)
-        d[:, 0] = d1
+        if d1.is_cuda:
+            # Avoid `test_torch.TestTorchDeviceTypeCUDA.test_lobpcg_basic_cuda_float64 leaked 4096 bytes CUDA memory on device 0`
+            d = torch.zeros((d1.shape[0], 1), dtype=d1.dtype, device=d1.device)
+            d[:, 0] = d1
+        else:
+            d = d1.reshape(d1.shape[0], 1)
 
         dd = mm(d, _utils.transpose(d))
         R = torch.cholesky(dd * SBS, upper=True)
@@ -554,8 +558,8 @@ class LOBPCG(object):
 
         .. note:: When `drop` is `False` then `svqb` is based on the
                   Algorithm 4 from [DuerschPhD2015] that is a slight
-                  modification of the corresponding algorithm introduced
-                  in [StathopolousWu2002]. Otherwise,
+                  modification of the corresponding algorithm
+                  introduced in [StathopolousWu2002].
 
         Arguments:
 
@@ -569,6 +573,7 @@ class LOBPCG(object):
           U (Tensor) : B-orthonormal columns (:math:`U^T B U = I`), size
                        is (m, n1), where `n1 = n` if `drop` is `False,
                        otherwise `n1 <= n`.
+
         """
         # type: (Tensor, bool, float) -> Tensor
         if torch.numel(U) == 0:
