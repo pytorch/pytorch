@@ -17,9 +17,9 @@
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/python_tracer.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 
