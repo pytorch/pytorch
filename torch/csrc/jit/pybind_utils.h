@@ -23,6 +23,7 @@
 #include <torch/csrc/utils/six.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #endif
 
 #include <ATen/core/function_schema.h>
@@ -271,6 +272,11 @@ inline InferredType tryToInferContainerType(py::handle input) {
       element_type = *unified_type;
     }
     return InferredType(ListType::create(element_type));
+#ifdef USE_DISTRIBUTED
+  } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
+    auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
+    return InferredType(RRefType::create(rref_ivalue.type()));
+#endif
   } else {
     // TODO: this message is not correct anymore, since this InferredType is
     // used from a bunch of circumstances unrelated to tracing. We can re-use
@@ -713,6 +719,15 @@ inline py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    auto RRefPtr =
+        c10::dynamic_intrusive_pointer_cast<torch::distributed::rpc::RRef>(
+            std::move(ivalue).toRRef());
+    return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
+#else
+    AT_ERROR("RRef is only supported with the distributed package");
+#endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     if (obj->type()->is_module()) {
