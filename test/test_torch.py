@@ -10359,7 +10359,10 @@ class TestTorchDeviceType(TestCase):
     def test_unfold_all_devices_and_dtypes(self, device):
         for dt in torch.testing.get_all_dtypes():
 
-            if dt in {torch.half, torch.bfloat16} and device == 'cpu':
+            if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
+                # TODO: https://github.com/pytorch/pytorch/issues/33793
+                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
+            elif dt == torch.half and device == 'cpu':
                 # fix once random is implemented for Half on CPU
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             else:
@@ -10449,7 +10452,10 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(shape, torch.empty_like(torch.zeros(shape, device=device, dtype=dt)).shape)
                 self.assertEqual(shape, torch.empty_strided(shape, (0,) * len(shape), device=device, dtype=dt).shape)
 
-                if dt in {torch.half, torch.bfloat16} and device == "cpu":
+                if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
+                    # TODO: https://github.com/pytorch/pytorch/issues/33793
+                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
+                elif dt == torch.half and device == "cpu":
                     # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
@@ -13929,11 +13935,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
 
-    @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(torch.float, torch.double, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_random(self, device, dtype):
         # This test is flaky with p<=(2/(ub-lb))^200=6e-36
-        t = torch.FloatTensor(200).to(dtype=dtype, device=device)
+        t = torch.empty(200, dtype=dtype, device=device)
         lb = 1
         ub = 4
 
@@ -13946,6 +13951,146 @@ class TestTorchDeviceType(TestCase):
         t.random_(ub)
         self.assertEqual(t.min(), 0)
         self.assertEqual(t.max(), ub - 1)
+
+    def test_random_bool(self, device):
+        size = 2000
+        t = torch.empty(size, dtype=torch.bool, device=device)
+
+        t.fill_(False)
+        t.random_()
+        self.assertEqual(t.min(), False)
+        self.assertEqual(t.max(), True)
+        self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
+
+        t.fill_(True)
+        t.random_()
+        self.assertEqual(t.min(), False)
+        self.assertEqual(t.max(), True)
+        self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
+            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                  torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_random_full_range(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        t = torch.empty(size, dtype=dtype, device=device)
+
+        if dtype in [torch.float, torch.double, torch.half]:
+            from_ = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
+        elif dtype == torch.bfloat16:
+            from_ = int(max(-3.389531389251535e+38, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(3.389531389251535e+38, torch.iinfo(torch.int64).max))
+        else:
+            from_ = int(max(torch.iinfo(dtype).min, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(torch.iinfo(dtype).max, torch.iinfo(torch.int64).max))
+        range_ = to_inc_ - from_ + 1
+
+        t.random_(from_, None)
+        self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
+        self.assertTrue((to_inc_ - alpha * range_) < t.to(torch.double).max() <= to_inc_)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
+            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                  torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_random_from_to(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        if dtype in [torch.float, torch.double, torch.half]:
+            min_val = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max / 2))
+            froms = [min_val, -42, 0, 42]
+            tos = [-42, 0, 42, max_val]
+        elif dtype == torch.uint8:
+            min_val = torch.iinfo(dtype).min
+            max_val = torch.iinfo(dtype).max
+            froms = [min_val, 42]
+            tos = [42, max_val]
+        elif dtype == torch.bfloat16:
+            froms = [24]
+            tos = [42]
+        else:
+            min_val = torch.iinfo(dtype).min
+            max_val = torch.iinfo(dtype).max
+            froms = [min_val, -42, 0, 42]
+            tos = [-42, 0, 42, max_val]
+
+        for from_ in froms:
+            for to_ in tos:
+                if to_ > from_:
+                    range_ = to_ - from_
+                    t = torch.empty(size, dtype=dtype, device=device)
+                    t.random_(from_, to_)
+                    self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
+                    self.assertTrue((to_ - alpha * range_) < t.to(torch.double).max() < to_)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
+            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                  torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_random_to(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        if dtype in [torch.float, torch.double, torch.half]:
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max) / 2)
+            tos = [42, max_val]
+        elif dtype == torch.bfloat16:
+            tos = [42]
+        else:
+            max_val = torch.iinfo(dtype).max
+            tos = [42, max_val]
+
+        for to_ in tos:
+            t = torch.empty(size, dtype=dtype, device=device)
+            t.random_(to_)
+            self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_)
+            self.assertTrue((to_ - alpha * to_) < t.to(torch.double).max() < to_)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
+            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                  torch.float, torch.double, torch.half, torch.bfloat16)
+    def test_random_default(self, device, dtype):
+        # TODO: https://github.com/pytorch/pytorch/issues/33793
+        if IS_WINDOWS and device.startswith('cuda') and dtype == torch.bfloat16:
+            return
+
+        size = 2000
+        alpha = 0.1
+
+        if dtype == torch.float:
+            to_inc = 1 << 24
+        elif dtype == torch.double:
+            to_inc = 1 << 53
+        elif dtype == torch.half:
+            to_inc = 1 << 11
+        elif dtype == torch.bfloat16:
+            to_inc = 1 << 8
+        else:
+            to_inc = torch.iinfo(dtype).max
+
+        t = torch.empty(size, dtype=dtype, device=device)
+        t.random_()
+        self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_inc)
+        self.assertTrue((to_inc - alpha * to_inc) < t.to(torch.double).max() <= to_inc)
 
     @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)

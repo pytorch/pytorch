@@ -81,11 +81,12 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
   if (strides.data()) {
     TORCH_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
   }
+  THCStorage *new_storage = THCStorage_(new)(state);
   THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
-    c10::intrusive_ptr<at::StorageImpl>::reclaim(THCStorage_(new)(state)),
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
+  THCTensor_(setStorageNd)(state, self, storage != nullptr ? storage : new_storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
   return self;
