@@ -238,7 +238,9 @@ class TestGatherRanges(serial.SerializedTestCase):
         workspace.FeedBlob("ranges", ranges)
         workspace.FeedBlob("key", key)
 
-        def getOpWithThreshold(min_observation=2, max_mismatched_ratio=0.6):
+        def getOpWithThreshold(
+            min_observation=2, max_mismatched_ratio=0.6, max_empty_ratio=None
+        ):
             return core.CreateOperator(
                 "GatherRangesToDense",
                 ["data", "ranges", "key"],
@@ -246,6 +248,7 @@ class TestGatherRanges(serial.SerializedTestCase):
                 lengths=lengths,
                 min_observation=min_observation,
                 max_mismatched_ratio=max_mismatched_ratio,
+                max_empty_ratio=max_empty_ratio,
             )
 
         workspace.RunOperatorOnce(getOpWithThreshold())
@@ -257,6 +260,11 @@ class TestGatherRanges(serial.SerializedTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(
                 getOpWithThreshold(max_mismatched_ratio=0.4, min_observation=5)
+            )
+
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(
+                getOpWithThreshold(min_observation=50, max_empty_ratio=0.01)
             )
 
 

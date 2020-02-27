@@ -15,6 +15,8 @@ namespace detail {
 // Note: CPU fusion is currently disabled due to test flakiness
 bool cpu_fuser_enabled = false;
 
+bool gpu_fuser_enabled = true;
+
 } // namespace detail
 
 int64_t registerFusion(const Node* fusion_group) {
@@ -33,11 +35,16 @@ bool canFuseOnCPU() {
 }
 
 bool canFuseOnGPU() {
-  return fuser::hasFusionBackend(at::DeviceType::CUDA);
+  return fuser::hasFusionBackend(at::DeviceType::CUDA) &&
+      detail::gpu_fuser_enabled;
 }
 
 void overrideCanFuseOnCPU(bool value) {
   detail::cpu_fuser_enabled = value;
+}
+
+void overrideCanFuseOnGPU(bool value) {
+  detail::gpu_fuser_enabled = value;
 }
 
 // Uses the above interface by stuffing the graph into a node and treating that

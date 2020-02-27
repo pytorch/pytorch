@@ -21,6 +21,10 @@
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/six.h>
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/rpc/py_rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
+#endif
 
 #include <ATen/core/function_schema.h>
 #include <c10/util/Exception.h>
@@ -268,6 +272,11 @@ inline InferredType tryToInferContainerType(py::handle input) {
       element_type = *unified_type;
     }
     return InferredType(ListType::create(element_type));
+#ifdef USE_DISTRIBUTED
+  } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
+    auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
+    return InferredType(RRefType::create(rref_ivalue.type()));
+#endif
   } else {
     // TODO: this message is not correct anymore, since this InferredType is
     // used from a bunch of circumstances unrelated to tracing. We can re-use
@@ -321,7 +330,7 @@ inline IValue toTypeInferredIValue(py::handle input) {
 
 inline Stack toTraceableStack(const py::tuple& inputs) {
   auto info = toTypeInferredIValue(inputs);
-  AT_CHECK(
+  TORCH_CHECK(
       isTraceableType(info.type()),
       "Type '",
       info.type()->python_str(),
@@ -560,28 +569,37 @@ inline IValue toIValue(
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else {
+        throw py::cast_error(
+            c10::str("Cannot cast ", py::str(obj), " to ", type->python_str()));
       }
     }
-    case TypeKind::GeneratorType:
-    case TypeKind::VarType:
-    case TypeKind::FutureType:
-    case TypeKind::QSchemeType:
-      break;
+    case TypeKind::RRefType: {
+#ifdef USE_DISTRIBUTED
+      return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
+#else
+      AT_ERROR("RRef is only supported with the distributed package");
+#endif
+    } break;
     case TypeKind::PyObjectType:
       // convert a py::handle to the IValue that holds the py::object
       return c10::ivalue::ConcretePyObjectHolder::create(obj.cast<py::object>());
-    case TypeKind::FunctionType:
-      AT_ERROR("Function Values aren't yet supported");
+
     case TypeKind::CapsuleType: {
       return py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj);
     } break;
     case TypeKind::AnyType:
       return toTypeInferredIValue(obj);
+    case TypeKind::FunctionType:
+    case TypeKind::GeneratorType:
+    case TypeKind::VarType:
+    case TypeKind::FutureType:
+    case TypeKind::QSchemeType:
+    case TypeKind::AnyListType:
+    case TypeKind::AnyTupleType:
+      break;
   }
-  AT_ERROR(
-      "Missing cases in toIValue for type: ",
-      type->str(),
-      "! File a bug report.");
+  AT_ERROR("toIValue() cannot handle converting to type: ", type->python_str());
 }
 
 // Small wrapper around getting the type name string from Python to make
@@ -701,6 +719,15 @@ inline py::object toPyObject(IValue ivalue) {
       py_dict[toPyObject(IValue{pair.key()})] = toPyObject(IValue{pair.value()});
     }
     return std::move(py_dict);
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    auto RRefPtr =
+        c10::dynamic_intrusive_pointer_cast<torch::distributed::rpc::RRef>(
+            std::move(ivalue).toRRef());
+    return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
+#else
+    AT_ERROR("RRef is only supported with the distributed package");
+#endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
     if (obj->type()->is_module()) {
@@ -737,6 +764,14 @@ inline py::object toPyObject(IValue ivalue) {
     return py::reinterpret_borrow<py::object>(ivalue.toPyObject());
   } else if (ivalue.isCapsule()) {
     return py::cast(ivalue.toCapsule());
+  } else if (ivalue.isRRef()) {
+#ifdef USE_DISTRIBUTED
+    return py::cast(torch::distributed::rpc::PyRRef(
+        c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
+            ivalue.toRRef())));
+#else
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
+#endif
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",

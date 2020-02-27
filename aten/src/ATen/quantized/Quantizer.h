@@ -8,6 +8,8 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 
+#include <ATen/TensorUtils.h>
+
 #include <cmath>
 #include <memory>
 
@@ -177,8 +179,8 @@ struct CAFFE2_API PerTensorAffineQuantizer : public AffineQuantizer {
 struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
   explicit PerChannelAffineQuantizer(
       ScalarType scalar_type,
-      const std::vector<double>& scales,
-      const std::vector<int64_t>& zero_points,
+      Tensor scales,
+      Tensor zero_points,
       int64_t axis)
       : AffineQuantizer(scalar_type),
         scales_(scales),
@@ -189,11 +191,11 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     return kPerChannelAffine;
   }
 
-  std::vector<double> scales() const {
+  Tensor scales() const {
     return scales_;
   }
 
-  std::vector<int64_t> zero_points() const {
+  Tensor zero_points() const {
     return zero_points_;
   }
 
@@ -211,14 +213,14 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
     auto* other_per_channel_affine =
         static_cast<PerChannelAffineQuantizer*>(other.get());
     return scalar_type() == other_per_channel_affine->scalar_type() &&
-        scales() == other_per_channel_affine->scales() &&
-        zero_points() == other_per_channel_affine->zero_points() &&
+        scales().equal(other_per_channel_affine->scales()) &&
+        zero_points().equal(other_per_channel_affine->zero_points()) &&
         axis() == other_per_channel_affine->axis();
   }
 
  private:
-  const std::vector<double> scales_;
-  const std::vector<int64_t> zero_points_;
+  Tensor scales_;
+  Tensor zero_points_;
   const int64_t axis_;
 };
 
@@ -251,11 +253,6 @@ CAFFE2_API QuantizerPtr
 make_per_tensor_affine_quantizer(
     double scale, int64_t zero_point, ScalarType scalar_type);
 
-CAFFE2_API QuantizerPtr
-make_per_channel_affine_quantizer(
-    const std::vector<double>& scales, const std::vector<int64_t>& zero_points,
-    int64_t axis, ScalarType scalar_type);
-// variant that unpacks scales and zero points from tensors
 CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,

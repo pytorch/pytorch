@@ -792,7 +792,7 @@ void ArgumentStash::stashValue(
   } else if (type == FloatType::get()) {
     ten = g.insert(aten::Float, {ten});
   } else if (type == NumberType::get()) {
-    ten = g.insert(prim::ImplicitTensorToNum, {ten});
+    ten = g.insert(aten::ScalarImplicit, {ten});
   }
 
   stash.values.emplace(arg_name, ten);
