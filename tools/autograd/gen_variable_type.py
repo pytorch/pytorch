@@ -168,6 +168,28 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     'set_', '_cudnn_rnn_flatten_weight',
 }
+
+ENFORCE_USE_COUNT_IS_ONE = CodeTemplate("""\
+TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() == 1);
+""")
+
+ENFORCE_USE_COUNT_IS_ONE_TENSORLIST = CodeTemplate("""\
+for (const auto& x : ${tensor_name}) {
+  TORCH_INTERNAL_ASSERT(x.use_count() == 1);
+}
+""")
+
+DONT_ENFORCE_USE_COUNT_IS_ONE = {
+    # batch_norm returns alias for mutation but the mutation is not
+    # manifestly obvious. Related https://github.com/pytorch/pytorch/issues/13402
+    'native_batch_norm',
+    'cudnn_batch_norm',
+    'miopen_batch_norm',
+    # these are probably legit bugs
+    'coalesce',
+    'slow_conv_transpose2d_backward',
+}
+
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
@@ -797,26 +819,34 @@ def emit_body(declaration):
             return 'std::move({})'.format(call)
 
     def enforce_same_tensorimpl_and_storage(env, call):
-        save_ptrs_stmts = []
-        enforce_same_ptrs_stmts = []
+        prologue = []
+        epilogue = []
         if declaration['name'] not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
             for arg in env.get('unpacked_args', []):
                 simple_type = env['unpacked_args_simple_type'][arg]
                 if simple_type == 'TensorList':
-                    save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                        SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                                ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                    prologue += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                 SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                    epilogue += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                 ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
                 elif simple_type == 'Tensor':
-                    save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
-                                        SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
-                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
-                                                ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
-        assert (save_ptrs_stmts and enforce_same_ptrs_stmts) or (not save_ptrs_stmts and not enforce_same_ptrs_stmts)
-        if save_ptrs_stmts and enforce_same_ptrs_stmts:
-            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=save_ptrs_stmts) + \
-                call + \
-                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
+                    prologue += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
+                                 SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
+                    epilogue += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
+                                 ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
+        # Functions that require derivative will mutably modify their outputs;
+        # we should check that the native function didn't alias with something
+        # else!
+        if requires_derivative and declaration['name'] not in DONT_ENFORCE_USE_COUNT_IS_ONE:
+            for ret in returns:
+                if ret['type'] == 'Tensor':
+                    epilogue += [ENFORCE_USE_COUNT_IS_ONE.substitute(tensor_name=ret['name'])]
+                elif ret['type'] == 'TensorList':
+                    epilogue += [ENFORCE_USE_COUNT_IS_ONE_TENSORLIST.substitute(tensor_name=ret['name'])]
+        if prologue or epilogue:
+            call = "\n".join([RUN_ONLY_IN_DEBUG_MODE.substitute(statements=prologue),
+                              call,
+                              RUN_ONLY_IN_DEBUG_MODE.substitute(statements=epilogue)])
         return call
 
     def emit_call(env):
