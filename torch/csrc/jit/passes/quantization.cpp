@@ -128,6 +128,50 @@ bool isFunctionNode(Node* n,
   return is_quantizable;
 }
 
+// If the op doesn't require observation, return
+// the the list of input indexes that we should check to see
+// if they are observed/quantized, if so, we can say the output
+// of this op is observed/quantized as well, since for these ops we can derive
+// the quantization parameters for output given inputs
+std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
+  std::vector<std::string> single_input_aten_funcs = {
+    "adaptive_avg_pool2d",
+    "max_pool2d",
+    "avg_pool2d",
+    "flatten",
+    "max",
+    "min",
+    "mean",
+    // TODO: sort returns a tuple of Tensors, we have
+    // to extend the API to support that
+    // "sort",
+    "__interpolate",
+    "__upsample",
+    "__upsample_bilinear",
+    "__upsample_nearest",
+  };
+  std::vector<std::string> single_input_call_funcs = {
+    "adaptive_avg_pool2d",
+    "_max_pool2d",
+  };
+  if (isFunctionNode(
+          n,
+      // We don't have call functions
+      // after inline
+      /* call_funcs = */ single_input_call_funcs,
+      /* aten_funcs = */ {})) {
+    return {1};
+  } else if (isFunctionNode(
+                 n,
+                 // We don't have call functions
+                 // after inline
+                 /* call_funcs = */ {},
+                 /* aten_funcs = */ single_input_aten_funcs)) {
+    return {0};
+  }
+  return {};
+}
+
 bool nodeQuantizable(Node* n) {
   return isFunctionNode(
       n,
@@ -1704,6 +1748,53 @@ void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
   }
   for (Node* n : dequant_nodes_to_rewrite) {
     n->destroy();
+  }
+}
+
+// This is the pass to handle ops that does not require observation
+// for example: flatten, average_pool, upsample
+// This is called after inline and before graph execution
+void SwapDeQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      auto input_indexes = getGeneralOpTensorInputIndexes(n);
+      if (input_indexes.size() > 0) {
+        bool is_dequantized = true;
+        for (auto i : input_indexes) {
+          is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
+        }
+        if (!is_dequantized) {
+          continue;
+        }
+        // Delete dequantize node, we have one dequantize
+        // for each use of the value
+        for (auto i : input_indexes) {
+          auto* dequantized_val = n->inputs()[i];
+          auto* dequantize_node = dequantized_val->node();
+          TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
+                                "Expect to have one dequantize node for each use");
+          // Replace useses of dequantized_val with the input of
+          // dequantize node
+          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+          dequantize_node->removeAllInputs();
+          dequantize_node->destroy();
+        }
+        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
+                    " with one output right now");
+        auto* output = n->output();
+        WithInsertPoint ins(n->next());
+        std::vector<Use> uses = output->uses();
+        // Insert new dequantize node for each use of the output
+        insertDeQuantCall(graph.get(), output, output, uses);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
   }
 }
 
