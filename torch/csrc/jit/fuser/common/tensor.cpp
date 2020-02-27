@@ -250,8 +250,6 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
 
 TensorView* TensorView::clone() const {
     TensorView* new_view = new TensorView(tensor_, domain_);
-    std::cout<<FusionGuard::getCurFusion()->origin(domain_)<<std::endl;
-    std::cout<<FusionGuard::getCurFusion()->origin(new_view->domain())<<std::endl;
     new_view->compute_at_view_ = compute_at_view_;
     new_view->compute_at_axis_ = compute_at_axis_;
     return new_view;
@@ -281,7 +279,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   if(axis < 0)
     //Compute at is funny where size is the maximum acceptable value instead of size-1
     axis +=  consumer->domain()->size() + 1;
-  TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size());
+  TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size() + 1);
 
   std::stack<Val*> dep_chain =
       DependencyCheck::getDependencyChain(this, consumer);
@@ -334,6 +332,11 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
 
   // Dep chain doesn't contain this, try to run on replay, as it may be merging
   // two independent loop nests of the same sizes.
+
+  // Reset view otherwise will conflict with replay.
+  
+  this->compute_at_view_ = nullptr;
+  this->compute_at_axis_ = -1;
   TransformReplay::replay(running_consumer, this, axis);
   this->compute_at_view_ = running_consumer;
   this->compute_at_axis_ = axis;
