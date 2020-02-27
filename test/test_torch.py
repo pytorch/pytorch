@@ -783,6 +783,7 @@ class _TestTorchMixin(object):
                                [0, 1, 1],
                                [1, 1, 1]]))
 
+    @slowTest
     def test_mv(self):
         def _test_mv(m1, v1):
             res1 = torch.mv(m1, v1)
@@ -1537,6 +1538,7 @@ class _TestTorchMixin(object):
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
+    @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
@@ -2941,6 +2943,7 @@ class _TestTorchMixin(object):
             for wi in w:
                 self.assertEqual(str(wi.message)[0:52], str(warn))
 
+    @slowTest
     def test_abs(self):
         def _test_abs(tensors_dict):
             for _category, tensors in tensors_dict.items():
@@ -3712,6 +3715,7 @@ class _TestTorchMixin(object):
         # test that it works with bool tensors
         self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
 
+    @slowTest
     def test_bernoulli_edge_cases(self):
         # Need to draw a lot of samples to cover every random floating point number.
         a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
@@ -9136,6 +9140,7 @@ class TestTorchDeviceType(TestCase):
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
             run_test(tensor_dims, some)
 
+    @slowTest
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
@@ -9775,6 +9780,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
+    @slowTest
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -11183,6 +11189,7 @@ class TestTorchDeviceType(TestCase):
             expected.backward(g0)
             self.assertTrue(torch.allclose(x.grad, y.grad))
 
+    @slowTest
     def test_pdist_norm_forward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
@@ -11195,6 +11202,7 @@ class TestTorchDeviceType(TestCase):
         for dtype in [torch.float32, torch.float64]:
             self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
+    @slowTest
     @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
@@ -13311,6 +13319,7 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
+    @slowTest
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_ger(self, device, dtype):
@@ -13331,6 +13340,7 @@ class TestTorchDeviceType(TestCase):
         v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
         run_test(v0, v1)
 
+    @slowTest
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_addr(self, device, dtype):
@@ -13384,6 +13394,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @slowTest
     @onlyCPU
     def test_addmm(self, device):
         types = {
@@ -13652,6 +13663,7 @@ class TestTorchDeviceType(TestCase):
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    @slowTest
     @onlyCPU
     def test_mm(self, device):
         def _test_mm(n, m, p, dtype, genf):

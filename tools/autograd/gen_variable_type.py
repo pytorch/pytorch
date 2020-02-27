@@ -170,24 +170,18 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 }
 
 ENFORCE_USE_COUNT_IS_ONE = CodeTemplate("""\
-TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() == 1);
+TORCH_INTERNAL_ASSERT(!${tensor_name}.defined() || ${tensor_name}.use_count() == 1);
 """)
 
 ENFORCE_USE_COUNT_IS_ONE_TENSORLIST = CodeTemplate("""\
 for (const auto& x : ${tensor_name}) {
-  TORCH_INTERNAL_ASSERT(x.use_count() == 1);
+  TORCH_INTERNAL_ASSERT(!x.defined() || x.use_count() == 1);
 }
 """)
 
 DONT_ENFORCE_USE_COUNT_IS_ONE = {
-    # batch_norm returns alias for mutation but the mutation is not
-    # manifestly obvious. Related https://github.com/pytorch/pytorch/issues/13402
-    'native_batch_norm',
-    'cudnn_batch_norm',
-    'miopen_batch_norm',
     # these are probably legit bugs
     'coalesce',
-    'slow_conv_transpose2d_backward',
 }
 
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
@@ -838,7 +832,7 @@ def emit_body(declaration):
         # we should check that the native function didn't alias with something
         # else!
         if requires_derivative and declaration['name'] not in DONT_ENFORCE_USE_COUNT_IS_ONE:
-            for ret in returns:
+            for ret in differentiable_outputs:
                 if ret['type'] == 'Tensor':
                     epilogue += [ENFORCE_USE_COUNT_IS_ONE.substitute(tensor_name=ret['name'])]
                 elif ret['type'] == 'TensorList':

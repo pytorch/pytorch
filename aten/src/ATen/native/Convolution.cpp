@@ -885,7 +885,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
     if (ggO.defined()) {
       ggO = ggO + ggb_expanded;
     } else {
-      ggO = ggb_expanded;
+      ggO = ggb_expanded.clone();
     }
   }
 
