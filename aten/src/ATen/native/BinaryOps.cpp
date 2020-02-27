@@ -14,6 +14,7 @@ DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
 DEFINE_DISPATCH(div_stub);
+DEFINE_DISPATCH(remainder_stub);
 DEFINE_DISPATCH(atan2_stub);
 DEFINE_DISPATCH(bitwise_and_stub);
 DEFINE_DISPATCH(bitwise_or_stub);
@@ -73,6 +74,24 @@ Tensor div(const Tensor& self, const Tensor& other) {
 
 Tensor& div_(Tensor& self, const Tensor& other) {
   return native::div_out(self, self, other);
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other,
+    /*check_mem_overlap=*/true);
+  remainder_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor remainder(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  remainder_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& remainder_(Tensor& self, const Tensor& other) {
+  return native::remainder_out(self, self, other);
 }
 
 Tensor truncate(const Tensor& tensor) {
@@ -220,6 +239,18 @@ Tensor div(const Tensor& self, Scalar other) {
 // used for Python)
 Tensor& div_(Tensor& self, Scalar other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor remainder(const Tensor& self, Scalar other) {
+  return native::remainder(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& remainder_(Tensor& self, Scalar other) {
+  return native::remainder_(self, wrapped_scalar_tensor(other));
+}
+
+Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
@@ -390,7 +421,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __lshift__(const Tensor& self, Scalar other) { 
+Tensor __lshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -418,7 +449,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __rshift__(const Tensor& self, Scalar other) { 
+Tensor __rshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);

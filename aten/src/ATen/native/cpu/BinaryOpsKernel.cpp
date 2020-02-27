@@ -94,6 +94,10 @@ void div_kernel(TensorIterator& iter) {
   }
 }
 
+void remainder_kernel(TensorIterator& iter) {
+  std::cout << "hello from CPU remainder_kernel!" << std::endl;
+}
+
 void bitwise_and_kernel(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
@@ -576,6 +580,7 @@ REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_stub, &div_kernel);
+REGISTER_DISPATCH(remainder_stub, &remainder_kernel);
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel);
 REGISTER_DISPATCH(bitwise_and_stub, &bitwise_and_kernel);
 REGISTER_DISPATCH(bitwise_or_stub, &bitwise_or_kernel);
