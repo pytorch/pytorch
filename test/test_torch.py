@@ -44,6 +44,7 @@ if TEST_NUMPY:
     import numpy as np
 
 if TEST_SCIPY:
+    import scipy
     from scipy import signal
 
 if TEST_LIBROSA:
@@ -13766,7 +13767,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
                              prec=prec)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and scipy.__version__ < '1.4.1'), "Scipy not found or older than 1.4.1")
     @onlyCPU
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -13774,6 +13775,7 @@ class TestTorchDeviceType(TestCase):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
         """
         import time
+        import scipy
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
         from torch._linalg_utils import matmul as mm
         from scipy.sparse.linalg import lobpcg as scipy_lobpcg
