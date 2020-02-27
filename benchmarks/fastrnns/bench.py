@@ -76,7 +76,7 @@ def trainbench(name, rnn_creator, nloops=100, warmup=10,
         if modeldef.backward is not None:
             for param in modeldef.params:
                 assert param.grad is not None
-                param.grad.data.zero_()
+                param.grad.zero_()
 
         torch.cuda.synchronize()
 
