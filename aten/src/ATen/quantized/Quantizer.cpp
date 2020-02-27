@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -126,10 +127,18 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
-                             /*dst=*/qd,
-                             /*len=*/rtensor.numel(),
-                             /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Quantize<typename T::underlying>(
+          rd, /*src=*/
+          qd, /*dst=*/
+          rtensor.numel(), /*len*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return qtensor;
 }
 
@@ -153,10 +162,18 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   float* rd = rtensor.data_ptr<float>();
-  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
-                              /*dst=*/rd,
-                              /*len=*/qtensor.numel(),
-                              /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Dequantize<typename T::underlying>(
+          qd, /*src=*/
+          rd, /*dst=*/
+          qtensor.numel(), /*len=*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return rtensor;
 }
 #else  // USE_FBGEMM
