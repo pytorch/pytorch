@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/script/script_type_parser.h>
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {
@@ -96,7 +96,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
 
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
-  // and imported in C++ (see get_python_cu() in csrc/jit/pybind_utils.h).
+  // and imported in C++ (see get_python_cu() in csrc/jit/python/pybind_utils.h).
   // We import the compilation unit here only once for less cost and thread
   // safety.
   std::shared_ptr<torch::jit::script::CompilationUnit> jitCompilationUnit_;
