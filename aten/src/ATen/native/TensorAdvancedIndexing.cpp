@@ -69,6 +69,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(index_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
+DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 
 DEFINE_DISPATCH(gather_stub);
@@ -535,6 +536,42 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
   return _self.clone(at::MemoryFormat::Contiguous).masked_scatter_(_mask, source);
 }
 
+static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar value) {
+  NoNamesGuard guard;
+  if (mask.dtype() == ScalarType::Byte) {
+    AT_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(self);
+  iter.add_input(mask);
+  iter.build();
+
+  masked_fill_stub(iter.device_type(), iter, value);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, Scalar value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
+  masked_fill_impl_cpu(self, mask, value);
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__cpu(Tensor& self, const Tensor & mask, const Tensor & value) {
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+
+  masked_fill_impl_cpu(self, mask, value.item());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
 Tensor masked_fill(const Tensor & self, const Tensor & mask, Scalar source) {
   Tensor result;
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
@@ -554,10 +591,10 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-  Tensor _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
-  result = _self.clone(at::MemoryFormat::Contiguous);
-  result.masked_fill_(mask, source);
+    Tensor _mask, _self;
+    std::tie(_mask, _self) = expand_outplace(mask, self);
+    result = _self.clone(at::MemoryFormat::Contiguous);
+    result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
