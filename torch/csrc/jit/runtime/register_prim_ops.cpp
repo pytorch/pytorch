@@ -2914,15 +2914,25 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::_list_to_tensor(int[] self) -> Tensor",
+        [](Stack& stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto t = torch::empty(
+              {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
+          for (size_t i = 0; i < l.size(); i++) {
+            t[i] = l.get(i);
+          }
+          push(stack, std::move(t));
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::all(int[] self) -> bool",
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
           push(stack, std::move(l));
-
           for(int i = 0; i < l.size(); i++){
-            std::cout << l.get(i) << std::endl;
             if(l[i] == 0){
-              std::cout << "I will execute!" << std::endl;
               push(stack, false);
               break;
             }
@@ -2934,15 +2944,19 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::_list_to_tensor(int[] self) -> Tensor",
+        "aten::all(bool[] self) -> bool",
         [](Stack& stack) {
-          c10::List<int64_t> l = pop(stack).toIntList();
-          auto t = torch::empty(
-              {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-          for (size_t i = 0; i < l.size(); i++) {
-            t[i] = l.get(i);
+          c10::List<bool> l = pop(stack).toBoolList();
+          push(stack, std::move(l));
+          for(int i = 0; i < l.size(); i++){
+            if(l[i] == 0){
+              push(stack, false);
+              break;
+            }
+            else{
+              push(stack, true);
+            }
           }
-          push(stack, std::move(t));
           return 0;
         },
         aliasAnalysisFromSchema()),
