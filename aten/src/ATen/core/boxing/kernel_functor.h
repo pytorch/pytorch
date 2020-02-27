@@ -59,6 +59,20 @@ namespace detail {
   struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
+  template <bool AllowDeprecatedTypes, class... Args>
+  struct TypeCheckHelper;
+
+  template <bool AllowDeprecatedTypes>
+  struct TypeCheckHelper<AllowDeprecatedTypes> {};
+
+  template <bool AllowDeprecatedTypes, class Head, class... Rest>
+  struct TypeCheckHelper<AllowDeprecatedTypes, Head, Rest...> : TypeCheckHelper<AllowDeprecatedTypes, Rest...> {
+    assert_is_valid_input_type<Head, AllowDeprecatedTypes> check;
+  };
+
+  template<class... Contained, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::tuple<Contained...>, AllowDeprecatedTypes> : TypeCheckHelper<AllowDeprecatedTypes, Contained...> {};
+
   template<class Key, class Value, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<Dict<Key, Value>, AllowDeprecatedTypes>
   : assert_is_valid_input_type<Value, AllowDeprecatedTypes> {

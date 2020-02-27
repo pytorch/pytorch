@@ -9,6 +9,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
+#include <c10/util/TypeCast.h>
 
 namespace c10 {
 
@@ -96,6 +97,20 @@ class C10_API Scalar {
   }
 
   Scalar operator-() const;
+
+  ScalarType type() const {
+    if (isComplex()) {
+      return ScalarType::ComplexDouble;
+    } else if (isFloatingPoint()) {
+      return ScalarType::Double;
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return ScalarType::Long;
+    } else if (isBoolean()) {
+      return ScalarType::Bool;
+    } else {
+      throw std::runtime_error("Unknown scalar type.");
+    }
+  }
 
  private:
     template<typename T,

@@ -185,6 +185,7 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
@@ -202,6 +203,7 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
+option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
@@ -271,7 +273,15 @@ if (MSVC)
 
     # /bigobj increases number of sections in .obj file, which is needed to link
     # against libraries in Python 2.7 under Windows
-    set(${flag_var} "${${flag_var}} /MP /bigobj")
+    # For Visual Studio generators, if /MP is not added, then we may need 
+    # to add /MP to the flags.
+    # For other generators like ninja, we don't need to add /MP because it is
+    # already handled by the generator itself.
+    if(CMAKE_GENERATOR MATCHES "Visual Studio" AND NOT ${flag_var} MATCHES "/MP")
+      set(${flag_var} "${${flag_var}} /MP /bigobj")
+    else()
+      set(${flag_var} "${${flag_var}} /bigobj")
+    endif()
   endforeach(flag_var)
 
   foreach(flag_var
@@ -335,7 +345,6 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(FEATURE_TORCH_MOBILE ON)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
-  set(USE_PYTORCH_QNNPACK ON)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
@@ -406,6 +415,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_XNNPACK)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
 endif()
 
 # ---[ Whitelist file if whitelist is specified

@@ -3,6 +3,7 @@
 package org.pytorch;
 
 import com.facebook.jni.HybridData;
+import com.facebook.jni.annotations.DoNotStrip;
 import com.facebook.soloader.nativeloader.NativeLoader;
 
 class NativePeer implements INativePeer {
@@ -12,9 +13,12 @@ class NativePeer implements INativePeer {
 
   private final HybridData mHybridData;
 
+  @DoNotStrip
   private static native HybridData initHybrid(String moduleAbsolutePath);
 
-  private static native HybridData initHybridAndroidAsset(String assetName, /* android.content.res.AssetManager */ Object androidAssetManager);
+  @DoNotStrip
+  private static native HybridData initHybridAndroidAsset(
+      String assetName, /* android.content.res.AssetManager */ Object androidAssetManager);
 
   NativePeer(String moduleAbsolutePath) {
     mHybridData = initHybrid(moduleAbsolutePath);
@@ -28,7 +32,9 @@ class NativePeer implements INativePeer {
     mHybridData.resetNative();
   }
 
+  @DoNotStrip
   public native IValue forward(IValue... inputs);
 
+  @DoNotStrip
   public native IValue runMethod(String methodName, IValue... inputs);
 }

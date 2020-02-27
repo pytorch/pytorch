@@ -53,16 +53,14 @@ install(FILES ${CMAKE_BINARY_DIR}/caffe2/core/macros.h
 
 # ---[ ATen specific
 if (INTERN_BUILD_ATEN_OPS)
-  SET(OPT_FLAG "-O3 ")
   IF(MSVC)
-    SET(OPT_FLAG "/Ox /fp:strict ")
-  ENDIF()
-  SET(VCOMP_LIB "vcomp")
-
-  IF("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-    SET(OPT_FLAG " ")
-    SET(VCOMP_LIB "vcompd")
-  ENDIF()
+    SET(OPT_FLAG "/fp:strict ")
+  ELSE(MSVC)
+    SET(OPT_FLAG "-O3 ")
+    IF("${CMAKE_BUILD_TYPE}" MATCHES "Debug")
+      SET(OPT_FLAG " ")
+    ENDIF()
+  ENDIF(MSVC)
 
   IF(C_AVX_FOUND)
     IF(MSVC)

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
@@ -31,12 +32,22 @@ static std::atomic<bool> executor_mode{true};
 static std::atomic<bool> profiling_mode{true};
 #endif
 
+static std::atomic<size_t> num_profiled_runs{1};
+static std::atomic<size_t> bailout_depth{1};
 
 std::atomic<bool>& getProfilingMode() {
   return profiling_mode;
 }
 std::atomic<bool>& getExecutorMode() {
   return executor_mode;
+}
+
+std::atomic<size_t>& getNumProfiledRuns() {
+  return num_profiled_runs;
+}
+
+std::atomic<size_t>& getBailoutDepth() {
+  return bailout_depth;
 }
 
 static bool needsGradientInProfilingMode(Block* b) {
@@ -73,6 +84,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   specializeAutogradZero(*copy);
 
   runRequiredPasses(copy);
+  PeepholeOptimize(copy);
   ConstantPropagation(copy);
   runOptimization(copy);
 
@@ -85,7 +97,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       Gradient gradient = differentiate(diff_graph);
       runOptimization(gradient.f);
       // run non diff optimization on the forward graph
-      runNondiffOptimization(gradient.f);
+      runNondiffOptimization(gradient.f, true);
       packGradient(gradient, dnode);
     }
     InlineAutodiffSubgraphs(
@@ -93,7 +105,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
 
   } else {
-    runNondiffOptimization(copy);
+    runNondiffOptimization(copy, true);
   }
   EliminateDeadCode(copy);
   GRAPH_DUMP("Optimized Graph : ", copy);
@@ -113,6 +125,7 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     return;
   }
 
+  DecomposeOps(copy);
   ConstantPropagation(copy);
   EliminateDeadCode(copy);
   EliminateCommonSubexpression(copy);

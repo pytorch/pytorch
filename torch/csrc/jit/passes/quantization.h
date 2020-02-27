@@ -85,6 +85,11 @@ TORCH_API script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace = false);
 
+/** Replicate dequantize node for each use, so that we can match
+ *  quantization patterns
+ */
+TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
+
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
  *
@@ -110,7 +115,7 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.
  */
-TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
+TORCH_API script::Module FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *

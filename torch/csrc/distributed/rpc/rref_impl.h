@@ -1,11 +1,11 @@
 #pragma once
 
+#include <ATen/core/jit_type.h>
+#include <ATen/core/rref_interface.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
-#include <torch/csrc/distributed/rpc/rref_interface.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/utils/pybind.h>
 
 #include <atomic>
 
@@ -15,35 +15,35 @@ namespace rpc {
 
 class RRef;
 class RRefContext;
-template <typename T>
 class UserRRef;
 
-// Represents fork of an RRef to be sent over the wire.
-struct RRefForkData {
-  py::tuple toPyTuple() const;
-  static RRefForkData fromPyTuple(const py::tuple& obj);
+constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
+constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
+constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
+constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
+constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
+constexpr int PARENT_IDX = 5; // index of parent in the tuple
+constexpr int TYPE_IDX = 6; // index of parent in the tuple
 
+// NB: if more fields are added, make sure this field is also bumped
+constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
+
+// Represents fork of an RRef to be sent over the wire.
+struct TORCH_API RRefForkData {
   const worker_id_t ownerId_;
   const RRefId rrefId_;
   const ForkId forkId_;
   const worker_id_t parent_;
-
- private:
-  friend class RRef;
-  friend class RRefContext;
-  template <typename T>
-  friend class UserRRef;
+  const std::string typeStr_;
 
   RRefForkData(
       worker_id_t ownerId,
-      const RRefId& rrefId_,
-      const ForkId& forkId_,
-      worker_id_t parent);
+      const RRefId& rrefId,
+      const ForkId& forkId,
+      worker_id_t parent,
+      std::string typeStr);
 };
 
-static_assert(
-    C10_IS_TRIVIALLY_COPYABLE(RRefForkData),
-    "RRefForkData must be trivially copyable");
 
 // Note [RRef Protocol]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -187,7 +187,7 @@ static_assert(
 //
 // ``RRef`` is the base type for both ``UserRRef`` and ``OwnerRRef``.
 // Each ``RRef`` has a globally unique ``RRefId``.
-class RRef : public RRefInterface {
+class TORCH_API RRef : public RRefInterface {
  public:
   // RRef is made NOT copyable NOT movable to prevent messing up reference
   // counting.
@@ -207,38 +207,43 @@ class RRef : public RRefInterface {
     return rrefId_;
   }
 
-  // returns true if this RRef holds an py::object, false if IValue
-  virtual bool isPyObj() = 0;
+  inline bool isPyObj() {
+    return type_ == PyObjectType::get();
+  }
+  inline const TypePtr type() const override{
+    return type_;
+  }
 
  protected:
   friend class RRefContext;
 
-  RRef(worker_id_t ownerId, const RRefId& rrefId);
+  RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type);
 
   RRefForkData fork() const;
 
   const worker_id_t ownerId_;
   const RRefId rrefId_;
+
+  // type field to denote the type of the element that the RRef is holding
+  // it could be any TypePtr that JIT support, including PyObjectType
+  const TypePtr type_;
 };
 
 // ``UserRRef`` represents a user of an RRef. Besides the ``RRefId``, each user
 // also has a globally unique ``ForkId`` to identify this user. ``UserRRef``
 // never owns the real value, the only way to get the value of the ``RRef`` is
 // to call ``to_here()`` and get a copy..
-template <typename T>
-class UserRRef final : public RRef {
+class TORCH_API UserRRef final : public RRef {
  public:
   UserRRef(const UserRRef& other) = delete;
   UserRRef(UserRRef&& other) = delete;
   UserRRef& operator=(const UserRRef& other) = delete;
   UserRRef& operator=(UserRRef&& other) = delete;
 
+  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId, TypePtr type);
+
   inline bool isOwner() const override {
     return false;
-  }
-
-  inline bool isPyObj() override {
-    return std::is_same<T, py::object>::value;
   }
 
   // Returns the globally unique ForkId of this RRef
@@ -246,7 +251,7 @@ class UserRRef final : public RRef {
 
   // Get of copy of the value from the ``OwnerRRef``. If the value is not ready
   // yet, this call will block.
-  T toHere();
+  IValue toHere();
 
   // Upon destruction, this ``UserRRef`` will tell the owner to deref.
   ~UserRRef() override;
@@ -254,37 +259,39 @@ class UserRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  UserRRef(worker_id_t ownerId, const RRefId& rrefId, const ForkId& forkId);
-
   const ForkId forkId_;
 };
 
 // Keep the template only on the derived class because ``RRefContext`` needs to
 // erase the type on ``RRef`` and keep them in one map.
-template <typename T>
-class OwnerRRef final : public RRef {
+class TORCH_API OwnerRRef final : public RRef {
  public:
   OwnerRRef(const OwnerRRef& other) = delete;
   OwnerRRef(OwnerRRef&& other) = delete;
   OwnerRRef& operator=(const OwnerRRef& other) = delete;
   OwnerRRef& operator=(OwnerRRef&& other) = delete;
 
-  inline bool isOwner() const override {
-    return true;
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
+      : OwnerRRef(ownerId, rrefId, type, {}) {}
+
+  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type, c10::optional<IValue> value)
+      : RRef(ownerId, rrefId, std::move(type)) {
+    value_ = std::move(value);
   }
 
-  inline bool isPyObj() override {
-    return std::is_same<T, py::object>::value;
+
+  inline bool isOwner() const override {
+    return true;
   }
 
   // Get a constant reference of the real value. This method will block if the
   // value is not ready. This method does not need GIL as it does not create
   // any new py::object.
-  const T& getValue() const;
+  const IValue& getValue() const;
 
   // Set the value of this ``OwnerRRef``. This method does not need GIL as it
   // does not create any new py::object.
-  void setValue(T&& value);
+  void setValue(IValue&& value);
 
   // Has a value been set?
   bool hasValue() const;
@@ -294,15 +301,7 @@ class OwnerRRef final : public RRef {
  private:
   friend class RRefContext;
 
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId)
-      : OwnerRRef(ownerId, rrefId, {}) {}
-
-  OwnerRRef(worker_id_t ownerId, const RRefId& rrefId, c10::optional<T> value)
-      : RRef(ownerId, rrefId) {
-    value_ = std::move(value);
-  }
-
-  c10::optional<T> value_;
+  c10::optional<IValue> value_;
   mutable std::mutex mutex_;
   mutable std::condition_variable valueCV_;
   std::shared_ptr<FutureMessage> future_;

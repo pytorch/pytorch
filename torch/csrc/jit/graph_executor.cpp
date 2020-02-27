@@ -635,7 +635,7 @@ void GraphExecutor::run(Stack& inputs) {
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? 1 : 0;
+  return getProfilingMode() ? getBailoutDepth().load() : 0;
 }
 
 ExecutionPlan GraphExecutor::getPlanFor(
@@ -707,10 +707,19 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
   return false;
 }
 
-void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
+void runNondiffOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool strict_fuser_check) {
+  // Run custom passes that different backends can register.
+  for (const auto& pass : getCustomPreFusionPasses()) {
+    pass(graph);
+  }
+
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
-  DecomposeOps(graph);
+  if (!getProfilingMode()) {
+    DecomposeOps(graph);
+  }
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
@@ -722,11 +731,10 @@ void runNondiffOptimization(std::shared_ptr<Graph>& graph) {
   // Fuse the dequant - op - quant patterns into quantized ops
   QuantFusion(graph);
 
-  FuseGraph(graph);
+  FuseGraph(graph, strict_fuser_check);
 
-  // Run custom passes that different backends can register.
-  // This is done last to give internal optimization passes priority.
-  for (const auto& pass : getCustomPasses()) {
+  // Run custom post-fusion passes
+  for (const auto& pass : getCustomPostFusionPasses()) {
     pass(graph);
   }
 }

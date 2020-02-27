@@ -5,10 +5,10 @@ import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any
+    is_optional, _qualified_name, Any, RRef, is_rref
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType
+    DeviceObjType, RRefType
 
 from textwrap import dedent
 from torch._six import builtins, PY2
@@ -39,6 +39,7 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
+        'RRef': RRef,
     }
 
     def __init__(self, rcb):
@@ -268,6 +269,8 @@ def try_ann_to_type(ann, loc):
             return OptionalType(try_ann_to_type(ann.__args__[0], loc))
         else:
             return OptionalType(try_ann_to_type(ann.__args__[1], loc))
+    elif is_rref(ann):
+        return RRefType(try_ann_to_type(ann.__args__[0], loc))
     elif ann is float:
         return FloatType.get()
     elif ann is int:

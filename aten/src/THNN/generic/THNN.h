@@ -8,22 +8,6 @@
 
 #if !defined(TH_REAL_IS_LONG)
 
-TH_API void THNN_(BCECriterion_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *output,
-          int64_t reduction,
-          THTensor *weights);          // [OPTIONAL]
-TH_API void THNN_(BCECriterion_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *target,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          int64_t reduction,
-          THTensor *weights);          // [OPTIONAL]
-
 TH_API void THNN_(GatedLinear_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor

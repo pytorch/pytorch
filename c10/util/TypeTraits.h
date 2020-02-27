@@ -129,7 +129,5 @@ struct is_type_condition<C, std::enable_if_t<std::is_same<bool, std::remove_cv_t
  */
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
-
-
 }
 }

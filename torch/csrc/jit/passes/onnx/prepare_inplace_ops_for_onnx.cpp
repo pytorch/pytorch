@@ -13,11 +13,11 @@ Value* CreateSizeOfDim(Value* input, int64_t dim, Node* insertBefore) {
   return size;
 }
 
-Value* ConvertSelectToIndex(int64_t index, Node* insertBefore) {
-  // Create index tensor based on index attribute of aten::select node.
+Value* ConvertSelectToIndex(Value* index, Node* insertBefore) {
+  // Create index tensor based on index input of aten::select node.
   auto graph = insertBefore->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto idx_tensor = graph->createNumToTensor(insertConstant(*graph, index));
+  auto idx_tensor = graph->createNumToTensor(index);
   graph->insertNode(idx_tensor);
   return graph->insert(aten::unsqueeze, {idx_tensor->output(), 0});
 }
@@ -137,8 +137,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
                             std::forward_as_tuple(dim),
                             std::forward_as_tuple(index_tensor, aten::slice));
     } else if (node->kind() == aten::select) {
-      auto index = node->get(attr::index)->toInt();
-      auto index_tensor = ConvertSelectToIndex(index, index_put_node);
+      auto index_tensor = ConvertSelectToIndex(node->input(2), index_put_node);
       dim_index_map.emplace(std::piecewise_construct,
                             std::forward_as_tuple(dim),
                             std::forward_as_tuple(index_tensor, aten::select));

@@ -1,12 +1,13 @@
+#include <torch/csrc/jit/profiling_record.h>
+#include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/profiling_record.h>
 
 namespace torch {
 namespace jit {
 
 ProfilingRecord::ProfilingRecord(std::shared_ptr<Graph> g)
-    : profiled_graph_(std::move(g)), profiling_count_(1) {}
+    : profiled_graph_(std::move(g)), profiling_count_(getNumProfiledRuns()) {}
 
 ProfileOp* ProfilingRecord::createProfileNode(
     const std::function<void(Stack&)>& fp,

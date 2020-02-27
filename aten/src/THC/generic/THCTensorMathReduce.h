@@ -40,9 +40,6 @@ THC_API void THCTensor_(median)(THCState *state,
                                 THCudaLongTensor *indices,
                                 THCTensor *src, int dim, int keepdim);
 
-THC_API accreal THCTensor_(dist)(THCState *state, THCTensor *self, THCTensor *src,
-                              scalar_t value);
-
 #endif
 
 #endif

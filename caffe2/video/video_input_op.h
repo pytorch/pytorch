@@ -574,7 +574,7 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
             CV_8UC1,
             const_cast<char*>(encoded_image_str.data())),
         cv::IMREAD_COLOR);
-    if (src.rows == 0 or src.cols == 0) {
+    if (src.rows == 0 || src.cols == 0) {
       throw std::runtime_error("Both rows and cols are 0 for image");
     }
   } else if (image_proto.data_type() == TensorProto::BYTE) {

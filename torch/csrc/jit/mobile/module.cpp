@@ -24,14 +24,9 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 #if defined(PYTORCH_MOBILE_OBSERVER)
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  debug_info->setModelName(name());
-  debug_info->setMethodName(method_name);
-  at::setThreadLocalDebugInfo(debug_info);
-
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
-    observer->onEnter();
+    observer->onEnter(name(), method_name);
   }
 #endif
 

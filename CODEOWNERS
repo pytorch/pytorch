@@ -13,10 +13,10 @@
 # Not there to strictly require the approval, but to be tagged as a reviewer
 # on the PRs to push them into a high priority inbox.
 /torch/csrc/api/data/ @apaszke
-/torch/csrc/autograd/ @apaszke
+/torch/csrc/autograd/ @apaszke @albanD
 /torch/csrc/jit/ @apaszke
 /torch/nn/ @apaszke
-/torch/autograd/ @apaszke
+/torch/autograd/ @apaszke @albanD
 /torch/jit/ @apaszke
 /torch/utils/data/ @apaszke
 

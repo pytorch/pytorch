@@ -24,21 +24,15 @@ inline std::ostream& operator<<(std::ostream& stream, c10::BFloat16 value) {
 }
 
 inline c10::ScalarType compute_desired_dtype(c10::ScalarType scalar_type) {
-  // NOTE: the dtype computation in this function only takes effect when the user passes
-  // an integer literal / floating-point literal or a braced-init-list to `torch::tensor`
-  // constructor. It doesn't affect `torch::tensor(at::ArrayRef<T>)` and `torch::tensor(std::vector<T>)`
-  // as the specified dtype `T` is always respected.
   if (scalar_type == at::kInt || scalar_type == at::kLong) {
-    // In C++, an integer literal without suffix (e.g. `1` instead of `1u`) can be one of
-    // `int` / `long int` / `long long int` types. When we find that `scalar_type` is one
-    // of those types, we always use `torch.int64` type, because In Python `torch.tensor(1)`
-    // always gives a tensor of `torch.int64` dtype.
+    // C++ `torch::tensor` with an integer type or an `at::ArrayRef` / `std::vector` /
+    // (nested) braced-init-list of integer types always produces a tensor of dtype `at::kLong`
+    // (aka. int64_t), matching Python `torch.tensor` behavior.
     return at::kLong;
-  } else if (scalar_type == at::kDouble) {
-    // When `scalar_type == at::kDouble`, we know that the user is passing in
-    // a floating-point literal without specifying its type (e.g. `1.0` instead of `1.0f`).
-    // In Python, the dtype of `torch.tensor(1.0)` depends on the value of
-    // `torch.get_default_dtype()`, and we should do the same for C++ `torch::tensor(1.0)`.
+  } else if (scalar_type == at::kFloat || scalar_type == at::kDouble) {
+    // C++ `torch::tensor` with a floating-point type or an `at::ArrayRef` / `std::vector` /
+    // (nested) braced-init-list of floating-point types always produces a tensor of dtype
+    // `torch::get_default_dtype()`, matching Python `torch.tensor` behavior.
     return at::typeMetaToScalarType(at::get_default_dtype());
   } else {
     return scalar_type;
@@ -106,7 +100,7 @@ struct TensorDataContainer {
 #define TENSOR(T, S) \
   TensorDataContainer(T value) : \
       sizes_(), \
-      scalar_type_(compute_desired_dtype(at::k##S)), \
+      scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Scalar), \
       scalar_(value) {}
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
@@ -154,7 +148,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 
   // NOTE: We need to handle `std::vector` explicitly instead of relying on an implicit conversion
   // to `at::ArrayRef`, otherwise the following error can be thrown when calling
-  // `torch::tensor(std::vector<double>({1.1, 2.2}))`:
+  // `torch::tensor(std::vector<int>({1, 2}))`:
   // ```
   // error: no matching function for call to 'tensor(const std::vector<int>&)'
   // no known conversion for argument 1 from 'const std::vector<int>' to
@@ -211,7 +205,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, TENSOR)
 
   at::Tensor convert_to_tensor(at::TensorOptions options) const {
     if (!options.has_dtype()) {
-      options = options.dtype(scalar_type_);
+      options = options.dtype(compute_desired_dtype(scalar_type_));
     }
 
     if (is_scalar()) {
