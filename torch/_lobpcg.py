@@ -5,6 +5,7 @@
 
 import torch
 from . import _linalg_utils as _utils
+from ._overrides import has_torch_function, handle_torch_function
 
 
 __all__ = ['lobpcg']
@@ -159,6 +160,17 @@ def lobpcg(A,                   # type: Tensor
     """
     # type: (...) -> Tuple[Tensor, Tensor]
 
+    if not torch.jit.is_scripting():
+        tensor_ops = (A, B, X, iK)
+        if (not set(map(type, tensor_ops)).issubset((torch.Tensor, type(None))) and has_torch_function(tensor_ops)):
+            return handle_torch_function(
+                lobpcg, tensor_ops, A, k=k,
+                B=B, X=X, n=n, iK=iK, niter=niter, tol=tol,
+                largest=largest, method=method, tracker=tracker,
+                ortho_iparams=ortho_iparams,
+                ortho_fparams=ortho_fparams,
+                ortho_bparams=ortho_bparams)
+
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -253,7 +265,7 @@ class LOBPCG(object):
                  fparams,  # type: Dict[str, float]
                  bparams,  # type: Dict[str, bool]
                  method,   # type: str
-                 tracker   # type: None
+                 tracker   # type: Optional[None]
                  ):
         # type: (...) -> None
 

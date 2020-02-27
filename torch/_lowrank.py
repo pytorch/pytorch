@@ -5,6 +5,7 @@ __all__ = ['svd_lowrank', 'pca']
 
 import torch
 from . import _linalg_utils as _utils 
+from ._overrides import has_torch_function, handle_torch_function
 
 
 def get_approximate_basis(A, q, niter=2, M=None):
@@ -50,8 +51,9 @@ def get_approximate_basis(A, q, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
-    # type: (Tensor, int, int, Optional[Tensor]) -> Tensor
-    niter = int(niter)
+    # type: (Tensor, int, Optional[int], Optional[Tensor]) -> Tensor
+
+    niter = 2 if niter is None else niter
     m, n = A.shape[-2:]
     dtype = _utils.get_floating_dtype(A)
     matmul = _utils.matmul
@@ -114,12 +116,17 @@ def svd_lowrank(A, q=6, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
-    # type: (Tensor, int, int, Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+    if not torch.jit.is_scripting():
+        tensor_ops = (A, M)
+        if (not set(map(type, tensor_ops)).issubset((torch.Tensor, type(None))) and has_torch_function(tensor_ops)):
+            return handle_torch_function(svd_lowrank, tensor_ops, A, q=q, niter=niter, M=M)
     return _svd_lowrank(A, q=q, niter=niter, M=M)
 
 
 def _svd_lowrank(A, q=6, niter=2, M=None):
-    # type: (Tensor, int, int, Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
+    q = 6 if q is None else q
     m, n = A.shape[-2:]
     matmul = _utils.matmul
     if M is None:
@@ -215,6 +222,11 @@ def pca(A, q=None, center=True, niter=2):
 
     """
     # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
+
+    if not torch.jit.is_scripting():
+        if type(A) is not torch.Tensor and has_torch_function((A,)):
+            return handle_torch_function(pca, (A,), A, q=q, center=center, niter=niter)
+
     (m, n) = A.shape[-2:]
 
     if q is None:
