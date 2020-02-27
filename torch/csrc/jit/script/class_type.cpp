@@ -23,17 +23,6 @@ Function* ClassType::getMethod(const std::string& name) const {
   return nullptr;
 }
 
-std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
-  auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
-  return cu;
-}
-std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
-  auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
-  return cu;
-}
-
 #ifndef USE_MOBILE_CLASSTYPE
 
 // This file exists because we need to reference module.h, which we can't from

@@ -1847,8 +1847,17 @@ struct CAFFE2_API ClassType : public NamedType {
   void addMethod(Function* method);
   Function* getMethod(const std::string& name) const;
 
-  std::shared_ptr<CompilationUnit> compilation_unit();
-  std::shared_ptr<const CompilationUnit> compilation_unit() const;
+  std::shared_ptr<CompilationUnit> compilation_unit() {
+    auto cu = compilation_unit_.lock();
+    TORCH_INTERNAL_ASSERT(cu);
+    return cu;
+  }
+
+  std::shared_ptr<const CompilationUnit> compilation_unit() const {
+    auto cu = compilation_unit_.lock();
+    TORCH_INTERNAL_ASSERT(cu);
+    return cu;
+  }
 
   // generate a refined version of this class.
   // It has the same name but the slot Types are subtypes of
