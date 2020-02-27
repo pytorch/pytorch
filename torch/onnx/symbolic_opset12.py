@@ -35,7 +35,7 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     else:
         nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s='none')
 
-    from symbolic_opset9 import zeros_like, ones_like, eq, where, index_select
+    from torch.onnx.symbolic_opset9 import zeros_like, ones_like, eq, where, index_select
     zeros = zeros_like(g, nllloss)
     ignored_mask = eq(g, target, ignore_index)
     nllloss = where(g, ignored_mask, zeros, nllloss)
