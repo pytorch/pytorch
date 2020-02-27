@@ -297,10 +297,14 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
   }
 }
 
-void DistEngine::execute(const variable_list& roots, bool retainGraph) {
-  // Get the current context, if exists. This will throw if we don't have a
-  // valid context.
-  auto autogradContext = DistAutogradContainer::getInstance().currentContext();
+void DistEngine::execute(
+    int64_t contextId,
+    const variable_list& roots,
+    bool retainGraph) {
+  // Retrieve the context for the given context_id. This will throw if the
+  // context_id is invalid.
+  auto autogradContext =
+      DistAutogradContainer::getInstance().retrieveContext(contextId);
 
   // Perform initial pre-processing.
   edge_list rootEdges;
