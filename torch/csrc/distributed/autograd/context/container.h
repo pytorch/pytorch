@@ -46,6 +46,9 @@ class TORCH_API DistAutogradContainer {
   // context. Does nothing if it is not present.
   void releaseContextIfPresent(int64_t context_id);
 
+  // Checks if the passed in context_id is valid.
+  void isValidContext(int64_t context_id);
+
   // Retrieve the autograd context for a given context_id.
   ContextPtr retrieveContext(int64_t context_id);
 
