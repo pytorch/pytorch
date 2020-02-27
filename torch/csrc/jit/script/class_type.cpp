@@ -23,7 +23,7 @@ ClassType::ClassType(
   }
 }
 
-const std::vector<Function*>& ClassType::methods() const {
+const std::vector<c10::QualifiedName>& ClassType::methods() const {
   return methods_;
 }
 
@@ -95,23 +95,38 @@ void ClassType::unsafeRemoveAttribute(const std::string& name) {
   }
 }
 
-void ClassType::addMethod(Function* method) {
+void ClassType::addMethod(c10::QualifiedName method) {
   TORCH_CHECK(
-      getMethod(method->name()) == nullptr,
+      !getMethod(method.name()),
       "Can't redefine method: ",
-      method->name(),
+      method.name(),
       " on class: ",
       python_str());
   methods_.push_back(method);
 }
 
-Function* ClassType::getMethod(const std::string& name) const {
+c10::optional<c10::QualifiedName> ClassType::getMethod(const std::string& name) const {
   for (auto method : methods_) {
-    if (name == method->name()) {
+    if (name == method.name()) {
       return method;
     }
   }
-  return nullptr;
+  return c10::nullopt;
+}
+
+
+TypePtr ClassType::createWithContained(std::vector<TypePtr> contained_types) const {
+  auto ptr = ClassType::create(name(), compilation_unit_);
+  AT_ASSERT(numAttributes() == contained_types.size());
+  for(size_t i = 0; i < attributeNames_.size(); ++i) {
+    AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
+    ptr->addAttribute(attributeNames_[i], contained_types[i]);
+  }
+  // Copy methods over
+  for (const auto& method : methods()) {
+    ptr->addMethod(method);
+  }
+  return ptr;
 }
 
 size_t ClassType::addConstant(const std::string& name, const IValue& value) {
@@ -213,8 +228,8 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
       return false;
     }
     for (const FunctionSchema& schema : iface->methods()) {
-      auto self_method = getMethod(schema.name());
-      if (!self_method) {
+      auto self_method_qualname = getMethod(schema.name());
+      if (!self_method_qualname) {
         if (why_not) {
           *why_not << "Class '" << python_str() << "' does not have method '"
                    << schema.name() << "' but '" << rhs->python_str()
@@ -222,13 +237,16 @@ bool ClassType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
         }
         return false;
       }
-      if (!self_method->getSchema().isSubtypeOf(
+      auto self_method = compilation_unit()->find_function(*self_method_qualname);
+      TORCH_INTERNAL_ASSERT(self_method);
+      auto self_method_schema = self_method->getSchema();
+      if (!self_method_schema.isSubtypeOf(
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << python_str()
                    << "' (1) is not compatible with interface '"
                    << rhs->python_str() << "' (2)\n"
-                   << "  (1) " << self_method->getSchema() << "\n"
+                   << "  (1) " << self_method_schema << "\n"
                    << "  (2) " << schema << "\n";
         }
         return false;

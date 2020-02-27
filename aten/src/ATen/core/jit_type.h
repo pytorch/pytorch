@@ -1516,8 +1516,6 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  const std::vector<Function*>& methods() const;
-
   TypePtr findAttribute(const std::string& name) const {
     TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
     size_t pos = 0;
@@ -1714,19 +1712,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // valid again.
   void unsafeRemoveConstant(const std::string& name);
 
-  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
-    auto ptr = ClassType::create(name(), compilation_unit_);
-    AT_ASSERT(numAttributes() == contained_types.size());
-    for(size_t i = 0; i < attributeNames_.size(); ++i) {
-      AT_ASSERT(attributeTypes_[i]->isSubtypeOf(contained_types[i]));
-      ptr->addAttribute(attributeNames_[i], contained_types[i]);
-    }
-    // Copy methods over
-    for (const auto& method : methods()) {
-      ptr->addMethod(method);
-    }
-    return ptr;
-  }
+  TypePtr createWithContained(std::vector<TypePtr> contained_types) const override;
 
   bool is_module() const override {
     return bool(parameterSlots_);
@@ -1737,8 +1723,10 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
-  void addMethod(Function* method);
-  Function* getMethod(const std::string& name) const;
+  const std::vector<c10::QualifiedName>& methods() const;
+
+  void addMethod(c10::QualifiedName method);
+  c10::optional<c10::QualifiedName> getMethod(const std::string& name) const;
 
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
@@ -1780,8 +1768,9 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<std::vector<bool>> parameterSlots_;
 
   // List of methods associated with this class.
-  std::vector<Function*> methods_;
-
+  // Implementations should be looked up in the corresponding CU using
+  // each FunctionSchema's QualifiedName
+  std::vector<c10::QualifiedName> methods_;
 };
 
 struct InterfaceType;

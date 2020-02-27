@@ -133,6 +133,8 @@ struct TORCH_API Function {
   // mutable because getSchema caches the default schema if one is requested
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
+
+  std::function<void()> definition_callback_;
 };
 } // namespace jit
 } // namespace torch

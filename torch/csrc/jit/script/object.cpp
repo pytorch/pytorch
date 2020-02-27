@@ -22,9 +22,11 @@ ObjectPtr Object::_ivalue() const {
 }
 
 c10::optional<Method> Object::find_method(const std::string& basename) const {
-  for (Function* fn : type()->methods()) {
-    if (fn->name() == basename) {
-      return Method(_ivalue(), fn);
+  for (auto fn_qualname : type()->methods()) {
+    if (fn_qualname.name() == basename) {
+      auto maybe_fn = script::lookupMethodByQualname(_ivalue()->type(), fn_qualname);
+      TORCH_INTERNAL_ASSERT(maybe_fn);
+      return Method(_ivalue(), maybe_fn);
     }
   }
   return c10::nullopt;

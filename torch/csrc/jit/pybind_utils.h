@@ -985,7 +985,9 @@ inline py::object invokeScriptMethodFromPython(
     tuple_slice args,
     py::kwargs kwargs) {
   auto type = object.type();
-  script::Method init_method(object._ivalue(), type->getMethod(method_name));
+  TORCH_INTERNAL_ASSERT(type->name());
+  auto method = script::lookupMethodByQualname(type, c10::QualifiedName(*type->name(), method_name));
+  script::Method init_method(object._ivalue(), method);
   invokeScriptMethodFromPython(init_method, std::move(args), std::move(kwargs));
   return py::cast(script::Object(object));
 }

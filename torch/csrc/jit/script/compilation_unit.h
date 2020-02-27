@@ -211,7 +211,7 @@ struct TORCH_API CompilationUnit {
         for (auto method : cls->methods()) {
           // Tombstone the method in the compilation unit.
           // Don't erase because the dict_
-          auto it = dict_.find(method->qualname());
+          auto it = dict_.find(method);
           TORCH_INTERNAL_ASSERT(it != dict_.end());
           functions_[it->second] = nullptr;
           // Erase in our big lookup table
@@ -266,6 +266,10 @@ struct TORCH_API CompilationUnit {
 
   mutable size_t mangleIndex_ = 0;
 };
+
+inline Function *lookupMethodByQualname(ClassTypePtr class_type, const c10::QualifiedName& qualname) {
+  return class_type->compilation_unit()->find_function(qualname);
+}
 
 } // namespace script
 

@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/script/method.h>
+#include <torch/csrc/jit/script/compilation_unit.h>
 
 namespace torch {
 namespace jit {
@@ -94,8 +95,11 @@ struct TORCH_API Object {
   }
 
   const std::vector<Method> get_methods() const {
-    return fmap(type()->methods(), [&](Function* func) {
-      return Method(_ivalue(), func);
+    return fmap(type()->methods(), [&](c10::QualifiedName name) {
+      if (auto fn = script::lookupMethodByQualname(_ivalue()->type(), name)) {
+        return Method(_ivalue(), fn);
+      }
+      AT_ERROR("Method '", name.qualifiedName(), "' has no definition!");
     });
   }
 

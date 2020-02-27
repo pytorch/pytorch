@@ -127,7 +127,11 @@ class class_ {
             std::move(setstate_wrapper)));
 
     // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__")->getSchema();
+    auto maybe_getstate_qualname = classTypePtr->getMethod("__getstate__");
+    TORCH_INTERNAL_ASSERT(maybe_getstate_qualname);
+    auto maybe_getstate = script::lookupMethodByQualname(classTypePtr, *maybe_getstate_qualname);
+    TORCH_INTERNAL_ASSERT(maybe_getstate);
+    auto getstate_schema = maybe_getstate->getSchema();
     auto format_getstate_schema = [&getstate_schema]() {
       std::stringstream ss;
       ss << getstate_schema;
@@ -147,7 +151,11 @@ class class_ {
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
     auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__")->getSchema();
+    auto maybe_setstate_qualname = classTypePtr->getMethod("__setstate__");
+    TORCH_INTERNAL_ASSERT(maybe_setstate_qualname);
+    auto maybe_setstate = script::lookupMethodByQualname(classTypePtr, *maybe_setstate_qualname);
+    TORCH_INTERNAL_ASSERT(maybe_setstate);
+    auto setstate_schema = maybe_setstate->getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
         (*arg_type == *ser_type),
@@ -196,7 +204,7 @@ class class_ {
     graph->registerOutput(res);
 
     auto method = classCU()->create_function(qualClassName + "." + name, graph);
-    classTypePtr->addMethod(method);
+    classTypePtr->addMethod(c10::QualifiedName(qualClassName, name));
   }
 };
 

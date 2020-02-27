@@ -142,7 +142,7 @@ void Module::clone_method(
   const auto this_method_name = getNameForMethod(method.name());
   auto copied =
       _ivalue()->compilation_unit()->create_function(this_method_name, graph);
-  type()->addMethod(copied);
+  type()->addMethod(this_method_name);
   copied->setSchema(std::move(schema));
 }
 
@@ -213,7 +213,9 @@ Module Module::clone_impl(
       r.type()->addConstant(type()->getConstantName(i), type()->getConstant(i));
     }
     // clone methods, remapping the types to the cloned ones.
-    for (auto& fn : type()->methods()) {
+    for (auto& fn_schema : type()->methods()) {
+      auto fn = script::lookupMethodByQualname(type(), fn_schema);
+      TORCH_INTERNAL_ASSERT(fn);
       r.clone_method(*this, *fn, type_remap);
     }
   }
@@ -272,7 +274,11 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   }
   // Note: following Python, `__init__()` modifies its first parameter in-place
   // and returns nothing.
-  classType->getMethod("__init__")->operator()(std::move(stackWithSelf));
+  auto init_schema = classType->getMethod("__init__");
+  TORCH_INTERNAL_ASSERT(init_schema);
+  auto init_fn = script::lookupMethodByQualname(classType, *init_schema);
+  TORCH_INTERNAL_ASSERT(init_fn);
+  init_fn->operator()(std::move(stackWithSelf));
 
   return obj;
 }

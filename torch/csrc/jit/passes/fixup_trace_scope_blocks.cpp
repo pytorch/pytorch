@@ -388,8 +388,8 @@ std::string mangleMethodName(
       mangled += c10::to_string(method_idx);
     }
     bool found = false;
-    for (Function* fn : mod_type->methods()) {
-      if (fn->name() == mangled) {
+    for (auto schema : mod_type->methods()) {
+      if (schema.name() == mangled) {
         found = true;
         break;
       }
@@ -422,7 +422,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
           callee_mod_type->name().value(), mangled_method_name);
       Function* f = callee_mod_type->compilation_unit()->create_function(
           qualname, n->g(attr::Subgraph));
-      callee_mod_type->addMethod(f);
+      callee_mod_type->addMethod(qualname);
 
       std::vector<NamedValue> nvs;
       for (Value* i : n->inputs()) {

@@ -30,7 +30,10 @@ void inlineCalls(Block* block) {
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
-          auto function = class_type->getMethod(name);
+          auto function_qualname = class_type->getMethod(name);
+          TORCH_INTERNAL_ASSERT(function_qualname);
+          auto function = script::lookupMethodByQualname(class_type, *function_qualname);
+          TORCH_INTERNAL_ASSERT(function);
           GRAPH_UPDATE("Inlining method '", function->name(), "' to ", *cur);
           GRAPH_UPDATE("Function body: ", *function->optimized_graph());
           inlineCallTo(cur, function);

@@ -707,13 +707,10 @@ struct to_ir {
           << "to customize serialization.\n"
           << "Did you forget to use `@torch.jit.export`?";
     }
-    getstate->ensure_defined();
-    return self->getClassType()
-        ->getMethod("__getstate__")
-        ->getSchema()
-        .returns()
-        .at(0)
-        .type();
+    auto maybe_getstate_fn = script::lookupMethodByQualname(self->getClassType(), *getstate);
+    TORCH_INTERNAL_ASSERT(maybe_getstate_fn);
+    maybe_getstate_fn->ensure_defined();
+    return maybe_getstate_fn->getSchema().returns().at(0).type();
   }
 
   // see [setstate type]
@@ -3426,10 +3423,10 @@ std::unique_ptr<Function> CompilationUnit::define(
     }
   }
   auto fn = torch::make_unique<Function>(
-      std::move(name), std::make_shared<Graph>(), creator);
+      name, std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    self->getClassType()->addMethod(std::move(name));
   }
   return fn;
 }

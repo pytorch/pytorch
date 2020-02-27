@@ -986,9 +986,10 @@ struct PythonPrintImpl {
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
           registerDependency(selfClass);
-          const auto method = selfClass->getMethod(node->s(attr::name));
+          const auto method_qualname = selfClass->getMethod(node->s(attr::name));
+          TORCH_INTERNAL_ASSERT(method_qualname);
           TORCH_INTERNAL_ASSERT(
-              method->qualname() ==
+              method_qualname ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
           registerDependency(selfInterface);
@@ -1256,8 +1257,10 @@ struct PythonPrintImpl {
       }
 
       // TODO fields
-      for (auto& method : classType->methods()) {
-        printFunction(*method);
+      for (auto& method_qualname : classType->methods()) {
+        auto maybe_function = script::lookupMethodByQualname(classType, method_qualname);
+        TORCH_INTERNAL_ASSERT(maybe_function);
+        printFunction(*maybe_function);
       }
     }
   }

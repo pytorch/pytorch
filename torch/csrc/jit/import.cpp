@@ -150,7 +150,10 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       // XXX: Do not optimize __setstate__, so that we don't try to
       // specialize the class before it is initialized.
       setGraphExecutorOptimize(false);
-      Function* set_state = cls->getMethod("__setstate__");
+      auto set_state_qualname = cls->getMethod("__setstate__");
+      TORCH_INTERNAL_ASSERT(set_state_qualname);
+      auto set_state = script::lookupMethodByQualname(cls, *set_state_qualname);
+      TORCH_INTERNAL_ASSERT(set_state);
       // since we are in the middle of unpickling we might still have lists and
       // dicts that do not have accurate tags (e.g. they report they are
       // List[Any]). But we need to run __setstate__ which will check the input

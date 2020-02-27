@@ -419,7 +419,10 @@ struct MethodValue : public SugaredValue {
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
       if (auto class_type = self_->type()->cast<ClassType>()) {
-        auto method = class_type->getMethod(method_name);
+        auto maybe_method_schema = class_type->getMethod(method_name);
+        TORCH_INTERNAL_ASSERT(maybe_method_schema);
+        auto method_schema = *maybe_method_schema;
+        auto method = script::lookupMethodByQualname(class_type, method_schema);
         TORCH_INTERNAL_ASSERT(method);
         try {
           method->ensure_defined();

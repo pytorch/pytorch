@@ -104,7 +104,10 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::EMPTY_TUPLE);
     push<PickleOpCode>(PickleOpCode::NEWOBJ);
     if (checkHasValidSetGetState(type)) {
-      Function* getstate = type->getMethod("__getstate__");
+      auto getstate_qualname = type->getMethod("__getstate__");
+      TORCH_INTERNAL_ASSERT(getstate_qualname);
+      auto getstate = script::lookupMethodByQualname(type, *getstate_qualname);
+      TORCH_INTERNAL_ASSERT(getstate);
       pushIValue((*getstate)({obj}));
     } else {
       push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
@@ -588,11 +591,13 @@ WriteableTensorData getWriteableTensorData(const at::Tensor& tensor) {
 
 bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   // Check that the schemas for __getstate__ and __setstate__ are correct
-  auto getstate = cls->getMethod("__getstate__");
-  if (getstate == nullptr) {
+  auto get_qualname = cls->getMethod("__getstate__");
+  if (!get_qualname) {
     return false;
   }
-  auto get_schema = getstate->getSchema();
+  auto get_method = script::lookupMethodByQualname(cls, *get_qualname);
+  TORCH_INTERNAL_ASSERT(get_method);
+  auto get_schema = get_method->getSchema();
 
   // Check __getstate__
   //   __getstate__ is expected to be (self) -> T
@@ -608,11 +613,13 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
 
   // Check __setstate__ if the method exists
   //   __setstate__ is expected to be (self, T) -> None
-  auto setstate = cls->getMethod("__setstate__");
-  if (!setstate) {
+  auto set_qualname = cls->getMethod("__setstate__");
+  if (!set_qualname) {
     return false;
   }
-  auto set_schema = setstate->getSchema();
+  auto set_method = script::lookupMethodByQualname(cls, *set_qualname);
+  TORCH_INTERNAL_ASSERT(set_method);
+  auto set_schema = set_method->getSchema();
 
   TORCH_CHECK(
       set_schema.arguments().size() == 2,

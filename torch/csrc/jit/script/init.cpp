@@ -520,7 +520,7 @@ void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   const auto name = QualifiedName(*module.type()->name(), "forward");
   auto method =
       module._ivalue()->compilation_unit()->create_function(name, graph);
-  module.type()->addMethod(method);
+  module.type()->addMethod(name);
 }
 
 // this is used in our test suite to check that we correctly preserved type tags
@@ -892,7 +892,7 @@ void initJitScriptBindings(PyObject* module) {
             const auto method_name = QualifiedName(*self.type()->name(), name);
             auto fn = self._ivalue()->compilation_unit()->create_function(
                 method_name, graph);
-            self.type()->addMethod(fn);
+            self.type()->addMethod(method_name);
             didFinishEmitModule(self);
           })
       .def_property_readonly(

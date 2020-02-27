@@ -257,7 +257,9 @@ class ModuleCloneHelper {
         r.type()->addConstant(type->getConstantName(i), type->getConstant(i));
       }
       // Clone methods remapping the types to the cloned ones.
-      for (auto& fn : type->methods()) {
+      for (auto& fn_schema : type->methods()) {
+        auto fn = script::lookupMethodByQualname(type, fn_schema);
+        TORCH_INTERNAL_ASSERT(fn);
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
       }
     }
@@ -356,7 +358,7 @@ class ModuleCloneHelper {
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
         this_method_name, graph);
-    target.type()->addMethod(copied);
+    target.type()->addMethod(this_method_name);
     // we'll use default schema for cloned method
   }
 };
