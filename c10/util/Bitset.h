@@ -6,8 +6,6 @@
 #include <iostream>
 #if defined(_MSC_VER)
 #include <intrin.h>
-#else
-#include <strings.h>
 #endif
 
 namespace c10 {
@@ -81,7 +79,7 @@ private:
       }
       return result + 1;
     #else
-      return ffsll(bitset_);
+      return __builtin_ffsll(bitset_);
     #endif
   }
   
