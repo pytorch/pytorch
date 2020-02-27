@@ -314,11 +314,15 @@ class FuseAxisTransform;
 class TORCH_API TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
  public:
   const Var* expr_var() const {
-    return func_->func_var();
+    // TODO: Support multiple-output functions
+    CHECK(func_->func_vars().size() == 1);
+    return func_->func_var(0);
   }
 
   const Expr* body() const {
-    return func_->body();
+    // TODO: Support multiple-output functions
+    CHECK(func_->func_vars().size() == 1);
+    return func_->body(0);
   }
 
   Function* func() const {
@@ -358,7 +362,10 @@ class TORCH_API TensorExprOp : public Cloneable<TensorExprOp, ScheduleObject> {
   friend class ScheduleNode;
   TensorExprOp() {}
   explicit TensorExprOp(Function* func)
-      : func_(func), element_stmt_(func_->ElementStmt()) {}
+      : func_(func), element_stmt_(func_->ElementStmt(0)) {
+    // TODO: Support multiple-output functions
+    CHECK(func_->func_vars().size() == 1);
+  }
 
   // TODO: this needs more work.
   // The ancestor-axes mark the region to evaluate expression.

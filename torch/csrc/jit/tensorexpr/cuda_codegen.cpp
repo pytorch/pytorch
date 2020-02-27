@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include "torch/csrc/jit/tensorexpr/cuda_half_support.h"
 
 #include "ATen/CUDAGenerator.h"
 #include "c10/cuda/CUDAFunctions.h"
@@ -130,25 +131,24 @@ void CudaPrinter::visit(const For* v) {
 }
 
 void CudaPrinter::visit(const Intrinsics* v) {
-  std::string func_name;
-  // TODO: handle other data types.
-  switch (v->op_type()) {
-    case IntrinsicsOp::kSin:
-      func_name = "sinf";
-      break;
-    case IntrinsicsOp::kCos:
-      func_name = "cosf";
-      break;
-    case IntrinsicsOp::kExp:
-      func_name = "expf";
-      break;
-    case IntrinsicsOp::kRand:
-      os() << "Uint32ToFloat(" << *rand_func_ << "())";
-      return;
-    default:
-      IRPrinter::visit(v);
-      return;
+  if (v->op_type() == IntrinsicsOp::kRand) {
+    os() << "Uint32ToFloat(" << *rand_func_ << "())";
+    return;
   }
+
+  std::string func_name = v->func_name();
+
+  // get type of resulting expression.
+  ScalarType returnType = v->param(0)->dtype().scalar_type();
+  for (int i = 1; i < v->nparams(); ++i) {
+    returnType =
+        promoteNumericTypes(returnType, v->param(i)->dtype().scalar_type());
+  }
+
+  if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
+    func_name = func_name + "f";
+  }
+
   os() << func_name << "(";
   for (int i = 0; i < v->nparams(); i++) {
     if (i > 0) {
@@ -161,13 +161,36 @@ void CudaPrinter::visit(const Intrinsics* v) {
 
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
-  os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
+  if (v->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__half2float(" << *v->base_handle() << "[" << *v->index() << "])";
+  } else {
+    os() << "__ldg(" << *v->base_handle() << " + " << *v->index() << ")";
+  }
+}
+
+void CudaPrinter::visit(const Store* v) {
+  os() << *v->base_handle() << "[" << *v->index() << "] = ";
+  if (v->value()->dtype().scalar_type() == ScalarType::Half) {
+    os() << "__float2half(" << *v->value() << ");";
+  } else {
+    os() << *v->value() << ";";
+  }
 }
 
 void CudaPrinter::visit(const Max* v) {
-  auto dtype = v->dtype();
-  if (dtype == kFloat32) {
-    os() << "fmaxf";
+  auto dtype = v->dtype().scalar_type();
+  switch (dtype) {
+    case ScalarType::Half:
+      // doing Half math in float.
+    case ScalarType::Float:
+      os() << "fmaxf";
+      break;
+    case ScalarType::Double:
+      os() << "fmax";
+      break;
+    default:
+      os() << "max";
+      break;
   }
   os() << "(";
   v->lhs()->accept(this);
@@ -177,15 +200,56 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  auto dtype = v->dtype();
-  if (dtype == kFloat32) {
-    os() << "fminf";
+  auto dtype = v->dtype().scalar_type();
+  switch (dtype) {
+    case ScalarType::Half:
+      // doing Half math in float.
+    case ScalarType::Float:
+      os() << "fminf";
+      break;
+    case ScalarType::Double:
+      os() << "fmin";
+      break;
+    default:
+      os() << "min";
+      break;
   }
   os() << "(";
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
   os() << ")";
+}
+
+std::string cudaDtypeCppString(const Dtype& dtype) {
+  switch (dtype.scalar_type()) {
+    case ScalarType::Half:
+      return "half";
+    case ScalarType::Char:
+      return "char";
+    case ScalarType::Byte:
+      return "unsigned char";
+    case ScalarType::Short:
+      return "short";
+    case ScalarType::Long:
+      return "long";
+    default:
+      ;/* nothing */
+  }
+  return dtype.ToCppString();
+}
+
+void CudaPrinter::visit(const LetStmt* v) {
+  const Var* var = v->var();
+  if (var->dtype().scalar_type() == ScalarType::Half) {
+    // we do math in floats so use that.
+    os() << "float";
+  } else {
+    os() << cudaDtypeCppString(var->dtype());
+  }
+  os() << " " << *var << " = " << *v->value() << "; "
+       << std::endl;
+  v->body()->accept(this);
 }
 
 void CudaPrinter::visit(const IfThenElse* v) {
@@ -342,6 +406,15 @@ void CudaCodeGen::Initialize() {
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
+
+  // Check whether the statement uses the Half type, if so add the
+  // half_support_literal.
+  CudaHalfChecker halfChecker;
+  stmt()->accept(&halfChecker);
+  if (halfChecker.hasHalf()) {
+    os() << fuser::cuda::half_support_literal << std::endl;
+  }
+
   os() << "extern \"C\" __global__" << std::endl << "void f(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (int i = 0; i < buffer_args.size(); i++) {
@@ -351,15 +424,17 @@ void CudaCodeGen::Initialize() {
     const BufferArg& buffer_arg = buffer_args[i];
     const Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
-    os() << dtype.ToCppString() << (buffer_arg.isVar() ? " " : "* ")
+
+    os() << cudaDtypeCppString(dtype)
+         << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
   const Var* rand_seed;
   const Var* rand_offset;
   if (has_random_) {
     // TODO: switch to kUint64 when it is available.
-    rand_seed = new Var("rand_seed", kInt32);
-    rand_offset = new Var("rand_offset", kInt32);
+    rand_seed = new Var("rand_seed", kInt);
+    rand_offset = new Var("rand_offset", kInt);
     std::string uint64_str = "unsigned long long";
     os() << ", " << uint64_str << " " << *rand_seed << ", " << uint64_str << " "
          << *rand_offset;
@@ -368,7 +443,7 @@ void CudaCodeGen::Initialize() {
   os() << std::endl;
 
   if (has_random_) {
-    const Var* idx = new Var("idx", kInt32);
+    const Var* idx = new Var("idx", kInt);
     os() << "int " << *idx << " = blockIdx.x*blockDim.x + threadIdx.x;"
          << std::endl;
     const Var* rand_func = printer_->rand_func();
@@ -455,13 +530,16 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   for (int i = 0; i < buffer_args.size(); i++) {
     auto const& bufferArg = buffer_args[i];
     if (bufferArg.isVar()) {
-      auto const& dtype = bufferArg.dtype();
-      if (dtype == kInt32) {
-        ptr_to_args[i] = args[i].intPtr();
-      } else if (dtype == kFloat32) {
-        ptr_to_args[i] = args[i].floatPtr();
-      } else {
-        LOG(FATAL) << "Unhandled dtype in argument";
+      auto stype = bufferArg.dtype().scalar_type();
+      switch (stype) {
+#define TYPE_CASE(Type, Name)             \
+  case ScalarType::Name:                  \
+    ptr_to_args[i] = args[i].Name##Ptr(); \
+    break;
+        AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+        default:
+          LOG(FATAL) << "Unhandled dtype in argument";
       }
     } else {
       args_data[i] = args[i].data();

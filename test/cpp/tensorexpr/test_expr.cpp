@@ -43,7 +43,7 @@ void testExprBasicValueTest02() {
 
 void testExprLetTest01() {
   KernelScope kernel_scope;
-  VarHandle x("x", kFloat32);
+  VarHandle x("x", kFloat);
   ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   ExprHandle result = Let::make(x, ExprHandle(3.f), body);
@@ -53,8 +53,8 @@ void testExprLetTest01() {
 
 void testExprLetTest02() {
   KernelScope kernel_scope;
-  VarHandle x("x", kFloat32);
-  VarHandle y("y", kFloat32);
+  VarHandle x("x", kFloat);
+  VarHandle y("y", kFloat);
   ExprHandle value = ExprHandle(3.f);
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
@@ -65,11 +65,11 @@ void testExprLetTest02() {
 
 void testExprLetStmtTest01() {
   KernelScope kernel_scope;
-  Buffer a_buf("a", kFloat32, {1});
-  Buffer b_buf("b", kFloat32, {1});
+  Buffer a_buf("a", kFloat, {1});
+  Buffer b_buf("b", kFloat, {1});
 
   ExprHandle load_a = Load::make(a_buf, 0, 1);
-  VarHandle var = VarHandle("v", kFloat32);
+  VarHandle var = VarHandle("v", kFloat);
   Stmt* store_b = Store::make(b_buf, 0, var, 1);
   Stmt* let_store = LetStmt::make(var, load_a, store_b);
   SimpleIREvaluator eval(let_store, a_buf, b_buf);
@@ -89,15 +89,101 @@ static ExprHandle test_01(const ExprHandle& expr) {
   return expr;
 }
 
+void testExprIntTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+  ExprHandle value = ExprHandle(3);
+  ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4));
+  ExprHandle result = Let::make(x, ExprHandle(3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
+}
+
+void testExprFloatTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle value = ExprHandle((float)3);
+  ExprHandle body =
+      ExprHandle((float)2) + (x * ExprHandle((float)3) + ExprHandle((float)4));
+  ExprHandle result = Let::make(x, ExprHandle((float)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
+}
+
+void testExprByteTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kByte);
+  ExprHandle value = ExprHandle((uint8_t)3);
+  ExprHandle body = ExprHandle((uint8_t)2) +
+      (x * ExprHandle((uint8_t)3) + ExprHandle((uint8_t)4));
+  ExprHandle result = Let::make(x, ExprHandle((uint8_t)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
+}
+
+void testExprCharTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kChar);
+  ExprHandle value = ExprHandle((int8_t)3);
+  ExprHandle body = ExprHandle((int8_t)2) +
+      (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4));
+  ExprHandle result = Let::make(x, ExprHandle((int8_t)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
+}
+
+void testExprShortTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kShort);
+  ExprHandle value = ExprHandle((int16_t)3);
+  ExprHandle body = ExprHandle((int16_t)2) +
+      (x * ExprHandle((int16_t)3) + ExprHandle((int16_t)4));
+  ExprHandle result = Let::make(x, ExprHandle((int16_t)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
+}
+
+void testExprLongTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kLong);
+  ExprHandle value = ExprHandle((int64_t)3);
+  ExprHandle body = ExprHandle((int64_t)2) +
+      (x * ExprHandle((int64_t)3) + ExprHandle((int64_t)4));
+  ExprHandle result = Let::make(x, ExprHandle((int64_t)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
+}
+
+void testExprHalfTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kHalf);
+  ExprHandle value = ExprHandle((at::Half)3);
+  ExprHandle body = ExprHandle((at::Half)2) +
+      (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4));
+  ExprHandle result = Let::make(x, ExprHandle((at::Half)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
+}
+
+void testExprDoubleTest() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kDouble);
+  ExprHandle value = ExprHandle((double)3);
+  ExprHandle body = ExprHandle((double)2) +
+      (x * ExprHandle((double)3) + ExprHandle((double)4));
+  ExprHandle result = Let::make(x, ExprHandle((double)3), body);
+  SimpleIRExprEval eval(result);
+  EXPECT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
+}
 void testExprVectorAdd01() {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
-  Buffer b_buf(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
-  Buffer c_buf(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer b_buf(VarHandle("B", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer c_buf(VarHandle("C", kHandle), kFloat, {ExprHandle(kTotalSize)});
 
   /*
   Build the following:
@@ -107,7 +193,7 @@ void testExprVectorAdd01() {
             load(b_buf, ramp(index * 8, 1, 8))))
     }
   */
-  VarHandle index = VarHandle("index", kInt32);
+  VarHandle index = VarHandle("index", kInt);
   ExprHandle load_a = Load::make(
       a_buf,
       Ramp::make(index * kVectorSize, 1, kVectorSize),
@@ -124,9 +210,9 @@ void testExprVectorAdd01() {
       Broadcast::make(1, kVectorSize));
   Stmt* stmt = For::make(index, 0, kVectorCount, store_c);
 
-  EXPECT_EQ(load_a.dtype(), Dtype(kFloat32, kVectorSize));
-  EXPECT_EQ(load_b.dtype(), Dtype(kFloat32, kVectorSize));
-  EXPECT_EQ(value.dtype(), Dtype(kFloat32, kVectorSize));
+  EXPECT_EQ(load_a.dtype(), Dtype(kFloat, kVectorSize));
+  EXPECT_EQ(load_b.dtype(), Dtype(kFloat, kVectorSize));
+  EXPECT_EQ(value.dtype(), Dtype(kFloat, kVectorSize));
 
   PaddedBuffer<float> a_v(kTotalSize);
   PaddedBuffer<float> b_v(kTotalSize);
@@ -145,16 +231,16 @@ void testExprVectorAdd01() {
 void testExprCompareSelectEQ() {
   KernelScope kernel_scope;
   constexpr int N = 1024;
-  Buffer a(VarHandle("A", kHandle), kInt32, {N});
-  Buffer b(VarHandle("B", kHandle), kInt32, {N});
-  Buffer c(VarHandle("C", kHandle), kInt32, {N});
+  Buffer a(VarHandle("A", kHandle), kInt, {N});
+  Buffer b(VarHandle("B", kHandle), kInt, {N});
+  Buffer c(VarHandle("C", kHandle), kInt, {N});
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
   std::vector<int> c_ref(N, 0);
 
   auto mask = IntImm::make(1);
-  VarHandle i("i", kInt32);
+  VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
@@ -182,11 +268,11 @@ void testExprCompareSelectEQ() {
 
 void testExprSubstitute01() {
   KernelScope kernel_scope;
-  ExprHandle x = Var::make("x", kFloat32);
-  ExprHandle y = Var::make("y", kFloat32);
+  ExprHandle x = Var::make("x", kFloat);
+  ExprHandle y = Var::make("y", kFloat);
   ExprHandle e = (x - 1.0f) * (x + y + 2.0f);
 
-  ExprHandle z = Var::make("z", kFloat32);
+  ExprHandle z = Var::make("z", kFloat);
   ExprHandle e2 = Substitute(&e, {{x, z + 1.0f}});
   ExprHandle e2_ref = ((z + 1.0f) - 1.0f) * ((z + 1.0f) + y + 2.0f);
   std::ostringstream oss;
@@ -301,11 +387,11 @@ void testExprBinaryMath01() {
 void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
-    VarHandle n("n", kInt32);
-    Buffer a(VarHandle("a", kHandle), kFloat32, {n});
-    Buffer b(VarHandle("b", kHandle), kFloat32, {n});
-    Buffer c(VarHandle("c", kHandle), kFloat32, {n});
-    VarHandle i("i", kInt32);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {n});
+    Buffer b(VarHandle("b", kHandle), kFloat, {n});
+    Buffer c(VarHandle("c", kHandle), kFloat, {n});
+    VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, Store::make(c, i, a(i) + b(i), 1));
     std::vector<float> aData(size, 1.0f);
     std::vector<float> bData(size, 2.0f);
@@ -322,8 +408,8 @@ void testCond01() {
   KernelScope kernel_scope;
   const int N = 16;
   PaddedBuffer<float> a_v(N);
-  Buffer a_buf("a", kFloat32, {N});
-  VarHandle index = VarHandle("index", kInt32);
+  Buffer a_buf("a", kFloat, {N});
+  VarHandle index = VarHandle("index", kInt);
   Stmt* assign_x2 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
   Stmt* assign_x3 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);

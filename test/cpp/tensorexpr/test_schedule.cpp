@@ -80,10 +80,10 @@ void testExprSimple02() {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt32);
-    VarHandle x_inner("x_inner", kInt32);
-    VarHandle y("y", kInt32);
-    VarHandle x_tail("x_tail", kInt32);
+    VarHandle x_outer("x_outer", kInt);
+    VarHandle x_inner("x_inner", kInt);
+    VarHandle y("y", kInt);
+    VarHandle x_tail("x_tail", kInt);
     VarHandle f("f", kHandle);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(26) - 0) / 4;
@@ -150,10 +150,10 @@ void testExprSplitWithTailNone() {
 
   {
     // Compare to a reference loop structure structure.
-    VarHandle x_outer("x_outer", kInt32);
-    VarHandle x_inner("x_inner", kInt32);
-    VarHandle y("y", kInt32);
-    VarHandle x_tail("x_tail", kInt32);
+    VarHandle x_outer("x_outer", kInt);
+    VarHandle x_inner("x_inner", kInt);
+    VarHandle y("y", kInt);
+    VarHandle x_tail("x_tail", kInt);
     VarHandle f("f", kHandle);
     ExprHandle x_1 = x_outer * 4 + x_inner;
     ExprHandle x_outer_end = (ExprHandle(24) - 0) / 4;
@@ -195,8 +195,8 @@ void testExprSplitWithMask01() {
   KernelScope kernel_scope;
   const int M = 26;
   const int N = 5;
-  Buffer a_buf("a", kFloat32, {M, N});
-  Buffer b_buf("b", kFloat32, {M, N});
+  Buffer a_buf("a", kFloat, {M, N});
+  Buffer b_buf("b", kFloat, {M, N});
   Tensor* tensor =
       Compute("f", {{M, "m"}, {N, "n"}}, [&](const ExprHandle& m, const ExprHandle& n) {
         return a_buf(m, n) + b_buf(m, n) + 1.0f;
@@ -233,8 +233,8 @@ void testScheduleBroadcastAddBuffer() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat32, {M, N});
-  Buffer b_buf("b", kFloat32, {N, K});
+  Buffer a_buf("a", kFloat, {M, N});
+  Buffer b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -282,8 +282,8 @@ void testScheduleFunctionCall01() {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat32, {M, N});
-  Buffer b_buf("b", kFloat32, {N, K});
+  Buffer a_buf("a", kFloat, {M, N});
+  Buffer b_buf("b", kFloat, {N, K});
   Tensor* c = Compute(
       "broadcast_add",
       {{M, "m"}, {N, "n"}, {K, "k"}},
@@ -343,10 +343,10 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   const int M = 4;
   const int N = 5;
   const int K = 6;
-  Buffer a_buf("a", kFloat32, {M, N});
-  Buffer b_buf("b", kFloat32, {N, K});
-  Buffer c_buf("c", kFloat32, {M, N});
-  Buffer d_buf("d", kFloat32, {M, K});
+  Buffer a_buf("a", kFloat, {M, N});
+  Buffer b_buf("b", kFloat, {N, K});
+  Buffer c_buf("c", kFloat, {M, N});
+  Buffer d_buf("d", kFloat, {M, K});
 
   Tensor* x = Compute(
       "x",
@@ -459,7 +459,7 @@ void testScheduleFuserStyle() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a_buf(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer a_buf(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
 
   Tensor* b =
       Compute("f", {{kTotalSize, "i"}}, [&](const std::vector<VarHandle>& axes) {
@@ -491,10 +491,10 @@ void testScheduleFuserThreeArg() {
   const int kVectorCount = 128;
   const int kTotalSize = kVectorSize * kVectorCount;
 
-  Buffer a(VarHandle("A", kHandle), kFloat32, {ExprHandle(kTotalSize)});
-  Buffer b(VarHandle("B", kHandle), kFloat32, {ExprHandle(kTotalSize)});
-  Buffer c(VarHandle("C", kHandle), kFloat32, {ExprHandle(kTotalSize)});
-  Buffer d(VarHandle("D", kHandle), kFloat32, {ExprHandle(kTotalSize)});
+  Buffer a(VarHandle("A", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer b(VarHandle("B", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer c(VarHandle("C", kHandle), kFloat, {ExprHandle(kTotalSize)});
+  Buffer d(VarHandle("D", kHandle), kFloat, {ExprHandle(kTotalSize)});
 
   Tensor* e = Compute(
       "e", {{kTotalSize, "i"}}, [&](const VarHandle& i) { return a(i) + b(i); });
@@ -523,10 +523,10 @@ void testScheduleFuserThreeArg() {
 void testScheduleDynamicShape2D() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
-    VarHandle m("m", kInt32);
-    VarHandle n("n", kInt32);
-    Buffer a(VarHandle("a", kHandle), kFloat32, {m, n});
-    Buffer b(VarHandle("b", kHandle), kFloat32, {m, n});
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {m, n});
+    Buffer b(VarHandle("b", kHandle), kFloat, {m, n});
     Tensor* c =
         Compute("c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);

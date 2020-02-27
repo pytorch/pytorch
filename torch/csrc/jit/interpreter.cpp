@@ -822,7 +822,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     Operation* operators;
     Function** functions;
     TypePtr* types;
-    std::map<int64_t, size_t> symbols2dims;
 
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
@@ -1078,9 +1077,9 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case GUARD: {
             auto t = stack.back().toTensor();
             const TypePtr& expected = af.types[inst.X];
-            auto expected_type = expected->cast<TensorType>();
-            auto bound_type = expected_type->merge(t, af.symbols2dims);
-            push(stack, *expected_type == *bound_type);
+            bool comp = expected->cast<TensorType>()
+                            ->isCompatibleWithInCurrentExecutionContext(t);
+            push(stack, comp);
             ++af.pc;
           } break;
           case TAIL_CALL: {

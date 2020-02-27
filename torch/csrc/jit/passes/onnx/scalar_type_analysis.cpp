@@ -73,7 +73,6 @@ static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
       typePtr->device(),
       typePtr->sizes(),
       typePtr->strides(),
-      typePtr->contiguity(),
       typePtr->requiresGrad());
 }
 

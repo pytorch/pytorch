@@ -1047,6 +1047,7 @@ class TestTensorExprFuser(BaseTestClass):
 
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skip("dynamic shapes are not quite there yet")
     def test_dynamic_shape(self):
         with num_profiled_runs(2):
             @torch.jit.script
@@ -1059,7 +1060,7 @@ class TestTensorExprFuser(BaseTestClass):
             res = test(x, y, z)
             np.testing.assert_allclose(ref.cpu().numpy(), res.cpu().numpy())
             assert cuda.elapsed_value() == 1
-      
+
             # A wild broadcast appears.
             x = torch.rand(4, 8).cuda()
             y = torch.rand(1, 8).cuda()
@@ -1124,15 +1125,15 @@ class TestTensorExprFuser(BaseTestClass):
                 a = torch.ones(128, dtype=torch.int32, device=device)
                 b = torch.zeros(128, dtype=torch.int32, device=device)
                 inp = torch.ones(128, dtype=torch.int32, device=device)
-                traced = torch.jit.trace(fn, (inp, inp)) 
+                traced = torch.jit.trace(fn, (inp, inp))
                 x = traced(a, b)
                 y = fn(a, b)
-                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())      
+                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
     def test_where(self):
         def run_where(x, y):
             return torch.where(torch.gt(x, y), x, y)
-    
+
         a = torch.rand(1024, dtype=float)
         b = torch.rand(1024, dtype=float)
         traced = torch.jit.trace(run_where, (torch.zeros(1024), torch.zeros(1024)))

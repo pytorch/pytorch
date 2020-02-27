@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -17,8 +18,12 @@ class Xor;
 class Lshift;
 class Rshift;
 class CompareSelect;
-class IntImm;
-class FloatImm;
+
+#define IMM_DECLARE(Type, Name) \
+  class Name##Imm;
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
+#undef IMM_DECLARE
+
 class Cast;
 class Var;
 class Let;
@@ -55,8 +60,10 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Lshift* v);
   virtual const Expr* mutate(const Rshift* v);
   virtual const Expr* mutate(const CompareSelect* v);
-  virtual const Expr* mutate(const IntImm* v);
-  virtual const Expr* mutate(const FloatImm* v);
+#define IMM_MUTATE_DECLARE(Type, Name) \
+  virtual const Expr* mutate(const Name##Imm* v);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
+#undef IMM_MUTATE_DECLARE
   virtual const Expr* mutate(const Cast* v);
   virtual const Expr* mutate(const Var* v);
   virtual const Expr* mutate(const Let* v);
@@ -65,6 +72,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Load* v);
   virtual const Expr* mutate(const Broadcast* v);
   virtual const Expr* mutate(const IfThenElse* v);
+
   // BaseCallNode is the base class for all call nodes.
   // For any visitors that only needs the common behavior, only override this
   // function is enough. This is because all derived class handlers will call

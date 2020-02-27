@@ -15,7 +15,6 @@ namespace jit {
 namespace tensorexpr {
 
 // The common base between all expression node.
-class ExprHandle;
 class Expr : public KernelScopedObject {
  public:
   explicit Expr(Dtype dtype) : dtype_(dtype) {}
@@ -27,14 +26,6 @@ class Expr : public KernelScopedObject {
 
  private:
   Dtype dtype_;
-};
-
-// The common base between all statement node.
-class Stmt : public KernelScopedObject {
- public:
-  Stmt() {}
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
-  virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -49,17 +40,6 @@ class ExprNode : public Base {
   const Expr* accept_mutator(IRMutator* mutator) const override;
   // pass the constructor to the base class
   using Base::Base;
-};
-
-template <class Op>
-class StmtNode : public Stmt {
- public:
-  using StmtNodeBase = StmtNode<Op>;
-  void accept(IRVisitor* visitor) const override {
-    visitor->visit(static_cast<const Op*>(this));
-  }
-  Stmt* accept_mutator(IRMutator* mutator) override;
-  StmtNode() {}
 };
 
 // A wrapper object to the underlying ExprNode.
@@ -82,8 +62,10 @@ class TORCH_API ExprHandle {
     return base_expr_node_ == nullptr;
   }
 
-  ExprHandle(int v);
-  ExprHandle(float v);
+#define IMM_EXPR_DECLARE(Type, Name) \
+  ExprHandle(Type v);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
+#undef IMM_EXPR_DECLARE
 
   template <class Op>
   Op* AsNode() {
@@ -120,24 +102,66 @@ class TORCH_API ExprHandle {
   Expr* base_expr_node_ = nullptr;
 };
 
+// The underlying representation node to a Var.
+// Currently, each Var object represents a unique variable, even though the
+// names might be the same. We should consider add a unique_name as well.
+class Var : public ExprNode<Var> {
+ public:
+  static ExprHandle make(const std::string& name_hint, Dtype dtype) {
+    return ExprHandle(new Var(name_hint, dtype));
+  }
+  static ExprHandle make(Dtype dtype) {
+    return ExprHandle(new Var("", dtype));
+  }
+
+  // TODO: unique_name
+  const std::string& name_hint() const {
+    return name_hint_;
+  }
+
+  Var(const std::string& name_hint, Dtype dtype)
+      : ExprNodeBase(dtype), name_hint_(name_hint) {}
+
+ private:
+  std::string name_hint_;
+};
+
+// An expression to construct the underlying variable node.
+// Note: do not store any info here, since it is often possible to slice this
+// object. For example: VarHandle x('x'); ExprHandle x2 = x;
+class VarHandle : public ExprHandle {
+ public:
+  VarHandle() : ExprHandle(nullptr) {}
+  explicit VarHandle(Dtype dtype) : ExprHandle(Var::make(dtype)) {}
+  VarHandle(const std::string& name_hint, Dtype dtype)
+      : ExprHandle(Var::make(name_hint, dtype)) {}
+  explicit VarHandle(const Var* node) : ExprHandle(node) {}
+  const Var* node() const {
+    return static_cast<const Var*>(ExprHandle::node());
+  }
+  bool operator==(const VarHandle& other) const {
+    return this->node() == other.node();
+  }
+  bool operator!=(const VarHandle& other) const {
+    return !(*this == other);
+  }
+
+  const std::string& name_hint() const {
+    return this->node()->name_hint();
+  }
+  bool empty() const {
+    return (this->node() == nullptr);
+  }
+};
+
 template <class Op, class Base>
 const Expr* ExprNode<Op, Base>::accept_mutator(IRMutator* mutator) const {
   ExprNode* this_mutable = const_cast<ExprNode*>(this);
   return mutator->mutate(static_cast<Op*>(this_mutable));
 }
 
-template <class Op>
-Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
-  StmtNode* this_mutable = const_cast<StmtNode*>(this);
-  return mutator->mutate(static_cast<Op*>(this_mutable));
-}
-
 inline bool same_node(const ExprHandle& expr1, const ExprHandle& expr2) {
   return expr1.AsNode<Expr>() == expr2.AsNode<Expr>();
-}
-
-inline bool same_node(Stmt* stmt1, Stmt* stmt2) {
-  return stmt1 == stmt2;
 }
 
 TORCH_API ExprHandle sin(const ExprHandle& v);

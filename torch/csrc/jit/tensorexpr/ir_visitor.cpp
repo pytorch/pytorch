@@ -64,8 +64,11 @@ void IRVisitor::visit(const CompareSelect* v) {
   v->ret_val2()->accept(this);
 }
 
-void IRVisitor::visit(const IntImm* v) {}
-void IRVisitor::visit(const FloatImm* v) {}
+#define IMM_VISIT(Type, Name) \
+  void IRVisitor::visit(const Name##Imm* v) {}
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+#undef IMM_VISIT
+
 void IRVisitor::visit(const Cast* v) {
   v->src_value()->accept(this);
 }

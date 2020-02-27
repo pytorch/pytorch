@@ -18,8 +18,39 @@ struct DefaultPaddedValue<int> {
 };
 
 template <>
+struct DefaultPaddedValue<int8_t> {
+  static const int8_t kValue = static_cast<int8_t>(0xBE);
+};
+
+template <>
+struct DefaultPaddedValue<uint8_t> {
+  static const uint8_t kValue = static_cast<uint8_t>(0xBE);
+};
+
+template <>
+struct DefaultPaddedValue<int16_t> {
+  static const int16_t kValue = static_cast<int16_t>(0xBEEF);
+};
+
+template <>
+struct DefaultPaddedValue<int64_t> {
+  static const int64_t kValue = static_cast<int64_t>(0xDEADBEEF);
+};
+
+template <>
 struct DefaultPaddedValue<float> {
   static constexpr float kValue = 0.1357;
+};
+
+template <>
+struct DefaultPaddedValue<at::Half> {
+  // at::Half ctor isn't constexpr, so just fill it with bits.
+  static constexpr uint16_t kValue = 1357;
+};
+
+template <>
+struct DefaultPaddedValue<double> {
+  static constexpr double kValue = 0.1357;
 };
 
 // A concrete base to be used in PaddedBase.
@@ -122,20 +153,41 @@ class PaddedBuffer : public PaddedBufferBase {
     return const_cast<PaddedBuffer*>(this)->operator()(indices);
   }
 
+  template <typename U>
   friend void ExpectAllNear(
-      const PaddedBuffer<float>& v1,
-      const PaddedBuffer<float>& v2,
+      const PaddedBuffer<U>& v1,
+      const PaddedBuffer<U>& v2,
       float abs_error);
   template <typename U>
   friend void ExpectAllEqual(
       const PaddedBuffer<U>& v1,
       const PaddedBuffer<U>& v2);
-  // Verify the watermarks in the paddings are intact.
-  void ValidateWatermark() const;
   void Backup() {
     backup_data_ = data_;
   }
-  void CheckBackup() const;
+
+  // Verify the watermarks in the paddings are intact.
+  void ValidateWatermark() const {
+    for (int i = 0; i < kPaddingSize; i++) {
+      EXPECT_EQ(data_[i], kPaddingValue)
+          << "left-side watermark broken: "
+          << "index: " << i << ", name: " << name();
+      EXPECT_EQ(data_[i + total_size_ + kPaddingSize], kPaddingValue)
+          << "right-side watermark broken: "
+          << "index: " << i << ", name: " << name();
+    }
+  }
+
+  void CheckBackup() const {
+    ValidateWatermark();
+    DCHECK(backup_data_.size() == data_.size())
+        << "Please make sure you have call Backup() before calling CheckBackup()";
+    for (int i = 0; i < total_size_; i++) {
+      EXPECT_EQ(data_[i + kPaddingSize], backup_data_[i + kPaddingSize])
+          << "mismatch against backup, "
+          << "index: " << i << ", name: " << name();
+    }
+  }
 
  private:
   std::vector<T> data_;
@@ -146,6 +198,50 @@ class PaddedBuffer : public PaddedBufferBase {
 template <typename T>
 inline CodeGen::CallArg::CallArg(const PaddedBuffer<T>& buffer)
     : ptr_(const_cast<T*>(buffer.data())) {}
+
+template <typename T>
+std::string CompareErrorMsg(
+    const PaddedBuffer<T>& v1,
+    const PaddedBuffer<T>& v2,
+    int index) {
+  std::ostringstream oss;
+  oss << "index: " << index << ", names: " << v1.name() << ", " << v2.name();
+  return oss.str();
+}
+
+template <typename T>
+void ExpectAllEqual(const PaddedBuffer<T>& f1, const PaddedBuffer<T>& f2) {
+  const std::vector<T>& v1 = f1.data_;
+  const std::vector<T>& v2 = f2.data_;
+  const int kPaddingSize = f1.kPaddingSize;
+  const int total_size = f1.total_size_;
+  ASSERT_EQ(v1.size(), v2.size());
+  f1.ValidateWatermark();
+  f2.ValidateWatermark();
+  for (int i = 0; i < total_size; i++) {
+    EXPECT_EQ(v1[kPaddingSize + i], v2[kPaddingSize + i])
+        << CompareErrorMsg(f1, f2, i);
+  }
+}
+
+template <typename T>
+void ExpectAllNear(
+    const PaddedBuffer<T>& f1,
+    const PaddedBuffer<T>& f2,
+    float abs_error) {
+  const std::vector<T>& v1 = f1.data_;
+  const std::vector<T>& v2 = f2.data_;
+  const int kPaddingSize = f1.kPaddingSize;
+  const int total_size = f1.total_size_;
+  ASSERT_EQ(v1.size(), v2.size());
+  f1.ValidateWatermark();
+  f2.ValidateWatermark();
+  for (int i = 0; i < total_size; i++) {
+   ASSERT_NEAR(v1[kPaddingSize + i], v2[kPaddingSize + i], abs_error);
+        // << CompareErrorMsg(f1, f2, i);
+  }
+}
+
 
 } // namespace tensorexpr
 } // namespace jit

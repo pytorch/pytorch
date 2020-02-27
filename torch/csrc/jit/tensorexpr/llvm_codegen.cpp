@@ -59,9 +59,18 @@ LLVMCodeGen::LLVMCodeGen(
     Dtype dtype)
     : CodeGen(stmt, args),
       context_(std::make_unique<llvm::LLVMContext>()),
-      irb_(getContext()),
-      int32Ty_(llvm::Type::getInt32Ty(getContext())),
-      floatTy_(llvm::Type::getFloatTy(getContext())) {
+      irb_(getContext()) {
+
+  // Manually map types to LLVM types.
+  ByteTy_ = llvm::Type::getInt8Ty(getContext());
+  CharTy_ = llvm::Type::getInt8Ty(getContext());
+  ShortTy_ = llvm::Type::getInt16Ty(getContext());
+  IntTy_ = llvm::Type::getInt32Ty(getContext());
+  LongTy_ = llvm::Type::getInt64Ty(getContext());
+  HalfTy_ = llvm::Type::getHalfTy(getContext());
+  FloatTy_ = llvm::Type::getFloatTy(getContext());
+  DoubleTy_ = llvm::Type::getDoubleTy(getContext());
+
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
@@ -110,12 +119,17 @@ llvm::LLVMContext& LLVMCodeGen::getContext() {
 }
 
 llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
-  if (dtype == kInt32) {
-    return int32Ty_;
-  } else if (dtype == kFloat32) {
-    return floatTy_;
+  switch (dtype.scalar_type()) {
+#define TYPE_CASE(_1, n) \
+  case ScalarType::n: \
+      return n##Ty_; \
+      break;
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+  default:
+    LOG(FATAL) << "Unhandled dtype: " << dtype;
   }
-  LOG(FATAL) << "Unhandled dtype: " << dtype;
   return nullptr;
 }
 
@@ -126,7 +140,7 @@ llvm::Type* LLVMCodeGen::dtypeToLLVMPtr(Dtype dtype) {
 void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto voidPtrPtrTy = llvm::Type::getInt8PtrTy(getContext())->getPointerTo();
   auto wrapper = llvm::Function::Create(
-      llvm::FunctionType::get(int32Ty_, {voidPtrPtrTy}, false),
+      llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
       llvm::Function::ExternalLinkage,
       "wrapper",
       module_.get());
@@ -135,7 +149,7 @@ void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
   for (size_t i = 0; i < params.size(); i++) {
     auto argp = irb_.CreateGEP(
-        wrapper->arg_begin(), llvm::ConstantInt::getSigned(int32Ty_, i));
+        wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
       auto arg = irb_.CreatePointerCast(irb_.CreateLoad(argp), params[i]);
       wrappedArgs.push_back(arg);
@@ -189,14 +203,20 @@ static void* argToPtr(
   if (!bufferArg.isVar()) {
     return callArg.data();
   }
-  if (bufferArg.dtype() == kInt32) {
-    return callArg.intPtr();
-  }
-  if (bufferArg.dtype() == kFloat32) {
-    return callArg.floatPtr();
-  }
-  LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+    case ScalarType::Name: \
+        return callArg.Name##Ptr();
+        break;
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+    LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
              << "dtype=" << bufferArg.var()->dtype();
+  }
   return nullptr;
 }
 
@@ -357,7 +377,7 @@ void LLVMCodeGen::visit(const Max* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
 
-  if (v->dtype() == kInt32) {
+  if (v->dtype() == kInt) {
     auto icmp = irb_.CreateICmpSGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
@@ -378,7 +398,7 @@ void LLVMCodeGen::visit(const Min* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
 
-  if (v->dtype() == kInt32) {
+  if (v->dtype() == kInt) {
     auto icmp = irb_.CreateICmpSLT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
@@ -403,12 +423,12 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
   v->ret_val2()->accept(this);
   auto retval2 = this->value_;
 
-  auto type_used = v->lhs()->dtype();
+  auto type_used = v->lhs()->dtype().scalar_type();
 
   llvm::Value* cmp_;
   CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-  if (type_used == kInt32) {
+  if (is_integral(type_used)) {
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
         cmp_ = irb_.CreateICmpEQ(lhs, rhs);
@@ -432,7 +452,7 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
         // TODO: change to a proper error report
         throw std::runtime_error("invalid operator type");
     }
-  } else { // FP32
+  } else if (is_floating_point(type_used)) { // FP32
     switch (cmp_op_) {
       case CompareSelectOperation::kEQ:
         cmp_ = irb_.CreateFCmpOEQ(lhs, rhs);
@@ -456,46 +476,83 @@ void LLVMCodeGen::visit(const CompareSelect* v) {
         // TODO: change to a proper error report
         throw std::runtime_error("invalid operator type");
     }
+  } else {
+    throw std::runtime_error("invalid type for CompareSelect");
   }
 
   value_ = irb_.CreateSelect(cmp_, retval1, retval2);
   return;
 }
 
-void LLVMCodeGen::visit(const IntImm* v) {
-  value_ = llvm::ConstantInt::getSigned(int32Ty_, v->value());
+template <typename T>
+typename std::enable_if<std::is_integral<T>::value, llvm::Value*>::type
+getFromType(llvm::Type* type, T value) {
+  return llvm::ConstantInt::get(type, value, std::is_signed<T>::value);
 }
 
-void LLVMCodeGen::visit(const FloatImm* v) {
-  value_ = llvm::ConstantFP::get(floatTy_, v->value());
+template <typename T>
+typename std::enable_if<std::is_floating_point<T>::value, llvm::Value*>::type
+getFromType(llvm::Type* type, T value) {
+  return llvm::ConstantFP::get(type, value);
+}
+
+#define IMM_VISIT_DECLARE(Type, Name) \
+  void LLVMCodeGen::visit(const Name##Imm* v) { \
+    value_ = getFromType<Type>(Name##Ty_, v->value()); \
+  }
+AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
+#undef IMM_VISIT_DECLARE
+
+void LLVMCodeGen::visit(const HalfImm* v) {
+  value_ = llvm::ConstantFP::get(HalfTy_, v->value());
+}
+
+void LLVMCodeGen::visit(const BoolImm* v) {
+  value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
 void LLVMCodeGen::visit(const Cast* v) {
   v->src_value()->accept(this);
 
-  llvm::Type* dstType = nullptr;
-  if (v->dtype().scalar_type() == kInt32) {
-    dstType = int32Ty_;
-  } else if (v->dtype().scalar_type() == kFloat32) {
-    dstType = floatTy_;
-  }
-
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
   if (v->dtype().lanes() > 1) {
     dstType = llvm::VectorType::get(dstType, v->dtype().lanes());
   }
+  llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
+
+  if (srcType == dstType) {
+    // do nothing.
+    return;
+  }
+
+  bool destUnsigned = v->dtype().scalar_type() == ScalarType::Byte;
 
   // Scalar casts
-  if (v->dtype() == kInt32 && v->src_value()->dtype() == kFloat32) {
-    value_ = irb_.CreateFPToSI(value_, dstType);
-    return;
+  if (srcType->isFloatingPointTy()) {
+    if (dstType->isFloatingPointTy()) {
+      value_ = irb_.CreateFPCast(value_, dstType);
+    } else if (dstType->isIntegerTy()) {
+      if (destUnsigned) {
+        value_ = irb_.CreateFPToUI(value_, dstType);
+      } else {
+        value_ = irb_.CreateFPToSI(value_, dstType);
+      }
+    } else {
+      LOG(FATAL) << "Unsupported cast!";
+    }
+  } else if (srcType->isIntegerTy()) {
+    if (dstType->isFloatingPointTy()) {
+      if (destUnsigned) {
+        value_ = irb_.CreateUIToFP(value_, dstType);
+      } else {
+        value_ = irb_.CreateSIToFP(value_, dstType);
+      }
+    } else if (dstType->isIntegerTy()) {
+      value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+    } else {
+      LOG(FATAL) << "Unsupported cast!";
+    }
   }
-
-  if (v->dtype() == kFloat32 && v->src_value()->dtype() == kInt32) {
-    value_ = irb_.CreateSIToFP(value_, dstType);
-    return;
-  }
-
-  LOG(FATAL) << "Unsupported cast!";
 }
 
 void LLVMCodeGen::visit(const Var* v) {
@@ -553,10 +610,15 @@ void LLVMCodeGen::visit(const Ramp* v) {
   int lanes = v->lanes();
 
   llvm::Type* vecType = nullptr;
-  if (v->dtype().scalar_type() == kInt32) {
-    vecType = llvm::VectorType::get(int32Ty_, lanes);
-  } else if (v->dtype().scalar_type() == kFloat32) {
-    vecType = llvm::VectorType::get(floatTy_, lanes);
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+    case ScalarType::Name: \
+      vecType = llvm::VectorType::get(Name##Ty_, lanes); \
+      break;
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw std::runtime_error("invalid dtype in Ramp");
   }
 
   value_ = llvm::UndefValue::get(vecType);
@@ -583,7 +645,7 @@ llvm::Value* LLVMCodeGen::emitMaskedLoad(
   auto tailblock = llvm::BasicBlock::Create(getContext(), "tail", fn_);
 
   // Test the mask
-  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::get(int32Ty_, 1));
+  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::get(IntTy_, 1));
   irb_.CreateCondBr(cond, condblock, tailblock);
 
   // Do the load
@@ -620,10 +682,16 @@ void LLVMCodeGen::visit(const Load* v) {
   }
 
   llvm::Type* loadType = nullptr;
-  if (v->dtype().scalar_type() == kInt32) {
-    loadType = llvm::VectorType::get(int32Ty_, v->dtype().lanes());
-  } else if (v->dtype().scalar_type() == kFloat32) {
-    loadType = llvm::VectorType::get(floatTy_, v->dtype().lanes());
+
+  switch (v->dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+    case ScalarType::Name: \
+      loadType = llvm::VectorType::get(Name##Ty_, v->dtype().lanes()); \
+      break;
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      throw std::runtime_error("invalid dtype in Load");
   }
 
   // Detect whether the vector mask is all true
@@ -679,7 +747,7 @@ void LLVMCodeGen::visit(const For* v) {
   irb_.SetInsertPoint(loop);
 
   // Set up phi node for index variable.
-  auto idx = irb_.CreatePHI(int32Ty_, 2);
+  auto idx = irb_.CreatePHI(IntTy_, 2);
   idx->addIncoming(start, preheader);
   varToVal_.emplace(v->var(), idx);
 
@@ -689,7 +757,7 @@ void LLVMCodeGen::visit(const For* v) {
   }
 
   // Create the stop condition. and "after" block.
-  auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(int32Ty_, 1));
+  auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(IntTy_, 1));
   v->stop()->accept(this);
   auto stop = this->value_;
   auto cond = irb_.CreateICmpSLT(inc, stop);
@@ -700,7 +768,7 @@ void LLVMCodeGen::visit(const For* v) {
   irb_.CreateCondBr(cond, loop, after);
   irb_.SetInsertPoint(after);
   idx->addIncoming(inc, end_loop);
-  value_ = llvm::ConstantInt::get(int32Ty_, 0);
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGen::visit(const Block* v) {
@@ -728,7 +796,7 @@ void LLVMCodeGen::emitMaskedStore(
   auto tailblock = llvm::BasicBlock::Create(getContext(), "tail", fn_);
 
   // Test the mask
-  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::get(int32Ty_, 1));
+  auto cond = irb_.CreateICmpEQ(mask, llvm::ConstantInt::get(IntTy_, 1));
   irb_.CreateCondBr(cond, condblock, tailblock);
 
   // Do the store
@@ -751,7 +819,7 @@ void LLVMCodeGen::visit(const Store* v) {
   v->value()->accept(this);
   auto val = this->value_;
 
-  value_ = llvm::ConstantInt::get(int32Ty_, 0);
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 
   if (v->value()->dtype().lanes() == 1) {
     auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
@@ -810,7 +878,7 @@ void LLVMCodeGen::visit(const IfThenElse* v) {
   v->condition()->accept(this);
   llvm::Value* condition = value_;
   llvm::Value* c =
-      irb_.CreateICmpNE(condition, llvm::ConstantInt::get(int32Ty_, 0));
+      irb_.CreateICmpNE(condition, llvm::ConstantInt::get(IntTy_, 0));
 
   auto then_block = llvm::BasicBlock::Create(getContext(), "then", fn_);
   auto else_block = llvm::BasicBlock::Create(getContext(), "else", fn_);
@@ -876,7 +944,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     case kRsqrt: {
       v->params().front()->accept(this);
       value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
-      llvm::Value* constant = llvm::ConstantFP::get(floatTy_, 1.0);
+      llvm::Value* constant = llvm::ConstantFP::get(FloatTy_, 1.0);
       if (v->dtype().lanes() > 1) {
         constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
       }
@@ -892,17 +960,17 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     call_fn = callee.getCallee();                                     \
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn)); \
   } break;
-      UNARY_MATH_CASE(kErf, "erff", floatTy_)
-      UNARY_MATH_CASE(kErfc, "erfcf", floatTy_)
-      UNARY_MATH_CASE(kTan, "tanf", floatTy_)
-      UNARY_MATH_CASE(kAcos, "acosf", floatTy_)
-      UNARY_MATH_CASE(kAsin, "asinf", floatTy_)
-      UNARY_MATH_CASE(kAtan, "atanf", floatTy_)
-      UNARY_MATH_CASE(kCosh, "coshf", floatTy_)
-      UNARY_MATH_CASE(kSinh, "sinhf", floatTy_)
-      UNARY_MATH_CASE(kTanh, "tanhf", floatTy_)
-      UNARY_MATH_CASE(kExpm1, "expm1f", floatTy_)
-      UNARY_MATH_CASE(kLgamma, "lgammaf", floatTy_)
+      UNARY_MATH_CASE(kErf, "erff", FloatTy_)
+      UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
+      UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
+      UNARY_MATH_CASE(kAcos, "acosf", FloatTy_)
+      UNARY_MATH_CASE(kAsin, "asinf", FloatTy_)
+      UNARY_MATH_CASE(kAtan, "atanf", FloatTy_)
+      UNARY_MATH_CASE(kCosh, "coshf", FloatTy_)
+      UNARY_MATH_CASE(kSinh, "sinhf", FloatTy_)
+      UNARY_MATH_CASE(kTanh, "tanhf", FloatTy_)
+      UNARY_MATH_CASE(kExpm1, "expm1f", FloatTy_)
+      UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
 #undef UNARY_MATH_CASE
 
 #define BINARY_MATH_CASE(enum, name, type)                             \
@@ -913,10 +981,10 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     call_fn = callee.getCallee();                                      \
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
   } break;
-      BINARY_MATH_CASE(kRemainder, "remainderf", floatTy_)
-      BINARY_MATH_CASE(kAtan2, "atan2f", floatTy_)
-      BINARY_MATH_CASE(kPow, "powf", floatTy_)
-      BINARY_MATH_CASE(kFmod, "fmodf", floatTy_)
+      BINARY_MATH_CASE(kRemainder, "remainderf", FloatTy_)
+      BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
+      BINARY_MATH_CASE(kPow, "powf", FloatTy_)
+      BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
 #undef BINARY_MATH_CASE
 
     default: {
@@ -933,7 +1001,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   if (v->dtype().lanes() == 1) {
     value_ = irb_.CreateCall(call_ty, call_fn, params);
   } else {
-    llvm::Type* vecType = llvm::VectorType::get(floatTy_, v->dtype().lanes());
+    llvm::Type* vecType = llvm::VectorType::get(FloatTy_, v->dtype().lanes());
     value_ = llvm::UndefValue::get(vecType);
     for (int i = 0; i < v->dtype().lanes(); ++i) {
       std::vector<llvm::Value*> call_operands;

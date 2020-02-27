@@ -29,8 +29,10 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(const Lshift* v) override;
   void visit(const Rshift* v) override;
   void visit(const CompareSelect* v) override;
-  void visit(const IntImm* v) override;
-  void visit(const FloatImm* v) override;
+#define IMM_PRINT_VISIT(Type, Name) \
+  void visit(const Name##Imm* v) override;
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+#undef IMM_PRINT_VISIT
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
   void visit(const Let* v) override;
@@ -70,6 +72,8 @@ class TORCH_API IRPrinter : public IRVisitor {
   }
 
  private:
+  void emitIndent();
+  int indent_ = 0;
   PrinterStream printer_os_;
   UniqueNameManager name_manager_;
 };

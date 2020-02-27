@@ -142,9 +142,8 @@ struct GuardElimination {
     // to remove a guard on ops' outputs
     for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
       auto n = *it;
-      GRAPH_DEBUG("eliminateRedundantGuards ", getHeader(n));
       if (n->kind() == prim::Guard && guardsOutput(n) &&
-          removableGuard(n->inputs().at(0)->node(), n->output()->type())) {
+          removableGuard(n->inputs().at(0)->node())) {
         auto pttp = n->output()->type();
         n->output()->replaceAllUsesWith(n->inputs().at(0));
         n->inputs().at(0)->setType(pttp);
@@ -160,118 +159,6 @@ struct GuardElimination {
     }
   }
 
-  // void eliminateInflates(Block* b) {
-  //   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-  //     auto n = *it;
-  //     if (n->kind() == prim::inflate) {
-  //         n->output()->replaceAllUsesWith(n->input());
-  //         GRAPH_UPDATE(
-  //             "Replacing ",
-  //             n->output()->debugName(),
-  //             " with ",
-  //             n->input()->debugName());
-  //         it.destroyCurrent();
-  //     }
-  //   }
-  // }
-
-  bool checkSimpleBroadcastableInputs(Node* n, TensorTypePtr type) {
-    auto bced_sizes = *type->sizes().concrete_sizes();
-    for (auto input : n->inputs()) {
-      if (input->node()->kind() == prim::Constant ||
-          input->type()->isSubtypeOf(NumberType::get())) {
-        continue;
-      }
-
-      if (input->node()->kind() != prim::Guard) {
-        GRAPH_DEBUG("%", input->debugName(), " isn't a guard!");
-        return false;
-      }
-
-      TORCH_INTERNAL_ASSERT(input->type()->cast<TensorType>());
-      auto isizes = input->type()->cast<TensorType>()->sizes();
-      // even rank isn't fixed
-      if (!isizes.size().has_value()) {
-        GRAPH_DEBUG("%", input->debugName(), "'s rank isn't fixed!");
-        return false;
-      }
-
-      // TODO: just copy and pad isizes as needed
-      auto padding_size = bced_sizes.size() - *isizes.size();
-
-      for (size_t i = 0; i < bced_sizes.size(); i++) {
-        auto input_dim =
-            (i < padding_size) ? c10::nullopt : isizes[i - padding_size];
-        if (input_dim.has_value() && *input_dim != bced_sizes[i]) {
-          GRAPH_DEBUG(
-              i,
-              "-th dimension of %",
-              input->debugName(),
-              " doesn't match output ",
-              getHeader(n),
-              " i.e. ",
-              *input_dim,
-              " != ",
-              bced_sizes[i]);
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  // bool checkSimpleBroadcastableInputs(Node* n, std::vector<size_t>
-  // input_indices) {
-  //   auto bced_sizes = *type->sizes().concrete_sizes();
-
-  //     if (input->node()->kind() != prim::Guard) {
-  //       GRAPH_DEBUG("%", input->debugName(), " isn't a guard!");
-  //       return false;
-  //     }
-
-  //     TORCH_INTERNAL_ASSERT(input->type()->cast<TensorType>());
-  //     auto isizes = input->type()->cast<TensorType>()->sizes();
-  //     // even rank isn't fixed
-  //     if (!isizes.size().has_value()) {
-  //       GRAPH_DEBUG("%", input->debugName(), "'s rank isn't fixed!");
-  //       return false;
-  //     }
-
-  //     // TODO: just copy and pad isizes as needed
-
-  //     for (size_t i = 0; i < bced_sizes.size(); i++) {
-
-  //       bool match = false;
-
-  //       for (auto ii : input_indices) {
-  //         auto isizes = n->input(ii)->type()->cast<TensorType>()->sizes();
-  //         auto padding_size = bced_sizes.size() - *isizes.size();
-  //         auto input_dim =
-  //           (i < padding_size) ? -1 : bced_sizes[i];
-  //       }
-
-  //       if (!match) {
-
-  //       }
-
-  //       if (input_dim.has_value() && *input_dim != bced_sizes[i]) {
-  //         GRAPH_DEBUG(
-  //             i,
-  //             "-th dimension of %",
-  //             input->debugName(),
-  //             " doesn't match output ",
-  //             getHeader(n),
-  //             " i.e. ",
-  //             *input_dim,
-  //             " != ",
-  //             bced_sizes[i]);
-  //         return false;
-  //       }
-  //     }
-
-  //   return true;
-  // }
-
   // `checkInputs` check the invariants specified in `removableGuard`
   // on inputs to `n`. The invariants must hold, or an input must
   // be a `prim::Constant` or be of `NumberType` or be included
@@ -281,7 +168,7 @@ struct GuardElimination {
     size_t i = 0;
     for (auto input : n->inputs()) {
       if ((input->node()->kind() == prim::Guard &&
-           !input->type()->expect<TensorType>()->isSummarized2()) ||
+           !input->type()->expect<TensorType>()->isSummarized()) ||
           input->node()->kind() == prim::Constant ||
           input->type()->isSubtypeOf(NumberType::get()) ||
           except.count(i) != 0) {
@@ -329,8 +216,7 @@ struct GuardElimination {
   //   Guards can be removed if all inputs are guarded and `isSummarized()`
   //   returns
   //   false or inputs are `prim::Constant`
-  bool removableGuard(Node* n, TypePtr type) {
-    GRAPH_DEBUG("Running removableGuard for ", getHeader(n));
+  bool removableGuard(Node* n) {
     const static auto no_exceptions = std::unordered_set<size_t>{};
     switch (n->kind()) {
       case aten::add:
@@ -398,16 +284,7 @@ struct GuardElimination {
       case aten::__lshift__:
       case aten::__rshift__:
       case aten::where:
-      case prim::inflate: {
-        // auto ttype = type->cast<TensorType>();
-        // TORCH_INTERNAL_ASSERT(ttype);
-        //  return !ttype->isSummarized2() &&
-        //      checkSimpleBroadcastableInputs(n, ttype);
         return checkInputs(n, no_exceptions);
-        // return !ttype->isSummarized() &&
-        //     checkSimpleBroadcastableInputs(n, ttype);
-        break;
-      }
       case aten::slice:
         return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
             // check that the dimension argument is constant

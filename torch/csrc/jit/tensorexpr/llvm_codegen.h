@@ -37,8 +37,10 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   llvm::Value* value_;
   llvm::JITTargetAddress kernelAddress_;
 
-  llvm::Type* int32Ty_;
-  llvm::Type* floatTy_;
+#define LLVM_TYPE_DECLARE(_1, Name) \
+  llvm::Type* Name##Ty_;
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
+#undef LLVM_TYPE_DECLARE
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
@@ -56,7 +58,7 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   explicit LLVMCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& args,
-      Dtype dtype = kInt32);
+      Dtype dtype = kInt);
   explicit LLVMCodeGen(Stmt* stmt);
 
   ~LLVMCodeGen() override {}
@@ -75,8 +77,12 @@ class TORCH_API LLVMCodeGen : public CodeGen, public IRVisitor {
   void visit(const Lshift* v) override;
   void visit(const Rshift* v) override;
   void visit(const CompareSelect* v) override;
-  void visit(const IntImm* v) override;
-  void visit(const FloatImm* v) override;
+
+#define IMM_VISIT_DECLARE(_1, Name) \
+  void visit(const Name##Imm* v) override;
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+#undef IMM_VISIT_DECLARE
+
   void visit(const Cast* v) override;
   void visit(const Var* v) override;
   void visit(const Let* v) override;

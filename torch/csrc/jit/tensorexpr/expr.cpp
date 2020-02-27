@@ -66,9 +66,10 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
   return Rshift::make(*this, other);
 }
 
-ExprHandle::ExprHandle(int v) : ExprHandle(IntImm::make(v)) {}
-
-ExprHandle::ExprHandle(float v) : ExprHandle(FloatImm::make(v)) {}
+#define IMM_EXPR_DECLARE(Type, Name) \
+  ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
+#undef IMM_EXPR_DECLARE
 
 ExprHandle sin(const ExprHandle& v) {
   return Intrinsics::make(kSin, v);

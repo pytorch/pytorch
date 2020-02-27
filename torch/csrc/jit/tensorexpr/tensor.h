@@ -63,8 +63,29 @@ class Tensor : public TensorOperation {
   int output_index() const {
     return output_index_;
   }
+
+
+  // Wrappers over accessors to fields of the underlying function
+  const Expr* body() const {
+    return function()->body(output_index());
+  }
+  const Var* func_var() const {
+    return function()->func_var(output_index());
+  }
+  int ndim() const {
+    return function()->dims().size();
+  }
+  const Expr* dim(int index) const {
+    return function()->dim(index);
+  }
+  const std::vector<const Expr*>& dims() const {
+    return function()->dims();
+  }
   const Var* arg(int index) const {
-    return function_->arg(index);
+    return function()->arg(index);
+  }
+  const std::vector<const Var*>& args() const {
+    return function()->args();
   }
 
   Tensor(Function* function, int output_index)
@@ -146,7 +167,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(tensor->function()->body()->dtype(), kFunctionCall, params),
+      : BaseClass(tensor->function()->body(tensor->output_index())->dtype(), kFunctionCall, params),
         tensor_(tensor) {}
  private:
   const Expr* DefaultMutator(const std::vector<const Expr*>& new_params) const override {
@@ -154,7 +175,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   std::string func_name() const {
-    return tensor_->function()->func_var()->name_hint();
+    return tensor_->func_var()->name_hint();
   }
 
   Tensor* tensor_;

@@ -28,10 +28,10 @@ class CudaPrinter : public IRPrinter {
     }
   }
 
-  void visit(const Cast* v) {
+  void visit(const Cast* v)  override {
     auto dtype = v->dtype();
-    if (dtype == kFloat32) {
-      os() << "float";
+    if (dtype == kHalf) {
+      os() << "half";
     } else {
       os() << dtype;
     }
@@ -43,10 +43,12 @@ class CudaPrinter : public IRPrinter {
   void visit(const Intrinsics* v);
   void visit(const For* v);
 
-  void visit(const Load* v);
-  void visit(const Max* v);
-  void visit(const Min* v);
-  void visit(const IfThenElse* v);
+  void visit(const Load* v) override;
+  void visit(const Store* v) override;
+  void visit(const Max* v) override;
+  void visit(const Min* v) override;
+  void visit(const LetStmt* v) override;
+  void visit(const IfThenElse* v) override;
 
   const std::vector<const Expr*>& gpu_block_extents() const {
     return gpu_block_extents_;

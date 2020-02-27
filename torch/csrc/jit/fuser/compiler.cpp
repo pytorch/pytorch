@@ -218,7 +218,6 @@ std::shared_ptr<FusedKernel> compileKernel(
         device,
         c10::VaryingShape(desc.nDim()),
         c10::VaryingShape(desc.nDim()),
-        c10::VaryingShape(desc.nDim()),
         false)); // TODO: nDim is bad, as it is collapsed
   }
 

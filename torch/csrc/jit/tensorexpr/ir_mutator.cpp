@@ -115,13 +115,12 @@ const Expr* IRMutator::mutate(const CompareSelect* v) {
       .node();
 }
 
-const Expr* IRMutator::mutate(const IntImm* v) {
-  return v;
-}
-
-const Expr* IRMutator::mutate(const FloatImm* v) {
-  return v;
-}
+#define IMM_MUTATE_DEFINE(_1, Name)                   \
+  const Expr* IRMutator::mutate(const Name##Imm* v) { \
+    return v;                                         \
+  }
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DEFINE);
+#undef IMM_MUTATE_DEFINE
 
 const Expr* IRMutator::mutate(const Cast* v) {
   const Expr* src_value = v->src_value();

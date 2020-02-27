@@ -34,7 +34,17 @@ class Function : public KernelScopedObject {
       const std::vector<const Expr*>& dims,
       const std::vector<const Var*>& args,
       const Expr* body)
-      : func_var_(VarHandle(func_name, kHandle).node()), dims_(dims), args_(args), body_(body) {}
+      : func_vars_({VarHandle(func_name, kHandle).node()}), dims_(dims), args_(args), bodies_({body}) {}
+  Function(
+      const std::vector<std::string>& func_names,
+      const std::vector<const Expr*>& dims,
+      const std::vector<const Var*>& args,
+      const std::vector<const Expr*>& bodies)
+      : func_vars_(func_names.size()), dims_(dims), args_(args), bodies_(bodies) {
+        for (size_t i = 0; i < func_names.size(); i++) {
+          func_vars_[i] = new Var(func_names[i], kHandle);
+        }
+      }
 
   int ndim() const {
     return dims_.size();
@@ -55,19 +65,30 @@ class Function : public KernelScopedObject {
   const std::vector<const Var*>& args() const {
     return args_;
   }
-  const Expr* body() const {
-    return body_;
+
+  std::vector<const Expr*> bodies() const {
+    return bodies_;
   }
-  const Var* func_var() const {
-    return func_var_;
+  const Expr* body(size_t index) const {
+    CHECK(index < bodies_.size());
+    return bodies_[index];
   }
-  Stmt* ElementStmt();
+
+  std::vector<const Var*> func_vars() const {
+    return func_vars_;
+  }
+  const Var* func_var(size_t index) const {
+    CHECK(index < func_vars_.size());
+    return func_vars_[index];
+  }
+
+  Stmt* ElementStmt(size_t index);
 
  private:
-  const Var* func_var_;
+  std::vector<const Var*> func_vars_;
   std::vector<const Expr*> dims_;
   std::vector<const Var*> args_;
-  const Expr* body_;
+  std::vector<const Expr*> bodies_;
 };
 
 } // namespace tensorexpr

@@ -22,19 +22,22 @@ DECLARE_TRIGGER(simple_ir_eval_executed);
 
 class Value {
  public:
-  Value() : dtype_(kInt32) {
-    i32_values.push_back(0);
+  Value() : dtype_(kInt) {
+    Intvalues.push_back(0);
   }
-  Value(int v) : dtype_(kInt32) {
-    i32_values.push_back(v);
+
+#define VALUE_CTOR(Type, Name)      \
+  Value(Type v) : dtype_(k##Name) { \
+    Name##values.push_back(v);      \
   }
-  Value(float v) : dtype_(kFloat32) {
-    f32_values.push_back(v);
-  }
-  Value(const std::vector<int>& v)
-      : dtype_(Dtype(kInt32, v.size())), i32_values(v) {}
-  Value(const std::vector<float>& v)
-      : dtype_(Dtype(kFloat32, v.size())), f32_values(v) {}
+AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_CTOR);
+#undef VALUE_CTOR
+
+#define VALUE_VEC_CTOR(Type, Name)  \
+  Value(const std::vector<Type>& v) \
+      : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
+AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_VEC_CTOR);
+#undef VALUE_VEC_CTOR
 
   template <typename T>
   T as() const;
@@ -48,44 +51,52 @@ class Value {
 
  private:
   Dtype dtype_;
-  std::vector<int32> i32_values;
-  std::vector<float> f32_values;
+
+#define VALUE_STORAGE(Type, Name) \
+  std::vector<Type> Name##values;
+AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_STORAGE);
+#undef VALUE_STORAGE
   void* ptr;
 };
 
-template <>
-inline int Value::as<int>() const {
-  CHECK_EQ(dtype_, kInt32) << "invalid dtype";
-  return i32_values[0];
-}
 
-template <>
-inline float Value::as<float>() const {
-  CHECK_EQ(dtype_, kFloat32) << "invalid dtype";
-  return f32_values[0];
+#define VALUE_AS_DISPATCH(Type, Name)             \
+  template <>                                     \
+  inline Type Value::as<Type>() const {           \
+    CHECK_EQ(dtype_, k##Name) << "invalid dtype"; \
+    return Name##values[0];\
 }
+AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_AS_DISPATCH);
+#undef VALUE_AS_DISPATCH
 
-template <>
-inline const std::vector<float>& Value::as_vec<float>() const {
-  CHECK_EQ(dtype_.scalar_type(), kFloat32) << "invalid dtype";
-  return f32_values;
+#define VALUE_AS_VEC_DISPATCH(Type, Name) \
+template <> \
+inline const std::vector<Type>& Value::as_vec<Type>() const { \
+  CHECK_EQ(dtype_.scalar_type(), ScalarType::Name) << "invalid dtype"; \
+  return Name##values; \
 }
-
-template <>
-inline const std::vector<int>& Value::as_vec<int>() const {
-  CHECK_EQ(dtype_.scalar_type(), kInt32) << "invalid dtype";
-  return i32_values;
-}
+AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_AS_VEC_DISPATCH);
+#undef VALUE_AS_VEC_DISPATCH
 
 template <typename T>
 class PaddedBuffer;
 
-inline int mod_value(int lhs, int rhs) {
+template <typename T>
+inline typename std::enable_if<std::is_integral<T>::value, T>::type mod_value(
+    T lhs,
+    T rhs) {
   return lhs % rhs;
 }
 
-inline float mod_value(float lhs, float rhs) {
+template <typename T>
+inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+mod_value(T lhs, T rhs) {
   return std::fmod(lhs, rhs);
+}
+
+inline bool mod_value(bool lhs, bool rhs) {
+  LOG(FATAL) << "Attempted modulus of bool";
+  return false;
 }
 
 class SimpleIREvaluator : public CodeGen, public IRVisitor {
@@ -107,17 +118,21 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   void bind(const BufferArg& buf, const CallArg& data) {
-    if (buf.isVar()) {
-      if (buf.dtype() == kInt32) {
-        eval_context_[buf.var()] = data.intData();
-      } else if (buf.dtype() == kFloat32) {
-        eval_context_[buf.var()] = data.floatData();
-      } else {
+    if (!buf.isVar()) {
+      buffer_mapping_[buf.var()] = data.data();
+      return;
+    }
+
+    switch (buf.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name) \
+      case ScalarType::Name: \
+        eval_context_[buf.var()] = data.Name##Data(); \
+        break;
+AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
         LOG(FATAL) << "Unhandled dtype for argument " << buf.var()->name_hint()
                    << ": " << buf.dtype();
-      }
-    } else {
-      buffer_mapping_[buf.var()] = data.data();
     }
   }
 
@@ -182,7 +197,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         case IRNodeType::kMax:
           if (option) {
             // Propagate NaNs
-            if (lhs.dtype() == kFloat32 && rhs.dtype() == kFloat32 && option) {
+            if (is_floating_point(lhs.dtype().scalar_type()) &&
+                is_floating_point(rhs.dtype().scalar_type())) {
               result_v[i] = lhs_v[i];
             } else if (std::isnan((float)rhs_v[i])) {
               result_v[i] = rhs_v[i];
@@ -194,7 +210,8 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
         case IRNodeType::kMin:
           if (option) {
             // Propagate NaNs
-            if (lhs.dtype() == kFloat32 && rhs.dtype() == kFloat32 && option) {
+            if (is_floating_point(lhs.dtype().scalar_type()) &&
+                is_floating_point(rhs.dtype().scalar_type())) {
               result_v[i] = lhs_v[i];
             } else if (std::isnan((float)rhs_v[i])) {
               result_v[i] = rhs_v[i];
@@ -293,12 +310,16 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       value_ = bitwise_binary_op(lhs_v, rhs_v, expr_type);
       return;
     }
-    if (lhs_v.dtype().scalar_type() == kFloat32) {
-      value_ = binary_op<float>(lhs_v, rhs_v, expr_type);
-    } else if (lhs_v.dtype().scalar_type() == kInt32) {
-      value_ = binary_op<int>(lhs_v, rhs_v, expr_type);
-    } else {
-      LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
+
+    switch (lhs_v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                              \
+      case ScalarType::Name:                               \
+        value_ = binary_op<Type>(lhs_v, rhs_v, expr_type); \
+        break;
+AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
     }
   }
 
@@ -316,24 +337,26 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     CHECK_EQ(ret_val1_v.dtype(), ret_val2_v.dtype());
-    if (lhs_v.dtype().scalar_type() == kFloat32) {
-      value_ = compare_select_op<float, int>(
-          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op);
 
-    } else if (lhs_v.dtype().scalar_type() == kInt32) {
-      value_ = compare_select_op<int, int>(
-          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op);
-    } else {
-      LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
+    switch (lhs_v.dtype().scalar_type())  {
+#define TYPE_CASE(Type, Name)                            \
+    case ScalarType::Name:                               \
+      value_ = compare_select_op<Type, int>(             \
+          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
+      break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
     }
   }
 
-  TORCH_API void visit(const IntImm* v) override {
-    value_ = Value(v->value());
+#define IMM_VISIT(Type, Name)                         \
+  TORCH_API void visit(const Name##Imm* v) override { \
+    value_ = Value(v->value());                       \
   }
-  TORCH_API void visit(const FloatImm* v) override {
-    value_ = Value(v->value());
-  }
+AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
+#undef IMM_VISIT
 
   TORCH_API void visit(const Let* v) override {
     const Var* var = dynamic_cast<const Var*>(v->var());
@@ -374,27 +397,50 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     value_ = iter->second;
   }
 
+  template <typename SrcType, typename DstType>
+  std::vector<DstType> castValues(const Dtype& src_dtype, const Value& v) {
+    const std::vector<SrcType>& src_values = v.as_vec<SrcType>();
+    std::vector<DstType> dst_values(src_values.size());
+    for (int i = 0; i < src_dtype.lanes(); ++i) {
+      dst_values[i] = static_cast<DstType>(src_values[i]);
+    }
+    return dst_values;
+  }
+
+  template <typename SrcType>
+  void doCastFromSrc(
+      const Dtype& src_dtype,
+      const Dtype& dst_dtype,
+      const Value& v) {
+    switch (dst_dtype.scalar_type()) {
+#define DST_TYPE_CASE(Type, Name)                                    \
+    case ScalarType::Name:                                           \
+      this->value_ = Value(castValues<SrcType, Type>(src_dtype, v)); \
+      break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, DST_TYPE_CASE);
+#undef DST_TYPE_CASE
+      default:
+        LOG(FATAL) << "Cast invalid dst type " << dst_dtype << "\n";
+    }
+  }
+
   TORCH_API void visit(const Cast* v) override {
     const Expr* src_value = v->src_value();
     src_value->accept(this);
     Dtype dst_dtype = v->dtype();
     Dtype src_dtype = src_value->dtype();
     CHECK_EQ(src_dtype.lanes(), dst_dtype.lanes());
+
     if (src_dtype != dst_dtype) {
-      if (src_dtype == kFloat32 && dst_dtype == kInt32) {
-        const std::vector<float>& src_values = value_.as_vec<float>();
-        std::vector<int> dst_values(src_values.size());
-        for (int i = 0; i < src_dtype.lanes(); ++i) {
-          dst_values[i] = static_cast<int>(src_values[i]);
-        }
-        this->value_ = Value(dst_values);
-      } else if (src_dtype == kInt32 && dst_dtype == kFloat32) {
-        const std::vector<int>& src_values = value_.as_vec<int>();
-        std::vector<float> dst_values(src_values.size());
-        for (int i = 0; i < src_dtype.lanes(); ++i) {
-          dst_values[i] = static_cast<float>(src_values[i]);
-        }
-        this->value_ = Value(dst_values);
+      switch (src_dtype.scalar_type()) {
+#define SRC_TYPE_CASE(Type, Name)                        \
+    case ScalarType::Name:                               \
+      doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
+      break;
+        AT_FORALL_SCALAR_TYPES_AND(Half, SRC_TYPE_CASE);
+#undef SRC_TYPE_CASE
+        default:
+          LOG(FATAL) << "Cast invalid src type " << src_dtype << "\n";
       }
     }
   }
@@ -436,14 +482,16 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->value()->accept(this);
     Value value = this->value();
     int lanes = v->lanes();
-    if (value.dtype() == kInt32) {
-      std::vector<int> v(lanes, value.as<int>());
-      value_ = Value(v);
-    } else if (value.dtype() == kFloat32) {
-      std::vector<float> v(lanes, value.as<float>());
-      value_ = Value(v);
-    } else {
-      LOG(FATAL) << "invalid dtype: " << value.dtype();
+    switch (value.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                       \
+    case ScalarType::Name: {                        \
+      std::vector<Type> v(lanes, value.as<Type>()); \
+      value_ = Value(v);                            \
+    } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        LOG(FATAL) << "invalid dtype: " << value.dtype();
     }
   }
 
@@ -467,27 +515,23 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     std::vector<int> index = value().as_vec<int>();
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
-    Dtype v_sdtype = v->dtype().scalar_type();
-    if (v_sdtype == kFloat32) {
-      float* ptr_f = static_cast<float*>(ptr);
-      std::vector<float> v(index.size());
-      for (size_t i = 0; i < index.size(); i++) {
-        if (mask[i]) {
-          v[i] = ptr_f[index[i]];
-        }
-      }
-      value_ = Value(v);
-    } else if (v_sdtype == kInt32) {
-      int* ptr_i = static_cast<int*>(ptr);
-      std::vector<int> v(index.size());
-      for (size_t i = 0; i < index.size(); i++) {
-        if (mask[i]) {
-          v[i] = ptr_i[index[i]];
-        }
-      }
-      value_ = Value(v);
-    } else {
-      LOG(FATAL) << "Invalid dtype: " << v_sdtype;
+    ScalarType v_sdtype = v->dtype().scalar_type();
+    switch (v_sdtype) {
+#define TYPE_CASE(Type, Name)                     \
+    case ScalarType::Name: {                      \
+      Type* ptr##Name = static_cast<Type*>(ptr);  \
+      std::vector<Type> v(index.size());          \
+      for (size_t i = 0; i < index.size(); i++) { \
+        if (mask[i]) {                            \
+          v[i] = ptr##Name[index[i]];             \
+        }                                         \
+      }                                           \
+      value_ = Value(v);                          \
+    } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        LOG(FATAL) << "Invalid dtype: " << v_sdtype;
     }
   }
 
@@ -502,29 +546,25 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     v->mask()->accept(this);
     std::vector<int> mask = value().as_vec<int>();
     CHECK_EQ(index.size(), mask.size());
-    Dtype v_sdtype = v->value()->dtype().scalar_type();
-    if (v_sdtype == kFloat32) {
-      v->value()->accept(this);
-      std::vector<float> value = this->value().as_vec<float>();
-      CHECK_EQ(index.size(), value.size());
-      float* ptr_f = static_cast<float*>(ptr);
-      for (size_t i = 0; i < index.size(); i++) {
-        if (mask[i]) {
-          ptr_f[index[i]] = value[i];
-        }
-      }
-    } else if (v_sdtype == kInt32) {
-      v->value()->accept(this);
-      std::vector<int> value = this->value().as_vec<int>();
-      CHECK_EQ(index.size(), value.size());
-      int* ptr_i = static_cast<int*>(ptr);
-      for (size_t i = 0; i < index.size(); i++) {
-        if (mask[i]) {
-          ptr_i[index[i]] = value[i];
-        }
-      }
-    } else {
-      LOG(FATAL) << "Invalid dtype: " << v_sdtype;
+    ScalarType v_sdtype = v->value()->dtype().scalar_type();
+
+    switch (v_sdtype) {
+#define TYPE_CASE(Type, Name)                                 \
+    case ScalarType::Name: {                                  \
+      v->value()->accept(this);                               \
+      std::vector<Type> value = this->value().as_vec<Type>(); \
+      CHECK_EQ(index.size(), value.size());                   \
+      Type* ptr##Name = static_cast<Type*>(ptr);              \
+      for (size_t i = 0; i < index.size(); i++) {             \
+        if (mask[i]) {                                        \
+          ptr##Name[index[i]] = value[i];                     \
+        }                                                     \
+      }                                                       \
+    } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        LOG(FATAL) << "Invalid dtype: " << v_sdtype;
     }
   }
 
@@ -752,18 +792,18 @@ class ExprEval {
 
   void call(const std::vector<CallArg>& call_args) {
     std::vector<CallArg> call_args_extended = call_args;
-    if (dtype_ == kFloat32) {
-      std::vector<float> ret_val_arg(1);
-      call_args_extended.push_back(CallArg(ret_val_arg));
-      codegen_->call(call_args_extended);
-      ret_value_ = Value(ret_val_arg[0]);
-    } else if (dtype_ == kInt32) {
-      std::vector<int> ret_val_arg(1);
-      call_args_extended.push_back(CallArg(ret_val_arg));
-      codegen_->call(call_args_extended);
-      ret_value_ = Value(ret_val_arg[0]);
-    } else {
-      throw std::runtime_error("Invalid dtype");
+    switch (dtype_.scalar_type()) {
+#define TYPE_CASE(Type, Name)                             \
+    case ScalarType::Name: {                              \
+      std::vector<Type> ret_val_arg(1);                   \
+      call_args_extended.push_back(CallArg(ret_val_arg)); \
+      codegen_->call(call_args_extended);                 \
+      ret_value_ = Value(ret_val_arg[0]);                 \
+    } break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+      default:
+        throw std::runtime_error("Invalid dtype");
     }
   }
 
@@ -772,6 +812,8 @@ class ExprEval {
     call(std::forward<Ts>(ts)...);
     return ret_value_.as<T>();
   }
+
+  Dtype dtype() { return dtype_; }
 
  private:
   Dtype dtype_;

@@ -64,9 +64,9 @@ void IRPrinter::visit(const Rshift* v) {
 }
 
 void IRPrinter::visit(const Mod* v) {
-  if (v->dtype() == kInt32) {
+  if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
-  } else if (v->dtype() == kFloat32) {
+  } else if (v->dtype().is_floating_point()) {
     os() << "mod(" << v->lhs() << ", " << v->rhs() << ")";
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
@@ -119,21 +119,25 @@ void IRPrinter::visit(const CompareSelect* v) {
   os() << ")";
 }
 
-void IRPrinter::visit(const IntImm* v) {
-  os() << v->value();
-}
 
-void IRPrinter::visit(const FloatImm* v) {
-  std::ostringstream oss;
-  oss << v->value();
-  std::string s = oss.str();
-  if (s.find('.') == std::string::npos) {
-    s += ".f";
-  } else {
-    s += "f";
+#define IMM_PRINT_VISIT(Type, Name)           \
+  void IRPrinter::visit(const Name##Imm* v) { \
+    if (v->dtype().is_floating_point()) {     \
+      std::ostringstream oss;                 \
+      oss << v->value();                      \
+      std::string s = oss.str();              \
+      if (s.find('.') == std::string::npos) { \
+        s += ".f";                            \
+      } else {                                \
+        s += "f";                             \
+      }                                       \
+      os() << s;                              \
+    } else {                                  \
+      os() << v->value();                     \
+    }                                         \
   }
-  os() << s;
-}
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
+#undef IMM_PRINT_VISIT
 
 void IRPrinter::visit(const Cast* v) {
   auto dtype = v->dtype();
@@ -164,6 +168,7 @@ void IRPrinter::visit(const LetStmt* v) {
 }
 
 void IRPrinter::visit(const Ramp* v) {
+  emitIndent();
   os() << "Ramp(" << v->base() << ", " << v->stride() << ", " << v->lanes()
        << ")";
 }
@@ -176,6 +181,7 @@ void IRPrinter::visit(const Load* v) {
 void IRPrinter::visit(const For* v) {
   const Var* var = v->var();
   VarHandle vv(var);
+  emitIndent();
   os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
        << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop()) << "; " << vv
        << "++) {";
@@ -185,8 +191,11 @@ void IRPrinter::visit(const For* v) {
   }
   os() << std::endl;
   if (v->body()) {
+    indent_++;
     os() << *v->body() << std::endl;
+    indent_--;
   }
+  emitIndent();
   os() << "}";
 }
 
@@ -198,6 +207,7 @@ void IRPrinter::visit(const Block* v) {
 
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
+  emitIndent();
   os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value() << ";";
 }
 
@@ -222,6 +232,7 @@ void IRPrinter::visit(const BaseCallNode* v) {
 }
 
 void IRPrinter::visit(const Allocate* v) {
+  emitIndent();
   os() << "Allocate(" << *v->buffer_var() << ", " << v->dtype();
   os() << ", {";
   const std::vector<const Expr*>& dims = v->dims();
@@ -235,6 +246,7 @@ void IRPrinter::visit(const Allocate* v) {
 }
 
 void IRPrinter::visit(const Free* v) {
+  emitIndent();
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
@@ -243,19 +255,34 @@ void IRPrinter::visit(const Cond* v) {
   Stmt* true_stmt = v->true_stmt();
   Stmt* false_stmt = v->false_stmt();
   if (!true_stmt) {
-    os() << "if(!" << *cond << ") {" << std::endl;
+    emitIndent();
+    os() << "if (!" << *cond << ") {" << std::endl;
+    indent_++;
     os() << *false_stmt << std::endl;
+    indent_--;
+    emitIndent();
     os() << "}";
   } else {
-    os() << "if(" << *cond << ") {" << std::endl;
+    emitIndent();
+    os() << "if (" << *cond << ") {" << std::endl;
+    indent_++;
     os() << *true_stmt << std::endl;
+    indent_--;
+    emitIndent();
     os() << "}";
     if (false_stmt) {
       os() << " else {" << std::endl;
+      indent_++;
       os() << *false_stmt << std::endl;
+      indent_--;
+      emitIndent();
       os() << "}";
     }
   }
+}
+
+void IRPrinter::emitIndent() {
+  os() << std::setw(2 * indent_) << "";
 }
 
 std::ostream& operator<<(std::ostream& stream, const ExprHandle& expr) {

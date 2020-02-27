@@ -46,10 +46,10 @@ class ScheduleNode::DependencyTracker : public IRVisitor {
 
     // Extract all the consumer-producer relationship.
     while (!to_process_.empty()) {
-      Tensor* tensor_node = const_cast<Tensor*>(to_process_.front());
+      Tensor* tensor = const_cast<Tensor*>(to_process_.front());
       to_process_.pop();
-      current_consumer_ = tensor_node;
-      tensor_node->function()->body()->accept(this);
+      current_consumer_ = tensor;
+      tensor->body()->accept(this);
     }
 
     // Topologically sorted all the tensors in encountered_
@@ -395,10 +395,11 @@ ScheduleObject* ScheduleNode::CloneScheduleObject(ScheduleObject* object) {
 class Flattener : public IRMutator {
  private:
   Expr* mutate(const FunctionCall* v) override {
+    const Tensor *t = v->tensor();
     Buffer buffer(
-        VarHandle(v->tensor()->function()->func_var()),
-        v->tensor()->function()->body()->dtype(),
-        ExprVectorToExprHandleVector(v->tensor()->function()->dims()));
+        VarHandle(t->func_var()),
+        t->body()->dtype(),
+        ExprVectorToExprHandleVector(t->dims()));
     const std::vector<const Expr*>& params = v->params();
     std::vector<ExprHandle> params_expr(params.size());
     for (size_t i = 0; i < params.size(); i++) {
@@ -412,7 +413,9 @@ class FunctionInliner : public IRMutator {
  public:
   FunctionInliner(const std::vector<Function*>& funcs) : funcs_(funcs) {
     for (Function* func : funcs) {
-      func_var_set_.insert(func->func_var());
+      // TODO: Support multiple-output functions
+      CHECK(func->func_vars().size() == 1);
+      func_var_set_.insert(func->func_var(0));
     }
   }
 
@@ -421,7 +424,9 @@ class FunctionInliner : public IRMutator {
   // mapping.
   const Expr* mutate(const FunctionCall* v) override {
     Function* func = v->tensor()->function();
-    if (func_var_set_.count(func->func_var()) > 0) {
+    // TODO: Support multiple-output functions
+    CHECK(func->func_vars().size() == 1);
+    if (func_var_set_.count(func->func_var(0)) > 0) {
       // Insert the caller/callee pair into the mapping.
       for (int i = 0; i < func->ndim(); i++) {
         const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
@@ -435,7 +440,7 @@ class FunctionInliner : public IRMutator {
       }
 
       // Call the actual replacement.
-      const Expr* body = func->body();
+      const Expr* body = func->body(v->tensor()->output_index());
       const Expr* result = body->accept_mutator(this);
 
       // Remove the caller/callee relationship.
@@ -561,11 +566,11 @@ Stmt* ScheduleNode::Lower() {
       continue;
     }
     Stmt* alloc = new Allocate(
-        tensor->function()->func_var(),
-        tensor->function()->body()->dtype(),
-        tensor->function()->dims());
+        tensor->func_var(),
+        tensor->body()->dtype(),
+        tensor->dims());
     allocs.push_back(alloc);
-    Stmt* free = new Free(tensor->function()->func_var());
+    Stmt* free = new Free(tensor->func_var());
     frees.push_back(free);
   }
   std::reverse(frees.begin(), frees.end());

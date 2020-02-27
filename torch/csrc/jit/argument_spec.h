@@ -49,7 +49,6 @@ struct ArgumentInfo {
         ConvertIntToCPUOrCUDA(device()),
         c10::VaryingShape(dim()),
         c10::VaryingShape(dim()),
-        c10::VaryingShape(dim()),
         requires_grad());
   }
   operator TypePtr() const {

@@ -13,19 +13,22 @@
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Half.h>
 
 namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr::schedule;
 
-void testCudaTestVectorAdd01() {
+template <typename ctype>
+void testCudaTestVectorAdd01_impl() {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
   const int block_size = 128;
-  Buffer a_buf("a", kFloat32, {num_iter, block_count, block_size});
-  Buffer b_buf("b", kFloat32, {num_iter, block_count, block_size});
+  Dtype dtype = ToDtype<ctype>();
+  Buffer a_buf("a", dtype, {num_iter, block_count, block_size});
+  Buffer b_buf("b", dtype, {num_iter, block_count, block_size});
   Tensor* c = Compute(
       "c",
       {
@@ -37,39 +40,39 @@ void testCudaTestVectorAdd01() {
         return a_buf(n, b_id, t_id) + b_buf(n, b_id, t_id);
       });
   Schedule sch({c});
-  VarHandle b_id(c->function()->arg(1));
-  VarHandle t_id(c->function()->arg(2));
+  VarHandle b_id(c->arg(1));
+  VarHandle t_id(c->arg(2));
   c->GPUExecConfig({b_id}, {t_id});
   Stmt* stmt = sch.Lower();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
   const int N = block_count * block_size * num_iter;
-  PaddedBuffer<float> a_v(N);
-  PaddedBuffer<float> b_v(N);
-  PaddedBuffer<float> c_v(N);
-  PaddedBuffer<float> c_ref(N);
+  PaddedBuffer<ctype> a_v(N);
+  PaddedBuffer<ctype> b_v(N);
+  PaddedBuffer<ctype> c_v(N);
+  PaddedBuffer<ctype> c_ref(N);
 
   for (int i = 0; i < N; i++) {
-    a_v(i) = i;
-    b_v(i) = i * 3 + 7;
+    a_v(i) = ctype(i);
+    b_v(i) = ctype(i * 3 + 7);
     c_ref(i) = a_v(i) + b_v(i);
   }
 
   // TODO: move gpu support into PaddedBuffer
-  float* a_dev = nullptr;
-  cudaMalloc(&a_dev, N * sizeof(float));
-  float* b_dev = nullptr;
-  cudaMalloc(&b_dev, N * sizeof(float));
-  float* c_dev = nullptr;
-  cudaMalloc(&c_dev, N * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  ctype* a_dev = nullptr;
+  cudaMalloc(&a_dev, N * sizeof(ctype));
+  ctype* b_dev = nullptr;
+  cudaMalloc(&b_dev, N * sizeof(ctype));
+  ctype* c_dev = nullptr;
+  cudaMalloc(&c_dev, N * sizeof(ctype));
+  cudaMemcpy(a_dev, a_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
+  cudaMemcpy(b_dev, b_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
   cudaDeviceSynchronize();
 
   cuda_cg(c_dev, a_dev, b_dev);
 
   cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(c_v.data(), c_dev, N * sizeof(ctype), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 
   ExpectAllNear(c_v, c_ref, 1e-5);
@@ -79,10 +82,24 @@ void testCudaTestVectorAdd01() {
   cudaFree(c_dev);
 }
 
+void testCudaTestVectorAdd01() {
+  // floating types.
+  testCudaTestVectorAdd01_impl<float>();
+  testCudaTestVectorAdd01_impl<at::Half>();
+  testCudaTestVectorAdd01_impl<double>();
+
+  // integer types.
+  testCudaTestVectorAdd01_impl<int8_t>();
+  testCudaTestVectorAdd01_impl<uint8_t>();
+  testCudaTestVectorAdd01_impl<int16_t>();
+  testCudaTestVectorAdd01_impl<int32_t>();
+  testCudaTestVectorAdd01_impl<int64_t>();
+}
+
 static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   KernelScope kernel_scope;
-  Buffer a_buf("a", kFloat32, {N});
-  Buffer b_buf("b", kFloat32, {N});
+  Buffer a_buf("a", kFloat, {N});
+  Buffer b_buf("b", kFloat, {N});
   Tensor* c = Compute(
       "c",
       {
@@ -90,7 +107,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       },
       [&](const VarHandle& n) { return a_buf(n) + b_buf(n); });
   Schedule sch({c});
-  VarHandle n(c->arg(0));
+  VarHandle n(c->function()->arg(0));
   VarHandle n_outer;
   VarHandle n_inner;
   c->SplitWithMask(n, block_size, true, &n_outer, &n_inner);
@@ -141,10 +158,10 @@ void testCudaTestVectorAdd02() {
 void testCudaDynamicShape2D() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
-    VarHandle m("m", kInt32);
-    VarHandle n("n", kInt32);
-    Buffer a(VarHandle("a", kHandle), kFloat32, {m, n});
-    Buffer b(VarHandle("b", kHandle), kFloat32, {m, n});
+    VarHandle m("m", kInt);
+    VarHandle n("n", kInt);
+    Buffer a(VarHandle("a", kHandle), kFloat, {m, n});
+    Buffer b(VarHandle("b", kHandle), kFloat, {m, n});
     Tensor* c =
         Compute("c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
           return a(i, j) + b(i, j);
@@ -213,11 +230,11 @@ void testCudaTestRand01() {
           {block_size, "t_id"},
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
-        return Intrinsics::make(IntrinsicsOp::kRand, kFloat32);
+        return Intrinsics::make(IntrinsicsOp::kRand, kFloat);
       });
   Schedule sch({c});
-  VarHandle b_id(c->arg(1));
-  VarHandle t_id(c->arg(2));
+  VarHandle b_id(c->function()->arg(1));
+  VarHandle t_id(c->function()->arg(2));
   c->GPUExecConfig({b_id}, {t_id});
   Stmt* stmt = sch.Lower();
   CudaCodeGen cuda_cg(stmt, c);
@@ -261,14 +278,14 @@ void testCudaTestRand01() {
 void testCudaDynamicShapeSplit() {
   KernelScope ks;
   constexpr int N = 4096;
-  VarHandle n("n", kInt32);
-  Buffer a(VarHandle("a", kHandle), kFloat32, {n});
+  VarHandle n("n", kInt);
+  Buffer a(VarHandle("a", kHandle), kFloat, {n});
   Tensor* b =
       Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
   auto sch = Schedule::make({b});
   VarHandle outer;
   VarHandle inner;
-  b->SplitWithMask(VarHandle(b->arg(0)), 1024, true, &outer, &inner);
+  b->SplitWithMask(VarHandle(b->function()->arg(0)), 1024, true, &outer, &inner);
   b->GPUExecConfig({outer}, {inner});
   Stmt* s = sch.Lower();
   CudaCodeGen cg(s, {a, b, n});

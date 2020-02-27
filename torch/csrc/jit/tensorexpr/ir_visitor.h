@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
@@ -17,8 +18,12 @@ class Xor;
 class Lshift;
 class Rshift;
 class CompareSelect;
-class IntImm;
-class FloatImm;
+
+#define IMM_DECLARE(Type, Name) class Name##Imm;
+
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE)
+#undef IMM_DECLARE
+
 class Cast;
 class Var;
 class Let;
@@ -52,8 +57,13 @@ class TORCH_API IRVisitor {
   virtual void visit(const Lshift* v);
   virtual void visit(const Rshift* v);
   virtual void visit(const CompareSelect* v);
-  virtual void visit(const IntImm* v);
-  virtual void visit(const FloatImm* v);
+
+#define IMM_PRINT_VISIT(Type, Name) \
+  virtual void visit(const Name##Imm* v);
+
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
+#undef IMM_PRINT_VISIT
+
   virtual void visit(const Cast* v);
   virtual void visit(const Var* v);
   virtual void visit(const Let* v);
