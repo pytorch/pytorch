@@ -24,12 +24,12 @@ def get_floating_dtype(A):
 
 
 def matmul(A, B):
+    # type: (Optional[Tensor], Tensor) -> Tensor
     """Multiply two matrices.
 
     If A is None, return B. A can be sparse or dense. B is always
     dense.
     """
-    # type: (Optional[Tensor], Tensor) -> Tensor
     if A is None:
         return B
     if is_sparse(A):
@@ -60,27 +60,17 @@ def transjugate(A):
     return conjugate(transpose(A))
 
 
-def norm(A):
-    """Return Frobenius norm of a real matrix.
-    """
-    return torch.norm(A, 2)
-    if A.is_cuda:
-        # e.g. conj is not available in CUDA
-        return (abs(A) ** 2).sum().sqrt()
-    return A.norm(2, [-2, -1])
-
-
 def bform(X, A, Y):
+    # type: (Tensor, Optional[Tensor], Tensor) -> Tensor
     """Return bilinear form of matrices: :math:`X^T A Y`.
     """
-    # type: (Tensor, Optional[Tensor], Tensor) -> Tensor
     return matmul(transpose(X), matmul(A, Y))
 
 
 def qform(A, S):
+    # type: (Optional[Tensor], Tensor) -> Tensor
     """Return quadratic form :math:`S^T A S`.
     """
-    # type: (Optional[Tensor], Tensor) -> Tensor
     return bform(S, A, S)
 
 
@@ -96,9 +86,9 @@ def basis(A):
 
 
 def symeig(A, largest=False, eigenvectors=True):
+    # type: (Tensor, Optional[bool], Optional[bool]) -> Tuple[Tensor, Tensor]
     """Return eigenpairs of A with specified ordering.
     """
-    # type: (Tensor, Optional[bool], Optional[bool]) -> Tuple[Tensor, Tensor]
     if largest is None:
         largest = False
     if eigenvectors is None:

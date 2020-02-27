@@ -8,7 +8,12 @@ from . import _linalg_utils as _utils
 from ._overrides import has_torch_function, handle_torch_function
 
 
-def get_approximate_basis(A, q, niter=2, M=None):
+def get_approximate_basis(A,        # type: Tensor
+                          q,        # type: int
+                          niter=2,  # type: Optional[int]
+                          M=None    # type: Optional[Tensor]
+                         ):
+    # type: (...) -> Tensor
     """Return tensor :math:`Q` with :math:`q` orthonormal columns such
     that :math:`Q Q^H A` approximates :math:`A`. If :math:`M` is
     specified, then :math:`Q` is such that :math:`Q Q^H (A - M)`
@@ -49,9 +54,7 @@ def get_approximate_basis(A, q, niter=2, M=None):
           constructing approximate matrix decompositions,
           arXiv:0909.4061 [math.NA; math.PR], 2009 (available at
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
-
     """
-    # type: (Tensor, int, Optional[int], Optional[Tensor]) -> Tensor
 
     niter = 2 if niter is None else niter
     m, n = A.shape[-2:]
@@ -77,6 +80,7 @@ def get_approximate_basis(A, q, niter=2, M=None):
 
 
 def svd_lowrank(A, q=6, niter=2, M=None):
+    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
     """Return the singular value decomposition ``(U, S, V)`` of a matrix,
     batches of matrices, or a sparse matrix :math:`A` such that
     :math:`A \approx U diag(S) V^T`. In case :math:`M` is given, then
@@ -116,7 +120,6 @@ def svd_lowrank(A, q=6, niter=2, M=None):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
-    # type: (Tensor, Optional[int], Optional[int], Optional[Tensor]) -> Tuple[Tensor, Tensor, Tensor]
     if not torch.jit.is_scripting():
         tensor_ops = (A, M)
         if (not set(map(type, tensor_ops)).issubset((torch.Tensor, type(None))) and has_torch_function(tensor_ops)):
@@ -162,6 +165,7 @@ def _svd_lowrank(A, q=6, niter=2, M=None):
 
 
 def pca(A, q=None, center=True, niter=2):
+    # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.
 
@@ -221,7 +225,6 @@ def pca(A, q=None, center=True, niter=2):
           `arXiv <http://arxiv.org/abs/0909.4061>`_).
 
     """
-    # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
 
     if not torch.jit.is_scripting():
         if type(A) is not torch.Tensor and has_torch_function((A,)):

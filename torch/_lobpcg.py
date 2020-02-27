@@ -314,10 +314,10 @@ class LOBPCG(object):
         """Set and update iteration variables.
         """
         if self.ivars['istep'] == 0:
-            X_norm = float(_utils.norm(self.X))
+            X_norm = float(torch.norm(self.X))
             iX_norm = X_norm ** -1
-            A_norm = float(_utils.norm(_utils.matmul(self.A, self.X))) * iX_norm
-            B_norm = float(_utils.norm(_utils.matmul(self.B, self.X))) * iX_norm
+            A_norm = float(torch.norm(_utils.matmul(self.A, self.X))) * iX_norm
+            B_norm = float(torch.norm(_utils.matmul(self.B, self.X))) * iX_norm
             self.fvars['X_norm'] = X_norm
             self.fvars['A_norm'] = A_norm
             self.fvars['B_norm'] = B_norm
@@ -661,7 +661,7 @@ class LOBPCG(object):
         self.ivars.pop('ortho_i', 0)
         self.ivars.pop('ortho_j', 0)
 
-        BV_norm = _utils.norm(mm_B(self.B, V))
+        BV_norm = torch.norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
         VBU = mm(_utils.transpose(V), BU)
         i = j = 0
@@ -684,12 +684,12 @@ class LOBPCG(object):
                     return U
                 BU = mm_B(self.B, U)
                 UBU = mm(_utils.transpose(U), BU)
-                U_norm = _utils.norm(U)
-                BU_norm = _utils.norm(BU)
+                U_norm = torch.norm(U)
+                BU_norm = torch.norm(BU)
                 R = UBU - torch.eye(UBU.shape[-1],
                                     device=UBU.device,
                                     dtype=UBU.dtype)
-                R_norm = _utils.norm(R)
+                R_norm = torch.norm(R)
                 # https://github.com/pytorch/pytorch/issues/33810 workaround:
                 rerr = float(R_norm) * float(BU_norm * U_norm) ** -1
                 vkey = 'ortho_UBUmI_rerr[{}, {}]'.format(i, j)
@@ -697,8 +697,8 @@ class LOBPCG(object):
                 if rerr < tau_ortho:
                     break
             VBU = mm(_utils.transpose(V), BU)
-            VBU_norm = _utils.norm(VBU)
-            U_norm = _utils.norm(U)
+            VBU_norm = torch.norm(VBU)
+            U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1
             vkey = 'ortho_VBU_rerr[{}]'.format(i)
             self.fvars[vkey] = rerr
