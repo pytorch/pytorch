@@ -3829,6 +3829,32 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, bad_mark_dirty_err):
             fn(a, b)
 
+    def test_custom_function_return_view_in_nograd(self):
+        class Alias(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x[:]
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        inp = torch.rand(2, requires_grad=True)
+
+        with torch.no_grad():
+            output = Alias.apply(inp)
+
+        with torch.no_grad():
+            expected_output = inp[:]
+
+        # Calling the custom function should operate as if we called an equivalent op
+        self.assertEqual(output.requires_grad, expected_output.requires_grad)
+
+        # Check that in-place modification on view throws
+        leaf_grad_err = "A view was created in no_grad mode and is being modified inplace"
+        with self.assertRaisesRegex(RuntimeError, leaf_grad_err):
+            output.zero_()
+
     def test_grad_mode_restored_reentrant(self):
         class MyFunction(Function):
             @staticmethod
