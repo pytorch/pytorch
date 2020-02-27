@@ -1177,13 +1177,13 @@ DropoutState& get_dropout_state(double dropout_p, bool train, TensorOptions opti
 
 Tensor try_get_weight_buf(
       const Tensor& input, TensorList parameters, bool has_biases,
-      cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional) {
+      cudnnRNNMode_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, bool type_2) {
   // Prepare all relevant descriptors
   auto handle = getCudnnHandle();
   auto datatype = getCudnnDataType(input);
 
   RNNDescriptorParams rnn;
-  rnn.set(mode, hidden_size, num_layers, bidirectional, promote_rnn_math_type(datatype), datatype);
+  rnn.set(mode, hidden_size, num_layers, bidirectional, type_2, promote_rnn_math_type(datatype), datatype);
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
   TensorGeometry x_geom ({1, input.size(-1)});
@@ -1236,7 +1236,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   std::cout << "CUDNN implementation is called\n";
 
   auto weight_buf = try_get_weight_buf(
-      input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
+      input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
   if (!weight_buf.defined()) {
     AT_WARN(WEIGHT_FORMAT_WARN);
   }
@@ -1266,7 +1266,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   int64_t hidden_size = hx.size(2);
 
   auto weight_buf = try_get_weight_buf(
-      input, params, has_biases, mode, hidden_size, num_layers, bidirectional);
+      input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
   if (!weight_buf.defined()) {
     AT_WARN(WEIGHT_FORMAT_WARN);
   }
