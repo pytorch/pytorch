@@ -12,11 +12,14 @@ declare -x "AWS_SECRET_ACCESS_KEY=${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}"
 set -eux -o pipefail
 export PATH="$MINICONDA_ROOT/bin:$PATH"
 
+# This gets set in binary_populate_env.sh, but lets have a sane default just in case
+PIP_UPLOAD_FOLDER=${PIP_UPLOAD_FOLDER:-nightly}
+
 # Upload the package to the final location
 pushd /home/circleci/project/final_pkgs
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda install -yq anaconda-client
-  anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u pytorch-nightly --label main --no-progress --force
+  anaconda -t "${CONDA_PYTORCHBOT_TOKEN}" upload  "$(ls)" -u "pytorch-${PIP_UPLOAD_FOLDER}" --label main --no-progress --force
 elif [[ "$PACKAGE_TYPE" == libtorch ]]; then
   retry pip install -q awscli
   s3_dir="s3://pytorch/libtorch/${PIP_UPLOAD_FOLDER}${DESIRED_CUDA}/"
