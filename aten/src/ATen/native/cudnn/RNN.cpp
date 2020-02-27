@@ -142,7 +142,7 @@ namespace {
       this->set_mode(mode);
       this->hidden_size = hidden_size;
       this->num_layers = num_layers;
-      this->set_bidirectional(bidirectional && type_2);
+      this->set_bidirectional(bidirectional);
       this->datatype = datatype;
       this->input_datatype = input_datatype;
     }
