@@ -231,6 +231,7 @@ class CAFFE2_API Tensor {
              "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
              "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
              "equivalent dense tensor, multiply numel() by element_size()");
+    return impl_->numel() * impl_->itemsize();
   }
 
   int64_t numel() const {
