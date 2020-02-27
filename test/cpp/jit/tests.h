@@ -84,7 +84,7 @@ namespace jit {
   _(MobileTypeParser)                  \
   _(LiteInterpreterPrim)               \
   _(LiteInterpreterLoadOrigJit)        \
-  _(LiteInterpreterQuant)
+  _(LiteInterpreterSetState)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \

@@ -22,6 +22,15 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
+Function* CompilationUnit::find_method_by_qn(const c10::QualifiedName& qn) {
+  for (auto& fn : methods_) {
+    if (fn->qualname() == qn) {
+      return fn.get();
+    }
+  }
+  return nullptr;
+}
+
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
 #if defined(PYTORCH_MOBILE_OBSERVER)
   auto observer = torch::observerConfig().getModuleObserver();

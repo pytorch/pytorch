@@ -93,6 +93,11 @@ bool InterpreterState::run(Stack& stack) {
       case SET_ATTR: {
         auto v = pop(stack);
         auto userObj = pop(stack).toObject();
+        // Mobile only: since the number of slots is not known, resize the numAttributes
+        // before setSlot.
+        while (userObj->type()->numAttributes() <= inst.X) {
+          userObj->type()->addAttribute(std::to_string(userObj->type()->numAttributes()), v.type());
+        }
         userObj->setSlot(inst.X, std::move(v));
         ++pc;
       } break;
