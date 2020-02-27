@@ -449,6 +449,7 @@ def gen_pyi(declarations_path, out):
                     .format(FACTORY_PARAMS),
                     'def randint(high: _int, size: _size, *, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS)],
+        'is_grad_enabled': ['def is_grad_enabled() -> _bool: ...']
     })
     for binop in ['add', 'sub', 'mul', 'div']:
         unsorted_function_hints[binop].append(
@@ -509,7 +510,7 @@ def gen_pyi(declarations_path, out):
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
-        'cuda': ['def cuda(self, device: Optional[_device]=None, non_blocking: _bool=False) -> Tensor: ...'],
+        'cuda': ['def cuda(self, device: Optional[Union[_device, _int, str]]=None, non_blocking: _bool=False) -> Tensor: ...'],
         'numpy': ['def numpy(self) -> Any: ...'],
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
@@ -522,6 +523,9 @@ def gen_pyi(declarations_path, out):
         'is_contiguous': ['def is_contiguous(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
+        'is_sparse': ['is_sparse: _bool'],
+        'is_quantized': ['is_quantized: _bool'],
+        'is_mkldnn': ['is_mkldnn: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
         'to': ['def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...',
                'def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, '
@@ -586,7 +590,7 @@ def gen_pyi(declarations_path, out):
     # source
     dtype_class_hints = ['{}: dtype = ...'.format(n)
                          for n in
-                         ['float32', 'float', 'float64', 'double', 'float16', 'half',
+                         ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'complex128', 'quint8', 'qint8', 'qint32', 'bool']]
 
