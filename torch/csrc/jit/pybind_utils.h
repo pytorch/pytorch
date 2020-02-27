@@ -271,6 +271,11 @@ inline InferredType tryToInferContainerType(py::handle input) {
       element_type = *unified_type;
     }
     return InferredType(ListType::create(element_type));
+#ifdef USE_DISTRIBUTED
+  } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
+    auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
+    return InferredType(RRefType::create(rref_ivalue.type()));
+#endif
   } else {
     // TODO: this message is not correct anymore, since this InferredType is
     // used from a bunch of circumstances unrelated to tracing. We can re-use
