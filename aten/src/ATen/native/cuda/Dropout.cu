@@ -9,6 +9,7 @@
 
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 
 #include <THC/THCGeneral.h>
 
@@ -19,6 +20,7 @@ namespace {
 
 // philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
 // for all members of float4 to be consumed UNROLL has to be 4. Don't change!
+// Note: VEC <= 4 (and in most real-world cases will be 4), so same logic applies.
 const int UNROLL = 4;
 
 template <
@@ -54,13 +56,13 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
   for (IndexType linearIndex = idx * VEC;
       linearIndex < totalElements;
       linearIndex += gridDim.x * blockDim.x * VEC) {
-    // keep UNROLL * VEC values so we can both unroll & vectorize if we so choose
+    // local storage
     scalar_t src[VEC];
     // We'll use this to actually cause vectorized loads later
     LoadT *value = reinterpret_cast<LoadT*>(&src);
 
     //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
-    // Note: need a new set of random values per 4 elements -- we'll handle UNROLL * VEC elements in this thread, so need UNROLL * VEC / 4
+    // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
     float4 rand = curand_uniform4(&state);
 
@@ -69,14 +71,18 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     rand.z = rand.z < p;
     rand.w = rand.w < p;
 
+    // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
+    // -- the IndexToOffset call _could_ be replaced with just linearIndex, but this is
+    // hopefully low enough overhead to not matter
     const IndexType aOffset =
-      cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(linearIndex, a); //  + ii*blockDim.x*gridDim.x*ii, a);
+      cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(linearIndex, a);
     // Single vectorized load
     *value = *reinterpret_cast<LoadT*>(&a.data[aOffset]);
 
     scalar_t r[VEC];
     uint8_t mask[VEC];
 
+    // Perform the actual computation
     #pragma unroll
     for (int ii = 0; ii < VEC; ii++) {
       r[ii] = src[ii]*(&rand.x)[ii]*pinv;
@@ -169,14 +175,6 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor
        });
 }
 
-int get_alignment(uint64_t addr) {
-  if (addr % 16 == 0) return 16;
-  if (addr %  8 == 0) return  8;
-  if (addr %  4 == 0) return  4;
-  if (addr %  2 == 0) return  2;
-  return 1;
-}
-
 template <typename scalar_t>
 int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   int vec_size = 4;
@@ -184,9 +182,7 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   if (!self.is_contiguous() || !ret.is_contiguous() || !mask.is_contiguous()) {
     vec_size = 1;
   } else {
-    vec_size = std::min(vec_size, (get_alignment((uint64_t)self.data_ptr()) / (int)sizeof(scalar_t)));
-    vec_size = std::min(vec_size, get_alignment((uint64_t)ret.data_ptr()) / (int)sizeof(scalar_t));
-    vec_size = std::min(vec_size, get_alignment((uint64_t)mask.data_ptr()) / (int)sizeof(uint8_t));
+    vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
