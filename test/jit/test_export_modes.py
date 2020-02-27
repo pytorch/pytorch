@@ -13,7 +13,7 @@ from torch.autograd import Variable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfNoLapack
+from torch.testing._internal.common_utils import skipIfNoLapack, suppress_warnings
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -79,6 +79,8 @@ class TestExportModes(JitTestCase):
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
             ModelWithAtenNotONNXOp(), (x, y), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     # torch.fmod is using to test ONNX_ATEN.
@@ -94,4 +96,6 @@ class TestExportModes(JitTestCase):
         y = torch.randn(3, 4, dtype=torch.float32)
         torch.onnx.export_to_pretty_string(
             ModelWithAtenFmod(), (x, y), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN)
