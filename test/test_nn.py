@@ -7644,17 +7644,6 @@ class TestNN(NNTestCase):
         input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(memory_format=torch.channels_last)
         out = torch.cudnn_convolution_transpose(input, weight, None, (1, 1), (0, 0), (1, 1), (1, 1), 4, False, False)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
-    @skipIfRocm
-    def test_conv_cudnn_nhwc_support(self):
-        input = torch.randn((1, 16, 1, 1), dtype=torch.float16, device="cuda", requires_grad=True)
-        weight = torch.randn((8, 16, 3, 3), dtype=torch.float16, device="cuda", requires_grad=True)
-        weight = weight.to(memory_format=torch.channels_last)
-        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
-        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
-        o.sum().backward()
-
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
@@ -10798,6 +10787,19 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_conv_cudnn_nhwc_support(self, device, dtype):
+        input = torch.randn((1, 16, 1, 1), dtype=dtype, device="cuda", requires_grad=True)
+        weight = torch.randn((8, 16, 3, 3), dtype=dtype, device="cuda", requires_grad=True)
+        weight = weight.to(memory_format=torch.channels_last)
+        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
+        o.sum().backward()
+
 
     @onlyCUDA
     @skipCUDAIfRocm
