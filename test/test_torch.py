@@ -3570,6 +3570,13 @@ class _TestTorchMixin(object):
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
 
+        # Check that deepcopy preserves grad
+        a = torch.randn(5, 5)
+        a.grad = torch.randn(5, 5)
+        b = deepcopy(a)
+        self.assertEqual(a, b)
+        self.assertEqual(a.grad, b.grad)
+
     def test_deepcopy_scalar(self):
         from copy import deepcopy
         a = torch.tensor(5)
