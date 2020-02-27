@@ -14090,7 +14090,7 @@ class TestDevicePrecision(TestCase):
     def _test_linspace(self, device, dtype, steps):
         a = torch.linspace(0, 10, steps=steps, dtype=dtype, device=device)
         b = torch.linspace(0, 10, steps=steps)
-        self.assertEqual(a, b)
+        self.assertEqual(a, b, exact_dtype=False)
 
     # See NOTE [Linspace+Logspace precision override]
     @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
@@ -14108,12 +14108,12 @@ class TestDevicePrecision(TestCase):
     def _test_logspace(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps)
-        self.assertEqual(a, b)
+        self.assertEqual(a, b, exact_dtype=False)
 
     def _test_logspace_base2(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, base=2, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps, base=2)
-        self.assertEqual(a, b)
+        self.assertEqual(a, b, exact_dtype=False)
 
     # See NOTE [Linspace+Logspace precision override]
     @precisionOverride({torch.half: 0.0157 + LINSPACE_LOGSPACE_EXTRA_EPS})
@@ -14296,7 +14296,7 @@ class TestDevicePrecision(TestCase):
             torch.uint8)
     def test_from_sequence(self, device, dtype):
         seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
-        reference = torch.arange(0, 20).resize_(5, 4)
+        reference = torch.arange(0, 20, dtype=dtype).resize_(5, 4)
         self.assertEqual(torch.tensor(seq, dtype=dtype, device=device), reference)
 
     def test_cat(self, device):
@@ -15303,7 +15303,7 @@ class TestTensorDeviceOps(TestCase):
     def assertEqual(self, *args, **kwargs):
         kwargs.setdefault('exact_dtype', True)
         # NB: Hard-code the super class due to instantiation
-        TestCase.assertEqual(*args, **kwargs)
+        TestCase.assertEqual(self, *args, **kwargs)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
         cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
@@ -15356,7 +15356,7 @@ class TestTensorDeviceOps(TestCase):
 class TestTorch(TestCase, _TestTorchMixin):
     def assertEqual(self, *args, **kwargs):
         kwargs.setdefault('exact_dtype', True)
-        super(TestTorch, self).assertEqual(*args, **kwargs)
+        super(TestTorch, self).assertEqual(self, *args, **kwargs)
 
 
 # Generates tests
