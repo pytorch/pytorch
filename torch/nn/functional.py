@@ -3762,7 +3762,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
         # convert ByteTensor attn_mask to float
         if attn_mask.dtype == torch.uint8:
             attn_mask = torch.zeros(attn_mask.size(),
-                                    device=attn_mask.device).masked_fill_(attn_mask.bool(),
+                                    device=attn_mask.device).masked_fill_(attn_mask.to(torch.bool),
                                                                           float('-inf'))
 
         if attn_mask.dim() == 2:
@@ -3778,7 +3778,7 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     # convert ByteTensor key_padding_mask to bool
     if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
-        key_padding_mask = key_padding_mask.bool()
+        key_padding_mask = key_padding_mask.to(torch.bool)
 
     if bias_k is not None and bias_v is not None:
         if static_k is None and static_v is None:
