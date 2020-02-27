@@ -171,11 +171,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
@@ -183,15 +183,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(DispatchKey::VariableTensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}),
+      &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(DispatchKey::VariableTensorId, &VariableType::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .kernel(DispatchKey::VariableTensorId, &VariableType::${type_wrapper_name}))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -216,7 +215,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${api_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${type_method_args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -782,11 +781,13 @@ def emit_body(declaration):
                 if not return_info['dynamic_type'] in ['Tensor', 'TensorList']:
                     raise RuntimeError("{} that return differentiable views can only return Tensor or Tensor[]".format(base_name))
                 # Only allow rebasing of the history if we return a single Tensor
-                allow_rebase_history = 'true'
+                # If we are in a no grad block, raise a warning
+                # See NOTE [ View + Inplace detection ] for more details about this logic
+                creation_meta = "GradMode::is_enabled() ? CreationMeta::DEFAULT: CreationMeta::NO_GRAD_MODE"
                 if return_info['dynamic_type'] == 'TensorList':
-                    allow_rebase_history = 'false'
-                wrapped_call = ("as_view(/* base */{}, /* output */ {}, /* is_differentiable */ true, "
-                                "/* allow_rebase_history */ {})").format(view_info, call, allow_rebase_history)
+                    creation_meta = "CreationMeta::MULTI_OUTPUT_NODE"
+                wrapped_call = ("as_view(/* base */ {}, /* output */ {}, /* is_differentiable */ true, "
+                                "/* creation_meta */ {})").format(view_info, call, creation_meta)
                 return wrapped_call
             else:
                 # This could be supported but we don't need it at the moment, so keeping things simple.

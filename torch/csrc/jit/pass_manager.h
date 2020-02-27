@@ -2,15 +2,19 @@
 
 #include <torch/csrc/jit/ir.h>
 
-/* `getCustomPasses()` returns a vector of passes that will be executed after
- * differentiation but before any fusion.  This is the de-facto location
+/* `getCustomPreFusionPasses()` returns a vector of passes that will be executed
+ * after differentiation but before any fusion. This is the de-facto location
  * for compiler backends to insert passes.
  *
- * Static registration of a pass can be done by creating a global
- * `RegisterPass r(Pass)` variable in a compilation unit.
+ * `getCustomPostFusionPasses()` returns a vector of passes that will be
+ * executed after differentiation and after fusion (if any). This is the
+ * location for fusion cleanup passes if they are needed.
  *
- * pass_manager.h uses a Meyer's singleton
- * to store a vector of `Pass`es, which modify the IR graph in place.
+ * Static registration of a pass can be done by creating a global
+ * `Register{Pre,Post}FusionPass r(Pass)` variable in a compilation unit.
+ *
+ * pass_manager.h uses a Meyer's singleton to store a vector of `Pass`es, which
+ * modify the IR graph in place.
  */
 
 namespace torch {
@@ -19,10 +23,17 @@ namespace jit {
 // A pass modifies a Graph in place.
 using Pass = std::function<void(std::shared_ptr<Graph>&)>;
 
-TORCH_API std::vector<Pass>& getCustomPasses();
+TORCH_API std::vector<Pass>& getCustomPostFusionPasses();
+TORCH_API std::vector<Pass>& getCustomPreFusionPasses();
 
-struct TORCH_API RegisterPass {
-  RegisterPass(Pass p);
+struct TORCH_API RegisterPostFusionPass {
+  RegisterPostFusionPass(Pass p);
+};
+
+using RegisterPass = RegisterPostFusionPass;
+
+struct TORCH_API RegisterPreFusionPass {
+  RegisterPreFusionPass(Pass p);
 };
 
 } // namespace jit

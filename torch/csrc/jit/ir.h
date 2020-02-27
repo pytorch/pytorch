@@ -1124,9 +1124,7 @@ struct Graph {
   TORCH_API Node* createLoad(const std::string& name, const TypePtr& type);
   TORCH_API Node* createIsInstance(
       Value* v,
-      at::ArrayRef<TypePtr> types,
-      bool is_list,
-      bool is_tuple);
+      at::ArrayRef<TypePtr> types);
 
   TORCH_API Value* insertUncheckedCast(Value* v, TypePtr type);
 

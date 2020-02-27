@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     simple_sparse_reduce_tests
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
-    retry_on_address_already_in_use_error, TEST_WITH_TSAN
+    retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -330,7 +330,7 @@ class RendezvousTest(TestCase):
 
 
 class RendezvousEnvTest(TestCase):
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_common_errors(self):
         # TODO remove this hack
         if not hasattr(c10d, "ProcessGroupNCCL"):
@@ -422,7 +422,7 @@ class RendezvousEnvTest(TestCase):
             self.assertEqual(rank, 0)
             self.assertEqual(size, 1)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
         os.environ['WORLD_SIZE'] = '1'
         os.environ['MASTER_ADDR'] = '127.0.0.1'
@@ -475,6 +475,13 @@ class RendezvousFileTest(TestCase):
 
 
 class RendezvousTCPTest(TestCase):
+
+    def create_tcp_url(self):
+        addr = "localhost"
+        port = common.find_free_port()
+        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        return url
+
     def test_common_errors(self):
         with self.assertRaisesRegex(ValueError, 'port number missing'):
             gen = c10d.rendezvous('tcp://127.0.0.1?rank=0&world_size=1')
@@ -486,11 +493,9 @@ class RendezvousTCPTest(TestCase):
             gen = c10d.rendezvous('tcp://127.0.0.1:23456?rank=0')
             next(gen)
 
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_nominal(self):
-        addr = 'localhost'
-        port = common.find_free_port()
-        url = 'tcp://%s:%d?world_size=%d' % (addr, port, 1)
+        url = self.create_tcp_url()
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)
@@ -501,6 +506,22 @@ class RendezvousTCPTest(TestCase):
 
         # check with get
         self.assertEqual(b"value0", store0.get("key0"))
+
+    @retry_on_connect_failures(connect_errors=(CONNECT_TIMEOUT, ADDRESS_IN_USE))
+    def test_tcp_store_timeout_set(self):
+        url = self.create_tcp_url()
+        test_store_timeout = timedelta(seconds=10)
+        gen0 = c10d.rendezvous(url + "&rank=0", timeout=test_store_timeout)
+        store0, rank0, size0 = next(gen0)
+        # this should time out in 10s. If the timeout passed into rendezvous was
+        # not respected, it will take much longer to timeout.
+        start = time.time()
+        with self.assertRaisesRegex(RuntimeError, "Timeout"):
+            store0.get("nonexistant key")
+
+        end = time.time()
+        time_diff = end - start
+        self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
 
 class TimeoutTest(TestCase):
@@ -542,18 +563,18 @@ class TimeoutTest(TestCase):
                 # waiting time should be 1s, use 3s to rule out false alarm
                 self.assertGreater(3, c2p[0])
             elif isinstance(c2p[0], RuntimeError):
-                # let @retry_on_address_already_in_use_error handle the error
+                # let @retry_on_connect_failures handle the error
                 raise c2p[0]
             else:
                 raise RuntimeError("Unexpected type {}".format(type(c2p[0])))
 
     @requires_nccl()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_nccl(self):
         self._test_default_store_timeout('nccl')
 
     @requires_gloo()
-    @retry_on_address_already_in_use_error
+    @retry_on_connect_failures
     def test_default_store_timeout_gloo(self):
         self._test_default_store_timeout('gloo')
 

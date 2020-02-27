@@ -6,10 +6,6 @@
 #include <torch/csrc/jit/fuser/cpu/temp_file.h>
 #include <torch/csrc/utils/memory.h>
 
-#ifdef _MSC_VER
-#include <torch/csrc/jit/fuser/cpu/msvc_arch.h>
-#endif
-
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -149,7 +145,7 @@ intptr_t run(const std::string& cmd) {
     comspec = "C:\\Windows\\System32\\cmd.exe";
   }
   // Constructing the command line
-  const char* a[] = {"/c", cmd.c_str()};
+  const char* a[] = {"/c", cmd.c_str(), nullptr};
   // Constructing the env array
   // If `env_list` is not empty, then add char pointers ending with nullptr.
   // Otherwise, it will be nullptr, which implies the default env.
@@ -213,14 +209,20 @@ static CompilerConfig& getConfig() {
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
 #ifdef _MSC_VER
+// According to https://stackoverflow.com/a/29178079, we are able to
+// detect which arch level is supported by the vectorizer using
+// the macro __isa_available. It is added during runtime.
+// The result of __isa_available and the corresponding arch:
+//  AVX       4
+//  AVX2      5
+//  AVX512    6
+extern "C" int __isa_available;
 static std::string getArchFlags() {
-  if (InstructionSet::AVX512F() && InstructionSet::AVX512CD() &&
-      InstructionSet::AVX512BW() && InstructionSet::AVX512DQ() &&
-      InstructionSet::AVX512VL()) {
+  if (__isa_available >= 6) {
     return "/arch:AVX512";
-  } else if (InstructionSet::AVX2()) {
+  } else if (__isa_available >= 5) {
     return "/arch:AVX2";
-  } else if (InstructionSet::AVX()) {
+  } else if (__isa_available >= 4) {
     return "/arch:AVX";
   } else {
     return "";
@@ -229,7 +231,7 @@ static std::string getArchFlags() {
 static const std::string arch_flags = getArchFlags();
 static const std::string compile_string =
     "cd /D \"" + temp_dir + "\" && "
-    "${cxx} /nologo /MD /Ox " + arch_flags + " /LD /EHsc "
+    "${cxx} /nologo /MD /O2 " + arch_flags + " /LD /EHsc "
     "${fopenmp} \"${cpp_file}\" /link /out:\"${so_file}\"";
 #else
 static const std::string compile_string =

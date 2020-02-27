@@ -5,6 +5,7 @@ import unittest
 import sys
 from itertools import repeat, chain
 import os
+import gc
 from contextlib import contextmanager
 import threading
 if sys.version_info[0] == 3:
@@ -24,7 +25,7 @@ from torch.testing._internal.common_methods_invocations import tri_tests_args, t
     _compare_trilu_indices, _compare_large_trilu_indices
 from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
     PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, skipIfRocm, \
-    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM
+    load_tests, slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -274,6 +275,7 @@ class TestCuda(TestCase):
         assert_change(0, reset_peak=True)
 
     def test_memory_stats(self):
+        gc.collect()
         torch.cuda.empty_cache()
         for _ in self._test_memory_stats_generator(self):
             self._check_memory_stat_consistency()
@@ -1981,30 +1983,39 @@ t2.start()
         found_inf = torch.tensor([0.0], dtype=dtype, device=device)
         g = torch.tensor([4.0], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertTrue(found_inf.item() == 0.0)
+        self.assertEqual(found_inf, 0.0)
         self.assertTrue(torch.allclose(g, torch.ones(10, dtype=torch.float32, device="cuda"), atol=1e-7))
 
         found_inf.zero_()
         g = torch.tensor([float('inf')], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertTrue(found_inf.item() == 1.0)
+        self.assertEqual(found_inf, 1.0)
 
         found_inf.zero_()
         g = torch.tensor([float('nan')], dtype=dtype, device=device)
         torch._amp_non_finite_check_and_unscale_(g, found_inf, inv_scale)
-        self.assertTrue(found_inf.item() == 1.0)
+        self.assertEqual(found_inf, 1.0)
 
-        growth_factor = 4.0
-        backoff_factor = 0.5
-        current_scale = torch.tensor([4.0], dtype=dtype, device=device)
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.tensor([4.0], dtype=dtype, device=device)
+        growth_tracker = torch.tensor([0], dtype=torch.int32, device=device)
 
         found_inf.zero_()
-        new_scale = torch._amp_update_scale(current_scale, found_inf, growth_factor, backoff_factor)
-        self.assertTrue(new_scale.item(), 16.0)
+        # Simulates 2 consecutive unskipped iterations
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
 
+        # Simulates a skipped iteration
         found_inf.fill_(1.0)
-        new_scale = torch._amp_update_scale(current_scale, found_inf, growth_factor, backoff_factor)
-        self.assertTrue(new_scale.item(), 2.0)
+        scale = torch._amp_update_scale(growth_tracker, scale, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_device_as_key(self):
@@ -2044,8 +2055,11 @@ t2.start()
 
     def test_grad_scaling_state_dict(self):
         for lazy_init_scale in True, False:
-            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5)
-            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8)
+            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
+
+            # sets a random value for load_state_dict to overwrite
+            s1._init_growth_tracker = 7
 
             if lazy_init_scale:
                 # Dummy scale() call to ensure the scale tensor is lazily initialized.
@@ -2054,9 +2068,11 @@ t2.start()
 
             s1.load_state_dict(s0.state_dict())
 
-            self.assertTrue(s1.get_scale() == 3.)
-            self.assertTrue(s1.get_growth_factor() == 4.)
-            self.assertTrue(s1.get_backoff_factor() == .5)
+            self.assertEqual(s1.get_scale(), 3.)
+            self.assertEqual(s1.get_growth_factor(), 4.)
+            self.assertEqual(s1.get_backoff_factor(), .5)
+            self.assertEqual(s1.get_growth_interval(), 2)
+            self.assertEqual(s1._init_growth_tracker, 0)
 
     def _create_scaling_models_optimizers(self, device="cuda"):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
@@ -2091,7 +2107,7 @@ t2.start()
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
-            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
             run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
@@ -2218,7 +2234,7 @@ t2.start()
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
                 self._create_scaling_models_optimizers()
 
-            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
                 for i, (input, target) in enumerate(data):
@@ -2274,7 +2290,7 @@ t2.start()
             mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
                 self._create_scaling_models_optimizers(device=dev1)
 
-            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled)
+            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
                 for i, (input, target) in enumerate(data):
@@ -2489,6 +2505,20 @@ t2.start()
 
             for t in range(num_threads):
                 self.assertEqual(results[t].sum().item(), size * size)
+
+    @slowTest
+    @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
+    def test_max_large_axis(self):
+        x = torch.zeros(2**32, device='cuda', dtype=torch.int8)
+        x[-1] = 1
+        val, idx = x.max(0)
+        self.assertEqual(val, 1)
+        self.assertEqual(idx, x.shape[0] - 1)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_to_numpy(self):
+        self.assertRaises(TypeError, lambda: torch.empty(1, device="cuda").numpy())
+
 
 if __name__ == '__main__':
     run_tests()
