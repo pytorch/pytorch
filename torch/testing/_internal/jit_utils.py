@@ -385,7 +385,9 @@ class JitTestCase(TestCase):
                         source,
                         inputs,
                         script.__name__,
-                        capture_output,
+                        optimize=optimize,
+                        inputs_requires_grad=inputs_requires_grad,
+                        capture_output=capture_output,
                         profiling=profiling,
                         frames_up=2)
 
