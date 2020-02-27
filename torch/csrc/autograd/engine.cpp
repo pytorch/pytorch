@@ -749,7 +749,7 @@ auto Engine::execute(const edge_list& roots,
 void Engine::initialize_threads_pool() {
   track_bad_autograd_forks();
   TORCH_CHECK(!in_bad_autograd_fork,
-              "Unable to handle autograd's threading in combination with fork. "
+              "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
               "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
   std::call_once(start_threads_flag_, &Engine::start_threads, this);
 }
