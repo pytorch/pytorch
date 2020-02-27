@@ -5542,10 +5542,7 @@ def add_neg_dim_tests():
 
 # Device-generic tests. Instantiated below and not run directly.
 class TestTorchDeviceType(TestCase):
-    def assertEqual(self, *args, **kwargs):
-        kwargs.setdefault('exact_dtype', True)
-        # NB: Hard-code the super class due to instantiation
-        TestCase.assertEqual(self, *args, **kwargs)
+    exact_dtype = True
 
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
@@ -14077,10 +14074,7 @@ LINSPACE_LOGSPACE_EXTRA_EPS = 1e-5
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
-    def assertEqual(self, *args, **kwargs):
-        kwargs.setdefault('exact_dtype', True)
-        # NB: Hard-code the super class due to instantiation
-        TestCase.assertEqual(self, *args, **kwargs)
+    exact_dtype = True
 
     # The implementation of linspace+logspace goes through a different path
     # when the steps arg is equal to 0 or 1. For other values of `steps`
@@ -14450,10 +14444,7 @@ class TestDevicePrecision(TestCase):
 # Tests ops and indexing to ensure they return views (and new tensors) as
 # appropriate.
 class TestViewOps(TestCase):
-    def assertEqual(self, *args, **kwargs):
-        kwargs.setdefault('exact_dtype', True)
-        # NB: Hard-code the super class due to instantiation
-        TestCase.assertEqual(self, *args, **kwargs)
+    exact_dtype = True
 
     def is_view_of(self, base, other):
         if (not other._is_view() or
@@ -15300,10 +15291,7 @@ def generate_not_implemented_tests(cls):
 
 
 class TestTensorDeviceOps(TestCase):
-    def assertEqual(self, *args, **kwargs):
-        kwargs.setdefault('exact_dtype', True)
-        # NB: Hard-code the super class due to instantiation
-        TestCase.assertEqual(self, *args, **kwargs)
+    exact_dtype = True
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
         cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
@@ -15354,9 +15342,7 @@ class TestTensorDeviceOps(TestCase):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
 class TestTorch(TestCase, _TestTorchMixin):
-    def assertEqual(self, *args, **kwargs):
-        kwargs.setdefault('exact_dtype', True)
-        super(TestTorch, self).assertEqual(self, *args, **kwargs)
+    exact_dtype = True
 
 
 # Generates tests

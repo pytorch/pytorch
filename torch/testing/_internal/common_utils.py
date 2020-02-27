@@ -638,6 +638,7 @@ class TestCase(expecttest.TestCase):
     maxDiff = None
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+    exact_dtype = False
 
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
@@ -776,7 +777,10 @@ class TestCase(expecttest.TestCase):
 
         return tg
 
-    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=False):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False, exact_dtype=None):
+        if exact_dtype is None:
+            exact_dtype = self.exact_dtype
+
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
