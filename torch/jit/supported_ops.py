@@ -161,7 +161,7 @@ def _get_math_builtins():
 
 
 def _get_global_builtins():
-    # Taken from the 'globals' map in torch/csrc/jit/script/ir_emitter.cpp
+    # Taken from the 'globals' map in torch/csrc/jit/frontend/ir_emitter.cpp
     supported_builtins = [
         'print',
         'tuple',

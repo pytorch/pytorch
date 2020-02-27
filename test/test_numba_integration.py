@@ -283,31 +283,31 @@ class TestNumbaIntegration(common.TestCase):
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.as_tensor(numba_ary, device="cuda")
                 self.assertEqual(numba_ary.__cuda_array_interface__, torch_ary.__cuda_array_interface__)
-                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+                self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary))
 
                 # Check that `torch_ary` and `numba_ary` points to the same device memory
                 torch_ary += 42
-                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+                self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary))
 
             # Implicit-copy because `torch_ary` is a CPU array
             for numpy_ary in numpy_arys:
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.as_tensor(numba_ary, device="cpu")
-                self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary))
+                self.assertEqual(torch_ary.numpy(), numpy.asarray(numba_ary))
 
                 # Check that `torch_ary` and `numba_ary` points to different memory
                 torch_ary += 42
-                self.assertEqual(torch_ary.data.numpy(), numpy.asarray(numba_ary) + 42)
+                self.assertEqual(torch_ary.numpy(), numpy.asarray(numba_ary) + 42)
 
             # Explicit-copy when using `torch.tensor()`
             for numpy_ary in numpy_arys:
                 numba_ary = numba.cuda.to_device(numpy_ary)
                 torch_ary = torch.tensor(numba_ary, device="cuda")
-                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+                self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary))
 
                 # Check that `torch_ary` and `numba_ary` points to different memory
                 torch_ary += 42
-                self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary) + 42)
+                self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary) + 42)
 
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
@@ -342,7 +342,7 @@ class TestNumbaIntegration(common.TestCase):
         torch_ary = torch.as_tensor(numba_ary, device="cuda")
         self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)  # No copy
         del numba_ary
-        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.arange(6))  # `torch_ary` is still alive
+        self.assertEqual(torch_ary.cpu().numpy(), numpy.arange(6))  # `torch_ary` is still alive
 
     @unittest.skipIf(not TEST_NUMPY, "No numpy")
     @unittest.skipIf(not TEST_CUDA, "No cuda")
@@ -354,14 +354,14 @@ class TestNumbaIntegration(common.TestCase):
         # Zero-copy: both torch/numba default to device 0 and can interop freely
         numba_ary = numba.cuda.to_device(numpy.arange(6))
         torch_ary = torch.as_tensor(numba_ary, device="cuda")
-        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+        self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary))
         self.assertEqual(torch_ary.__cuda_array_interface__, numba_ary.__cuda_array_interface__)
 
         # Implicit-copy: when the Numba and Torch device differ
         numba_ary = numba.cuda.to_device(numpy.arange(6))
         torch_ary = torch.as_tensor(numba_ary, device=torch.device("cuda", 1))
         self.assertEqual(torch_ary.get_device(), 1)
-        self.assertEqual(torch_ary.cpu().data.numpy(), numpy.asarray(numba_ary))
+        self.assertEqual(torch_ary.cpu().numpy(), numpy.asarray(numba_ary))
         if1 = torch_ary.__cuda_array_interface__
         if2 = numba_ary.__cuda_array_interface__
         self.assertNotEqual(if1["data"], if2["data"])
