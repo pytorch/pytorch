@@ -83,9 +83,9 @@ def convert_script(model, inplace=False):
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
     torch._C._jit_pass_swap_functional_linear_in_module(model._c)
     torch._C._jit_pass_inline(model.graph)
-    torch._C._jit_pass_constant_propagation(model.graph)
     if 'fbgemm' in torch.backends.quantized.supported_engines:
         torch._C._jit_pass_insert_prepack_unpack(model._c)
+    torch._C._jit_pass_constant_propagation(model.graph)
     return model
 
 # TODO: non-scriptable QConfig will be supported later
