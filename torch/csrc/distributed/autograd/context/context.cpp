@@ -19,12 +19,12 @@ int64_t DistAutogradContext::contextId() const {
 
 std::unordered_set<rpc::worker_id_t> DistAutogradContext::getKnownWorkerIds()
     const {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   return knownWorkerIds_;
 };
 
 void DistAutogradContext::addKnownWorkerId(const rpc::worker_id_t workerId) {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   knownWorkerIds_.insert(workerId);
 }
 
@@ -33,7 +33,7 @@ void DistAutogradContext::addSendFunction(
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(
       sendAutogradFunctions_.find(autograd_message_id) ==
       sendAutogradFunctions_.end());
@@ -45,7 +45,7 @@ void DistAutogradContext::addRecvFunction(
     int64_t autograd_message_id) {
   TORCH_INTERNAL_ASSERT(func != nullptr);
 
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(
       recvAutogradFunctions_.find(autograd_message_id) ==
       recvAutogradFunctions_.end());
@@ -54,13 +54,13 @@ void DistAutogradContext::addRecvFunction(
 
 std::unordered_map<int64_t, std::shared_ptr<SendRpcBackward>>
 DistAutogradContext::sendFunctions() const {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   return sendAutogradFunctions_;
 }
 
 std::unordered_map<int64_t, std::shared_ptr<RecvRpcBackward>>
 DistAutogradContext::recvFunctions() const {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   return recvAutogradFunctions_;
 }
 
@@ -71,7 +71,7 @@ void DistAutogradContext::accumulateGrad(
   TORCH_INTERNAL_ASSERT(grad.defined());
   TORCH_INTERNAL_ASSERT(variable.requires_grad());
 
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   auto it = accumulatedGrads_.find(variable);
   at::Tensor old_grad;
   if (it != accumulatedGrads_.end()) {
@@ -90,20 +90,20 @@ void DistAutogradContext::accumulateGrad(
       grad,
       num_expected_refs,
       [this, &variable](at::Tensor&& grad_update) {
-        accumulatedGrads_.insert(variable, grad_update);
+        accumulatedGrads_.insert(variable, std::move(grad_update));
       });
 }
 
 std::shared_ptr<torch::autograd::GraphTask> DistAutogradContext::
     retrieveGraphTask() {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(graphTask_);
   return graphTask_;
 }
 
 void DistAutogradContext::setGraphTask(
     std::shared_ptr<torch::autograd::GraphTask> graphTask) {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   TORCH_INTERNAL_ASSERT(
       !graphTask_,
       "Cannot set GraphTask multiple times for the same autograd context");
@@ -111,7 +111,7 @@ void DistAutogradContext::setGraphTask(
 }
 
 void DistAutogradContext::resetGraphTask() {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   graphTask_ = nullptr;
 }
 
@@ -124,9 +124,12 @@ void DistAutogradContext::addOutstandingRpc(
         if (futErr) {
           // If we have an error, let the local autograd engine know about it.
           std::runtime_error err((*futErr).what());
-          std::lock_guard<std::recursive_mutex> guard(lock_);
+          std::unique_lock<std::mutex> lock(lock_);
           if (graphTask_) {
-            graphTask_->set_exception(err, nullptr);
+            auto future_result =
+                graphTask_->set_exception_without_signal(nullptr);
+            lock.unlock();
+            future_result->setErrorIfNeeded(err.what());
           } else {
             LOG(WARNING)
                 << "Ignoring error since GraphTask is no longer valid: "
@@ -134,18 +137,18 @@ void DistAutogradContext::addOutstandingRpc(
           }
         }
       });
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   outStandingRpcs_.push_back(futureMessage);
 }
 
 void DistAutogradContext::clearOutstandingRpcs() {
-  std::unique_lock<std::recursive_mutex> lock(lock_);
+  std::unique_lock<std::mutex> lock(lock_);
   outStandingRpcs_.clear();
 }
 
 std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
-  std::unique_lock<std::recursive_mutex> lock(lock_);
+  std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
   lock.unlock();
 
@@ -191,7 +194,7 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
 
 std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
     int64_t autograd_message_id) {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   auto it = sendAutogradFunctions_.find(autograd_message_id);
   TORCH_CHECK(
       it != sendAutogradFunctions_.end(),
@@ -202,7 +205,7 @@ std::shared_ptr<SendRpcBackward> DistAutogradContext::retrieveSendFunction(
 
 const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
     getGradients() const {
-  std::lock_guard<std::recursive_mutex> guard(lock_);
+  std::lock_guard<std::mutex> guard(lock_);
   return accumulatedGrads_;
 }
 

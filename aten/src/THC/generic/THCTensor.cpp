@@ -262,46 +262,6 @@ void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storag
   THCTensor_setStorage(state, self, storage_, storageOffset_, size_, stride_);
 }
 
-void THCTensor_(setStorage1d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_)
-{
-  THCTensor_(setStorage)(state, self, storage_, storageOffset_,
-                         {size0_}, {stride0_});
-}
-
-void THCTensor_(setStorage2d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_)
-{
-  THCTensor_(setStorage)(state, self, storage_, storageOffset_,
-                         {size0_, size1_},
-                         {stride0_, stride1_});
-}
-
-void THCTensor_(setStorage3d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_)
-{
-  THCTensor_(setStorage)(state, self, storage_, storageOffset_,
-                         {size0_, size1_, size2_},
-                         {stride0_, stride1_, stride2_});
-}
-
-void THCTensor_(setStorage4d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
-                             int64_t size0_, int64_t stride0_,
-                             int64_t size1_, int64_t stride1_,
-                             int64_t size2_, int64_t stride2_,
-                             int64_t size3_, int64_t stride3_)
-{
-
-  int64_t size[4] = {size0_, size1_, size2_, size3_};
-  int64_t stride[4] = {stride0_, stride1_, stride2_, stride3_};
-
-  THCTensor_(setStorage)(state, self, storage_, storageOffset_, size, stride);
-}
-
-
 void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t firstIndex, int64_t size)
 {
   if(!src)

@@ -125,7 +125,7 @@ class TORCH_API DistAutogradContext {
   std::vector<std::shared_ptr<rpc::FutureMessage>> outStandingRpcs_;
 
   // Lock to protect concurrent modification of the context.
-  mutable std::recursive_mutex lock_;
+  mutable std::mutex lock_;
 };
 
 using ContextPtr = std::shared_ptr<DistAutogradContext>;

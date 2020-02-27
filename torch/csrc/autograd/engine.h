@@ -75,6 +75,9 @@ struct GraphTask {
   // means it's .backward(), otherwise it's .grad(). exec_info_ is safe to read
   // without synchronization
   std::unordered_map<Node*, ExecInfo> exec_info_;
+  // Captures variables are grads captured that we return to the user. After
+  // execution of the GraphTask is completed, the captured_vars_ are moved
+  // out of the GraphTask and are no longer valid.
   std::vector<Variable> captured_vars_;
   std::shared_ptr<at::ThreadLocalDebugInfoBase> debug_info_ =
       at::getThreadLocalDebugInfo();
@@ -96,6 +99,13 @@ struct GraphTask {
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function.
   void set_exception(std::exception& e, const std::shared_ptr<Node>& fn);
+
+  // Set an appropriate exception on this graph_task which was encountered while
+  // running the provided function. But doesn't signal completion on
+  // 'future_result_' right away. The user needs to explicitly mark the returned
+  // future completed with an appropriate exception.
+  std::shared_ptr<FutureVariableList> set_exception_without_signal(
+      const std::shared_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw

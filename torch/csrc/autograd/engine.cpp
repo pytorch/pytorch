@@ -388,8 +388,7 @@ void Engine::thread_on_exception(
   graph_task->set_exception(e, fn);
 }
 
-void GraphTask::set_exception(
-    std::exception& e,
+std::shared_ptr<FutureVariableList> GraphTask::set_exception_without_signal(
     const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
@@ -397,18 +396,18 @@ void GraphTask::set_exception(
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    // Careful: setting the future_result_ can trigger DistAutogradContext to
-    // resetGraphTask(), sometimes deleting this underlying GraphTask.
-    // Don't touch *this after setError() below, and release the lock early, to
-    // avoid unlocking this->mutex_ after setting the future.
-    std::shared_ptr<FutureVariableList> future_result = future_result_;
-    lock.unlock();
-    if (!future_result->completed()) {
-      future_result->setError(e.what());
-    } else {
-      TORCH_INTERNAL_ASSERT(future_result->hasError());
-    }
   }
+  return future_result_;
+}
+
+void GraphTask::set_exception(
+    std::exception& e,
+    const std::shared_ptr<Node>& fn) {
+  // Careful: setting the future_result can trigger DistAutogradContext to
+  // resetGraphTask(), sometimes deleting this underlying GraphTask.
+  // Don't touch *this after setError() below.
+  auto future_result = set_exception_without_signal(fn);
+  future_result->setErrorIfNeeded(e.what());
 }
 
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
