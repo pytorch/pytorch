@@ -36,7 +36,7 @@ std::vector<Statement*> IterVisitor::next(Expr* expr) {
   return {expr->inputs().begin(), expr->inputs().end()};
 }
 
-void IterVisitor::traverse(
+void IterVisitor::traverseFrom(
     const Fusion* const fusion,
     std::vector<Val*> from) {
   std::set<Statement*> visited;
@@ -84,10 +84,10 @@ void IterVisitor::traverse(
 }
 
 void IterVisitor::traverse(
-    const Fusion* const fusion,
-    bool from_outputs_only,
-    std::unordered_set<ValType> val_types,
-    bool breadth_first) {
+      const Fusion* const fusion
+    , bool from_outputs_only
+    , bool breadth_first
+    , std::unordered_set<ValType> val_types) {
   if (breadth_first)
     throw std::runtime_error("Not implemented yet.");
   std::set<Statement*> visited;
@@ -127,7 +127,7 @@ void IterVisitor::traverse(
       }
     }
 
-  traverse(fusion, outputs_to_visit);
+  traverseFrom(fusion, outputs_to_visit);
 }
 
   void IterVisitor::handle(Statement* s) { Statement::dispatch(this, s); }
@@ -149,7 +149,6 @@ std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
 */
 void DependencyCheck::handle(Val* val){
   //Debug dependency chain
-  //std::cout << "Handle val: " << val << " deps: " << dep_chain << std::endl;
   if(val->same_as(dependency_))
     is_dependency = true;
 }
@@ -176,7 +175,7 @@ void DependencyCheck::toVisitCallback(Statement* stmt){
 
 bool DependencyCheck::check(){
   is_dependency = false;
-  IterVisitor::traverse(FusionGuard::getCurFusion(), {of_});
+  IterVisitor::traverseFrom(FusionGuard::getCurFusion(), {of_});
   return is_dependency;
 }
 
