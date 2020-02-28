@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
 namespace jit {
@@ -108,7 +108,8 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       decomposed = true;
       WithInsertPoint guard(*it);
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("addmm").graph();
+          dynamic_cast<FunctionImpl&>(decompose_funcs.get_function("addmm"))
+              .graph();
       Value* new_output =
           insertGraph(*it->owningGraph(), *d_graph, it->inputs()).at(0);
       // Set the output of the decomposed graph to have the same output type as
@@ -138,7 +139,9 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
 
       // inline the compiled decomposed batchnorm
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("batch_norm").graph();
+          dynamic_cast<FunctionImpl&>(
+              decompose_funcs.get_function("batch_norm"))
+              .graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
@@ -173,7 +176,9 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
 
       // inline the compiled decomposed layernorm
       std::shared_ptr<Graph> d_graph =
-          decompose_funcs.get_function("layer_norm").graph();
+          dynamic_cast<FunctionImpl&>(
+              decompose_funcs.get_function("layer_norm"))
+              .graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph

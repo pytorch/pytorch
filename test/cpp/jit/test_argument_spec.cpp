@@ -1,6 +1,6 @@
 #include <torch/jit.h>
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
 
 namespace torch {
 namespace jit {
@@ -131,12 +131,12 @@ void testArgumentSpec() {
   auto& GF = at::CUDA(at::kFloat);
   auto& GD = at::CUDA(at::kDouble);
 
-  auto graph = jit::compile(R"JIT(
+  auto& fn = jit::compile(R"JIT(
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                   ->get_function("fn")
-                   .graph();
+                 ->get_function("fn");
+  auto graph = dynamic_cast<FunctionImpl&>(fn).graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);
 

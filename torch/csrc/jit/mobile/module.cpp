@@ -1,5 +1,5 @@
 #include "module.h"
-#include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #if defined(PYTORCH_MOBILE_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>

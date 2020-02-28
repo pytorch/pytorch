@@ -4,7 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/grad_mode.h>
-#include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/api/function.h>
 #include <iostream>
 
 namespace c10 {

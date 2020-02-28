@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/irparser.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 namespace torch {
 namespace jit {
@@ -29,7 +29,7 @@ void SubgraphRewriter::RegisterRewritePattern(
 script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
   nodes_to_delete_.clear();
   for (const auto& m : module.get_methods()) {
-    auto g = m.function().graph();
+    auto g = dynamic_cast<FunctionImpl&>(m.function()).graph();
     runOnGraph(g);
   }
   return module;

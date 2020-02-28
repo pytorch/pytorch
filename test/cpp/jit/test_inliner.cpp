@@ -1,8 +1,8 @@
 #include <test/cpp/jit/test_base.h>
 
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 const auto testSource = R"JIT(
@@ -45,7 +45,7 @@ void testInliner() {
     CompilationUnit cu(testSource);
     auto& fn = cu.get_function("foo3");
 
-    auto g = fn.graph();
+    auto g = dynamic_cast<FunctionImpl&>(fn).graph();
     Inline(*g);
     FileCheck().check_count("prim::Print", 3)->run(*g);
   }

@@ -8,20 +8,20 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
-#include <torch/csrc/jit/type_hashing.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/attributes.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/irparser.h"
-#include "torch/csrc/jit/pass_manager.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/codegen/fuser/interface.h"
+#include "torch/csrc/jit/serialization/import.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
+#include "torch/csrc/jit/ir/irparser.h"
+#include "torch/csrc/jit/passes/pass_manager.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -37,18 +37,18 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/symbolic_script.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/runtime/symbolic_script.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
-#include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/ir_emitter.h"
-#include "torch/csrc/jit/script/module.h"
+#include "torch/csrc/jit/runtime/profiling_record.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/api/module.h"
 #include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
@@ -461,7 +461,7 @@ void testControlFlow() {
   auto cu = compile(cf_examples);
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
-    auto graph = cu->get_function(name).graph();
+    auto graph = dynamic_cast<FunctionImpl&>(cu->get_function(name)).graph();
     Code code(graph);
     InterpreterState interp(code);
     interp.run(stack);
@@ -1072,7 +1072,7 @@ void testInsertAndEliminateRedundantGuards() {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic");
+  auto& fun = dynamic_cast<FunctionImpl&>(cu->get_function("basic"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1122,7 +1122,7 @@ void testInsertBailOuts() {
   )JIT";
 
   auto cu = compile(basic_example);
-  auto& fun = cu->get_function("basic_loop");
+  auto& fun = dynamic_cast<FunctionImpl&>(cu->get_function("basic_loop"));
   auto pr = ProfilingRecord::instrumentGraph(fun.graph());
   auto x = at::randn({2, 3}, at::kCPU);
   auto y = at::randn({2, 3}, at::kCPU);
@@ -1207,7 +1207,8 @@ def foo(x):
     return bar(x)*baz(x)*11
   )";
   auto cu = compile(text);
-  const Function& foo = cu->get_function("foo");
+  const FunctionImpl& foo =
+      dynamic_cast<FunctionImpl&>(cu->get_function("foo"));
   for (Node* n : foo.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -1248,7 +1249,8 @@ def foo(x):
   }
 
   // Check that inlining doesn't corrupt callstack of the callee's nodes.
-  const Function& baz = cu->get_function("baz");
+  const FunctionImpl& baz =
+      dynamic_cast<FunctionImpl&>(cu->get_function("baz"));
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
       if (!n->hasAttribute(attr::value) ||
@@ -1289,7 +1291,7 @@ def c(x):
     return x
   )";
   auto cu = compile(text);
-  const Function& baz = cu->get_function("c");
+  const FunctionImpl& baz = dynamic_cast<FunctionImpl&>(cu->get_function("c"));
   std::unordered_map<std::string, InlinedCallStack*> callstack_objects;
   for (Node* n : baz.optimized_graph()->nodes()) {
     if (n->kind() == prim::Constant) {
