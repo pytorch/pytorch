@@ -13,8 +13,12 @@ Scalar _local_scalar_dense_cuda(const Tensor& self) {
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "_local_scalar_dense_cuda", [&] {
         scalar_t value;
         cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+#ifdef __HIP_PLATFORM_HCC__
+        AT_CUDA_CHECK(hipMemcpyWithStream(&value, self.data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream));
+#else
         AT_CUDA_CHECK(cudaMemcpyAsync(&value, self.data_ptr<scalar_t>(), sizeof(scalar_t), cudaMemcpyDeviceToHost, stream));
         AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
         r = Scalar(value);
       });
   return r;
