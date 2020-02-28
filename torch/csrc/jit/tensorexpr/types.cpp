@@ -67,52 +67,6 @@ Dtype ToDtype(ScalarType type) {
   }
 }
 
-/* Type promotion rules are taken from torch.Tensor attributes.
- * Simple version is: largest floating type, then largest integer type. */
-ScalarType promoteNumericTypes(ScalarType a, ScalarType b) {
-  bool floatA = is_floating_point(a);
-  bool floatB = is_floating_point(b);
-
-  // Only support numeric types.
-  if ((!floatA && !is_integral(a)) || (!floatB && !is_integral(b))) {
-    return ScalarType::Undefined;
-  }
-
-  // Equal types remain the same.
-  if (a == b) {
-    return a;
-  }
-
-  // If either are floats, then take the bitwidth of the widest float component.
-  if (floatA || floatB) {
-    if (a == ScalarType::Double || b == ScalarType::Double) {
-      return ScalarType::Double;
-    }
-
-    if (a == ScalarType::Float || b == ScalarType::Float) {
-      return ScalarType::Float;
-    }
-
-    return ScalarType::Half;
-  }
-
-  // If only integers, take the widest bitwidth.
-  if (a == ScalarType::Long || b == ScalarType::Long) {
-    return ScalarType::Long;
-  }
-
-  if (a == ScalarType::Int || b == ScalarType::Int) {
-    return ScalarType::Int;
-  }
-
-  if (a == ScalarType::Short || b == ScalarType::Short) {
-    return ScalarType::Short;
-  }
-
-  // Remaining combination is Byte and Char.
-  return ScalarType::Short;
-}
-
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
   stream << dtype.scalar_type_;
   if (dtype.lanes() > 1) {

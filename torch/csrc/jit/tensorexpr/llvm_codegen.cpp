@@ -920,37 +920,38 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
 
-  switch (v->op_type()) {
+  if (v->dtype() == kFloat) {
+    switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \
     v->params().front()->accept(this);                   \
     value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
     return;                                             \
   } break;
-    UNARY_INTRIN_CASE(kLog10, llvm::Intrinsic::log10)
-    UNARY_INTRIN_CASE(kLog, llvm::Intrinsic::log)
-    UNARY_INTRIN_CASE(kLog2, llvm::Intrinsic::log2)
-    UNARY_INTRIN_CASE(kExp, llvm::Intrinsic::exp)
-    UNARY_INTRIN_CASE(kCos, llvm::Intrinsic::cos)
-    UNARY_INTRIN_CASE(kSin, llvm::Intrinsic::sin)
-    UNARY_INTRIN_CASE(kSqrt, llvm::Intrinsic::sqrt)
-    UNARY_INTRIN_CASE(kFabs, llvm::Intrinsic::fabs)
-    UNARY_INTRIN_CASE(kFloor, llvm::Intrinsic::floor)
-    UNARY_INTRIN_CASE(kCeil, llvm::Intrinsic::ceil)
-    UNARY_INTRIN_CASE(kTrunc, llvm::Intrinsic::trunc)
-    UNARY_INTRIN_CASE(kRound, llvm::Intrinsic::round)
+      UNARY_INTRIN_CASE(kLog10, llvm::Intrinsic::log10)
+      UNARY_INTRIN_CASE(kLog, llvm::Intrinsic::log)
+      UNARY_INTRIN_CASE(kLog2, llvm::Intrinsic::log2)
+      UNARY_INTRIN_CASE(kExp, llvm::Intrinsic::exp)
+      UNARY_INTRIN_CASE(kCos, llvm::Intrinsic::cos)
+      UNARY_INTRIN_CASE(kSin, llvm::Intrinsic::sin)
+      UNARY_INTRIN_CASE(kSqrt, llvm::Intrinsic::sqrt)
+      UNARY_INTRIN_CASE(kFabs, llvm::Intrinsic::fabs)
+      UNARY_INTRIN_CASE(kFloor, llvm::Intrinsic::floor)
+      UNARY_INTRIN_CASE(kCeil, llvm::Intrinsic::ceil)
+      UNARY_INTRIN_CASE(kTrunc, llvm::Intrinsic::trunc)
+      UNARY_INTRIN_CASE(kRound, llvm::Intrinsic::round)
 #undef UNARY_INTRIN_CASE
 
-    case kRsqrt: {
-      v->params().front()->accept(this);
-      value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
-      llvm::Value* constant = llvm::ConstantFP::get(FloatTy_, 1.0);
-      if (v->dtype().lanes() > 1) {
-        constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
-      }
-      value_ = irb_.CreateFDiv(constant, value_);
-      return;
-    } break;
+      case kRsqrt: {
+        v->params().front()->accept(this);
+        value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
+        llvm::Value* constant = llvm::ConstantFP::get(FloatTy_, 1.0);
+        if (v->dtype().lanes() > 1) {
+          constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
+        }
+        value_ = irb_.CreateFDiv(constant, value_);
+        return;
+      } break;
 
 #define UNARY_MATH_CASE(enum, name, type)                             \
   case enum: {                                                        \
@@ -960,17 +961,17 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     call_fn = callee.getCallee();                                     \
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn)); \
   } break;
-      UNARY_MATH_CASE(kErf, "erff", FloatTy_)
-      UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
-      UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
-      UNARY_MATH_CASE(kAcos, "acosf", FloatTy_)
-      UNARY_MATH_CASE(kAsin, "asinf", FloatTy_)
-      UNARY_MATH_CASE(kAtan, "atanf", FloatTy_)
-      UNARY_MATH_CASE(kCosh, "coshf", FloatTy_)
-      UNARY_MATH_CASE(kSinh, "sinhf", FloatTy_)
-      UNARY_MATH_CASE(kTanh, "tanhf", FloatTy_)
-      UNARY_MATH_CASE(kExpm1, "expm1f", FloatTy_)
-      UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
+        UNARY_MATH_CASE(kErf, "erff", FloatTy_)
+        UNARY_MATH_CASE(kErfc, "erfcf", FloatTy_)
+        UNARY_MATH_CASE(kTan, "tanf", FloatTy_)
+        UNARY_MATH_CASE(kAcos, "acosf", FloatTy_)
+        UNARY_MATH_CASE(kAsin, "asinf", FloatTy_)
+        UNARY_MATH_CASE(kAtan, "atanf", FloatTy_)
+        UNARY_MATH_CASE(kCosh, "coshf", FloatTy_)
+        UNARY_MATH_CASE(kSinh, "sinhf", FloatTy_)
+        UNARY_MATH_CASE(kTanh, "tanhf", FloatTy_)
+        UNARY_MATH_CASE(kExpm1, "expm1f", FloatTy_)
+        UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
 #undef UNARY_MATH_CASE
 
 #define BINARY_MATH_CASE(enum, name, type)                             \
@@ -981,15 +982,88 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     call_fn = callee.getCallee();                                      \
     applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
   } break;
-      BINARY_MATH_CASE(kRemainder, "remainderf", FloatTy_)
-      BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
-      BINARY_MATH_CASE(kPow, "powf", FloatTy_)
-      BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
+        BINARY_MATH_CASE(kRemainder, "remainderf", FloatTy_)
+        BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
+        BINARY_MATH_CASE(kPow, "powf", FloatTy_)
+        BINARY_MATH_CASE(kFmod, "fmodf", FloatTy_)
 #undef BINARY_MATH_CASE
 
-    default: {
-      LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
-    } break;
+      default: {
+        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+      } break;
+    }
+  } else if (v->dtype() == kDouble) {
+    switch (v->op_type()) {
+#define UNARY_INTRIN_CASE(enum, intrin)                 \
+  case enum: {                                          \
+    v->params().front()->accept(this);                   \
+    value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
+    return;                                             \
+  } break;
+      UNARY_INTRIN_CASE(kLog10, llvm::Intrinsic::log10)
+      UNARY_INTRIN_CASE(kLog, llvm::Intrinsic::log)
+      UNARY_INTRIN_CASE(kLog2, llvm::Intrinsic::log2)
+      UNARY_INTRIN_CASE(kExp, llvm::Intrinsic::exp)
+      UNARY_INTRIN_CASE(kCos, llvm::Intrinsic::cos)
+      UNARY_INTRIN_CASE(kSin, llvm::Intrinsic::sin)
+      UNARY_INTRIN_CASE(kSqrt, llvm::Intrinsic::sqrt)
+      UNARY_INTRIN_CASE(kFabs, llvm::Intrinsic::fabs)
+      UNARY_INTRIN_CASE(kFloor, llvm::Intrinsic::floor)
+      UNARY_INTRIN_CASE(kCeil, llvm::Intrinsic::ceil)
+      UNARY_INTRIN_CASE(kTrunc, llvm::Intrinsic::trunc)
+      UNARY_INTRIN_CASE(kRound, llvm::Intrinsic::round)
+#undef UNARY_INTRIN_CASE
+
+      case kRsqrt: {
+        v->params().front()->accept(this);
+        value_ = irb_.CreateUnaryIntrinsic(llvm::Intrinsic::sqrt, value_);
+        llvm::Value* constant = llvm::ConstantFP::get(DoubleTy_, 1.0);
+        if (v->dtype().lanes() > 1) {
+          constant = irb_.CreateVectorSplat(v->dtype().lanes(), constant);
+        }
+        value_ = irb_.CreateFDiv(constant, value_);
+        return;
+      } break;
+
+#define UNARY_MATH_CASE(enum, name, type)                             \
+  case enum: {                                                        \
+    auto callee = module_->getOrInsertFunction(                       \
+        name, llvm::FunctionType::get(type, {type}, false), {});      \
+    call_ty = callee.getFunctionType();                               \
+    call_fn = callee.getCallee();                                     \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn)); \
+  } break;
+        UNARY_MATH_CASE(kErf, "erf", DoubleTy_)
+        UNARY_MATH_CASE(kErfc, "erfc", DoubleTy_)
+        UNARY_MATH_CASE(kTan, "tan", DoubleTy_)
+        UNARY_MATH_CASE(kAcos, "acos", DoubleTy_)
+        UNARY_MATH_CASE(kAsin, "asin", DoubleTy_)
+        UNARY_MATH_CASE(kAtan, "atan", DoubleTy_)
+        UNARY_MATH_CASE(kCosh, "cosh", DoubleTy_)
+        UNARY_MATH_CASE(kSinh, "sinh", DoubleTy_)
+        UNARY_MATH_CASE(kTanh, "tanh", DoubleTy_)
+        UNARY_MATH_CASE(kExpm1, "expm1", DoubleTy_)
+        UNARY_MATH_CASE(kLgamma, "lgamma", DoubleTy_)
+#undef UNARY_MATH_CASE
+
+#define BINARY_MATH_CASE(enum, name, type)                             \
+  case enum: {                                                         \
+    auto callee = module_->getOrInsertFunction(                        \
+        name, llvm::FunctionType::get(type, {type, type}, false), {}); \
+    call_ty = callee.getFunctionType();                                \
+    call_fn = callee.getCallee();                                      \
+    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));  \
+  } break;
+        BINARY_MATH_CASE(kRemainder, "remainder", DoubleTy_)
+        BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
+        BINARY_MATH_CASE(kPow, "pow", DoubleTy_)
+        BINARY_MATH_CASE(kFmod, "fmod", DoubleTy_)
+#undef BINARY_MATH_CASE
+
+      default: {
+        LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
+      } break;
+    }
   }
 
   std::vector<llvm::Value*> params;

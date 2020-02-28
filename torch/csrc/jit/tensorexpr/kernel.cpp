@@ -95,7 +95,7 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
     if (iType == ScalarType::Bool) {
       continue;
     }
-    highType = promoteNumericTypes(highType, iType);
+    highType = promoteTypes(highType, iType);
   }
 
   for (ExprHandle& e : inputs) {
@@ -115,7 +115,7 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
   default:
-    LOG(FATAL) << "Unsupported datatype";
+    LOG(FATAL) << "Unsupported datatype: " << highType;
     }
   }
 }
@@ -801,7 +801,7 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
                   load,
                   tensorOrConstant(inputs[ii], new_axes));
               offset += bufferSizes(tensors_.at(inputs[ii]->unique()))[dim];
-              new_axes[dim] = new_axes[dim] - IntImm::make(offset);
+              new_axes[dim] = axes[dim] - IntImm::make(offset);
             }
 
             return load;

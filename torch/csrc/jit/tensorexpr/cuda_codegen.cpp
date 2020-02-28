@@ -142,7 +142,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   ScalarType returnType = v->param(0)->dtype().scalar_type();
   for (int i = 1; i < v->nparams(); ++i) {
     returnType =
-        promoteNumericTypes(returnType, v->param(i)->dtype().scalar_type());
+        promoteTypes(returnType, v->param(i)->dtype().scalar_type());
   }
 
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
@@ -253,17 +253,22 @@ void CudaPrinter::visit(const LetStmt* v) {
 }
 
 void CudaPrinter::visit(const IfThenElse* v) {
-  os() << "(";
+  os() << "((";
   v->condition()->accept(this);
   os() << ") ? ";
   v->true_value()->accept(this);
   os() << " : ";
   v->false_value()->accept(this);
+  os() << ")";
 }
 
 class PrioritizeLoad : public IRMutator {
  public:
-  virtual const Expr* mutate(const Load* v) {
+  const Expr* mutate(const Load* v) override {
+    // Look at the declaration of this variable for more details.
+    if (nested_if_then_else_ > 0) {
+      return IRMutator::mutate(v);
+    }
     MemLoadList& load_list = load_stack_.back();
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
@@ -272,7 +277,7 @@ class PrioritizeLoad : public IRMutator {
   }
 
   // TODO: merge this with the IRMutator::mutate version.
-  virtual Stmt* mutate(const For* v) {
+  Stmt* mutate(const For* v) override {
     const Var* var = v->var();
     const Expr* start = v->start();
     const Expr* stop = v->stop();
@@ -296,7 +301,7 @@ class PrioritizeLoad : public IRMutator {
         var_new, start_new, stop_new, body_with_loads, loop_options);
   }
 
-  virtual Stmt* mutate(const LetStmt* v) {
+  Stmt* mutate(const LetStmt* v) override {
     const Var* var = v->var();
     const Expr* value = v->value();
     Stmt* body = v->body();
@@ -316,7 +321,7 @@ class PrioritizeLoad : public IRMutator {
     return new LetStmt(var_new, value_new, body_with_loads);
   }
 
-  virtual Stmt* mutate(const Cond* v) {
+  Stmt* mutate(const Cond* v) override {
     const Expr* cond_old = v->condition();
     Stmt* true_old = v->true_stmt();
     Stmt* false_old = v->false_stmt();
@@ -336,6 +341,13 @@ class PrioritizeLoad : public IRMutator {
       return (Stmt*)v;
     }
     return new Cond(cond_new, true_with_loads, false_with_loads);
+  }
+
+  const Expr* mutate(const IfThenElse* v) override {
+    nested_if_then_else_++;
+    const Expr* new_v = IRMutator::mutate(v);
+    nested_if_then_else_--;
+    return new_v;
   }
 
   Stmt* Process(Stmt* stmt) {
@@ -372,6 +384,18 @@ class PrioritizeLoad : public IRMutator {
   }
 
   MemoryLoadStack load_stack_;
+  // TODO: For now, we are not moving the loads with the IfThenElse.
+  // Eventually, we should switch to a more generic structure like:
+  // int v2 = IfThenElse(cond, true_v, false_v) + 2 ->
+  // 
+  // int v;
+  // if (cond) {
+  //   v = true_v;
+  // } else {
+  //   v = false_v;
+  // }
+  // int v2 = v + 2;
+  int nested_if_then_else_ = 0;
 };
 
 class HasRand : public IRVisitor {
@@ -396,6 +420,15 @@ class HasRand : public IRVisitor {
   bool has_rand_ = false;
 };
 
+std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
+  // We are using a global counter here to make sure difference instances within
+  // CudaCodeGen have different names.
+  static int64_t counter = 0;
+  ++counter;
+  int64_t value = counter;
+  return func_prefix + "_" + std::to_string(value);
+}
+
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
@@ -415,7 +448,8 @@ void CudaCodeGen::Initialize() {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
 
-  os() << "extern \"C\" __global__" << std::endl << "void f(";
+  std::string func_name = GetUniqueFuncName("func");
+  os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (int i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
@@ -489,7 +523,7 @@ void CudaCodeGen::Initialize() {
   ;
 #endif
 
-  CompileToNVRTC(oss_.str());
+  CompileToNVRTC(oss_.str(), func_name);
   USE_TRIGGER(cuda_codegen_created);
 }
 
@@ -579,7 +613,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 }
 
-void CudaCodeGen::CompileToNVRTC(const std::string& code) {
+void CudaCodeGen::CompileToNVRTC(const std::string& code, const std::string& func_name) {
   // Initializes driver's API context (if necessary)
   CUdevice device = 0;
   CUcontext pctx = 0;
@@ -643,10 +677,9 @@ void CudaCodeGen::CompileToNVRTC(const std::string& code) {
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
 
   CUmodule module;
-  std::string name = "f";
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
   AT_CUDA_DRIVER_CHECK(
-      nvrtc().cuModuleGetFunction(&function_, module, name.c_str()));
+      nvrtc().cuModuleGetFunction(&function_, module, func_name.c_str()));
 }
 
 RegisterCodeGen<CudaCodeGen> reg("cuda_codegen");

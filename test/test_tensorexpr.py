@@ -918,24 +918,29 @@ class TestTensorExprFuser(BaseTestClass):
         npr_a, npr_b = np.array_split(npr2, 2)
         np.testing.assert_allclose(npr_a + npr_b, x.numpy())
 
+    def _test_cat(self, device):
+        def easy(*args):
+            args_2 = [v + i for i, v in enumerate(args)]
+            v = torch.cat(args_2, dim=1)
+            return v
 
-    def test_cat(self):
-        def easy(x, y):
-            a = x + 1
-            b = y + 2
-            c = torch.cat([a, b], dim=1)
-            return c
+        M = 1024
+        Ns = [1024, 512, 256, 128]
+        values = [torch.zeros(M, N, device=device) for N in Ns]
+        traced = torch.jit.trace(easy, values)
 
-        traced = torch.jit.trace(easy, (torch.zeros(1024, 1024), torch.zeros(1024, 1024)))
+        x = traced(*values)
+        npr = [v.cpu().numpy() for v in values]
+        npr_2 = [v + i for i, v in enumerate(npr)]
+        npr_x = np.concatenate(npr_2, axis=1)
+        np.testing.assert_allclose(npr_x, x.cpu().numpy())
 
-        a = torch.zeros(1024, 1024)
-        x = traced(a, a)
-        npr = a.numpy()
-        npr_x = npr + 1
-        npr_y = npr + 2
-        npr_c = np.concatenate((npr_x, npr_y), axis=1)
-        np.testing.assert_allclose(npr_c, x.numpy())
+    def test_cat_cpu(self):
+        self._test_cat('cpu')
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cat_cuda(self):
+        self._test_cat('cuda')
 
     def test_scalar(self):
         @torch.jit.script
@@ -1141,5 +1146,6 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
+        
 if __name__ == '__main__':
     unittest.main()

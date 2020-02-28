@@ -97,7 +97,7 @@ class TORCH_API CudaCodeGen : public CodeGen {
  private:
   TORCH_API void Initialize();
 
-  void CompileToNVRTC(const std::string& code);
+  void CompileToNVRTC(const std::string& code, const std::string& func_name);
 
   UniqueNameManager* name_manager() {
     if (!printer_) {
@@ -114,6 +114,8 @@ class TORCH_API CudaCodeGen : public CodeGen {
   std::unique_ptr<CudaPrinter> printer_;
   CUfunction function_;
   bool has_random_ = false;
+
+  std::string GetUniqueFuncName(const std::string& func_prefix);
 };
 
 } // namespace tensorexpr

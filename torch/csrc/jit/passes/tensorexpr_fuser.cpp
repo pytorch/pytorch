@@ -200,7 +200,9 @@ Node *getOrCreateTensorExprSubgraph(Node *n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
-  return SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+  auto te_group = SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+  GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group);
+  return te_group;
 }
 
 c10::optional<Node*> tryMerge(
@@ -209,9 +211,9 @@ c10::optional<Node*> tryMerge(
     AliasDb& aliasDb) {
   GRAPH_DEBUG(
       "Trying producer ",
-      producer->kind().toQualString(),
+      getHeader(producer),
       " and consumer ",
-      consumer->kind().toQualString(),
+      getHeader(consumer),
       ":\n");
 
   if (!canMerge(consumer, producer, aliasDb)) {
@@ -224,12 +226,18 @@ c10::optional<Node*> tryMerge(
     Node* listconstruct = producer->inputs()[0]->node();
 
     aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
 
     aliasDb.moveAfterTopologicallyValid(consumer, listconstruct);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
   } else {
     aliasDb.moveAfterTopologicallyValid(consumer, producer);
+    GRAPH_UPDATE(
+        "Merging ", getHeader(producer), " into ", getHeader(consumer));
     SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
   }
 

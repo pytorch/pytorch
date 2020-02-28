@@ -95,9 +95,15 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_TODTYPE_DECLARATION)
 
 TORCH_API Dtype ToDtype(ScalarType type);
 
-TORCH_API ScalarType promoteNumericTypes(ScalarType a, ScalarType b);
-inline ScalarType promoteNumericTypes(Dtype a, Dtype b) {
-  return promoteNumericTypes(a.scalar_type(), b.scalar_type());
+// Call c10 type promotion directly.
+inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
+  return static_cast<ScalarType>(c10::promoteTypes(
+      static_cast<c10::ScalarType>(a), static_cast<c10::ScalarType>(b)));
+}
+inline ScalarType promoteTypes(Dtype a, Dtype b) {
+  return static_cast<ScalarType>(c10::promoteTypes(
+      static_cast<c10::ScalarType>(a.scalar_type()),
+      static_cast<c10::ScalarType>(b.scalar_type())));
 }
 
 inline Dtype BinaryOpDtype(
@@ -115,7 +121,7 @@ inline Dtype BinaryOpDtype(
   CHECK_EQ(op1_dtype.lanes(), op2_dtype.lanes()) << "vector lengths must match";
   int lanes = op1_dtype.lanes();
 
-  ScalarType resultType = promoteNumericTypes(op1_dtype, op2_dtype);
+  ScalarType resultType = promoteTypes(op1_dtype, op2_dtype);
   CHECK_NE(resultType, ScalarType::Undefined)
       << "Invalid dtypes: " << op1_dtype << ", " << op2_dtype;
 

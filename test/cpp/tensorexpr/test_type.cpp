@@ -47,10 +47,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kFloat);
-    ExprHandle body =
-        ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
-    ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
+    ExprHandle body = FloatImm::make(2.f) +
+        (x * FloatImm::make(3.f) + FloatImm::make(4.f) * y);
+    ExprHandle e1 = Let::make(x, FloatImm::make(3.f), body);
+    ExprHandle e2 = Let::make(y, FloatImm::make(6.f), e1);
     EXPECT_EQ(e2.dtype(), kFloat);
   }
   // Int to bigger int:
@@ -58,10 +58,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kShort);
     VarHandle y("y", kLong);
-    ExprHandle body = ExprHandle((short)2.f) +
-        (x * ExprHandle((short)3) + ExprHandle((short)4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle((short)3), body);
-    ExprHandle e2 = Let::make(y, ExprHandle((long)6), e1);
+    ExprHandle body =
+        ShortImm::make(2.f) + (x * ShortImm::make(3) + ShortImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, ShortImm::make(3), body);
+    ExprHandle e2 = Let::make(y, LongImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kLong);
   }
   // Float to bigger float:
@@ -69,10 +69,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kDouble);
-    ExprHandle body = ExprHandle((at::Half)2.f) +
-        (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle((at::Half)3), body);
-    ExprHandle e2 = Let::make(y, ExprHandle((double)6), e1);
+    ExprHandle body =
+        HalfImm::make(2.f) + (x * HalfImm::make(3) + HalfImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, HalfImm::make(3), body);
+    ExprHandle e2 = Let::make(y, DoubleImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kDouble);
   }
   // Int to Float:
@@ -80,9 +80,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kFloat);
     VarHandle y("y", kInt);
-    ExprHandle body = ExprHandle(2) + (x * ExprHandle(3) + ExprHandle(4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
-    ExprHandle e2 = Let::make(y, ExprHandle(6), e1);
+    ExprHandle body =
+        IntImm::make(2) + (x * IntImm::make(3) + IntImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, FloatImm::make(3.f), body);
+    ExprHandle e2 = Let::make(y, IntImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kFloat);
   }
   // Smaller float, bigger Int:
@@ -90,10 +91,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kHalf);
     VarHandle y("y", kLong);
-    ExprHandle body = ExprHandle((at::Half)2) +
-        (x * ExprHandle((at::Half)3) + ExprHandle((at::Half)4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle((at::Half)3), body);
-    ExprHandle e2 = Let::make(y, ExprHandle(6l), e1);
+    ExprHandle body =
+        HalfImm::make(2) + (x * HalfImm::make(3) + HalfImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, HalfImm::make(3), body);
+    ExprHandle e2 = Let::make(y, LongImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kHalf);
   }
   // Bigger float, smaller Int:
@@ -101,10 +102,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kDouble);
-    ExprHandle body = ExprHandle((char)2) +
-        (x * ExprHandle((char)3) + ExprHandle((char)4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle((char)3), body);
-    ExprHandle e2 = Let::make(y, ExprHandle((double)6), e1);
+    ExprHandle body =
+        CharImm::make(2) + (x * CharImm::make(3) + CharImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, CharImm::make(3), body);
+    ExprHandle e2 = Let::make(y, DoubleImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kDouble);
   }
   // Sign change char/byte upgrades to short:
@@ -112,10 +113,10 @@ void testTypePropagation() {
     KernelScope kernel_scope;
     VarHandle x("x", kChar);
     VarHandle y("y", kByte);
-    ExprHandle body = ExprHandle((int8_t)2) +
-        (x * ExprHandle((int8_t)3) + ExprHandle((int8_t)4) * y);
-    ExprHandle e1 = Let::make(x, ExprHandle((int8_t)3), body);
-    ExprHandle e2 = Let::make(y, ExprHandle((uint8_t)6), e1);
+    ExprHandle body =
+        CharImm::make(2) + (x * CharImm::make(3) + CharImm::make(4) * y);
+    ExprHandle e1 = Let::make(x, CharImm::make(3), body);
+    ExprHandle e2 = Let::make(y, ByteImm::make(6), e1);
     EXPECT_EQ(e2.dtype(), kShort);
   }
 }
