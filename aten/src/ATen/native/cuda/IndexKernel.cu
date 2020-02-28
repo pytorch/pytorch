@@ -117,17 +117,6 @@ void gpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
   });
 }
 
-template <typename scalar_t>
-void masked_select_kernel_impl(TensorIterator& iter) {
-  gpu_masked_select_kernel(iter, []C10_DEVICE(int64_t idx, void* out_data, void* in_data, bool mask, int64_t mask_cumsum) {
-    if (mask) {
-      scalar_t* in_ptr = (scalar_t*) in_data;
-      scalar_t* out_ptr = (scalar_t*) out_data;
-      out_ptr[mask_cumsum-1] = in_ptr[idx];
-    }
-  });
-}
-
 static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
@@ -143,14 +132,6 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
     index_put_kernel_impl<dtype>(iter, index_size, index_stride);
   });
 }
-
-static void masked_select_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "masked_select", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    masked_select_kernel_impl<dtype>(iter);
-  });
-}
-
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
@@ -194,7 +175,16 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   iter.add_input(mask_cumsum);
   iter.build();
 
-  masked_select_kernel(iter);
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "masked_select", [&] {
+    using dtype = OpaqueType<sizeof(scalar_t)>;
+    gpu_masked_select_kernel(iter, []C10_DEVICE(int64_t idx, void* out_data, void* in_data, bool mask, int64_t mask_cumsum) {
+      if (mask) {
+        scalar_t* in_ptr = (scalar_t*) in_data;
+        scalar_t* out_ptr = (scalar_t*) out_data;
+        out_ptr[mask_cumsum-1] = in_ptr[idx];
+      }
+    });
+  });
   return result;
 }
 
