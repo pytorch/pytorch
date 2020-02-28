@@ -217,6 +217,7 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
+  void initialize_threads_pool();
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;

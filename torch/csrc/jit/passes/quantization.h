@@ -5,8 +5,8 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
 
 namespace std {
 
@@ -186,6 +186,8 @@ TORCH_API void FoldPrepackedWeightIntoModule(
  *  of cloned module in the Graph.
  */
 TORCH_API void DedupModuleUses(script::Module& module);
+
+TORCH_API void Finalize(script::Module& module);
 
 } // namespace jit
 } // namespace torch
