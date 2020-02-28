@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/alias_info.h>
+#include <ATen/core/alias_info.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
