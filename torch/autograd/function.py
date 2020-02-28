@@ -139,7 +139,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>         return grad_output * result
     """
 
-    def __call__(ctx, *args, **kwargs):
+    def __call__(self, *args, **kwargs):
         raise RuntimeError(
             "Legacy autograd function with non-static forward method is deprecated. "
             "Please use new-style autograd function with static forward method. "
