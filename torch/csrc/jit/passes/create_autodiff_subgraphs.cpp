@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
