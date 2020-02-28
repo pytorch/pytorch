@@ -432,7 +432,6 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         )
 
         # rpc_sync does not accept script module and script module method.
-        from pickle import PickleError
         with self.assertRaisesRegex(
             Exception, "ScriptModules cannot be deepcopied"
         ):
