@@ -18,7 +18,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.distributed_c10d as dist_c10d
-import torch.multiprocessing as multiprocessing
 import torch.nn as nn
 
 
