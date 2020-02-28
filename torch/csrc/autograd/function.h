@@ -349,12 +349,15 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Since we could allow the owning thread to call Engine::execute and drive the
-  // execution by itself, there might be cases that part of the GraphTask is shared
+  // Autograd Engine let the owning thread which calls Engine::execute to drive the
+  // GraphTask execution, there might be cases that part of the GraphTask is shared
   // across different `backward()` or `grad()` calls, i.e. fork new threads in the
   // middle of the forward and call `backward()` separately from different threads.
   // We need to protect the thread safety on NodeTask to prevent data racing on
   // shared variables read/write.
+  //
+  // NB: This is only needed for Autograd Nodes that runs on CPU, technically "CUDA",
+  // "XLA" nodes don't need locking because device threads are always single threaded.
   //
   // Here we add a thread mutex to protect the Node's thread safety, so that different
   // threads cannot race the shared data when executing the same NodeTask from multiple

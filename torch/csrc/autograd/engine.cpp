@@ -58,16 +58,15 @@ static thread_local int current_depth = 0;
 // Total nested reentrant backwards calls over all threads for worker_device
 static thread_local int total_depth = 0;
 
-// This shared_ptr is a thread local pointer to the local ready queue per thread
-// We colocate each device (i.e. CUDA, XLA) a separate thread other than CPU,
-// see Note [Allocating GPUs to autograd threads] each device thread should have
-// its own ReadyQueue that initialized in thread_init and used as the queue for
-// executing tasks. These local_ready_queues for device threads are also memorized
-// in the Engine to perform cross device training (i.e. CPU to GPU, XLA, etc.)
+// Every autograd worker thread is associated with a ready queue, which specifies
+// the stream of work of this thread to do. This shared_ptr is a thread_local
+// pointer to each thread's ready_queue, and it should be initialized via the
+// Engine::init_local_ready_queue() call in each corresponding thread before execution.
 //
-// For CPU threads, each thread will also have its own ReadyQueue per thread, and
-// it is memorized in the GraphTask to perform cross device training. (i.e. GPU to
-// CPU via variable.cpu(), etc.)
+// The CUDA, XLA threads are shared among all invocations of backwards via
+// device_ready_queues_, while CPU threads are dedicated to processing CPU work for
+// the backward they invoked. So any given graph task maintains its own cpu_ready_queue_
+// where you should send work for it to be done
 //
 // For reentrant backward calls, if we spawn new thread from the current thread
 // because we reached the maximum depth, the new thread will just reuse the same
@@ -286,6 +285,7 @@ auto Engine::thread_main(
   // graph_task.
   TORCH_INTERNAL_ASSERT(reentrant_thread != (graph_task == nullptr));
 
+  // local_ready_queue should already been initialized when we get into thread_main
   TORCH_INTERNAL_ASSERT(local_ready_queue != nullptr);
   // Why the test on graph_task->outstanding_tasks_?  See
   // Note [Reentrant backwards]
@@ -387,16 +387,22 @@ void Engine::thread_on_exception(
 void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
       fn->metadata()->print_stack();
     }
     has_error_ = true;
-    if (!future_result_->completed()) {
-      future_result_->setError(e.what());
+    // Careful: setting the future_result_ can trigger DistAutogradContext to
+    // resetGraphTask(), sometimes deleting this underlying GraphTask.
+    // Don't touch *this after setError() below, and release the lock early, to
+    // avoid unlocking this->mutex_ after setting the future.
+    std::shared_ptr<FutureVariableList> future_result = future_result_;
+    lock.unlock();
+    if (!future_result->completed()) {
+      future_result->setError(e.what());
     } else {
-      TORCH_INTERNAL_ASSERT(future_result_->hasError());
+      TORCH_INTERNAL_ASSERT(future_result->hasError());
     }
   }
 }
@@ -710,16 +716,19 @@ auto Engine::execute(const edge_list& roots,
   bool is_reentrant_call = worker_device != NO_DEVICE;
   std::shared_ptr<ReadyQueue> memorized_cpu_ready_queue = nullptr;
 
-  if (is_reentrant_call) {
+  if (is_reentrant_call || local_ready_queue) {
     // Reentrant call will still use the parent thread ready_queue
     // While we can create separate cpu_ready_queue for each new reentrant
     // thread, but sharing the same cpu_ready_queue with parent thread is
     // a mild performance improvement and cuda thread still have to do the
     // same thing.
+    //
+    // if local_ready_queue already exist (i.e. from a previous backward call),
+    // we could also reuse it instead of creating a new one.
     memorized_cpu_ready_queue = local_ready_queue;
   } else {
-    // not a reentrant call, Engine::execute should start on CPU device
-    // create the thread local ready queue on CPU and memorize it in GraphTask
+    // A frech first time Engine::execute call should start on the CPU device,
+    // initialize a new thread local ready queue on CPU and memorize it in GraphTask
     init_local_ready_queue(std::make_shared<ReadyQueue>());
     memorized_cpu_ready_queue = local_ready_queue;
   }
@@ -772,7 +781,7 @@ variable_list Engine::execute_with_graph_task(
     // NO_DEVICE. Setting it to CPU afterwards allow us to detect whether this is
     // a re-entrant call or not.
     //
-    // If worker_device = NO_DEVICE: this is not a re-entrant call
+    // If worker_device = NO_DEVICE: this is NOT a re-entrant call
     // If worker_device is other devices (i.e. CPU, CUDA): this is a re-entrant
     //    backward call from that device.
     set_device(CPU_DEVICE);
@@ -785,12 +794,11 @@ variable_list Engine::execute_with_graph_task(
     lock.unlock();
     thread_main(nullptr, false);
 
-    // reset the worker_device and the cpu_ready_queue after the completion of the
-    // graph_task, this is so that the initial state of the engine remains the
-    // same across every backward()/grad() call.
+    // reset the worker_device after the completion of the graph_task, this is so
+    // that the initial state of the engine remains the same across every backward()
+    // or grad() call, we don't need to reset local_ready_queue as we could possibly
+    // reuse it for new backward calls.
     worker_device = NO_DEVICE;
-    local_ready_queue.reset();
-    return graph_task->future_result_->wait();
   } else {
     // this must be a re-entrant call from worker_device
     graph_task->owner_ = worker_device;
@@ -799,7 +807,6 @@ variable_list Engine::execute_with_graph_task(
       // If reached the max depth, switch to a different thread
       lock.unlock();
       add_thread_pool_task(graph_task);
-      return graph_task->future_result_->wait();
     } else {
       // Total depth needs to be updated only in this codepath, since it is
       // not used in the block above (when we call add_thread_pool_task).
@@ -815,18 +822,16 @@ variable_list Engine::execute_with_graph_task(
       --current_depth;
       --total_depth;
 
+      // The graph task should have completed and the associated future should
+      // be marked completed as well.
+      // We return a completed future here since 'thread_main' above is a call
+      // blocking an autograd engine thread.
       TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
-
-      return graph_task->future_result_->wait();
     }
   }
-  // // The graph task should have completed and the associated future should
-  // // be marked completed as well.
-  // TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
-
-  // // graph_task_exec_post_processing is done when the Future is marked as
-  // // completed in mark_graph_task_completed.
-  // return graph_task->future_result_->wait();
+  // graph_task_exec_post_processing is done when the Future is marked as
+  // completed in mark_graph_task_completed.
+  return graph_task->future_result_->wait();
 }
 
 void Engine::mark_graph_task_completed(std::shared_ptr<GraphTask>& graph_task) {
@@ -928,7 +933,6 @@ auto Engine::ready_queue(const std::shared_ptr<GraphTask>& graph_task, at::Devic
   if (device.type() == at::kCPU) {
     // return the cpu ready queue memorized in GraphTask
     TORCH_INTERNAL_ASSERT(graph_task);
-    TORCH_INTERNAL_ASSERT(graph_task->cpu_ready_queue_ != nullptr);
     return *graph_task->cpu_ready_queue_;
   } else {
     // See Note [Allocating GPUs to autograd threads]
@@ -936,16 +940,15 @@ auto Engine::ready_queue(const std::shared_ptr<GraphTask>& graph_task, at::Devic
   }
 }
 
-// See Note [Allocating GPUs to autograd threads]
-// NB: This would become obsolete if we truly allocated a CPU thread
-// per device, rather than colocate.
 auto Engine::ready_queue_by_index(const std::shared_ptr<GraphTask>& graph_task, int device_index) -> ReadyQueue& {
   if (device_index == CPU_DEVICE) {
     // return the cpu ready queue memorized in GraphTask
     TORCH_INTERNAL_ASSERT(graph_task);
-    TORCH_INTERNAL_ASSERT(graph_task->cpu_ready_queue_ != nullptr);
     return *graph_task->cpu_ready_queue_;
   } else {
+    // See Note [Allocating GPUs to autograd threads]
+    // NB: This function would become obsolete if we truly allocated a CPU thread
+    // per device, rather than colocate.
     return *device_ready_queues_.at(device_index);
   }
 }

@@ -47,6 +47,8 @@ TypePtr IValue::type() const {
       return ListType::create(toList().elementType());
     case Tag::Future:
       return toFuture()->type();
+    case Tag::RRef:
+      return toRRef()->type();
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:
@@ -221,6 +223,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Capsule";
     case IValue::Tag::GenericList:
       return printList(out, v.toList(), "[", "]", formatter);
+    case IValue::Tag::RRef:
+      return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
     case IValue::Tag::Uninitialized:
@@ -249,23 +253,26 @@ void IValue::dump() const {
   std::cout << *this << "\n";
 }
 
+std::shared_ptr<ClassType> ivalue::Object::type() const {
+  return type_.type_->expect<ClassType>();
+}
 
 std::string ivalue::Object::name() const {
-  return this->type_.type_->name()->qualifiedName();
+  return type()->name()->qualifiedName();
 }
 
 IValue ivalue::Object::getAttr(const std::string& name) const {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   return getSlot(slot);
 }
 
 void ivalue::Object::setAttr(const std::string& name, IValue v) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   setSlot(slot, std::move(v));
 }
 
 void ivalue::Object::unsafeRemoveAttr(const std::string& name) {
-  const size_t slot = type_.type_->getAttributeSlot(name);
+  const size_t slot = type()->getAttributeSlot(name);
   unsafeRemoveSlot(slot);
 }
 
@@ -298,6 +305,18 @@ std::vector<std::pair<IValue, IValue>> iterationOrder(const c10::Dict<IValue, IV
   }
   std::sort(ordered.begin(), ordered.end(), CompareKeys);
   return ordered;
+}
+
+StrongTypePtr::StrongTypePtr(
+    std::shared_ptr<torch::jit::script::CompilationUnit> cu,
+    std::shared_ptr<Type> type) {
+  cu_ = std::move(cu);
+  type_ = type;
+  TORCH_INTERNAL_ASSERT(type_);
+  if (type_->cast<ClassType>()) {
+    TORCH_INTERNAL_ASSERT(
+        cu_, "class type's owning compilation unit is nullptr");
+  }
 }
 
 std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {

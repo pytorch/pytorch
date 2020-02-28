@@ -326,12 +326,12 @@ struct C10_API TensorOptions {
   ///
   TensorOptions merge_in(TensorOptions options) const noexcept {
     TensorOptions r = options;
-    if (!r.has_device()) r.set_device(device());
-    if (!r.has_dtype()) r.set_dtype(dtype());
-    if (!r.has_layout()) r.set_layout(layout());
+    if (!r.has_device()) r.set_device(device_opt());
+    if (!r.has_dtype()) r.set_dtype(dtype_opt());
+    if (!r.has_layout()) r.set_layout(layout_opt());
     // NB: requires grad is right biased; not a logical AND/OR!
-    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad());
-    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory());
+    if (!r.has_requires_grad()) r.set_requires_grad(requires_grad_opt());
+    if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory_opt());
     return r;
   }
 
@@ -348,18 +348,12 @@ struct C10_API TensorOptions {
         switch (device().type()) {
           case DeviceType::CPU: {
             auto dtype_tmp = typeMetaToScalarType(dtype());
-            if (isComplexType(dtype_tmp)) {
-              return DispatchKey::ComplexCPUTensorId;
-            }
             if (isQIntType(dtype_tmp)) {
               return DispatchKey::QuantizedCPUTensorId;
             }
             return DispatchKey::CPUTensorId;
             }
           case DeviceType::CUDA:
-            if (isComplexType(typeMetaToScalarType(dtype()))) {
-              return DispatchKey::ComplexCUDATensorId;
-            }
             return DispatchKey::CUDATensorId;
           case DeviceType::MKLDNN:
             return DispatchKey::MKLDNNTensorId;
@@ -595,10 +589,6 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::HIP;
   } else if (tid == DispatchKey::MkldnnCPUTensorId) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCPUTensorId) {
-    return DeviceType::CPU;
-  } else if (tid == DispatchKey::ComplexCUDATensorId) {
-    return DeviceType::CUDA;
   } else {
     AT_ASSERTM(false, "Unknown DispatchKey: ", tid);
   }

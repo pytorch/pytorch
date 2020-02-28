@@ -121,7 +121,7 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
     return;
   }
 
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -243,7 +243,7 @@ static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, T
   auto numel = THCTensor_(numel)(state, src);
 
   thrust::sort_by_key(
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    thrust::cuda::par(thrustAlloc).on(c10::cuda::getCurrentCUDAStream()),
     index_iter, index_iter + numel,
     src_iter, ThrustLTOp<int64_t>());
 }
@@ -309,7 +309,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   if (sliceSize == 0) {
     return;
   }
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
@@ -410,7 +410,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
 
   int srcDims = THCTensor_(nDimensionLegacyNoScalars)(state, src);
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
 
   THArgCheck(THCudaLongTensor_nDimensionLegacyNoScalars(state, indices) <= 1, 3,
              "Index is supposed to be an empty tensor or a vector");
@@ -563,7 +563,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   if (sliceSize == 0) {
     return;
   }
-  cudaStream_t stream = THCState_getCurrentStream(state);
+  cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;

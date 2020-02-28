@@ -3,7 +3,6 @@
 #include <mutex>
 #include <unordered_set>
 
-#include <c10/core/thread_pool.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
@@ -34,7 +33,10 @@ class TORCH_API DistEngine {
   // these variables and accumulate all the gradients in the current autograd
   // context on each node. This method is used to kickoff distributed autograd
   // on a single node.
-  void execute(const torch::autograd::variable_list& roots, bool retainGraph);
+  void execute(
+      int64_t context_id,
+      const torch::autograd::variable_list& roots,
+      bool retainGraph);
 
   // Given a send function to execute in the autograd engine, ensures we compute
   // dependencies once for this node and enqueues the send function for execute

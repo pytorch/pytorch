@@ -102,10 +102,11 @@ struct GraphTask {
   // an exception as soon as the autograd engine receives an exception.
   bool exit_on_error_;
 
-  // cpu ready queue asssociated with each graph task, since each `backward()`
-  // or `grad()` have its own GraphTask, we memorize the CPU thread's ReadyQueue
-  // in GraphTask to support cross device training (i.e. GPU, XLA to CPU via
-  // variable.cpu(), etc.)
+  // CPU threads are dedicated to processing CPU work for the backward they invoked.
+  // So any given graph task maintains its own cpu_ready_queue_ where you should send
+  // work for it to be done. We memorize the cpu_ready_queue_ per GraphTask so that
+  // we know which ready queue we should push to if we are on device thread (i.e. GPU)
+  // and but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
 
   // Future representing the completion of the graph task. Notified when all
@@ -126,7 +127,9 @@ struct GraphTask {
         reentrant_depth_(reentrant_depth),
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(std::make_shared<FutureVariableList>()) {}
+        future_result_(std::make_shared<FutureVariableList>()) {
+          TORCH_INTERNAL_ASSERT(cpu_ready_queue_ != nullptr);
+        }
 };
 
 struct NodeTask {
@@ -210,13 +213,6 @@ struct TORCH_API Engine {
       bool keep_graph,
       bool create_graph,
       const edge_list& outputs = {});
-
-  // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
-  // for the graph. This API should only be used by internal autograd specific
-  // machinery and shouldn't be exposed to users in anyway.
-  // virtual variable_list execute_until_ready(
-  //     const std::shared_ptr<GraphTask>& graph_task,
-  //     std::shared_ptr<Node> graph_root);
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
   // for the graph. This API should only be used by internal autograd specific

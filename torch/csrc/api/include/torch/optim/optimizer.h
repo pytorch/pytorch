@@ -126,6 +126,9 @@ class TORCH_API OptimizerBase {
   /// Returns the number of parameters referenced by the optimizer.
   virtual size_t size() const noexcept;
 
+  /// Returns the number of parameters referenced by the optimizer.
+  virtual size_t _size_new_design() const noexcept;
+
   OptimizerOptions& defaults() noexcept;
 
   const OptimizerOptions& defaults() const noexcept;

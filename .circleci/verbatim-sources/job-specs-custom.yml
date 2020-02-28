@@ -477,9 +477,7 @@
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             source ~/anaconda/bin/activate
-            pip install pillow==7.0.0 --progress-bar off
-            #install the latest version of PyTorch and TorchVision
-            pip install torch "torchvision>=0.5.0" --progress-bar off
+            pip install torch torchvision --progress-bar off
             #run unit test
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             python trace_model.py
