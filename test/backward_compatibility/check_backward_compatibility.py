@@ -57,6 +57,8 @@ white_list = [
     ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
     ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
     ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
 ]
 
 
