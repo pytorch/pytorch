@@ -2,18 +2,23 @@
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 from typing import Callable, NamedTuple
 import enum
 =======
 >>>>>>> minor changes
 =======
 from typing import Callable, List, NamedTuple
+=======
+from typing import Callable, NamedTuple
+>>>>>>> Fix fake8-py3 check failures
 import enum
 >>>>>>> Addressed comments.
 import logging
 import os
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -36,6 +41,8 @@ import sys
 import enum
 =======
 >>>>>>> e6b06001dc... Addressed comments.
+=======
+>>>>>>> 9da2a0761a... Fix fake8-py3 check failures
 
 <<<<<<< HEAD
 from typing import Callable, List, NamedTuple
@@ -75,7 +82,7 @@ from torch.distributed.optim import DistributedOptimizer
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.dist_utils import dist_init
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -171,20 +178,29 @@ class DdpMode(enum.Enum):
 def init_logger():
     logger = logging.getLogger(__name__)
 <<<<<<< HEAD
+<<<<<<< HEAD
     level = logging.DEBUG if "debug" in os.environ else logging.INFO
     logger.setLevel(level)
 =======
 >>>>>>> make the framework work
+=======
+    level = logging.DEBUG if "debug" in os.environ else logging.INFO
+    logger.setLevel(level)
+>>>>>>> Fix fake8-py3 check failures
     console = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(processName)s t:%(threadName)s: %(message)s"
     )
     console.setFormatter(formatter)
 <<<<<<< HEAD
+<<<<<<< HEAD
     console.setLevel(level)
 =======
     console.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
 >>>>>>> make the framework work
+=======
+    console.setLevel(level)
+>>>>>>> Fix fake8-py3 check failures
     # add the handlers to the logger
     logger.addHandler(console)
     logger.propagate = False
