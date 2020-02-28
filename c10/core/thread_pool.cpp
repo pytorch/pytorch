@@ -1,5 +1,7 @@
 #include <c10/core/thread_pool.h>
 
+#include <c10/util/Logging.h>
+
 namespace c10 {
 
 ThreadPool::ThreadPool(
@@ -108,7 +110,10 @@ void ThreadPool::main_loop(std::size_t index) {
         } else {
           tasks.no_id();
         }
-      } catch (const std::exception&) {
+      } catch (const std::exception& e) {
+        C10_LOG_EVERY_MS(ERROR, 1000) << "Exception in thread pool task: " << e.what();
+      } catch (...) {
+        C10_LOG_EVERY_MS(ERROR, 1000) << "Exception in thread pool task: unknown";
       }
 
       // Update status of empty, maybe
