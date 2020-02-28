@@ -663,6 +663,37 @@ except ImportError:
         return isinstance(ann, FinalInstance)
 
 
+try:
+    from typing import TypeVar, Generic
+
+    T = TypeVar('T')
+
+    class RRef(Generic[T]):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    def is_rref(ann):
+        return getattr(ann, "__origin__", None) is RRef
+
+except ImportError:
+    class RRefInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class RRefCls(object):
+        def __getitem__(self, types):
+            return RRefInstance(types)
+
+    RRef = RRefCls()  # noqa: T484
+
+    def is_rref(ann):
+        return isinstance(ann, RRefInstance)
+
+
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
     def __getitem__(self, types):
