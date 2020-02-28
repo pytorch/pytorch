@@ -84,14 +84,14 @@ public:
   // instead of search for Val typed nodes that have no uses.
   // The output type set limits further the set of Val nodes to search by type.
   void traverse(
-      const Fusion* const _fusion,
-      bool from_outputs_only,
-      std::unordered_set<ValType> val_types,
-      bool breadth_first);
+      const Fusion* const fusion
+    , bool from_outputs_only = false
+    , bool breadth_first = false
+    , std::unordered_set<ValType> val_types = {});
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes
   // in depth first topological sorted order.
-  void traverse(const Fusion* const fusion, std::vector<Val*> from);
+  void traverseFrom(const Fusion* const fusion, std::vector<Val*> from);
 };
 
 
@@ -101,9 +101,6 @@ private:
   
   //Class constructor checking if _dependency is a dependency of _of.
   DependencyCheck(Val* _dependency, Val* _of):dependency_{_dependency}, of_{_of}, is_dependency{false}{}
-
-  //Run through nodes in topological order starting from _of looking for _dependency.
-  void traverse(const Fusion* const, std::vector<Val*>);
 
   //when handle is called on val, we know 2 things. Val is a dependency of of.
   //and dep_chain contains the values in between of and dependency.

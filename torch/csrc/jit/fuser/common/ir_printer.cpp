@@ -18,11 +18,11 @@ void IRPrinter::print(const Fusion* const fusion) {
   
   cnt_ = 0;   
   irstream_ << "\nPrinting Operator Expressions...\n";
-  traverse(fusion, false /*from_outputs_only*/, {ValType::TensorView}, false /*breadth_first*/);
+  traverse(fusion, false /*from_outputs_only*/, false /*breadth_first*/, {ValType::TensorView});
 
   cnt_ = 0; 
   irstream_ << "\nPrinting Tensor Expressions...\n";
-  traverse(fusion, false /*from_outputs_only*/, {ValType::TensorDomain}, false /*breadth_first*/);
+  traverse(fusion, false /*from_outputs_only*/, false /*breadth_first*/, {ValType::TensorDomain});
   irstream_ << "\n";
 }
 

@@ -117,7 +117,11 @@ void testGPU_FusionMutator() {
   ZeroMutator mutator;
   BaseMutator* base_mutator = &mutator;
   base_mutator->mutate(&fusion);
-  std::cout << "Replaced: " << fusion << std::endl;
+  Val* lhs = static_cast<BinaryOp*>(fusion.origin(f5))->lhs();
+  TORCH_CHECK(lhs->getValType().value() == ValType::Scalar && lhs->getDataType().value() == DataType::Float);
+  Float* flhs = static_cast<Float *>( lhs );
+  
+  TORCH_CHECK(flhs->value().value() == 0.f);
 }
 
 void testGPU_FusionRegister() {

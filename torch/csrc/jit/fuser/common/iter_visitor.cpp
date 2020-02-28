@@ -36,41 +36,7 @@ std::vector<Statement*> IterVisitor::next(Expr* expr) {
   return {expr->inputs().begin(), expr->inputs().end()};
 }
 
-void IterVisitor::handle(const Statement* const stmt) {
-  stmt->dispatch(this);
-}
-
-void IterVisitor::handle(const Expr* const expr) {
-  expr->dispatch(this);
-}
-
-void IterVisitor::handle(const Val* const val) {
-  val->dispatch(this);
-}
-
-void IterVisitor::handle(const TensorDomain* const t) {}
-
-void IterVisitor::handle(const TensorView* const t) {}
-
-void IterVisitor::handle(const IterDomain* const t) {}
-
-void IterVisitor::handle(const Tensor* const t) {}
-
-void IterVisitor::handle(const Float* const f) {}
-
-void IterVisitor::handle(const Int* const i) {}
-
-void IterVisitor::handle(const UnaryOp* const uop) {}
-
-void IterVisitor::handle(const BinaryOp* const bop) {}
-
-void IterVisitor::handle(const Split* const split) {}
-
-void IterVisitor::handle(const Merge* const merge) {}
-
-void IterVisitor::handle(const Reorder* const reoder) {}
-
-void IterVisitor::traverse(
+void IterVisitor::traverseFrom(
     const Fusion* const fusion,
     std::vector<Val*> from) {
   std::set<Statement*> visited;
@@ -118,10 +84,10 @@ void IterVisitor::traverse(
 }
 
 void IterVisitor::traverse(
-    const Fusion* const fusion,
-    bool from_outputs_only,
-    std::unordered_set<ValType> val_types,
-    bool breadth_first) {
+      const Fusion* const fusion
+    , bool from_outputs_only
+    , bool breadth_first
+    , std::unordered_set<ValType> val_types) {
   if (breadth_first)
     throw std::runtime_error("Not implemented yet.");
   std::set<Statement*> visited;
@@ -161,7 +127,7 @@ void IterVisitor::traverse(
       }
     }
 
-  traverse(fusion, outputs_to_visit);
+  traverseFrom(fusion, outputs_to_visit);
 }
 
   void IterVisitor::handle(Statement* s) { Statement::dispatch(this, s); }
@@ -183,7 +149,6 @@ std::ostream& operator<<(std::ostream& os, std::stack<Val*> vals) {
 */
 void DependencyCheck::handle(Val* val){
   //Debug dependency chain
-  //std::cout << "Handle val: " << val << " deps: " << dep_chain << std::endl;
   if(val->same_as(dependency_))
     is_dependency = true;
 }
@@ -210,7 +175,7 @@ void DependencyCheck::toVisitCallback(Statement* stmt){
 
 bool DependencyCheck::check(){
   is_dependency = false;
-  IterVisitor::traverse(FusionGuard::getCurFusion(), {of_});
+  IterVisitor::traverseFrom(FusionGuard::getCurFusion(), {of_});
   return is_dependency;
 }
 

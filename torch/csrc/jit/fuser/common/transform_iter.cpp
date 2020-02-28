@@ -73,7 +73,7 @@ TensorDomain* TransformIter::runBackward(
 }
 
 TensorView* TransformIter::replay(Split* expr, TensorView* tv) {
-  split(tv, expr->axis(), static_cast<Int*>(expr->factor())->value().value());
+  return split(tv, expr->axis(), static_cast<Int*>(expr->factor())->value().value());
 }
 
 TensorView* TransformIter::replay(Merge* expr, TensorView* tv) {

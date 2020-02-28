@@ -76,7 +76,7 @@ struct ExprSort : public IterVisitor{
 
   static std::vector<Expr*> getExprs(const Fusion* const fusion, bool from_outputs_only, bool breadth_first){
     ExprSort es;
-    es.traverse(fusion, from_outputs_only, {}, breadth_first);
+    es.traverse(fusion, from_outputs_only, breadth_first, {});
     return es.exprs;
   }
 
