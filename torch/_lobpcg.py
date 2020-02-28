@@ -337,7 +337,7 @@ class LOBPCG(object):
         """Update residual R from A, B, X, E.
         """
         mm = _utils.matmul
-        self.R = mm(self.A, self.X) - torch.matmul(mm(self.B, self.X), torch.diag_embed(self.E))
+        self.R = mm(self.A, self.X) - mm(self.B, self.X) * self.E
 
     def update_converged_count(self):
         """Determine the number of converged eigenpairs using backward stable
@@ -546,20 +546,12 @@ class LOBPCG(object):
         B = self.B
         mm = torch.matmul
         SBS = _utils.qform(B, S)
-
-        d1 = SBS.diagonal(0, -2, -1) ** -0.5
-        if d1.is_cuda:
-            # Avoid `test_torch.TestTorchDeviceTypeCUDA.test_lobpcg_basic_cuda_float64 leaked 4096 bytes CUDA memory on device 0`
-            d = torch.zeros((d1.shape[0], 1), dtype=d1.dtype, device=d1.device)
-            d[:, 0] = d1
-        else:
-            d = d1.reshape(d1.shape[0], 1)
-
-        dd = mm(d, _utils.transpose(d))
-        R = torch.cholesky(dd * SBS, upper=True)
+        d_row = SBS.diagonal(0, -2, -1) ** -0.5
+        d_col = d_row.reshape(d_row.shape[0], 1)
+        R = torch.cholesky((SBS * d_row) * d_col, upper=True)
         # TODO: could use LAPACK ?trtri as R is upper-triangular
         Rinv = torch.inverse(R)
-        return Rinv * d
+        return Rinv * d_col
 
     def _get_svqb(self,
                   U,     # Tensor
@@ -592,7 +584,14 @@ class LOBPCG(object):
             return U
         UBU = _utils.qform(self.B, U)
         d = UBU.diagonal(0, -2, -1)
-        # detect and drop zero columns from U
+
+        # Detect and drop exact zero columns from U. While the test
+        # `abs(d) == 0` is unlikely to be True for random data, it is
+        # possible to construct input data to lobpcg where it will be
+        # True leading to a failure (notice the `d ** -0.5` operation
+        # in the original algorithm). To prevent the failure, we drop
+        # the exact zero columns here and then continue with the
+        # original algorithm below.
         nz = torch.where(abs(d) != 0.0)
         assert len(nz) == 1, nz
         if len(nz[0]) < len(d):
@@ -604,8 +603,9 @@ class LOBPCG(object):
             nz = torch.where(abs(d) != 0.0)
             assert len(nz[0]) == len(d)
 
-        D = torch.diag_embed(d ** -0.5)
-        DUBUD = _utils.qform(UBU, D)
+        # The original algorithm 4 from [DuerschPhD2015].
+        d_col = (d ** -0.5).reshape(d.shape[0], 1)
+        DUBUD = (UBU * d_col) * _utils.transpose(d_col)
         E, Z = _utils.symeig(DUBUD, eigenvectors=True)
         t = tau * abs(E).max()
         if drop:
@@ -613,9 +613,11 @@ class LOBPCG(object):
             assert len(keep) == 1, keep
             E = E[keep[0]]
             Z = Z[:, keep[0]]
+            d_col = d_col[keep[0]]
         else:
             E[(torch.where(E < t))[0]] = t
-        return torch.chain_matmul(U, D, Z, torch.diag_embed(E ** -0.5))
+
+        return torch.matmul(U * _utils.transpose(d_col), Z * E ** -0.5)
 
     def _get_ortho(self, U, V):
         """Return B-orthonormal U with columns are B-orthogonal to V.
