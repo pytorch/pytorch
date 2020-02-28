@@ -136,7 +136,7 @@ void testArgumentSpec() {
       return a, b, c, d, e
    )JIT")
                  ->get_function("fn");
-  auto graph = dynamic_cast<FunctionImpl&>(fn).graph();
+  auto graph = fn.graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);
 

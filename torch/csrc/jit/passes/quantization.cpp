@@ -396,7 +396,7 @@ class ModuleCloneHelper {
       }
       return type_ptr;
     };
-    auto graph = dynamic_cast<const FunctionImpl&>(method).graph()->copy();
+    auto graph = method.graph()->copy();
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());

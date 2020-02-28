@@ -17,7 +17,7 @@ struct NoneValue : SugaredValue {
 
 std::shared_ptr<SugaredValue> PrintValue::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -46,7 +46,7 @@ builtin_cast_methods() {
 
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -68,7 +68,7 @@ struct EnumClassHash {
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(TensorType::get())) {
@@ -163,7 +163,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
@@ -204,7 +204,7 @@ static bool isRecursive(const TypePtr& classType, const TypePtr& attrType) {
 
 void SimpleValue::setAttr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field,
     Value* newValue) {
   const auto classType = value_->type()->cast<ClassType>();
@@ -271,7 +271,7 @@ void SimpleValue::setAttr(
 
 std::shared_ptr<SugaredValue> SimpleValue::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -310,7 +310,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
   return SugaredValue::call(loc, m, inputs, attributes, n_binders);
 }
 
-Value* SimpleValue::len(const SourceRange& loc, FunctionImpl& m) {
+Value* SimpleValue::len(const SourceRange& loc, Function& m) {
   // List, Tuple, Tensor, fill in missing information desugaring
   Value* val = getValue();
   TypePtr val_type = val->type();
@@ -326,7 +326,7 @@ Value* SimpleValue::len(const SourceRange& loc, FunctionImpl& m) {
 
 SugaredValuePtr SimpleValue::getitem(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     Value* idx) {
   Value* val = getValue();
   TypePtr val_type = val->type();
@@ -350,7 +350,7 @@ SugaredValuePtr SimpleValue::getitem(
   }
 }
 
-SugaredValuePtr SimpleValue::iter(const SourceRange& loc, FunctionImpl& m) {
+SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
   auto value = getValue();
   auto type = value->type();
   // built-in iterable types
@@ -378,7 +378,7 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, FunctionImpl& m) {
 
 RangeValue::RangeValue(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -416,11 +416,11 @@ RangeValue::RangeValue(
   static_len_ = static_len;
 }
 
-SugaredValuePtr RangeValue::iter(const SourceRange& loc, FunctionImpl& m) {
+SugaredValuePtr RangeValue::iter(const SourceRange& loc, Function& m) {
   return shared_from_this();
 };
 
-Value* RangeValue::len(const SourceRange& loc, FunctionImpl& m) {
+Value* RangeValue::len(const SourceRange& loc, Function& m) {
   if (static_len_) {
     return insertConstant(*m.graph(), *static_len_, loc);
   }
@@ -434,7 +434,7 @@ Value* RangeValue::len(const SourceRange& loc, FunctionImpl& m) {
 
 SugaredValuePtr RangeValue::getitem(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     Value* idx) {
   if (has_only_end_) {
     return std::make_shared<SimpleValue>(idx);
@@ -465,7 +465,7 @@ std::vector<SugaredValuePtr> IterableTree::get_base_iterables() {
   return base_iters;
 }
 
-Value* IterableTree::len(const SourceRange& loc, FunctionImpl& m) {
+Value* IterableTree::len(const SourceRange& loc, Function& m) {
   // if it's a iterable tree, we get the base iterables that consists of
   // SimpleValue or RangeValue, and then calculate the minimum length of all the
   // base iterables to be max_trip_count_val
@@ -484,7 +484,7 @@ Value* IterableTree::len(const SourceRange& loc, FunctionImpl& m) {
 
 SugaredValuePtr IterableTree::getitem(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     Value* idx) {
   std::vector<SugaredValuePtr> child_items;
   for (const SugaredValuePtr& child : children_) {
@@ -495,7 +495,7 @@ SugaredValuePtr IterableTree::getitem(
 
 void IterableTree::addChild(
     const SourceRange& range,
-    FunctionImpl& m,
+    Function& m,
     const SugaredValuePtr iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
@@ -518,7 +518,7 @@ void IterableTree::addChild(
 
 std::shared_ptr<SugaredValue> MagicMethod::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -536,7 +536,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
 
 std::shared_ptr<SugaredValue> ClassValue::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     // note: names for args will be 'argument 0', 'argument 1', etc..
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
@@ -559,7 +559,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
 
 std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   if (field != "__new__") {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
@@ -569,7 +569,7 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {

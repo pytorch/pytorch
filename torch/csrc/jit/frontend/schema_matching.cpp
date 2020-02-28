@@ -608,11 +608,7 @@ Value* emitBuiltinCall(
     Function* fn = builtin_functions[matched.first - variants.size()];
     // we inline builtin calls because they are normally very small
     // wrappers and are not useful for keeping around to debug
-    return insertGraph(
-               graph,
-               *dynamic_cast<FunctionImpl*>(fn)->graph(),
-               matched.second.inputs)
-        .at(0);
+    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
   }
 }
 

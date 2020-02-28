@@ -24,11 +24,11 @@ struct TORCH_API FunctionImpl : public Function {
   IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
       override;
 
-  std::shared_ptr<Graph> graph() const {
+  std::shared_ptr<Graph> graph() const override {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const {
+  std::shared_ptr<Graph> optimized_graph() const override {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (optimized_graph_) {
       return *optimized_graph_;
@@ -84,7 +84,7 @@ struct TORCH_API FunctionImpl : public Function {
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  GraphExecutor& get_executor() {
+  GraphExecutor& get_executor() override {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     if (executor_) {

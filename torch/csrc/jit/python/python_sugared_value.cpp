@@ -111,7 +111,7 @@ FunctionSchema PythonValue::getSchema(
 
 std::shared_ptr<SugaredValue> PythonValue::call(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -166,7 +166,7 @@ std::string PythonValue::kind() const {
 
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const c10::optional<size_t>& size_hint) {
   const std::string type_str = typeString(self);
   std::stringstream ss;
@@ -177,7 +177,7 @@ std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
 
 std::shared_ptr<SugaredValue> PythonValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   const std::string type_str = typeString(self);
   std::stringstream ss;
@@ -206,7 +206,7 @@ void PythonValue::checkForAddToConstantsError(std::stringstream& ss) {
 
 std::shared_ptr<SugaredValue> PythonModuleValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   py::object member = getattr(loc, field);
   // note: is_constant = true because we consider that global properties
@@ -215,13 +215,13 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
-Value* ModuleValue::asValue(const SourceRange& loc, FunctionImpl& m) {
+Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
@@ -255,7 +255,7 @@ void recurseThroughNestedModules(
 
 std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
     const SourceRange& loc,
-    FunctionImpl& m) {
+    Function& m) {
   std::vector<std::string> submoduleNames;
   const auto& selfType = concreteType_->getJitType()->expect<ClassType>();
   for (size_t i = 0; i < selfType->numAttributes(); ++i) {
@@ -286,7 +286,7 @@ std::shared_ptr<SugaredModuleDict> ModuleValue::getSugaredModuleDict(
 
 std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   if (field == "keys") {
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
@@ -312,7 +312,7 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
 // helper function for instantiating a SugaredValue from an IValue
 std::shared_ptr<SugaredValue> toSugaredValue(
     const IValue& v,
-    FunctionImpl& m,
+    Function& m,
     const SourceRange& loc) {
   if (v.isTuple()) {
     auto tp = v.toTuple();
@@ -332,7 +332,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   // 1. Look inside script::Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
@@ -379,8 +379,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // 4. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
-    return std::make_shared<FunctionValue>(
-        dynamic_cast<FunctionImpl*>(*fnAttr));
+    return std::make_shared<FunctionValue>(*fnAttr);
   } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
     return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
@@ -431,7 +430,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
                          << " has no attribute '" << field << "' " << hint;
 }
 
-SugaredValuePtr ModuleValue::iter(const SourceRange& loc, FunctionImpl& m) {
+SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
   const auto iterableModuleKind = concreteType_->getIterableModuleKind();
   if (iterableModuleKind == IterableModuleKind::NONE) {
     throw ErrorReport(loc)
@@ -450,7 +449,7 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, FunctionImpl& m) {
 
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
@@ -464,7 +463,7 @@ std::shared_ptr<SugaredValue> PythonClassValue::attr(
 
 void ModuleValue::setAttr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& field,
     Value* newValue) {
   // Forward to SimpleValue::setAttr
@@ -474,7 +473,7 @@ void ModuleValue::setAttr(
 
 std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     const SourceRange& loc,
-    FunctionImpl& caller,
+    Function& caller,
     at::ArrayRef<NamedValue> inputs,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
@@ -516,7 +515,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
 
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
-    FunctionImpl& m,
+    Function& m,
     SourceRange loc,
     bool is_constant) {
   // directly create SimpleValues when possible, because they are first-class
@@ -573,8 +572,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (auto callee = as_function(obj)) {
-    return std::make_shared<FunctionValue>(
-        dynamic_cast<FunctionImpl*>(callee->function_));
+    return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
     return std::make_shared<PythonModuleValue>(obj);
   } else if (obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr()) {

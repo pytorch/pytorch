@@ -217,7 +217,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
 
 struct Environment {
   Environment(
-      FunctionImpl& method,
+      Function& method,
       ResolverPtr resolver,
       Block* b,
       std::shared_ptr<Environment> next = nullptr)
@@ -226,7 +226,7 @@ struct Environment {
         b(b),
         next(std::move(next)) {}
 
-  FunctionImpl& method;
+  Function& method;
   ResolverPtr resolver;
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
   Block* b;
@@ -589,7 +589,7 @@ struct to_ir {
       const Def& def,
       ResolverPtr resolver_,
       const Self* self,
-      FunctionImpl& method) // method being constructed
+      Function& method) // method being constructed
       : method(method),
         graph(method.graph()),
         resolver(std::move(resolver_)),
@@ -622,7 +622,7 @@ struct to_ir {
   }
 
  private:
-  FunctionImpl& method;
+  Function& method;
   std::shared_ptr<Graph> graph;
   ResolverPtr resolver;
   std::unordered_map<int64_t, Value*> integral_constants;
@@ -3324,8 +3324,7 @@ struct FunctionResolver : public Resolver {
       const SourceRange& loc) override {
     auto it = functionTable_.find(name);
     if (it != functionTable_.end()) {
-      return std::make_shared<FunctionValue>(
-          dynamic_cast<FunctionImpl*>(it->second));
+      return std::make_shared<FunctionValue>(it->second);
     }
     return otherResolver_->resolveValue(name, m, loc);
   }
@@ -3408,7 +3407,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
     }
     ErrorReport::CallStack call(call_name);
-    to_ir(def, _resolver, self, dynamic_cast<FunctionImpl&>(method));
+    to_ir(def, _resolver, self, method);
   };
   auto name = prefix ? QualifiedName(*prefix, def.name().name())
                      : QualifiedName(def.name().name());

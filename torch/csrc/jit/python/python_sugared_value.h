@@ -24,7 +24,7 @@ inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
 // type, *add it in this function's implementation*.
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
-    FunctionImpl& m,
+    Function& m,
     SourceRange loc,
     bool is_constant = false);
 
@@ -47,7 +47,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   // call it like a function, e.g. `outputs = this(inputs)`
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       at::ArrayRef<NamedValue> inputs_,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
@@ -56,12 +56,12 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const c10::optional<size_t>& size_hint = {}) override;
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override;
 
  protected:
@@ -79,7 +79,7 @@ struct VISIBILITY_HIDDEN PythonModuleValue : public PythonValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override;
 };
 
@@ -91,7 +91,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      FunctionImpl& caller,
+      Function& caller,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
@@ -112,7 +112,7 @@ struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      FunctionImpl& f,
+      Function& f,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
@@ -144,18 +144,18 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
     return "module";
   }
 
-  Value* asValue(const SourceRange& loc, FunctionImpl& m) override;
+  Value* asValue(const SourceRange& loc, Function& m) override;
 
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override;
 
   // call module.forward
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      FunctionImpl& caller,
+      Function& caller,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override {
@@ -165,15 +165,15 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
   std::shared_ptr<SugaredModuleDict> getSugaredModuleDict(
       const SourceRange& loc,
-      FunctionImpl& m);
+      Function& m);
 
   void setAttr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field,
       Value* newValue) override;
 
-  SugaredValuePtr iter(const SourceRange& loc, FunctionImpl& m) override;
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
 
  private:
   Value* self_;
@@ -182,7 +182,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
 void recurseThroughNestedModules(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
@@ -205,10 +205,10 @@ struct VISIBILITY_HIDDEN SugaredModuleDict : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override;
 
-  SugaredValuePtr iter(const SourceRange& loc, FunctionImpl& m) {
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) {
     return keys_;
   };
 
@@ -227,7 +227,7 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      FunctionImpl& caller,
+      Function& caller,
       at::ArrayRef<NamedValue> inputs,
       at::ArrayRef<NamedValue> attributes,
       size_t n_binders) override;
@@ -246,7 +246,7 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override;
 
  private:

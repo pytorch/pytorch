@@ -90,7 +90,7 @@ struct PythonResolver : public Resolver {
     if (obj.is(py::none())) {
       return nullptr;
     }
-    return toSugaredValue(obj, dynamic_cast<FunctionImpl&>(m), loc);
+    return toSugaredValue(obj, m, loc);
   }
 
   static bool isNamedTupleClass(py::object obj) {
@@ -514,7 +514,7 @@ static std::shared_ptr<Graph> _assign_output_shapes(
 
 void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = dynamic_cast<FunctionImpl*>(func.function_)->graph()->copy();
+  auto graph = func.function_->graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
   const auto name = QualifiedName(*module.type()->name(), "forward");
@@ -981,14 +981,11 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
           "graph",
-          [](const StrongFunctionPtr& self) {
-            return dynamic_cast<FunctionImpl*>(self.function_)->graph();
-          })
+          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
       .def_property_readonly(
           "inlined_graph",
           [](const StrongFunctionPtr& self) {
-            auto g =
-                dynamic_cast<FunctionImpl*>(self.function_)->graph()->copy();
+            auto g = self.function_->graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1009,9 +1006,7 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
-            return dynamic_cast<FunctionImpl*>(self.function_)
-                ->get_executor()
-                .getDebugState();
+            return self.function_->get_executor().getDebugState();
           })
       .def_property_readonly(
           "name",
@@ -1036,8 +1031,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "inlined_graph",
           [](const Method& self) {
-            auto g =
-                dynamic_cast<FunctionImpl&>(self.function()).graph()->copy();
+            auto g = self.function().graph()->copy();
             Inline(*g);
             return g;
           })

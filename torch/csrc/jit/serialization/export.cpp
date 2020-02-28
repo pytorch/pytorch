@@ -919,8 +919,7 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   for (const auto& method : m.get_methods()) {
     const auto& func = method.function();
-    for (const auto& node :
-         dynamic_cast<const FunctionImpl&>(func).graph()->nodes()) {
+    for (const auto& node : func.graph()->nodes()) {
       auto schema = node->maybeSchema();
       if (schema) {
         auto opname = schema->operator_name();

@@ -160,7 +160,7 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     for (const auto& method : methods) {
       const auto& func = method.function();
-      auto graph = dynamic_cast<const FunctionImpl&>(func).graph()->copy();
+      auto graph = func.graph()->copy();
       Inline(*graph);
       torch::jit::Code code(graph);
 

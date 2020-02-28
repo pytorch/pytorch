@@ -18,7 +18,7 @@ struct OpsValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override {
     return std::make_shared<BuiltinModule>(field, version_);
   }
@@ -41,7 +41,7 @@ struct TORCH_API ClassNamespaceValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& name) override;
   std::string kind() const override {
     return "Class Namespace";
@@ -64,7 +64,7 @@ struct ConstantTableValue : public SugaredValue {
   // select an attribute on it, e.g. `this.field`
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      FunctionImpl& m,
+      Function& m,
       const std::string& field) override {
     const char* field_s = field.c_str();
     char* end;
@@ -205,7 +205,7 @@ struct SourceImporterImpl : public Resolver,
     if (it != env_.end()) {
       return it->second;
     }
-    auto graph = dynamic_cast<FunctionImpl&>(m).graph();
+    auto graph = m.graph();
     if (name == "inf") {
       return std::make_shared<SimpleValue>(
           graph->insertConstant(std::numeric_limits<double>::infinity(), loc));
@@ -444,7 +444,7 @@ struct SourceImporterImpl : public Resolver,
 
 std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     const SourceRange& loc,
-    FunctionImpl& m,
+    Function& m,
     const std::string& name) {
   auto fullName = c10::QualifiedName(basename_, name);
   // Could be a ClassType or NamedTuple constructor
@@ -458,7 +458,7 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
 
   // Or it could be a free function
   if (auto fn = si_->findFunction(fullName)) {
-    return std::make_shared<FunctionValue>(dynamic_cast<FunctionImpl*>(fn));
+    return std::make_shared<FunctionValue>(fn);
   }
 
   // If it's none of those things, assume it's another namespace

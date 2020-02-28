@@ -1492,10 +1492,7 @@ struct CAFFE2_API ClassType : public NamedType {
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module = false) {
-    return ClassTypePtr(
-        new ClassType(std::move(qualifiedName), std::move(cu), is_module));
-  }
+      bool is_module = false);
 
   bool operator==(const Type& rhs) const override {
     if (auto user_rhs = rhs.cast<ClassType>()) {
@@ -1516,9 +1513,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  const std::vector<torch::jit::Function*>& methods() const {
-    return methods_;
-  }
+  const std::vector<torch::jit::Function*>& methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
     TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1564,36 +1559,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return attributeNames_[slot];
   }
 
-  void checkNotExist(const std::string& name, const std::string& what)
-      const {
-    // Check no overlap with existing constants
-    for (size_t i = 0; i < constantNames_.size(); ++i) {
-      TORCH_CHECK(
-          name != constantNames_[i],
-          "attempting to add ",
-          what,
-          " '",
-          name,
-          "' to ",
-          python_str(),
-          " but a constant field of the same name already exists with value ",
-          constantValues_[i]);
-    }
-
-    // Check no overlap with existing attributes
-    for (size_t i = 0; i < attributeNames_.size(); ++i) {
-      TORCH_CHECK(
-          name != attributeNames_[i],
-          "attempting to add ",
-          what,
-          " '",
-          name,
-          "' to ",
-          python_str(),
-          " but an attribute field of the same name already exists with type ",
-          attributeTypes_[i]->python_str());
-    }
-  }
+  void checkNotExist(const std::string& name, const std::string& what) const;
 
   // Attributes are stored in a specific slot at runtime for effiency.
   // When emitting instructions we specify the slot so that attribute access is
@@ -1632,31 +1598,7 @@ struct CAFFE2_API ClassType : public NamedType {
   size_t addAttribute(
       const std::string& name,
       const TypePtr& type,
-      bool is_parameter = false) {
-    const char* what = is_parameter ? "parameter" : "attribute";
-    checkNotExist(name, what);
-    checkNoAny(*this, what, name, type);
-
-    size_t slot = attributeNames_.size();
-    attributeNames_.push_back(name);
-    attributeTypes_.push_back(type);
-    if (is_parameter) {
-      TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter to a non module");
-      TORCH_CHECK(
-          (type->kind() == TensorType::Kind) ||
-              (type->kind() == OptionalType::Kind &&
-              type->expect<OptionalType>()->getElementType()->kind() ==
-                  TensorType::Kind) ||
-              (type->kind() == NoneType::Kind),
-          "Expecting parameter to have either None, Tensor or Optional[Tensor] type, but got: ",
-          toString(type));
-    }
-    if (is_module()) {
-      parameterSlots_->push_back(is_parameter);
-    }
-    return slot;
-  }
-
+      bool is_parameter = false);
 
   // [Internal Only] Remove attribute from the ClassType,
   // caller is responsible to make sure the modification is safe:
@@ -1664,14 +1606,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // of this object around anymore, and any code that works on
   // the attribute is now invalid. Only newly created code is
   // valid again.
-  void unsafeRemoveAttribute(const std::string& name) {
-    auto slot = getAttributeSlot(name);
-    attributeNames_.erase(attributeNames_.begin() + slot);
-    attributeTypes_.erase(attributeTypes_.begin() + slot);
-    if (is_module()) {
-      parameterSlots_->erase(parameterSlots_->begin() + slot);
-    }
-  }
+  void unsafeRemoveAttribute(const std::string& name);
 
   // Add attribute \p NAME if it doesn't exist or verify that it has a
   // compatible type otherwise.
@@ -1717,13 +1652,7 @@ struct CAFFE2_API ClassType : public NamedType {
         constantNames_.cend();
   }
 
-  size_t addConstant(const std::string& name, const IValue& value) {
-    checkNotExist(name, "constant");
-    size_t slot = constantNames_.size();
-    constantNames_.push_back(name);
-    constantValues_.push_back(value);
-    return slot;
-  }
+  size_t addConstant(const std::string& name, const IValue& value);
 
   c10::optional<size_t> findConstantSlot(const std::string& name) const {
     TORCH_CHECK(constantNames_.size() == constantValues_.size());
@@ -1756,42 +1685,11 @@ struct CAFFE2_API ClassType : public NamedType {
   }
 
 
-  IValue getConstant(const std::string& name) const {
-    const auto& v = findConstant(name);
-    TORCH_CHECK(
-        v.has_value(),
-        python_str(),
-        " does not have a constant field with name '",
-        name,
-        "'");
-    return *v;
-  }
+  IValue getConstant(const std::string& name) const;
 
-  IValue getConstant(size_t slot) const {
-    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
-    TORCH_CHECK(
-        slot < constantValues_.size(),
-        python_str(),
-        " does not have a constant slot of index ",
-        slot);
-    return constantValues_[slot];
-  }
+  IValue getConstant(size_t slot) const;
 
-  c10::optional<IValue> findConstant(const std::string& name) const {
-    TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
-    size_t pos = 0;
-    for (const auto& c : constantNames_) {
-      if (name == c) {
-        break;
-      }
-      ++pos;
-    }
-
-    if (pos >= constantNames_.size()) {
-      return c10::nullopt;
-    }
-    return constantValues_[pos];
-  }
+  c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
     TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
@@ -1812,11 +1710,7 @@ struct CAFFE2_API ClassType : public NamedType {
   // of this object around anymore, and any code that works on
   // the attribute is now invalid. Only newly created code is
   // valid again.
-  void unsafeRemoveConstant(const std::string& name) {
-    auto slot = getConstantSlot(name);
-    constantNames_.erase(constantNames_.begin() + slot);
-    constantValues_.erase(constantValues_.begin() + slot);
-  }
+  void unsafeRemoveConstant(const std::string& name);
 
   TypePtr createWithContained(std::vector<TypePtr> contained_types) const override {
     auto ptr = ClassType::create(name(), compilation_unit_);
@@ -1844,17 +1738,9 @@ struct CAFFE2_API ClassType : public NamedType {
   void addMethod(torch::jit::Function* method);
   torch::jit::Function* getMethod(const std::string& name) const;
 
-  std::shared_ptr<CompilationUnit> compilation_unit() {
-    auto cu = compilation_unit_.lock();
-    TORCH_INTERNAL_ASSERT(cu);
-    return cu;
-  }
+  std::shared_ptr<CompilationUnit> compilation_unit();
 
-  std::shared_ptr<const CompilationUnit> compilation_unit() const {
-    auto cu = compilation_unit_.lock();
-    TORCH_INTERNAL_ASSERT(cu);
-    return cu;
-  }
+  std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
   // generate a refined version of this class.
   // It has the same name but the slot Types are subtypes of
@@ -1872,13 +1758,7 @@ struct CAFFE2_API ClassType : public NamedType {
   ClassType(
       c10::optional<QualifiedName> name,
       std::weak_ptr<CompilationUnit> cu,
-      bool is_module)
-      : NamedType(TypeKind::ClassType, std::move(name)),
-        compilation_unit_(std::move(cu)) {
-    if (is_module) {
-      parameterSlots_ = std::make_shared<std::vector<bool>>();
-    }
-  }
+      bool is_module);
 
   // Mapping of attribute names -> their type.
   // NOTE: this does not contain methods, which are stored in the module

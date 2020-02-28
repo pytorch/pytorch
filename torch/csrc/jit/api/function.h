@@ -49,6 +49,12 @@ struct TORCH_API Function {
 
   virtual void check_single_output() = 0;
 
+  virtual std::shared_ptr<Graph> graph() const = 0;
+
+  virtual std::shared_ptr<Graph> optimized_graph() const = 0;
+
+  virtual GraphExecutor& get_executor() = 0;
+
   virtual ~Function() {}
 };
 } // namespace jit

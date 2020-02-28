@@ -1544,7 +1544,7 @@ void loadModule(const script::CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = dynamic_cast<const FunctionImpl*>(method)->graph();
+    pair.forward = method->graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();

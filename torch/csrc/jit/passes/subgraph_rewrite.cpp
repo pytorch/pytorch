@@ -29,7 +29,7 @@ void SubgraphRewriter::RegisterRewritePattern(
 script::Module SubgraphRewriter::runOnModule(const script::Module& module) {
   nodes_to_delete_.clear();
   for (const auto& m : module.get_methods()) {
-    auto g = dynamic_cast<FunctionImpl&>(m.function()).graph();
+    auto g = m.function().graph();
     runOnGraph(g);
   }
   return module;

@@ -1148,7 +1148,7 @@ struct PythonPrintImpl {
       const Function& func,
       bool print_first_argument_type = true) {
     const FunctionSchema& schema = func.getSchema();
-    Graph& graph = *dynamic_cast<const FunctionImpl&>(func).graph();
+    Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
 
     WithSourceRange guard(&source_range_stack_, graph.param_node());

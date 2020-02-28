@@ -1828,7 +1828,7 @@ std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   std::unordered_map<Value*, Value*> value_map;
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),
-      *(dynamic_cast<FunctionImpl*>(callee)->optimized_graph()),
+      *(callee->optimized_graph()),
       to_replace->inputs(),
       value_map);
 

@@ -45,7 +45,7 @@ void testInliner() {
     CompilationUnit cu(testSource);
     auto& fn = cu.get_function("foo3");
 
-    auto g = dynamic_cast<FunctionImpl&>(fn).graph();
+    auto g = fn.graph();
     Inline(*g);
     FileCheck().check_count("prim::Print", 3)->run(*g);
   }

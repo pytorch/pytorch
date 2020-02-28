@@ -650,7 +650,7 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](FunctionImpl& func) {
+                                unoptimized_graph](Function& func) {
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
@@ -1064,7 +1064,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // potential to reduce the number of compilations for too
                 // dynamic callers we might miss opportunities where a caller is
                 // dynamic but a callee gets stable arguments
-                dynamic_cast<FunctionImpl*>(af.functions[inst.X])
+                af.functions[inst.X]
                     ->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code;
@@ -1090,8 +1090,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
             const Code& code =
-                dynamic_cast<FunctionImpl*>(function)
-                    ->get_executor()
+                function->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code;
             frames.back().pc = af.pc + 1;
@@ -1186,7 +1185,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 frames.back().function->remaining_bailout_depth_ > 0
                 ? frames.back().function->remaining_bailout_depth_ - 1
                 : 0;
-            const Code& code = dynamic_cast<FunctionImpl*>(af.functions[inst.X])
+            const Code& code = af.functions[inst.X]
                                    ->get_executor()
                                    .getPlanFor(stack, remaining_bailout_depth)
                                    .code;

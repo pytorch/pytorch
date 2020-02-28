@@ -33,7 +33,7 @@ struct TORCH_API Method {
       const Kwargs& kwargs = Kwargs());
 
   std::shared_ptr<Graph> graph() const {
-    return dynamic_cast<FunctionImpl*>(function_)->graph();
+    return function_->graph();
   }
 
   const std::string& name() const {
@@ -45,7 +45,7 @@ struct TORCH_API Method {
   }
 
   GraphExecutor& get_executor() {
-    return dynamic_cast<FunctionImpl*>(function_)->get_executor();
+    return function_->get_executor();
   }
 
   Function& function() const {

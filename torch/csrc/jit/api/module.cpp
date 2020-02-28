@@ -136,7 +136,7 @@ void Module::clone_method(
       return in;
     return it->second;
   };
-  auto graph = dynamic_cast<const FunctionImpl&>(method).graph()->copy();
+  auto graph = method.graph()->copy();
   graph->remapTypes(type_remap_fn);
   auto schema = method.getSchema().cloneWithRemappedTypes(type_remap_fn);
   const auto this_method_name = getNameForMethod(method.name());
