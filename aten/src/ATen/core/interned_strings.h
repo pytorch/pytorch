@@ -250,7 +250,8 @@ namespace c10 {
   _(attr, types)                     \
   _(attr, scope)                     \
   _(attr, keepdims)                  \
-  _(attr, new_axis)
+  _(attr, new_axis)                  \
+  _(attr, is_splittable)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
