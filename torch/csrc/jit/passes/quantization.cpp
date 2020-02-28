@@ -533,17 +533,31 @@ bool matchArgPattern(
 }
 
 bool isBiasOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear bias being used by"
+        " one node.");
+  }
+  return result;
 }
 
 bool isWeightOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear weight being used by"
+        " one node.");
+  }
+  return result;
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
@@ -637,19 +651,10 @@ void InsertObserversHelper::insertObserverFor(
   if (!qconfig_opt) {
     return;
   }
-  // Skip observing bias
-  if (isBiasOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1, "We only support bias being used by one node.");
-    return;
-  }
 
   const auto& qconfig = *qconfig_opt;
   script::Module observer_module;
   if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "We only support weight being used by one node.");
     observer_module = std::get<1>(qconfig);
   } else {
     observer_module = std::get<0>(qconfig);
@@ -742,7 +747,7 @@ void InsertObserversHelper::preprocess(
 
 bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   if (!v->type()->isSubtypeOf(TensorType::get()) ||
-      values_to_skip_.count(v)) {
+      values_to_skip_.count(v) || isBiasOfConvOrLinear(v)) {
     return false;
   }
   // Check whether producer is quantizable
