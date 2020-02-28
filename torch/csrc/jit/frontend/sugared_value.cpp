@@ -100,7 +100,6 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            "T",
            "ndim",
            "name",
-           "output_nr",
        }},
       {TypeKind::DeviceObjType, {"type", "index"}}};
   auto kind = value_->type()->kind();

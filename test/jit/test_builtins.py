@@ -100,6 +100,8 @@ class TestTensorBuiltins(JitTestCase):
         ])
         MISSING_PROPERTIES = set([
             'grad_fn',
+            # This is an undocumented property so it's not included
+            "output_nr",
             # This has a longer implementation, maybe not worth copying to
             # TorchScript if named tensors don't work there anyways
             'names',
