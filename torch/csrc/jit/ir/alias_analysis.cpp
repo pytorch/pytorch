@@ -336,6 +336,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ChunkSizes:
     case prim::Function:
     case prim::CreateObject:
+    case prim::tolist:
       return analyzeCreator(node);
     case prim::TupleConstruct:
     case prim::DictConstruct:
