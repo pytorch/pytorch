@@ -137,19 +137,19 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
   auto shape = _self.sizes().vec();
   int64_t num_input_elements = _self.flatten().size(0);
-  Tensor mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
-  Tensor mask_cumsum = at::empty(shape, self.options().dtype(at::kLong));
+  // Tensor mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  Tensor mask_inclusive_scan = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
 
   auto stream = at::cuda::getCurrentCUDAStream();
   auto policy = thrust::cuda::par.on(stream);
   thrust::inclusive_scan(
     policy,
-    thrust::device_ptr<int64_t>(mask_long.data_ptr<int64_t>()),
-    thrust::device_ptr<int64_t>(mask_long.data_ptr<int64_t>() + num_input_elements),
-    thrust::device_ptr<int64_t>(mask_cumsum.data_ptr<int64_t>())
+    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>()),
+    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>() + num_input_elements),
+    thrust::device_ptr<int64_t>(mask_inclusive_scan.data_ptr<int64_t>())
   );
 
-  int64_t num_output_elements = mask_cumsum.flatten()[num_input_elements-1].item().toLong();
+  int64_t num_output_elements = mask_inclusive_scan.flatten()[num_input_elements-1].item().toLong();
 
   result.resize_({num_output_elements});
   if (num_output_elements == 0) {
@@ -173,20 +173,36 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
       scalar_t* out_ptr = result_strided.data_ptr<scalar_t>();
       scalar_t* in_ptr = _self.data_ptr<scalar_t>();
-      int64_t* mask_ptr = mask_long.data_ptr<int64_t>();
-      int64_t* mask_cumsum_ptr = mask_cumsum.data_ptr<int64_t>();
+      int64_t* mask_inclusive_scan_ptr = mask_inclusive_scan.data_ptr<int64_t>();
 
-      legacy::launch_kernel<launch_size_nd, launch_bound2>(
-        num_input_elements,
-        [=]__device__(int64_t idx) {
-          bool mask = mask_ptr[idx] != 0;
+      if (_mask.dtype() == ScalarType::Bool) {
+        bool* mask_ptr = _mask.data_ptr<bool>();
+        legacy::launch_kernel<launch_size_nd, launch_bound2>(
+          num_input_elements,
+          [=]__device__(int64_t in_idx) {
+            bool mask = mask_ptr[in_idx];
 
-          if (mask) {
-            int64_t mask_cumsum = mask_cumsum_ptr[idx];
-            out_ptr[mask_cumsum-1] = in_ptr[idx];
+            if (mask) {
+              int64_t out_idx = mask_inclusive_scan_ptr[in_idx]-1;
+              out_ptr[out_idx] = in_ptr[in_idx];
+            }
           }
-        }
-      );
+        );
+      } else {
+        uint8_t* mask_ptr = _mask.data_ptr<uint8_t>();
+        legacy::launch_kernel<launch_size_nd, launch_bound2>(
+          num_input_elements,
+          [=]__device__(int64_t in_idx) {
+            uint8_t mask = mask_ptr[in_idx];
+
+            if (mask) {
+              int64_t out_idx = mask_inclusive_scan_ptr[in_idx]-1;
+              out_ptr[out_idx] = in_ptr[in_idx];
+            }
+          }
+        );
+
+      }
     }
   );
 
