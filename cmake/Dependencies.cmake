@@ -248,6 +248,11 @@ if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
+    if (NOT DEFINED CLOG_SOURCE_DIR)
+      # XNNPACK gets clog from inside the cpuinfo repository,
+      # so lets just do the same for now.
+      set(CLOG_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo/deps/clog" CACHE STRING "cpuinfo source directory")
+    endif()
 
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
