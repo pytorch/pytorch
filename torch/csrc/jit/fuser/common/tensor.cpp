@@ -268,6 +268,12 @@ TensorView* TensorView::newForOutput(DataType dtype) const {
   return new TensorView(td, dtype);
 };
 
+void TensorView::resetView(){
+  setDomain(TransformIter::getRoot(this->domain()));
+  compute_at_view_ = nullptr;
+  compute_at_axis_ = 0;
+}
+
 TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   /*
    * Recursive compute_at:
@@ -279,6 +285,7 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   if(axis < 0)
     //Compute at is funny where size is the maximum acceptable value instead of size-1
     axis +=  consumer->domain()->size() + 1;
+
   TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size() + 1);
 
   std::stack<Val*> dep_chain =
@@ -334,9 +341,10 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   // two independent loop nests of the same sizes.
 
   // Reset view otherwise will conflict with replay.
-  
+
   this->compute_at_view_ = nullptr;
   this->compute_at_axis_ = -1;
+
   TransformReplay::replay(running_consumer, this, axis);
   this->compute_at_view_ = running_consumer;
   this->compute_at_axis_ = axis;

@@ -11,7 +11,7 @@ namespace fuser {
 
 namespace {
 
-static bool print_inline = false;
+static bool print_inline_ = false;
 
 template<typename T>
 std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
@@ -127,9 +127,10 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id)
     default:
       os << id->parallel_method();
   }
-  print_inline = true;
+  bool prev = print_inline_;
+  print_inline_ = true;
   os << "{" << id->size() << "}";
-  print_inline = false;
+  print_inline_ = prev;
   return os;
 }
 
@@ -151,7 +152,7 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const Float* const f) {
-  if(print_inline && FusionGuard::getCurFusion()->origin(f) != nullptr){
+  if(print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr){
     return os<<"( "<< FusionGuard::getCurFusion()->origin(f) << " )";
   }
   
@@ -163,7 +164,7 @@ std::ostream& operator<<(std::ostream& os, const Float* const f) {
 }
 
 std::ostream& operator<<(std::ostream& os, const Int* const i) {
-  if(print_inline && FusionGuard::getCurFusion()->origin(i) != nullptr){
+  if(print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr){
     return os<<"( "<< FusionGuard::getCurFusion()->origin(i) << " )";
   }
   
@@ -175,7 +176,7 @@ std::ostream& operator<<(std::ostream& os, const Int* const i) {
 }
 
 std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
-  if(!print_inline)
+  if(!print_inline_)
     os << uop->out() << " = ";
   if(auto inline_uop = inline_op_str(uop->type())) {
     return os << inline_uop.value() << uop->in();
@@ -185,7 +186,7 @@ std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
 }
 
 std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
-  if(!print_inline)
+  if(!print_inline_)
     os << bop->out() << " = ";
   if(auto inline_bop = inline_op_str(bop->type())) {
     return os << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
@@ -216,6 +217,15 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const m){
 TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const ro){
   return os << "Reorder: " << ro->in() << " -> " << ro->out();
 }
+
+TORCH_API std::ostream& print_inline(std::ostream& os, const Statement* const stmt){
+  bool prev = print_inline_;
+  print_inline_ = true;
+  os << stmt;
+  print_inline_ = prev;
+  return os;
+}
+
 
 } // namespace fuser
 } // namespace jit

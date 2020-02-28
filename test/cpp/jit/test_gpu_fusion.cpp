@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/tensor_meta.h>
 #include <torch/csrc/jit/fuser/common/transform_replay.h>
+#include <torch/csrc/jit/fuser/common/code_write.h>
 
 // fuser and IR parser
 #include <torch/csrc/jit/fuser/cuda/parser.h>
@@ -519,22 +520,22 @@ void testGPU_FusionComputeAt() {
 
   ASSERT_ANY_THROW(tv0->computeAt(tv2, 3));
 
-  //[I0, I1, I2]
+  //[I0, I1, I3]
   tv2 = split(tv2, 0, 4);
-  //[I0o, I0i{4}, I1, I2]
+  //[I0o, I0i{4}, I1, I3]
   tv2 = merge(tv2, 1);
-  //[I0o, I0i{4}*I1, I2]
+  //[I0o, I0i{4}*I1, I3]
   tv2 = split(tv2, -1, 2);
-  //[I0o, I0i{4}*I1, I2o, I2i{2}]
+  //[I0o, I0i{4}*I1, I3o, I3i{2}]
   tv2 = reorder(tv2, {{0, 1}, {1, 0}, {3, 2}});
-  //[I0i{4}*I1, I0o, I2i, I2o{2}]
+  //[I0i{4}*I1, I0o, I3i, I3o{2}]
   std::cout << "Replaying: " << td << "\n-> " << tv2 << "\n on " << tv0
             << " and " << tv1 << "\nwith \'compute_at(2)\' produces:\n"
             << tv0->computeAt(tv2, 2)
             << "\nWhich should along the lines of:"
-            << "\n[I0i{4}*I1, I0o, R0, I2]\n"
-            << tv1 << " should be along the lines of: "
-            << "\n[I0i{4}*I1, I0o, I2]" << std::endl;
+            << "\n[I0i{4}*I1, I0o, R2, I3]\n"
+            << tv1 << "\nshould be along the lines of: "
+            << "\n[I0i{4}*I1, I0o, I3]" << std::endl;
   
  }
 
@@ -762,6 +763,52 @@ void testGPU_FusionTwoAdds() {
   
   fusion.print();
 }
+void testGPU_FusionCodeGen() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+
+  TensorDomain* td = new TensorDomain(dom);
+  TensorView* tv0 = new TensorView(td, DataType::Float);
+  new BinaryOp(BinaryOpType::Add, tv0, new Float(0.0), new Float(1.0));
+  TensorView* tv1 = static_cast<TensorView*>(add(tv0, new Float(2.0)));
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(3.0)));
+
+  //[I0, I1, I2]
+  tv2 = split(tv2, 0, 4);
+  //[I0o, I0i{4}, I1, I2]
+  tv2 = merge(tv2, 1);
+  //[I0o, I0i{4}*I1, I2]
+  tv2 = split(tv2, -1, 2);
+  //[I0o, I0i{4}*I1, I2o, I2i{2}]
+  tv2 = reorder(tv2, {{0, 1}, {1, 0}, {3, 2}});
+  //[I0i{4}*I1, I0o, I2i{2}, I2o]
+  fusion.addOutput(tv2);
+
+  tv0->computeAt(tv2, 1);
+  
+  //std::cout<<fusion<<std::endl;
+
+  std::cout
+  << "Code gen-ing:\n"
+  << "%TV0[ I0i{4} * I1, I0o, I2] compute_at( %TV1, 1 ) = 0f + 1f\n"
+  << "%TV1[ I0i{4} * I1, I0o, I2] compute_at( %TV2, 1 ) = %TV0 + 2f\n"
+  << "%TV2[ I0i{4} * I1, I0o, I2i{2}, I2o]              = %TV1 + 3f\n"
+  << ":::::::" << std::endl;
+  
+  CodeWrite cw;
+  cw.traverse(&fusion);
+  /*
+  std::vector<Int*> indices;
+  for(int i=0; i < tv2->domain()->size(); i++)
+    indices.push_back(new Int());
+  IndexCompute test(tv2, indices);
+  */
+ }
 
 void testGPU_Fusion() {}
 
