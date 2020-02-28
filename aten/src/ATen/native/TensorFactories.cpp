@@ -762,8 +762,10 @@ Tensor& zeros_out(Tensor& result, IntArrayRef size) {
 
 Tensor zeros_like(
     const Tensor& self,
-    const TensorOptions& options,
+    const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Resolve options so we can accurately test if it's sparse
+  auto options = self.options().merge_in(options_);
   if (options.layout() == kSparse && self.is_sparse()) {
     auto res = at::empty({0}, options); // to be resized
     res.sparse_resize_and_clear_(
