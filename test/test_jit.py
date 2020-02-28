@@ -1177,7 +1177,6 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        print()
         dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
@@ -1263,6 +1262,10 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         observer = torch.jit.script(default_observer())
+
+        # run the observer once to avoid warning on an empty observer
+        observer(torch.rand(2, 2))
+
         qconfig_dict = {
             '':
             QConfig(
@@ -2069,19 +2072,6 @@ graph(%Ra, %Rb):
 
         self.checkTrace(f, (x,), (torch.ones(2, 2, requires_grad=True),))
 
-    def test_legacy_fail(self):
-        class MyLegacyFn(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_output):
-                return grad_output
-
-        x = torch.tensor([0.], requires_grad=True)
-        with warnings.catch_warnings(record=True):
-            with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-                torch.jit._get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
-
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
 
@@ -2235,6 +2225,9 @@ graph(%Ra, %Rb):
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
 
+    # Suppression: we are intentionally slicing a tensor, we don't care that it
+    # will be constantified
+    @suppress_warnings
     def do_trace_slice(self, requires_grad):
         def slice(x):
             results = []
@@ -4409,7 +4402,7 @@ class TestScript(JitTestCase):
             def forward(self, x):
                 return self.fn(x)
 
-        m = M(F.sigmoid)
+        m = M(torch.sigmoid)
         inp = torch.rand(2, 3)
         self.checkModule(m, (inp, ))
 
@@ -5017,12 +5010,12 @@ def foo(x):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
-        module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
+        module = torch.jit.trace_module(n, inputs, check_trace=True, check_inputs=check_inputs)
         self.assertTrue(module._c._has_method("forward"))
         self.assertTrue(module._c._has_method("weighted_kernel_sum"))
 
         module = torch.jit.trace(n.forward, example_forward_input)
-        module = torch.jit.trace(n.forward, example_forward_input, True, [example_forward_input])
+        module = torch.jit.trace(n.forward, example_forward_input, check_trace=True, check_inputs=[example_forward_input])
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
@@ -11148,6 +11141,8 @@ a")
         # test copy
         m_c = m.copy()
 
+    # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
+    @suppress_warnings
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -12123,6 +12118,7 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
 
+    @suppress_warnings
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -12135,8 +12131,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
+
         torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            mte, (torch.zeros(1, 2, 3, dtype=torch.float),), None, verbose=False,
             example_outputs=outputs)
 
     def test_onnx_raw_export_script_truediv(self):
@@ -12153,6 +12150,7 @@ a")
         outputs = mte(torch.zeros(1, 2, 3))
         torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            add_node_names=False, do_constant_folding=False,
             example_outputs=outputs, export_raw_ir=True)
 
     def test_onnx_export_script_non_alpha_add_sub(self):
@@ -14734,6 +14732,8 @@ a")
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
             FooMod(), (torch.rand(3, 4),), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @suppress_warnings
@@ -14766,6 +14766,8 @@ a")
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
+        # Suppression: using deprecated quant api
+        @suppress_warnings
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
