@@ -846,6 +846,20 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(ngrads, len(grads))
 
     @dist_init
+    def test_backward_no_grad_on_tensor(self):
+        t1 = torch.rand((3, 3), requires_grad=True)
+        t2 = torch.rand((3, 3), requires_grad=True)
+        with dist_autograd.context() as context_id:
+            loss = rpc.rpc_sync(
+                "worker{}".format(self._next_rank()),
+                torch.add,
+                args=(t1, t2)).sum()
+
+            dist_autograd.backward(context_id, [loss])
+            self.assertIsNone(t1.grad)
+            self.assertIsNone(t2.grad)
+
+    @dist_init
     def test_backward_simple(self):
         # Run the same code locally and with dist autograd and verify gradients
         # are same.
