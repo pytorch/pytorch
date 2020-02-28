@@ -315,8 +315,6 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         env['th_headers'] = [
             '#include <TH/TH.h>',
             '#include <TH/THTensor.hpp>',
-            '#include <THNN/THNN.h>',
-            '#undef THNN_',
         ]
         env['extra_cuda_headers'] = []
         env['state'] = []
