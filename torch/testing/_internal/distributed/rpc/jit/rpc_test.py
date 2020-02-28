@@ -433,7 +433,7 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         # rpc_sync does not accept script module and script module method.
         with self.assertRaisesRegex(
-            Exception, "ScriptModules cannot be deepcopied"
+            RuntimeError, "ScriptModules cannot be deepcopied"
         ):
             ret = rpc.rpc_sync(
                 dst_worker_name, MyScriptModule, args=(self.rank,)

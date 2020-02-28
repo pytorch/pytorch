@@ -589,6 +589,4 @@ def rpc_async(to, func, args=None, kwargs=None):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
-    # If invoking an annotated TorchScript function,
-    # call the internal API _rpc_async_torchscript()
     return _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs)
