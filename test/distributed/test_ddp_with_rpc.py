@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 
-from typing import Callable, List, NamedTuple
+from typing import Callable, NamedTuple
 import enum
 import logging
 import os
-import sys
 
 from torch.distributed import rpc
 from torch.distributed.optim import DistributedOptimizer
 from torch import optim
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.dist_utils import dist_init
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
@@ -60,13 +59,14 @@ class DdpMode(enum.Enum):
 
 def init_logger():
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
+    level = logging.DEBUG if "debug" in os.environ else logging.INFO
+    logger.setLevel(level)
     console = logging.StreamHandler()
     formatter = logging.Formatter(
         "%(asctime)s %(filename)s:%(lineno)s %(levelname)s p:%(processName)s t:%(threadName)s: %(message)s"
     )
     console.setFormatter(formatter)
-    console.setLevel(logging.DEBUG if "debug" in os.environ else logging.INFO)
+    console.setLevel(level)
     # add the handlers to the logger
     logger.addHandler(console)
     logger.propagate = False
