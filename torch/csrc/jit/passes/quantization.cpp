@@ -189,23 +189,6 @@ bool nodeQuantizable(Node* n) {
     });
 }
 
-bool valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get())) {
-    return false;
-  }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
-  }
-  // Check whether user is quantizable
-  for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 script::Module findChildModule(
     const script::Module& module,
     const std::vector<std::string>& path) {
@@ -247,6 +230,13 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
               " which is not self:",
               self->debugName());
   return path;
+}
+
+script::Module getInvokedModule(
+    script::Module& module, Node* n, Value* self) {
+  auto* instance = n->inputs()[0];
+  auto path = getModuleAccessPath(instance, self);
+  return findChildModule(module, path);
 }
 
 class ModuleCloneHelper {
@@ -435,11 +425,12 @@ class InsertObserversHelper {
       script::Module& module,
       const std::string& method_name);
 
+  bool valueNeedsToBeQuantized(Value* v);
+
   void insertObserverFor(
       Value* v,
-      Graph* g,
       script::Module& module,
-      const c10::optional<QConfig>& qconfig_opt);
+      const script::Module& observer_module);
 
   void findIntermediateValuesInPattern(
       Graph& graph,
@@ -549,17 +540,36 @@ bool matchArgPattern(
 }
 
 bool isBiasOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear bias being used by"
+        " one node.");
+  }
+  return result;
 }
 
 bool isWeightOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear weight being used by"
+        " one node.");
+  }
+  return result;
+}
+
+script::Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
+  return
+    isWeightOfConvOrLinear(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
@@ -619,21 +629,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        // Record all method calls in the graph
-        auto module_instance = n->inputs()[0];
-        auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
-        if (module_instance->node()->kind() == prim::GetAttr) {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          callee_module = module.attr(child_module_name).toModule();
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance == graph->inputs()[0],
-              "We only support call method either on %self"
-              "or child instance in insert_observers_pass right now");
-          callee_module = module;
-        }
-        invoked_methods.push_back({callee_module, module_method_name});
+        invoked_methods.push_back(std::make_pair(getInvokedModule(module, n, graph->inputs()[0]), n->s(attr::name)));
       }
 
       for (Block* subblock : n->blocks()) {
@@ -648,36 +644,15 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 // and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
     Value* v,
-    Graph* g,
     script::Module& module,
-    const c10::optional<QConfig>& qconfig_opt) {
-  if (!qconfig_opt) {
-    return;
-  }
-  // Skip observing bias
-  if (isBiasOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1, "We only support bias being used by one node.");
-    return;
-  }
-
-  const auto& qconfig = *qconfig_opt;
-  script::Module observer_module;
-  if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "We only support weight being used by one node.");
-    observer_module = std::get<1>(qconfig);
-  } else {
-    observer_module = std::get<0>(qconfig);
-  }
-
+    const script::Module& observer_module) {
   script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
+  auto* g = v->owningGraph();
   graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
@@ -756,6 +731,24 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      values_to_skip_.count(v) || isBiasOfConvOrLinear(v)) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use : v->uses()) {
+    if (nodeQuantizable(use.user)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -784,6 +777,10 @@ void InsertObserversHelper::insertObservers(
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
+  if (!qconfig_opt) {
+    return;
+  }
+  auto qconfig = *qconfig_opt;
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -794,8 +791,8 @@ void InsertObserversHelper::insertObservers(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
+    if (valueNeedsToBeQuantized(v)) {
+      insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
     }
   }
 
@@ -811,7 +808,7 @@ void InsertObserversHelper::insertObservers(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
       }
@@ -824,7 +821,7 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
+    insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
   }
 }
 

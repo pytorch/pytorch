@@ -2387,11 +2387,14 @@ struct to_ir {
     }
   }
 
-  std::shared_ptr<SugaredValue> emitApplyExpr(Apply& apply, size_t n_binders) {
+  std::shared_ptr<SugaredValue> emitApplyExpr(
+      Apply& apply,
+      size_t n_binders,
+      const TypePtr& type_hint = nullptr) {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
-      return emitApplySpecialForm(special_form->form(), apply);
+      return emitApplySpecialForm(special_form->form(), apply, type_hint);
     }
     auto inputs = getNamedValues(apply.inputs(), true);
     auto attributes = emitAttributes(apply.attributes());
@@ -2405,7 +2408,8 @@ struct to_ir {
   // evaluation order.
   std::shared_ptr<SugaredValue> emitApplySpecialForm(
       Symbol form,
-      Apply& apply) {
+      Apply& apply,
+      const TypePtr& type_hint = nullptr) {
     switch (form) {
       case prim::fork: {
         auto& trees = apply.inputs().tree()->trees();
@@ -2494,6 +2498,19 @@ struct to_ir {
         checkApplyNumInputs(apply, 2);
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
         return std::make_shared<SimpleValue>(result.value());
+      }
+      case prim::tolist: {
+        auto select = Select(apply.callee());
+        auto value = select.value();
+        auto operand = emitSugaredExpr(value, 1);
+
+        if (!type_hint) {
+          throw ErrorReport(apply)
+              << "Expected type hint for result of tolist()";
+        }
+
+        return std::make_shared<SimpleValue>(graph->insertToList(
+            operand->asValue(value.range(), method), type_hint));
       }
       case prim::HasAttr: {
         checkApplyNumInputs(apply, 2);
@@ -2638,7 +2655,7 @@ struct to_ir {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        return emitApplyExpr(apply, n_binders);
+        return emitApplyExpr(apply, n_binders, type_hint);
       } break;
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree, type_hint));
