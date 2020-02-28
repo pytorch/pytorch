@@ -799,7 +799,7 @@ void InsertObserversHelper::insertObservers(
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
     if (valueNeedsToBeQuantized(v)) {
-      insertObserverFor(v, module, qconfig);
+      insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
     }
   }
 
