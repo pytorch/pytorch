@@ -1141,9 +1141,9 @@ struct GraphFuser {
     replaceIntermediateBroadcastingChunks();
 
     // Fuse starting chunks into the group.
-    //for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
-     // it = scanNodeForChunks(*it);
-    //}
+    for (auto it = block_->nodes().rbegin(); it != block_->nodes().rend();) {
+      it = scanNodeForChunks(*it);
+    }
 
     // Remove outputs that have been added only because we need their size
     for (Node* n : block_->nodes()) {
