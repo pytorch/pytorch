@@ -209,6 +209,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_swap_dequantize", &SwapDeQuant)
       .def("_jit_pass_swap_functional_linear", &SwapFunctionalLinear)
       .def("_jit_pass_swap_functional_linear_in_module", &SwapFunctionalLinearInModule)
+      .def("_jit_pass_quant_finalize", &Finalize)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const script::Module& m) { return PatternBasedRewrite(m); })

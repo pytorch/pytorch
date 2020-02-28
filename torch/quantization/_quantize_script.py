@@ -81,8 +81,7 @@ def convert_script(model, inplace=False):
     if not inplace:
         model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        torch._C._jit_pass_insert_prepack_unpack(model._c)
+    torch._C._jit_pass_quant_finalize(model._c)
     return model
 
 # TODO: non-scriptable QConfig will be supported later
