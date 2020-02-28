@@ -1,9 +1,9 @@
 #include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/serialization/import.h>
 
 // Tests go in torch::jit
 namespace torch {
