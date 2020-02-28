@@ -78,7 +78,6 @@ namespace c10 {
   _(prim, dtype)                     \
   _(prim, shape)                     \
   _(prim, requires_grad)             \
-  _(prim, MakeTestTensor) /* test */ \
   _(prim, AutogradAdd)               \
   _(prim, GradOf)                    \
   _(aten, grad)                      \
