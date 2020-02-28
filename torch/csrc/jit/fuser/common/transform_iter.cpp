@@ -61,6 +61,9 @@ TensorDomain* TransformIter::runBackward(
         if (generate_record)
           record.push_back(orig);
 
+        // run operation
+        replayBackward(orig);
+          
         // Traverse back
         root = static_cast<TensorDomain*>(inp);
         orig = fusion->origin(root);
