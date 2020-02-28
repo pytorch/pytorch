@@ -3,8 +3,8 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <torch/csrc/jit/import.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/api/module.h>
 #include <caffe2/serialize/read_adapter_interface.h>
 #include <c10/util/Exception.h>
 

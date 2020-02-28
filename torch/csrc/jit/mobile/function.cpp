@@ -1,7 +1,7 @@
 #include "function.h"
 #include "interpreter.h"
-#include <torch/csrc/jit/instruction.h>
-#include <torch/csrc/jit/vararg_functions.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
 namespace torch{
