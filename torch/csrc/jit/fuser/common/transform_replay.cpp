@@ -245,7 +245,7 @@ TensorView* TransformReplay::runReplay(
   if (compute_at_axis < 0)
     compute_at_axis += replay_ref->domain()->size() + 1;
 
-  assert(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1 );
+  TORCH_CHECK(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1 );
 
   this->compute_at_axis = compute_at_axis;
   

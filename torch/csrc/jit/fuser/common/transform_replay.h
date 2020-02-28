@@ -170,10 +170,6 @@ struct TORCH_API TransformReplay : public TransformIter {
   std::vector<int> axis_map;
 
  public:
-  static TensorDomain* getRoot(TensorDomain* td) {
-    TransformReplay tr;
-    return tr.runBackward(td, false);
-  }
 
   static TensorView* replay(
       TensorView* replay_ref,

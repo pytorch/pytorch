@@ -195,6 +195,7 @@ libtorch_sources = [
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/fuser/interface.cpp",
     "torch/csrc/jit/fuser/common/arith.cpp",
+    "torch/csrc/jit/fuser/common/code_write.cpp",
     "torch/csrc/jit/fuser/common/fusion.cpp",
     "torch/csrc/jit/fuser/common/ir.cpp",
     "torch/csrc/jit/fuser/common/iriostream.cpp",

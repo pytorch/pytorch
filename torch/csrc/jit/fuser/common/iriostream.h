@@ -57,6 +57,8 @@ TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const);
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& f);
 
+TORCH_API std::ostream& print_inline(std::ostream& os, const Statement* const);
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

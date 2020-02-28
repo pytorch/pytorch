@@ -45,7 +45,7 @@ TensorDomain* TransformIter::runBackward(
   while (orig != nullptr) {
     if (visited_exprs.find(orig) != visited_exprs.end())
       throw std::runtime_error(
-          "TransformReplay::get_root is not traversing a correct history.");
+          "TransformReplay::runBackward is not traversing a correct history.");
 
     visited_exprs.emplace(orig);
     TensorDomain* previous_td = nullptr;
@@ -55,7 +55,7 @@ TensorDomain* TransformIter::runBackward(
       if (inp->getValType() == ValType::TensorDomain) {
         if (previous_td != nullptr)
           throw std::runtime_error(
-              "TransformReplay::get_root could not decifer transform history of a TensorDomain.");
+              "TransformReplay::runBackward could not decifer transform history of a TensorDomain.");
 
         // Place transform op on top of stack.
         if (generate_record)
@@ -63,7 +63,7 @@ TensorDomain* TransformIter::runBackward(
 
         // run operation
         replayBackward(orig);
-          
+
         // Traverse back
         root = static_cast<TensorDomain*>(inp);
         orig = fusion->origin(root);
