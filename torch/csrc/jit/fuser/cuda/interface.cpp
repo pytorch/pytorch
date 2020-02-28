@@ -64,6 +64,7 @@ struct KernelCache {
 
 static KernelCache kernel_cache_;
 
+/*
 std::vector<bool> canCollapseDimsDown(const std::shared_ptr<c10::TensorType> tensor){
   int64_t ndims = *(tensor->dim());
 
@@ -86,6 +87,7 @@ std::vector<bool> canCollapseDimsDown(const std::shared_ptr<c10::TensorType> ten
 
   return canCollapseDown;
 }
+ */
 
 bool CUDAFusionBackend::isFusible(const Node* const node) {
   return isFusibleCudaFusionGroup(node);
@@ -94,7 +96,7 @@ bool CUDAFusionBackend::isFusible(const Node* const node) {
 bool CUDAFusionBackend::isFusible(const Node* const fusion, const Node* const node) {
   return isFusibleCudaFusionGroup(fusion, node);
 }
-/*
+
 /*
 // Returns true if the node is added to the fusion group, false o.w.
 bool CUDAFusionBackend::isFusible(const Node* const node) {
@@ -157,17 +159,6 @@ bool CUDAFusionBackend::isFusible(const Node* const node) {
   return false;
 }
 */
-
-// dummy kernel
-const char *saxpy = "                                           \n\
-extern \"C\" __global__                                         \n\
-void saxpy(float *x, float *y, float *out, size_t n)            \n\
-{                                                               \n\
-  size_t tid = blockIdx.x * blockDim.x + threadIdx.x;           \n\
-  if (tid < n) {                                                \n\
-   out[tid] = x[tid] + y[tid];                                  \n\
-  }                                                             \n\
-}                                                               \n";
 
 int CUDAFusionBackend::fuse(const Node* const node) {
   TORCH_CHECK(isFusible(node), "Trying to fuse nonfusible node!");
