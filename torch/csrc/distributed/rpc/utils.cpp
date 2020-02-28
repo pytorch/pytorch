@@ -13,8 +13,8 @@
 #include <torch/csrc/distributed/rpc/script_call.h>
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
-#include <torch/csrc/jit/pickler.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace distributed {
