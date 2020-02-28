@@ -114,6 +114,17 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
 }
 
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
+  if (mask.dtype() == at::ScalarType::Byte) {
+    // TODO: would be much better to put this warning inside AT_WARN(), but for
+    //    some reason using the __FILE__ macro in nvcc causes the message to be
+    //    displayed incorrectly
+    c10::Warning::warn(
+      {"", "IndexKernel.cu", static_cast<uint32_t>(__LINE__)},
+      "masked_select received a mask with dtype torch.uint8, this behavior is now deprecated, "
+      "please use a mask with dtype torch.bool instead."
+    );
+  }
+
   NoNamesGuard guard;
 
   TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
@@ -186,11 +197,6 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
 Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
   namedinference::compute_broadcast_outnames(self, mask);
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
   Tensor result = at::empty({0}, self.options());
   return masked_select_out_cuda_impl(result, self, mask);
 }
