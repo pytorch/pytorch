@@ -649,6 +649,8 @@
   return: argument 0
   variants:
     - function
+  backends:
+    - CUDA
   options:
     - cname: remainder
       arguments:
@@ -668,6 +670,8 @@
   name: _th_remainder_
   return: argument 0
   variants: function
+  backends:
+    - CUDA
   options:
     - cname: remainder
       arguments:
