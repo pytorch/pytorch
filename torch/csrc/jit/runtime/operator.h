@@ -72,7 +72,7 @@ struct TORCH_API Operator {
 
   Operator(
       const std::string& schema,
-      int(*op)(Stack&),
+      Operation op,
       c10::OperatorOptions options = c10::OperatorOptions())
       : schema_string_(schema),
         op_(std::make_shared<Operation>(std::move(op))),
@@ -124,6 +124,14 @@ struct TORCH_API Operator {
 
   c10::AliasAnalysisKind aliasAnalysisKind() const {
     if (isC10Op()) {
+      // Update options_ because they might have changed if new c10 registrations came in
+      // TODO We're doing an isValid check because the c10 operator might already be deregistered.
+      //      Instead, we should automatically deregister the JIT wrapper when the c10 op
+      //      gets deregistered and remove this isValid() check.
+      if (c10Handle_->isValid()) {
+        options_ = c10Handle_->options();
+      }
+
       const FunctionSchema& schemaRef = schema();
       TORCH_CHECK(
           options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
@@ -158,7 +166,7 @@ struct TORCH_API Operator {
   std::shared_ptr<Operation> op_;
   OperationCreator op_creator_;
   c10::optional<c10::OperatorHandle> c10Handle_;
-  c10::OperatorOptions options_;
+  mutable c10::OperatorOptions options_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
