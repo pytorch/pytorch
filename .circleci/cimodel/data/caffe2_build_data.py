@@ -40,7 +40,7 @@ class TreeConfigNode(ConfigNode):
 
     def is_test(self):
         if str(self.find_prop("language_version")) == "onnx_py3.6_part1" or \
-              str(self.find_prop("language_version")) == "onnx_py3.6_part2" or \
+                str(self.find_prop("language_version")) == "onnx_py3.6_part2" or \
                 str(self.find_prop("language_version")) == "onnx_py2":
             return True
         return False

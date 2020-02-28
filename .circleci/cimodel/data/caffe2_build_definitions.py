@@ -166,11 +166,12 @@ def get_workflow_jobs():
     x = []
     for conf_options in configs:
 
-        phases = dimensions.PHASES
-        if not conf_options.test:
-            phases = ["build"]
-        elif conf_options.build_only:
+        if conf_options.build_only:
             phases = ["test"]
+        elif conf_options.test:
+            phases = dimensions.PHASES
+        else:
+            phases = ["build"]
 
         for phase in phases:
             x.append(conf_options.gen_workflow_job(phase))
