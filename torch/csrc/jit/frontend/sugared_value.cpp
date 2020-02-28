@@ -147,6 +147,11 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     return builtin;
   }
 
+  // Handle calling tolist() on a Tensor.
+  if (value_->type()->isSubtypeOf(TensorType::get()) && field == "tolist") {
+    return SpecialFormValue::create(prim::tolist);
+  }
+
   ErrorReport report(loc);
   report << "Tried to access nonexistent attribute or method '" << field
          << "' of type '" << value_->type()->python_str() << "'.";
