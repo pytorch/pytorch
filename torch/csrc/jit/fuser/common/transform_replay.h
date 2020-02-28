@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/transform_iter.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 
 #include <algorithm>
@@ -122,20 +122,17 @@ namespace fuser {
  *
  */
 
-struct TORCH_API TransformReplay : public IterVisitor {
+struct TORCH_API TransformReplay : public TransformIter {
  private:
   /*
    * Functions to backward propagate influence from split/merge/reorder
    */
-  void compute_influence(Split* expr);
-  void compute_influence(Merge* expr);
-  void compute_influence(Reorder* expr);
-
-  // Backward influence propagate dispatch
-  void compute_influence(Expr* expr);
+  void replayBackward(Split* expr);
+  void replayBackward(Merge* expr);
+  void replayBackward(Reorder* expr);
 
   // Entry for backward influence propagation on td following record
-  void compute_influence(TensorDomain* td);
+  TensorDomain* replayBackward(TensorDomain* td, bool generate_record = false);
 
   /*
    * Replay functions, takes a TensorView and steps through the operations in
@@ -145,12 +142,6 @@ struct TORCH_API TransformReplay : public IterVisitor {
   TensorView* replay(Split* expr, TensorView* tv);
   TensorView* replay(Merge* expr, TensorView* tv);
   TensorView* replay(Reorder* expr, TensorView* tv);
-
-  // Dispatch for replay functions
-  TensorView* replay(Expr* expr, TensorView* tv);
-
-  // Entry point for replay on a TensorView, will relpay all ops from "replay"
-  TensorView* replay(TensorView* target);
 
   /*
    * Takes replay_ref and replays its transformations on replay_target
@@ -163,13 +154,6 @@ struct TORCH_API TransformReplay : public IterVisitor {
       TensorView* replay_ref,
       TensorView* replay_target,
       int compute_at_axis);
-
-  // Trace back the history of td, record the Expr's that made this td (split,
-  // merge, reorder)
-  TensorDomain* get_root(TensorDomain* td, bool create_record = false);
-
-  // Forward record from root, to replay_ref/ref_root
-  std::vector<Expr*> record;
 
   // Running influence vector
   std::vector<bool> influence;
@@ -188,7 +172,7 @@ struct TORCH_API TransformReplay : public IterVisitor {
  public:
   static TensorDomain* getRoot(TensorDomain* td) {
     TransformReplay tr;
-    return tr.get_root(td);
+    return tr.runBackward(td, false);
   }
 
   static TensorView* replay(

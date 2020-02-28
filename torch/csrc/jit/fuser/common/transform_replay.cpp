@@ -42,18 +42,18 @@ std::ostream& operator<<(std::ostream& os, std::vector<int> vec) {
 /*
  * Functions to backward propagate influence from split/merge/reorder
  */
-void TransformReplay::compute_influence(Split* expr) {
+void TransformReplay::replayBackward(Split* expr) {
   int axis = expr->axis();
   influence[axis] = influence[axis] | influence[axis + 1];
   influence.erase(influence.begin() + axis + 1);
 }
 
-void TransformReplay::compute_influence(Merge* expr) {
+void TransformReplay::replayBackward(Merge* expr) {
   int axis = expr->axis();
   influence.insert(influence.begin() + axis + 1, influence[axis]);
 }
 
-void TransformReplay::compute_influence(Reorder* expr) {
+void TransformReplay::replayBackward(Reorder* expr) {
   // pos2axis[new_pos] = old_pos Generate new axis2pos map
   const std::vector<int>& pos2axis = expr->pos2axis();
 
@@ -67,78 +67,12 @@ void TransformReplay::compute_influence(Reorder* expr) {
   influence = reorder_influence;
 }
 
-// Backward influence propagate dispatch
-void TransformReplay::compute_influence(Expr* expr) {
-  TORCH_CHECK(expr->isExpr());
-  switch (*(expr->getExprType())) {
-    case (ExprType::Split):
-      compute_influence(static_cast<Split*>(expr));
-      break;
-    case (ExprType::Merge):
-      compute_influence(static_cast<Merge*>(expr));
-      break;
-    case (ExprType::Reorder):
-      compute_influence(static_cast<Reorder*>(expr));
-      break;
-    default:
-      throw std::runtime_error(
-          "Could not detect expr type in compute_influence.");
-  }
-}
-
 // Entry for backward influence propagation on td following record
-void TransformReplay::compute_influence(TensorDomain* td) {
+TensorDomain* TransformReplay::replayBackward(TensorDomain* td, bool create_record) {
   influence = std::vector<bool>(td->size(), false);
   for (int i = 0; i < compute_at_axis; i++)
     influence[i] = true;
-
-  for (auto it = record.rbegin(); it < record.rend(); ++it) {
-    compute_influence(*it);
-  }
-}
-
-// Trace back the history of td, record the Expr's that made this td (split,
-// merge, reorder)
-TensorDomain* TransformReplay::get_root(TensorDomain* td, bool create_record) {
-  if (create_record)
-    record = std::vector<Expr*>();
-
-  TensorDomain* root = td; // backward running td
-  Fusion* fusion = FusionGuard::getCurFusion();
-
-  // Get my origin
-  Expr* orig = fusion->origin(root);
-  std::set<Expr*> visited_exprs;
-
-  // If I'm not back to the original td
-  while (orig != nullptr) {
-    if (visited_exprs.find(orig) != visited_exprs.end())
-      throw std::runtime_error(
-          "TransformReplay::get_root is not traversing a correct history.");
-
-    visited_exprs.emplace(orig);
-    TensorDomain* previous_td = nullptr;
-    // Check inputs of this operation, make sure there isn't more than one TD
-    // I can only record operations that only take this TD as an input.
-    for (Val* inp : orig->inputs())
-      if (inp->getValType() == ValType::TensorDomain) {
-        if (previous_td != nullptr)
-          throw std::runtime_error(
-              "TransformReplay::get_root could not decifer transform history of a TensorDomain.");
-
-        // Place transform op on top of stack.
-        if (create_record)
-          record.push_back(orig);
-
-        // Traverse back
-        root = static_cast<TensorDomain*>(inp);
-        orig = fusion->origin(root);
-      }
-  }
-  if (create_record)
-    std::reverse(record.begin(), record.end());
-
-  return root;
+  return TransformIter::runBackward(td, create_record);
 }
 
 /*
@@ -268,30 +202,6 @@ TensorView* TransformReplay::replay(Reorder* expr, TensorView* tv) {
   return tv;
 }
 
-// Dispatch for replay functions
-TensorView* TransformReplay::replay(Expr* expr, TensorView* tv) {
-  TORCH_CHECK(expr->isExpr());
-  switch (*(expr->getExprType())) {
-    case (ExprType::Split):
-      return replay(static_cast<Split*>(expr), tv);
-    case (ExprType::Merge):
-      return replay(static_cast<Merge*>(expr), tv);
-    case (ExprType::Reorder):
-      return replay(static_cast<Reorder*>(expr), tv);
-    default:
-      throw std::runtime_error("Could not detect expr type in replay.");
-  }
-}
-
-// Entry point for replay on a TensorView, will relpay all ops from "replay"
-TensorView* TransformReplay::replay(TensorView* target) {
-  TensorView* tv = target;
-  for (auto it = record.begin(); it < record.end(); ++it) {
-    tv = replay(*it, tv);
-  }
-  return tv;
-}
-
 /*
  * TODO: When we compare root axes, we should ignore reduction axes in the
  * producer. Reduction axes are owned by a consumer.
@@ -341,25 +251,26 @@ TensorView* TransformReplay::runReplay(
   
   /* STEP 1 */
   // Trace back to the root TensorDomain's of ref and target
-  TensorDomain* target_root = get_root(replay_target->domain());
+  TensorDomain* target_root = TransformIter::runBackward(replay_target->domain(), false);
 
   // Reset the tensor domain of the target, this is the only way we can be
   // certain That we can actually replay the ops of ref.
 
   replay_target->setDomain(target_root);
-  // As we trace the ref, record the operations to go from replay_ref ->
-  // ref_root, save in "record"
-  TensorDomain* ref_root = get_root(replay_ref->domain(), true);
 
   /* STEP 2 */
   // Mark compute_at_axis and below as "influenced", trace back through
   // operations, and map these axes to the ref root axis that were modified to
   // produce these axis
-  compute_influence(replay_ref->domain());
+  // As we trace the ref, record the operations to go from replay_ref ->
+  // ref_root, save in "record"
+  TensorDomain* ref_root = replayBackward(replay_ref->domain(), true);
   // We're going to save a copy of this vector, class member influnce will be
   // used during replay to forward propagate influence.
   std::vector<bool> root_influence_vector = influence;
 
+  // Remove isReduction from the axis_map of a producer
+  // isReduction is only impactful when its on a consumer
   auto init_size = replay_target->domain()->size();
   for (decltype(init_size) i = 0; i < init_size; i++)
     if (!replay_target->domain()->axis(i)->isReduction())
@@ -380,7 +291,7 @@ TensorView* TransformReplay::runReplay(
   // actually execute those based on influence. If we didn't track all
   // axes, we wouldn't know what axis split/merge/reorder are referencing
   // as they're relative to the "full" replay that produced the reference.
-  TensorView* replayed = replay(replay_target);
+  TensorView* replayed = TransformIter::runReplay(replay_target);
 
   for (decltype(replayed->domain()->size()) i{0}; i < compute_at_axis; i++)
     if (replayed->domain()->axis(i)->isReduction())
