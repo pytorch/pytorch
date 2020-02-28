@@ -1043,6 +1043,11 @@ struct PythonPrintImpl {
         }
         stmt << ")";
       } break;
+      case prim::tolist: {
+        stmt << "annotate(" << node->output()->type()->python_str() << ", ";
+        stmt << useOf(node->input(0)) << ".tolist()"
+             << ")";
+      } break;
       default: {
         printOpName(stmt, node->kind());
         const FunctionSchema& schema = node->schema();

@@ -28,23 +28,6 @@ def one_arg(value):
     return value + 1
 
 
-class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
-    def __init__(self, dst_worker):
-        super().__init__()
-        self.rrefs = []
-        for _ in range(4):
-            self.rrefs.append(rpc_return_rref(dst_worker))
-
-    @torch.jit.script_method
-    def forward(self):
-        # type: () -> Tensor
-        res_tensor = torch.ones(2, 2)
-        for rref in self.rrefs:
-            res_tensor += rref.to_here()
-
-        return res_tensor
-
-
 @torch.jit.script
 class MyScriptClass:
     def __init__(self):
@@ -102,7 +85,7 @@ def raise_script():
 def rpc_async_call_remote_torchscript_in_torchscript(
     dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
 ):
-    fut = rpc.api.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+    fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
     ret = fut.wait()
     return ret
 
@@ -172,7 +155,7 @@ class JitRpcAsyncOpTest:
                 torch.tensor([2, 2]),
             )
             kwargs = {"second_kwarg": torch.tensor([3, 3])}
-            fut = rpc.api.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+            fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
             ret = fut.wait()
             return ret
 
@@ -203,7 +186,7 @@ class JitRpcAsyncOpTest:
                 "str_kwarg": "_str_kwarg",
                 "int_kwarg": 3,
             }
-            fut = rpc.api.rpc_async(
+            fut = rpc.rpc_async(
                 dst_worker_name, assorted_types_args_kwargs, args, kwargs
             )
             ret = fut.wait()
@@ -226,7 +209,7 @@ class JitRpcAsyncOpTest:
             dst_worker_name: str
         ):
             args = ()
-            fut = rpc.api.rpc_async(dst_worker_name, no_arg, args)
+            fut = rpc.rpc_async(dst_worker_name, no_arg, args)
             ret = fut.wait()
             return ret
 
@@ -246,7 +229,7 @@ class JitRpcAsyncOpTest:
         def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
             dst_worker_name: str
         ):
-            fut = rpc.api.rpc_async(dst_worker_name, no_arg)
+            fut = rpc.rpc_async(dst_worker_name, no_arg)
             ret = fut.wait()
             return ret
 
@@ -271,7 +254,7 @@ class JitRpcAsyncOpTest:
             ):
                 args = (torch.tensor([1, 1]),)
                 kwargs = {}
-                fut = rpc.api.rpc_async(
+                fut = rpc.rpc_async(
                     dst_worker_name, two_args_two_kwargs, args, kwargs
                 )
                 ret = fut.wait()
@@ -302,7 +285,7 @@ class JitRpcAsyncOpTest:
                     torch.tensor([5, 5]),
                 )
                 kwargs = {}
-                fut = rpc.api.rpc_async(
+                fut = rpc.rpc_async(
                     dst_worker_name, two_args_two_kwargs, args, kwargs
                 )
                 ret = fut.wait()
@@ -322,7 +305,7 @@ class JitRpcAsyncOpTest:
         ):
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {"third_kwarg": torch.tensor([1, 1])}
-            fut = rpc.api.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+            fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
             ret = fut.wait()
             return ret
 
@@ -345,7 +328,7 @@ class JitRpcAsyncOpTest:
         def rpc_async_call_remote_py_function_in_torchscript(dst_worker_name: str):
             args = ()
             kwargs = {}
-            fut = rpc.api.rpc_async(dst_worker_name, python_function, args, kwargs)
+            fut = rpc.rpc_async(dst_worker_name, python_function, args, kwargs)
             ret = fut.wait()
             return ret
 
@@ -371,7 +354,7 @@ class JitRpcAsyncOpTest:
         ):
             args = ()
             kwargs = {}
-            fut = rpc.api.rpc_async(dst_worker_name, raise_script, args, kwargs)
+            fut = rpc.rpc_async(dst_worker_name, raise_script, args, kwargs)
             ret = fut.wait()
             return ret
 
@@ -398,7 +381,7 @@ class JitRpcAsyncOpTest:
         ):
             args = ()
             kwargs = {}
-            fut = rpc.api.rpc_async(dst_worker_name, nonexisting_script, args, kwargs)
+            fut = rpc.rpc_async(dst_worker_name, nonexisting_script, args, kwargs)
             ret = fut.wait()
             return ret
 
@@ -570,15 +553,6 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         self.assertEqual(res, False)
 
     @dist_init
-    def test_my_script_module_with_rrefs(self):
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-
-        module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
-        res = module_with_rrefs()
-        self.assertEqual(res, torch.ones(2, 2) * 9)
-
-    @dist_init
     def test_rref_python_annotation(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
@@ -596,3 +570,14 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_local_rref_creation_with_ivalue(self):
+
+        # create a local RRef that holds a IValue
+        rref_local_script_class = rpc.RRef(MyScriptClass())
+        self.assertEqual(rref_local_script_class.to_here().a, 10)
+
+        # create a local RRef that holds a ScriptModule
+        rref_local_script_mod = rpc.RRef(MyScriptModule(3)._c)
+        self.assertEqual(rref_local_script_mod.to_here().forward(), torch.ones(3))
