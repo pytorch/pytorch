@@ -8121,7 +8121,7 @@ a")
         with self.assertRaises(RuntimeError) as cm:
             bar(torch.rand(10), torch.rand(9))
         FileCheck().check("The following operation failed in the TorchScript interpreter") \
-                   .check("Traceback (most recent call last)") \
+                   .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
@@ -8160,7 +8160,7 @@ a")
             x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
         FileCheck().check("The following operation failed in the TorchScript interpreter") \
-                   .check("Traceback (most recent call last)") \
+                   .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
