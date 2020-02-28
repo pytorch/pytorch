@@ -2,7 +2,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
