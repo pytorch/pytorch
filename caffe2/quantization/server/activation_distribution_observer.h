@@ -142,7 +142,7 @@ class HistogramNetObserver final : public NetObserver {
       string delimiter = " ");
   ~HistogramNetObserver();
   void DumpHistogramFile() {
-    DumpAndReset_(out_file_name_, true);
+    DumpAndReset_(out_file_name_, false);
   }
 
  private:

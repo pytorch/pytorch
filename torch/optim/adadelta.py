@@ -67,12 +67,12 @@ class Adadelta(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
 
-                square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
+                square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
                 std = square_avg.add(eps).sqrt_()
                 delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-                p.data.add_(-group['lr'], delta)
-                acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
+                p.data.add_(delta, alpha=-group['lr'])
+                acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
         return loss

@@ -5,7 +5,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 // All metrics are prefixed with the following  key.
-constexpr char kRPCMetricsKeyPrefix[] = "torch.distributed.rpc.";
+constexpr char kRpcMetricsKeyPrefix[] = "torch.distributed.rpc.";
 // APIs for logging time-series metrics for RPC-based distributed
 // training. Implementations of this class should provide thread safety so that
 // metrics can be logged from multiple threads without the user needing to
