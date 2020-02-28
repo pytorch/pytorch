@@ -37,6 +37,7 @@ static bool isFusibleDevice(const Node* node, const c10::Device device) {
   return true;
 }
 
+// TODO: we need to check input type when we handle `to()`
 static bool isFusibleDevice(const Node* node) {
   auto device = getDevice(node);
   if (!device.has_value()) {
@@ -46,13 +47,28 @@ static bool isFusibleDevice(const Node* node) {
   return isFusibleDevice(node, device.value());
 }
 
+// TODO: fusible_ops should be a registry unordered_map<Node,Expr>
+static OperatorSet fusible_ops{{
+    "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+    "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
+    "aten::div(Tensor self, Tensor other) -> Tensor",
+    "aten::div(Tensor self, Scalar other) -> Tensor",
+    "aten::mul(Tensor self, Tensor other) -> Tensor",
+    "aten::mul(Tensor self, Scalar other) -> Tensor"
+}};
+
+inline bool isFusibleNode(const Node* const node)  {
+  // TODO: update code base so we can use `node->is_MemberOf(fusible_ops)`
+  return ((fusible_ops.find(node)) || node->kind() == prim::FusionGroup);
+}
+
 } // namespace
 
 bool isFusibleCudaFusionGroup(const Node* const node) {
-  if (isFusibleDevice(node)) {
-    if(node->kind() == aten::add || node->kind() == prim::FusionGroup){
-      return true;
-    }
+  if (isFusibleNode(node)) {
+    return isFusibleDevice(node);
   }
   return false;
 }
@@ -60,12 +76,10 @@ bool isFusibleCudaFusionGroup(const Node* const node) {
 bool isFusibleCudaFusionGroup(
     const Node* const fusion,
     const Node* const node) {
-  auto device = getDevice(fusion);
+  if (isFusibleNode(node)) {
+    auto device = getDevice(fusion);
 
-  if (device.has_value() && isFusibleDevice(node, device.value())) {
-    if(node->kind() == aten::add || node->kind() == prim::FusionGroup){
-      return true;
-    }
+    return (device.has_value() && isFusibleDevice(node, device.value()));
   }
   return false;
 }

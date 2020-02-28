@@ -51,6 +51,9 @@ struct TORCH_API RegisterFusionBackendEx {
 // Returns true iff the node is fusible
 TORCH_API bool isFusible(const Node* const node);
 
+// Returns true iff the node is fusible
+TORCH_API bool isFusible(const Node* const fusion, const Node* const node);
+
 // Creates a fusion consisting of just the given node and returns its
 // corresponding key
 TORCH_API int fuse(const Node* const node);
