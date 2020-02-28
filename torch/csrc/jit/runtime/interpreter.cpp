@@ -647,10 +647,6 @@ struct CodeImpl {
     size_t r = type_table_.size();
     type_table_.emplace_back(std::move(t));
     return r;
-  void emitProfile(Node* node) {
-    emitLoadInputs(node->inputs());
-    insertInstruction(PROFILE, profile_function_table_.size());
-    profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
   }
 
   size_t emitGuard(Node* node) {
@@ -685,6 +681,12 @@ struct CodeImpl {
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));
     createBailoutBlock(jf_index);
+  }
+
+  void emitProfile(Node* node) {
+    // emitLoadInputs(node->inputs());
+    // insertInstruction(PROFILE, profile_function_table_.size());
+    // profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
   }
 
   void emitGetAttr(Node* node) {
@@ -936,15 +938,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     // with a frame of a bailout graph
     size_t base_pointer;
 
-    // unique to every frame across all threads
-    size_t id;
+    // unique to every frame with prim::profile across all threads
+    c10::optional<size_t> id;
     static std::atomic<size_t> num_frames;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
   struct ActiveFrame {
     size_t pc;
-    size_t id;
     Instruction* instructions;
     IValue* constants;
     Operation* operators;
@@ -954,7 +955,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     ActiveFrame(const Frame& frame)
         : pc(frame.pc),
-          id(frame.id),
           instructions(frame.function->instructions_.data()),
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
@@ -971,8 +971,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void enterFrame(const Code& code, size_t base_pointer) {
-    frames.emplace_back(
-        Frame{code.pImpl, 0, base_pointer, Frame::num_frames++});
+    frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt});
     registers.resize(registers.size() + code.pImpl->register_size_);
     // frames.back().function->dump(std::cout);
   }
@@ -1214,8 +1213,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++af.pc;
           } break;
           case PROFILE: {
+            auto frame_id_ref = frames.back().id;
+            if (!frame_id_ref.has_value()) {
+              frame_id_ref = Frame::num_frames++;
+            }
             auto callback = af.profile_functions[inst.X];
-            push(stack, c10::IValue{static_cast<int64_t>(af.id)});
+            push(stack, c10::IValue{static_cast<int64_t>(*frame_id_ref)});
             callback(stack);
             ++af.pc;
             break;
