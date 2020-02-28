@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/function.h>
+#include <torch/csrc/jit/function_impl.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/source_range.h>
@@ -117,7 +118,7 @@ struct TORCH_API CompilationUnit {
     if (shouldMangle) {
       name = mangle(name);
     }
-    auto fn = torch::make_unique<Function>(
+    auto fn = torch::make_unique<FunctionImpl>(
         std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));

@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/constants.h>
 #include <torch/csrc/jit/exception_message.h>
+#include <torch/csrc/jit/function_impl.h>
 #include <torch/csrc/jit/graph_executor.h>
 #include <torch/csrc/jit/instruction.h>
 #include <torch/csrc/jit/ir.h>
@@ -655,7 +656,7 @@ struct CodeImpl {
     };
 
     auto empty_graph = std::make_shared<Graph>();
-    auto func = torch::make_unique<Function>(
+    auto func = torch::make_unique<FunctionImpl>(
         "bailout", empty_graph, build_bailout_graph);
     function_table_.emplace_back(func.get());
     bailout_functions_.emplace_back(std::move(func));

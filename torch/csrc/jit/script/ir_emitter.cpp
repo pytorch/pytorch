@@ -2,6 +2,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/hooks_for_testing.h>
+#include <torch/csrc/jit/function_impl.h>
 #include <torch/csrc/jit/interpreter.h>
 #include <torch/csrc/jit/ir.h>
 #include <torch/csrc/jit/operator.h>
@@ -3400,7 +3401,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<Function>(
+  auto fn = torch::make_unique<FunctionImpl>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
