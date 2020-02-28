@@ -3886,6 +3886,18 @@ for shape in [(1,), ()]:
         with self.assertRaisesRegex(RuntimeError, "must implement the backward"):
             BadBw.apply(inp).sum().backward()
 
+    def test_leaky_relu_inplace_with_neg_slope(self):
+        for device in torch.testing.get_all_device_types():
+            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+            b = torch.nn.functional.leaky_relu_(a.clone(), -2)
+            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+                b.backward(torch.ones(2, device=device))
+
+            a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+            b = torch.nn.functional.rrelu_(a.clone(), -5.0, 1.0)
+            with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+                b.backward(torch.ones(2, device=device))
+
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
@@ -4136,12 +4148,31 @@ class TestAutogradDeviceType(TestCase):
                 f_args_tensor = deepcopy(unpack_variables(f_args_variable))
                 run_functional_checks(self, "test_cdist", "cdist", f,
                                       True, f_args_variable, f_args_tensor)
+
+        def _test_euclidean_large_cdist(sizex, sizey=None):
+            if sizey is None:
+                sizey = sizex
+            x = torch.randn(sizex, device=device, dtype=torch.float)
+            y = torch.randn(sizey, device=device, dtype=torch.float)
+            eps = 1e-6
+            # to avoid extremum
+            x = x - (((x - y) < eps).float() * 2 * eps)
+            x.requires_grad = True
+            y.requires_grad = True
+            f_args_variable = (x, y)
+            dist = torch.cdist(x, y, p=2)
+            # Do a backward pass to check that it is valid for large
+            # matrices
+            loss = dist.sum()
+            loss.backward()
+
         _test_cdist_for_size((S, S))
         _test_cdist_for_size((S, S, S))
         _test_cdist_for_size((3, 5))
         _test_cdist_for_size((2, 3, 5))
         _test_cdist_for_size((1, 2, 3))
         _test_cdist_for_size((1, 1), (S, 1))
+        _test_euclidean_large_cdist((2000, 5))
 
 
     # NOTE: flaky on ROCm CI

@@ -1,7 +1,7 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/vararg_functions.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/autograd/record_function.h>
@@ -13,7 +13,7 @@ namespace jit{
 char const * toString(OpCode op);
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
-InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(code) {
+InterpreterState::InterpreterState(std::shared_ptr<Code> code) : code_(std::move(code)) {
   registers_.resize(code_->register_size_);
 }
 
