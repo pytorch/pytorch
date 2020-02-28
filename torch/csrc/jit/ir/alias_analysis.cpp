@@ -769,7 +769,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // bivariant type containers can be point to types which are not
+  // covariant type containers can be point to types which are not
   // also mutable/immutable because we unify the contained types
   if (mutableType(from) != mutableType(to)) {
     auto from_kind = from->type()->kind();
