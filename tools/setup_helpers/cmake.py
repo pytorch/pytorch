@@ -235,7 +235,7 @@ class CMake:
              'INSTALL_TEST',
              'JAVA_HOME',
              'MKL_THREADING',
-             'MKLDNN_THREADING',
+             'MKLDNN_CPU_RUNTIME',
              'MSVC_Z7_OVERRIDE',
              'Numa_INCLUDE_DIR',
              'Numa_LIBRARIES',

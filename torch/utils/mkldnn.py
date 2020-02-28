@@ -43,8 +43,13 @@ class MkldnnConv2d(torch.jit.ScriptModule):
         self.padding = dense_module.padding
         self.dilation = dense_module.dilation
         self.groups = dense_module.groups
-
-        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+        prepacked_weight = torch._C._nn.mkldnn_reorder_conv2d_weight(
+            dense_module.weight.to_mkldnn(),
+            self.padding,
+            self.stride,
+            self.dilation,
+            self.groups)
+        self.register_buffer('weight', prepacked_weight)
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:

@@ -12,6 +12,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 import torch
 import torch.jit
+import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
@@ -105,7 +106,7 @@ class TestMkldnn(TestCase):
             N = torch.randint(3, 10, (1,)).item()
             C = torch.randint(1, 3, (1,)).item() * groups
             M = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             for bias in [True, False]:
                 conv2d = torch.nn.Conv2d(in_channels=C,
                                          out_channels=M,
@@ -115,12 +116,35 @@ class TestMkldnn(TestCase):
                                          bias=bias,
                                          groups=groups).float()
                 mkldnn_conv2d = mkldnn_utils.to_mkldnn(copy.deepcopy(conv2d))
-                self.assertEqual(
-                    conv2d(x),
-                    mkldnn_conv2d(x.to_mkldnn()).to_dense())
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y_aten = conv2d(x)
+                y_mkldnn = mkldnn_conv2d(x.to_mkldnn()).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
 
                 self._test_serialization(mkldnn_conv2d, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv2d, (x.to_mkldnn(),))
+
+    def test_conv2d_legacy_jit_model(self):
+        g = 4
+        conv2d = torch.nn.Conv2d(16, 16, 3, groups=g)
+        conv2d_mkldnn = torch.utils.mkldnn.to_mkldnn(conv2d)
+
+        # contrive legacy conv2d module with a 5-d weight
+        o, i, h, w = conv2d.weight.shape
+        weight_5d = conv2d.weight.reshape((g, o // g, i, h, w))
+        conv2d_mkldnn.weight = weight_5d.to_mkldnn()
+
+        x = torch.randn(1, 16, 8, 8)
+
+        with TemporaryFileName() as fname:
+            torch.jit.save(conv2d_mkldnn, fname)
+            conv2d_loaded = torch.jit.load(fname)
+
+            self.assertEqual(conv2d_mkldnn.weight.ndimension(), 5)
+            self.assertEqual(conv2d_loaded.weight.ndimension(), 4)
+            self.assertEqual(
+                conv2d(x),
+                conv2d_loaded(x.to_mkldnn()).to_dense())
 
     def test_relu(self):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
