@@ -14,7 +14,7 @@ def register_quantized_ops(domain, version):
     for op in quant_version_ops:
         if isfunction(op[1]) and not sym_registry.is_registered_op(op[0], domain, version):
             aten_q_ops = ['relu', '_empty_affine_quantized', 'dequantize',
-                          'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'reshape', 'slice', 'cat']
+                          'quantize_per_tensor', 'upsample_nearest2d', 'avg_pool2d', 'reshape', 'slice', 'cat', 'max_pool2d']
             if op[0] in aten_q_ops:
                 sym_registry.register_op(op[0], op[1], '', version)
             sym_registry.register_op(op[0], op[1], domain, version)
@@ -151,6 +151,24 @@ def upsample_nearest2d(g, input, output_size, align_corners=None, scales_h=None,
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
+    output = nhwc2nchw(g, output)
+    sym_help._quantized_ops.add(output)
+    return output
+@parse_args('v', 'is', 'is', 'is', 'is', 'i')
+def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if input not in sym_help._quantized_ops:
+        from torch.onnx.symbolic_opset9 import max_pool2d
+        return max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode)
+    kwargs = {
+        "strides_i": stride,
+        "pads_i": padding + padding,
+        "kernel_i": kernel_size[0],
+        "order_s": "NHWC",
+        "Y_scale_f": input.node()["Y_scale"],
+        "Y_zero_point_i": input.node()["Y_zero_point"],
+    }
+    input = nchw2nhwc(g, input)
+    output = g.op("_caffe2::Int8MaxPool", input, **kwargs)
     output = nhwc2nchw(g, output)
     sym_help._quantized_ops.add(output)
     return output

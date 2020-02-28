@@ -204,5 +204,19 @@ class TestQuantizedOps(unittest.TestCase):
         y = np.random.rand(1, 4, 3, 4).astype("float32")
         self.generic_test(QConcatModule(), (x, y,), input_names=["x", "y"])
 
+    def test_max_pool2d(self):
+        class QMaxPool2dModule(torch.nn.Module):
+            def __init__(self):
+                super(QMaxPool2dModule, self).__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                res = torch.nn.functional.max_pool2d(self.quant1(x), kernel_size=2, stride=1, padding=0)
+                return self.dequant(res)
+
+        x = np.random.rand(1, 2, 8, 8).astype("float32")
+        self.generic_test(QMaxPool2dModule(), (x,), input_names=["x"])
+
 if __name__ == '__main__':
     unittest.main()
