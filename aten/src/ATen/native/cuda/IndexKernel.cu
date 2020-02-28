@@ -7,6 +7,14 @@
 #include <ATen/core/Array.h>
 #include <ATen/ExpandUtils.h>
 
+
+// #include <THC/THCDeviceUtils.cuh>
+// #include <THC/THCThrustAllocator.cuh>
+#include <thrust/scan.h>
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
+// #include <thrust/unique.h>
+
 namespace at { namespace native {
 
 template <int N>
@@ -145,20 +153,23 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   std::tie(_mask, _self) = expand_outplace(mask, self);
 
   auto shape = _self.sizes().vec();
+  int64_t num_input_elements = _self.flatten().size(0);
+  Tensor mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
+  Tensor mask_cumsum = at::empty(shape, self.options().dtype(at::kLong));
 
-  Tensor mask_cumsum_flat = _mask.flatten().cumsum(0, c10::ScalarType::Long);
-  int64_t mask_cumsum_flat_last_idx = mask_cumsum_flat.size(0)-1;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  auto policy = thrust::cuda::par.on(stream);
+  thrust::inclusive_scan(
+    policy,
+    thrust::device_ptr<int64_t>(mask_long.data_ptr<int64_t>()),
+    thrust::device_ptr<int64_t>(mask_long.data_ptr<int64_t>() + num_input_elements),
+    thrust::device_ptr<int64_t>(mask_cumsum.data_ptr<int64_t>())
+  );
 
-  int64_t* numel_ptr_dev = mask_cumsum_flat[mask_cumsum_flat_last_idx].data_ptr<int64_t>();
-  int64_t numel;
+  int64_t num_output_elements = mask_cumsum.flatten()[num_input_elements-1].item().toLong();
 
-  cudaMemcpy(&numel,numel_ptr_dev,sizeof(int64_t),cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
-
-  Tensor mask_cumsum = mask_cumsum_flat.reshape(shape);
-
-  result.resize_({numel});
-  if (numel == 0) {
+  result.resize_({num_output_elements});
+  if (num_output_elements == 0) {
     return result;
   }
 
