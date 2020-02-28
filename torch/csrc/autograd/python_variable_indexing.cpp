@@ -10,8 +10,8 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
