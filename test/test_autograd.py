@@ -175,8 +175,8 @@ class TestAutograd(TestCase):
 
         # Check exception occurs
         with self.assertRaisesRegex(
-            RuntimeError,
-            'Legacy autograd function with non-static forward method is deprecated'):
+                RuntimeError,
+                'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
 
     def test_invalid_gradients(self):
