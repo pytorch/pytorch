@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
-#include <torch/csrc/jit/custom_operator.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/jit/script/ir_emitter.h>
+#include <torch/csrc/jit/frontend/ir_emitter.h>
 
 namespace torch {
 namespace jit {
