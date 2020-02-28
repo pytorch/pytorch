@@ -312,7 +312,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
     @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
-    def test_train_save_load_eval(self, qengine):
+    def test_save_load_state_dict(self, qengine):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
         Load the quantized state_dict for eval and compare results against original model
         """
@@ -861,8 +861,21 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
             self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
 
             torch.quantization.convert(model, inplace=True)
+            model.eval()
             model.load_state_dict(quant_state_dict)
+            out = model(x)
+            self.assertEqual(ref, out)
 
+            # Check model created using prepare has same state dict as quantized state_dict
+            model = TwoLayerLinearModel()
+            model.eval()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+            torch.quantization.prepare(model, inplace=True)
+            torch.quantization.convert(model, inplace=True)
+            self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
+            model.eval()
+            model.load_state_dict(quant_state_dict)
             out = model(x)
             self.assertEqual(ref, out)
 
