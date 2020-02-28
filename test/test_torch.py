@@ -14435,8 +14435,8 @@ class TestDevicePrecision(TestCase):
             torch.uint8)
     def test_from_sequence(self, device, dtype):
         seq = [list(range(i * 4, i * 4 + 4)) for i in range(5)]
-        reference = torch.arange(0, 20, dtype=dtype).resize_(5, 4)
-        self.assertEqual(torch.tensor(seq, dtype=dtype, device=device), reference)
+        reference = torch.arange(0, 20).resize_(5, 4)
+        self.assertEqual(torch.tensor(seq, dtype=dtype, device=device), reference, exact_dtype=False)
 
     def test_cat(self, device):
         SIZE = 10
@@ -15343,9 +15343,9 @@ def generate_test_function(cls,
         # Compares CPU and device inputs and outputs
         precision = dtype2precision.get(dtype, float_precision)
 
-        self.assertEqual(cpu_tensor, device_tensor, prec=precision)
-        self.assertEqual(cpu_args, device_args, prec=precision)
-        self.assertEqual(cpu_result, device_result, prec=precision)
+        self.assertEqual(cpu_tensor, device_tensor, prec=precision, exact_dtype=False)
+        self.assertEqual(cpu_args, device_args, prec=precision, exact_dtype=False)
+        self.assertEqual(cpu_result, device_result, prec=precision, exact_dtype=False)
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
