@@ -97,34 +97,6 @@ void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArra
   });
 }
 
-template <typename func_t>
-void gpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
-  if (iter.numel() == 0) {
-    return;
-  }
-
-  if (!iter.can_use_32bit_indexing()) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      gpu_masked_select_kernel(sub_iter, f);
-    }
-    return;
-  }
-
-  void* out_ptr = (void*)iter.data_ptr(0);
-  void* in_ptr = (void*)iter.data_ptr(1);
-  bool* mask_ptr = (bool*)iter.data_ptr(2);
-  int64_t* mask_cumsum_ptr = (int64_t*)iter.data_ptr(3);
-
-  legacy::launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), [=]__device__(int64_t idx) {
-    void* out_data = out_ptr;
-    void* in_data = in_ptr;
-    bool mask = mask_ptr[idx];
-    int64_t mask_cumsum = mask_cumsum_ptr[idx];
-
-    f(idx, out_data, in_data, mask, mask_cumsum);
-  });
-}
-
 static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
@@ -177,31 +149,44 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   auto strides = DimVector(shape.size(), 0);
   auto result_strided = result.as_strided(shape, strides);
 
-  auto iter = TensorIterator();
-  iter.dont_compute_common_dtype();
-  iter.dont_resize_outputs();
-  iter.add_output(result_strided);
-  iter.add_input(_self);
-  iter.add_input(_mask);
-  iter.add_input(mask_cumsum);
-  iter.build();
-
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "masked_select", [&] {
-    using dtype = OpaqueType<sizeof(scalar_t)>;
-    gpu_masked_select_kernel(iter, []C10_DEVICE(int64_t idx, void* out_data, void* in_data, bool mask, int64_t mask_cumsum) {
-      if (mask) {
-        scalar_t* in_ptr = (scalar_t*) in_data;
-        scalar_t* out_ptr = (scalar_t*) out_data;
-        out_ptr[mask_cumsum-1] = in_ptr[idx];
+  AT_DISPATCH_ALL_TYPES_AND3(
+    at::ScalarType::Half,
+    at::ScalarType::Bool,
+    at::ScalarType::BFloat16,
+    _self.scalar_type(),
+    "masked_select",
+    [&] {
+      if (num_input_elements == 0) {
+        return;
       }
-    });
-  });
+
+      scalar_t* out_ptr = result_strided.data_ptr<scalar_t>();
+      scalar_t* in_ptr = _self.data_ptr<scalar_t>();
+      int64_t* mask_ptr = mask_long.data_ptr<int64_t>();
+      int64_t* mask_cumsum_ptr = mask_cumsum.data_ptr<int64_t>();
+
+      legacy::launch_kernel<launch_size_nd, launch_bound2>(
+        num_input_elements,
+        [=]__device__(int64_t idx) {
+          bool mask = mask_ptr[idx] != 0;
+
+          if (mask) {
+            int64_t mask_cumsum = mask_cumsum_ptr[idx];
+            out_ptr[mask_cumsum-1] = in_ptr[idx];
+          }
+        }
+      );
+    }
+  );
+
+
   return result;
 }
 
 
 Tensor masked_select_cuda(const Tensor & self, const Tensor & mask) {
   namedinference::compute_broadcast_outnames(self, mask);
+
   if (mask.dtype() == at::ScalarType::Byte) {
     AT_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
