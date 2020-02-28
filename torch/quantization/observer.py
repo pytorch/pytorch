@@ -296,8 +296,8 @@ class MinMaxObserver(_ObserverBase):
         super(MinMaxObserver, self).__init__(dtype=dtype,
                                              qscheme=qscheme,
                                              reduce_range=reduce_range)
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        self.register_buffer('min_val', torch.tensor([]))
+        self.register_buffer('max_val', torch.tensor([]))
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -340,7 +340,8 @@ class MinMaxObserver(_ObserverBase):
         for name in local_state:
             key = prefix + name
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                val = state_dict[key]
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(MinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -440,8 +441,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
                                                        qscheme=qscheme,
                                                        reduce_range=reduce_range)
         self.ch_axis = ch_axis
-        self.min_vals = torch.tensor([])
-        self.max_vals = torch.tensor([])
+        self.register_buffer('min_vals', torch.tensor([]))
+        self.register_buffer('max_vals', torch.tensor([]))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -499,7 +500,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         for name in local_state:
             key = prefix + name
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                val = state_dict[key]
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(PerChannelMinMaxObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
@@ -591,8 +593,8 @@ class HistogramObserver(_ObserverBase):
                                                 reduce_range=reduce_range)
         self.bins = bins
         self.register_buffer('histogram', torch.zeros(self.bins))
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        self.register_buffer('min_val', torch.tensor([]))
+        self.register_buffer('max_val', torch.tensor([]))
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
@@ -836,7 +838,8 @@ class HistogramObserver(_ObserverBase):
         for name in local_state:
             key = prefix + name
             if key in state_dict:
-                setattr(self, name, state_dict.pop(key))
+                val = state_dict[key]
+                setattr(self, name, val)
             elif strict:
                 missing_keys.append(key)
         super(HistogramObserver, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,

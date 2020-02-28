@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
 namespace distributed {
@@ -28,8 +29,11 @@ std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::
   // unpickle and get the context_id we need to clean up
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  IValue ivalue_context_id =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  IValue ivalue_context_id = jit::unpickle(
+      payload,
+      payload_size,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
 
   // convert ivalue to int and construct request
   int64_t context_id = ivalue_context_id.toInt();
