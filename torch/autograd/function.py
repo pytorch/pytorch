@@ -139,8 +139,11 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>         return grad_output * result
     """
 
-    # only for backward compatibility
-    __call__ = _C._FunctionBase._do_forward
+    def __call__(ctx, *args, **kwargs):
+        raise RuntimeError(
+            "Legacy autograd function with non-static forward method is deprecated. "
+            "Please use new-style autograd function with static forward method. "
+            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)")
 
     # for the tracer
     is_traceable = False
