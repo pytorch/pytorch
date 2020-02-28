@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 from typing import Callable, NamedTuple
 import enum
 =======
 >>>>>>> minor changes
+=======
+from typing import Callable, List, NamedTuple
+import enum
+>>>>>>> Addressed comments.
 import logging
 import os
 <<<<<<< HEAD
@@ -16,6 +21,7 @@ import os
 <<<<<<< HEAD
 =======
 import sys
+<<<<<<< HEAD
 >>>>>>> e13cee7da0... Add a Python unit test for combining DDP and Distributed Autograd/Optimizer
 =======
 >>>>>>> 56d6cd92d3... 1. Removed unused import
@@ -28,7 +34,10 @@ import sys
 import sys
 >>>>>>> 0614fdde87... Use a file store for init_process_group()
 import enum
+=======
+>>>>>>> e6b06001dc... Addressed comments.
 
+<<<<<<< HEAD
 from typing import Callable, List, NamedTuple
 >>>>>>> 1. Removed unused import
 
@@ -60,10 +69,23 @@ import torch
 from torch import optim
 import torch.distributed.distributed_c10d as dist_c10d
 import torch.distributed as c10d
+=======
+from torch.distributed import rpc
+from torch.distributed.optim import DistributedOptimizer
+from torch import optim
+from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.dist_utils import dist_init
+from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
+from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+import torch
+>>>>>>> Addressed comments.
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.distributed_c10d as dist_c10d
 import torch.multiprocessing as multiprocessing
+<<<<<<< HEAD
 <<<<<<< HEAD
 import torch.nn as nn
 
@@ -78,6 +100,9 @@ from torch.distributed.optim import DistributedOptimizer
 
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+=======
+import torch.nn as nn
+>>>>>>> Addressed comments.
 
 
 NUM_EM_ROW = 2
@@ -121,15 +146,10 @@ NUM_TRAINERS = 2
 # Trainers + the master + the remote worker
 WORLD_SIZE = NUM_TRAINERS + 2
 
-TRAINER_NAME_TEMPLATE = "trainer:{}"
-REMOTE_WORKER_NAME = "remote_worker"
 TRAINER_GROUP = "trainer_group"
-MASTER_NAME = "master"
-DDP_TRAINER_RANKS = list(range(1, NUM_TRAINERS + 1))
-TRAINER_NAMES = [
-    TRAINER_NAME_TEMPLATE.format(rank) for rank in DDP_TRAINER_RANKS
-]
+TRAINER_RANKS = list(range(1, NUM_TRAINERS + 1))
 REMOTE_WORKER_RANK = NUM_TRAINERS + 1
+MASTER_RANK = 0
 
 <<<<<<< HEAD
 gTrainerProcessGroup: [dist.ProcessGroup] = [None] * WORLD_SIZE
@@ -222,6 +242,7 @@ class FeatureSet(NamedTuple):
 >>>>>>> Use a file store for init_process_group()
 
 
+<<<<<<< HEAD
 =======
 >>>>>>> Add backward()
 =======
@@ -282,6 +303,8 @@ class ProcessGroupContext:
 
 
 >>>>>>> make the distributed optimizer to update all parameters
+=======
+>>>>>>> Addressed comments.
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
         gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
@@ -531,16 +554,11 @@ class Trainer:
         ddp_mode: DdpMode,
         rank: int,
     ):
-        self.process_group_context = ProcessGroupContext(
-            name=TRAINER_NAME_TEMPLATE.format(rank),
-            ranks=DDP_TRAINER_RANKS,
-            group_name="trainers_ddp",
-        )
-        process_group_for_ddp = self.process_group_context.__enter__()
-        check_process_group_type(f"trainer #{rank}", process_group_for_ddp)
         gLogger.info(
-            f"Initing a trainer with process group {process_group_for_ddp} ..."
+            f"Initing trainer process group by traner #{rank} with ranks {TRAINER_RANKS}"
         )
+        self.process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        check_process_group_type(f"trainer #{rank}", self.process_group_for_ddp)
 
         self.criterion = torch.nn.CrossEntropyLoss()
         self.remote_em_rref = remote_em_rref
@@ -548,20 +566,21 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            process_group_for_ddp if ddp_mode in (DdpMode.INSIDE,) else None,
+            self.process_group_for_ddp
+            if ddp_mode in (DdpMode.INSIDE,)
+            else None,
         )
         if ddp_mode == DdpMode.OUTSIDE:
             gLogger.info(f"Wrapping the whole hybride module into DDP.")
             self.hybrid_module = DistributedDataParallel(
                 self.hybrid_module,
-                process_group=process_group_for_ddp,
+                process_group=self.process_group_for_ddp,
                 check_reduction=True,
             )
-        self.local_optimizer = optim.SGD(self.hybrid_module.parameters(), lr=LR)
         gLogger.info(f"Succeeded in creating a HybridModel instance.")
 
     def __del__(self):
-        self.process_group_context.__exit__(None, None, None)
+        dist.destroy_process_group(self.process_group_for_ddp)
 
     def do_forward_without_grad(self, input: FeatureSet):
         gLogger.debug(f"Doing a forward pass on {input}")
@@ -591,6 +610,7 @@ class Trainer:
             gLogger.debug(
                 f"Distributed grads: {dist_autograd.get_gradients(context_id)}"
             )
+<<<<<<< HEAD
             gLogger.info(f"Running distributed optimizer...")
             dist_optimizer = DistributedOptimizer(
                 optim.SGD,
@@ -627,6 +647,8 @@ class Trainer:
             self.local_optimizer.step()
             self.hybrid_module.print_parameters()
 
+=======
+>>>>>>> Addressed comments.
             gLogger.info(f"Running distributed optimizer...")
             dist_optimizer = DistributedOptimizer(
                 optim.SGD,
@@ -722,6 +744,7 @@ class TestDdpWithRpc(TestCase):
 >>>>>>> make the distributed optimizer to update all parameters
 
 
+<<<<<<< HEAD
 class TestDdpWithRpc(TestCase):
     @classmethod
     def _remote_worker_process(cls):
@@ -749,11 +772,42 @@ class TestDdpWithRpc(TestCase):
 =======
 >>>>>>> make the framework work
             gLogger.info(f"The remote worker is running.")
+=======
+class TestDdpWithRpc(MultiProcessTestCase):
+    rpc_backend = rpc.backend_registry.BackendType.PROCESS_GROUP
+    rpc_backend_options = None
+>>>>>>> Addressed comments.
 
+    @property
+    def world_size(self) -> int:
+        return WORLD_SIZE
+
+    def remote_worker_name(self) -> str:
+        # The name has to be consistent with that in 'dist_init' decorator.
+        return f"worker{REMOTE_WORKER_RANK}"
+
+    def trainer_name(self, rank):
+        # The name has to be consistent with that in 'dist_init' decorator.
+        return f"worker{rank}"
+
+    def setUp(self):
+        super(TestDdpWithRpc, self).setUp()
+
+        os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
+        os.environ["MASTER_PORT"] = str(MASTER_PORT)
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(TestDdpWithRpc, self).tearDown()
+
+    @dist_init
+    def _remote_worker_process(self):
+        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        gLogger.info(f"The remote worker is running.")
+        dist.destroy_process_group(process_group_for_ddp)
         gLogger.info(f"Exiting remote worker.")
-        # exit to avoid run teardown() for fork processes
-        sys.exit(0)
 
+<<<<<<< HEAD
     def spawn_remote_worker(self):
         remote_worker_process = multiprocessing.Process(
 <<<<<<< HEAD
@@ -829,10 +883,14 @@ class TestDdpWithRpc(MultiProcessTestCase):
             )
             trainer.start()
             self.processes.append(trainer)
+=======
+    @dist_init
+    def _trainer_process(self, rank: int):
+        gLogger.info(f"Running the trainer #{rank}...")
+>>>>>>> Addressed comments.
 
-    @classmethod
     def do_test_on_master(
-        cls,
+        self,
         ddp_mode: DdpMode,
         trainer_method: Callable[[FeatureSet], None],
         remote_em_rref: rpc.RRef,
@@ -842,12 +900,13 @@ class TestDdpWithRpc(MultiProcessTestCase):
         # 'gTrainerProcessGroup'
         dist.barrier()
         trainer_rrefs = []
-        for rank, trainer in zip(DDP_TRAINER_RANKS, TRAINER_NAMES):
+        for rank in TRAINER_RANKS:
+            trainer = self.trainer_name(rank)
             trainer_rrefs.append(
                 rpc.remote(
                     trainer,
                     Trainer,
-                    args=(remote_em_rref, remote_net_rref, ddp_mode, rank + 1),
+                    args=(remote_em_rref, remote_net_rref, ddp_mode, rank),
                 )
             )
 
@@ -863,6 +922,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
             log_loss = 0
             for future in futures:
                 log_loss += future.wait()
+<<<<<<< HEAD
             gLogger.info(f"Log loss at epoch #{epoch}: {log_loss}")
 
     @classmethod
@@ -884,16 +944,22 @@ class TestDdpWithRpc(MultiProcessTestCase):
             gLogger.info(f"Created remote rrefs on master")
             cls.do_test_on_master(
                 ddp_mode, trainer_method, remote_em_rref, remote_net_rref
+=======
+            gLogger.info(
+                f"Log loss at epoch #{epoch}: {log_loss / NUM_TRAINERS}"
+>>>>>>> Addressed comments.
             )
 
-    def spawn_master_process(
+    @dist_init
+    def _master_process(
         self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
     ):
-        master_process = multiprocessing.Process(
-            target=self._master_process,
-            name=MASTER_NAME,
-            args=(ddp_mode, trainer_method),
+        gLogger.info(f"Running the master process...")
+        process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
+        remote_em_rref = rpc.remote(
+            self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
+<<<<<<< HEAD
         master_process.start()
         self.processes.append(master_process)
 
@@ -962,6 +1028,8 @@ class TestDdpWithRpc(MultiProcessTestCase):
         remote_em_rref = rpc.remote(
             self.remote_worker_name(), RemoteEM, args=(NUM_EM_ROW, D_SPARSE)
         )
+=======
+>>>>>>> Addressed comments.
         remote_net_rref = rpc.remote(
             self.remote_worker_name(),
             RemoteNet,
@@ -972,6 +1040,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
             ddp_mode, trainer_method, remote_em_rref, remote_net_rref
         )
         dist.destroy_process_group(process_group_for_ddp)
+<<<<<<< HEAD
 
     def _do_test(
         self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
@@ -1025,10 +1094,20 @@ class TestDdpWithRpc(MultiProcessTestCase):
         self.join_processes()
         for p in self.processes:
             p.terminate()
+=======
+>>>>>>> Addressed comments.
 
-    def join_processes(self):
-        for p in self.processes:
-            p.join()
+    def _do_test(
+        self, ddp_mode: DdpMode, trainer_method: Callable[[FeatureSet], None]
+    ):
+        if self.rank == MASTER_RANK:
+            self._master_process(ddp_mode, trainer_method)
+        elif self.rank == REMOTE_WORKER_RANK:
+            self._remote_worker_process()
+        elif self.rank in TRAINER_RANKS:
+            self._trainer_process(self.rank)
+        else:
+            raise RuntimeError(f"Unknow process rank: {self.rank}")
 
 <<<<<<< HEAD
     def create_trainers(self, ddp_mode: DdpMode):
@@ -1104,13 +1183,18 @@ class TestDdpWithRpc(MultiProcessTestCase):
 >>>>>>> 0fcd3c0148... Add backward()
 =======
     def test_forward_no_ddp(self):
+<<<<<<< HEAD
         self.spawn_master_process(DdpMode.NONE, Trainer.do_forward_without_grad)
 >>>>>>> e5b4e7d245... Spawn a master process to do all driving work
+=======
+        self._do_test(DdpMode.NONE, Trainer.do_forward_without_grad)
+>>>>>>> e6b06001dc... Addressed comments.
 
     def test_forward_ddp_outside(self):
-        self.spawn_master_process(
-            DdpMode.OUTSIDE, Trainer.do_forward_without_grad
-        )
+        self._do_test(DdpMode.OUTSIDE, Trainer.do_forward_without_grad)
+
+    def test_forward_ddp_inside(self):
+        self._do_test(DdpMode.INSIDE, Trainer.do_forward_without_grad)
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -1179,6 +1263,7 @@ class TestDdpWithRpc(MultiProcessTestCase):
 =======
     def test_training_no_ddp(self):
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.do_test(DdpMode.NONE, Trainer.do_mini_batch)
 >>>>>>> 0fcd3c0148... Add backward()
 <<<<<<< HEAD
@@ -1187,10 +1272,19 @@ class TestDdpWithRpc(MultiProcessTestCase):
 =======
         self.spawn_master_process(DdpMode.NONE, Trainer.do_mini_batch)
 >>>>>>> e5b4e7d245... Spawn a master process to do all driving work
+<<<<<<< HEAD
 >>>>>>> Spawn a master process to do all driving work
+=======
+=======
+        self._do_test(DdpMode.NONE, Trainer.do_mini_batch)
+>>>>>>> e6b06001dc... Addressed comments.
+>>>>>>> Addressed comments.
 
     def test_training_ddp_outside(self):
-        self.spawn_master_process(DdpMode.OUTSIDE, Trainer.do_mini_batch)
+        self._do_test(DdpMode.OUTSIDE, Trainer.do_mini_batch)
+
+    def test_training_ddp_inside(self):
+        self._do_test(DdpMode.INSIDE, Trainer.do_mini_batch)
 
 
 if __name__ == "__main__":
