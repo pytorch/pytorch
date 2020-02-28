@@ -121,6 +121,7 @@ libtorch_sources = [
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
+    "torch/csrc/jit/passes/cuda_graph_fuser.cpp",
     "torch/csrc/jit/passes/guard_elimination.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/inliner.cpp",
