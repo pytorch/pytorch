@@ -113,6 +113,27 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   });
 }
 
+template<typename scalar_t, typename mask_t>
+void masked_select_out_cuda_kernel(
+  scalar_t* out_ptr,
+  scalar_t* in_ptr,
+  mask_t* mask_ptr,
+  int64_t* mask_inclusive_scan_ptr,
+  int64_t num_input_elements
+) {
+  legacy::launch_kernel<launch_size_nd, launch_bound2>(
+    num_input_elements,
+    [=]__device__(int64_t in_idx) {
+      mask_t mask = mask_ptr[in_idx];
+
+      if (mask) {
+        int64_t out_idx = mask_inclusive_scan_ptr[in_idx]-1;
+        out_ptr[out_idx] = in_ptr[in_idx];
+      }
+    }
+  );
+}
+
 static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
   if (mask.dtype() == at::ScalarType::Byte) {
     // TODO: would be much better to put this warning inside AT_WARN(), but for
@@ -137,7 +158,6 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
 
   auto shape = _self.sizes().vec();
   int64_t num_input_elements = _self.flatten().size(0);
-  // Tensor mask_long = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
   Tensor mask_inclusive_scan = at::empty(shape, self.options().dtype(at::kLong)).copy_(_mask);
 
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -156,10 +176,6 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
     return result;
   }
 
-  // Create strided view of result before feeding into TensorIterator
-  auto strides = DimVector(shape.size(), 0);
-  auto result_strided = result.as_strided(shape, strides);
-
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half,
     at::ScalarType::Bool,
@@ -170,42 +186,29 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
       if (num_input_elements == 0) {
         return;
       }
-
-      scalar_t* out_ptr = result_strided.data_ptr<scalar_t>();
+      scalar_t* out_ptr = result.data_ptr<scalar_t>();
       scalar_t* in_ptr = _self.data_ptr<scalar_t>();
       int64_t* mask_inclusive_scan_ptr = mask_inclusive_scan.data_ptr<int64_t>();
 
       if (_mask.dtype() == ScalarType::Bool) {
-        bool* mask_ptr = _mask.data_ptr<bool>();
-        legacy::launch_kernel<launch_size_nd, launch_bound2>(
-          num_input_elements,
-          [=]__device__(int64_t in_idx) {
-            bool mask = mask_ptr[in_idx];
-
-            if (mask) {
-              int64_t out_idx = mask_inclusive_scan_ptr[in_idx]-1;
-              out_ptr[out_idx] = in_ptr[in_idx];
-            }
-          }
+        masked_select_out_cuda_kernel<scalar_t, bool>(
+          out_ptr,
+          in_ptr,
+          _mask.data_ptr<bool>(),
+          mask_inclusive_scan_ptr,
+          num_input_elements
         );
       } else {
-        uint8_t* mask_ptr = _mask.data_ptr<uint8_t>();
-        legacy::launch_kernel<launch_size_nd, launch_bound2>(
-          num_input_elements,
-          [=]__device__(int64_t in_idx) {
-            uint8_t mask = mask_ptr[in_idx];
-
-            if (mask) {
-              int64_t out_idx = mask_inclusive_scan_ptr[in_idx]-1;
-              out_ptr[out_idx] = in_ptr[in_idx];
-            }
-          }
+        masked_select_out_cuda_kernel<scalar_t, uint8_t>(
+          out_ptr,
+          in_ptr,
+          _mask.data_ptr<uint8_t>(),
+          mask_inclusive_scan_ptr,
+          num_input_elements
         );
-
       }
     }
   );
-
 
   return result;
 }
