@@ -684,9 +684,9 @@ struct CodeImpl {
   }
 
   void emitProfile(Node* node) {
-    // emitLoadInputs(node->inputs());
-    // insertInstruction(PROFILE, profile_function_table_.size());
-    // profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
+    emitLoadInputs(node->inputs());
+    insertInstruction(PROFILE, profile_function_table_.size());
+    profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
   }
 
   void emitGetAttr(Node* node) {
