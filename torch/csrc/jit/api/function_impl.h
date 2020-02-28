@@ -21,9 +21,8 @@ struct TORCH_API FunctionImpl : public Function {
 
   void run(Stack&& stack) override;
 
-  IValue operator()(
-      std::vector<IValue> stack,
-      const Kwargs& kwargs = Kwargs()) override;
+  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
+      override;
 
   std::shared_ptr<Graph> graph() const {
     return graph_;
@@ -50,7 +49,7 @@ struct TORCH_API FunctionImpl : public Function {
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
-  size_t num_inputs() const override{
+  size_t num_inputs() const override {
     return graph()->inputs().size();
   }
 
@@ -127,4 +126,5 @@ struct TORCH_API FunctionImpl : public Function {
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
 
-}} // namespace torch::jit
+} // namespace jit
+} // namespace torch

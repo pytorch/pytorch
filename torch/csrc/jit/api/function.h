@@ -32,7 +32,6 @@ struct TORCH_API Function {
       std::vector<at::IValue> stack,
       const Kwargs& kwargs = Kwargs()) = 0;
 
-
   virtual const c10::QualifiedName& qualname() const = 0;
 
   virtual const std::string& name() const = 0;
