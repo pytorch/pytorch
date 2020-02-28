@@ -581,15 +581,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "prim::is_leaf(Tensor a) -> bool",
-         [](Stack& stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.is_leaf());
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::name(Tensor a) -> str?",
          [](Stack& stack) {
            at::Tensor a;
