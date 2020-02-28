@@ -13,7 +13,8 @@ import torch.nn.intrinsic.qat as nniqat
 
 from torch._ops import ops
 from torch.nn.modules.utils import _pair, _triple
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, \
+    _get_module_state, _set_module_state
 from torch.nn.utils import fuse_conv_bn_weights
 
 class _ConvNd(nn.Module):
@@ -77,13 +78,8 @@ class _ConvNd(nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError(
-                'torch.save() is not currently supported for quantized modules.'
-                ' See https://github.com/pytorch/pytorch/issues/24045.'
-                ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
-        return (
+        state = (
             self.in_channels,
             self.out_channels,
             self.kernel_size,
@@ -98,8 +94,13 @@ class _ConvNd(nn.Module):
             b,
             self.scale,
             self.zero_point,
-            self.training
+            self.training,
         )
+
+        if not torch.jit.is_scripting():
+            state = state + _get_module_state(self)
+
+        return state
 
     # ===== Deserialization methods =====
     # Counterpart to the serialization methods, we must pack the serialized
@@ -134,6 +135,9 @@ class _ConvNd(nn.Module):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
+
+        if not torch.jit.is_scripting():
+            _set_module_state(self, state, start=15)
 
 
 class Conv2d(_ConvNd):

@@ -81,6 +81,36 @@ def _make_conv_test_input(
     return (X, X_q, W, W_q, b if use_bias else None)
 
 
+class TestSerialization(QuantizationTestCase):
+    def check_save_load(self, module, inputs):
+        # Save the module, then run the original and saved module and make
+        # sure the outputs match
+        buf = io.BytesIO()
+        # TODO: Remove flag once https://github.com/pytorch/pytorch/pull/32958
+        # lands
+        torch.save(module, buf, _use_new_zipfile_serialization=True)
+        buf.seek(0)
+        loaded_module = torch.load(buf)
+        self.assertEqual(module(*inputs), loaded_module(*inputs))
+
+    def test_conv(self):
+        module = torch.nn.quantized.Conv2d(2,2,1)
+        input = torch.randn(2, 2, 2, 2)
+        input = torch.quantize_per_tensor(input, 0.1, 10, torch.quint8)
+        self.check_save_load(module, [input])
+
+    def test_rnn(self):
+        module = torch.nn.quantized.dynamic.LSTM(2,2,1)
+        input = torch.randn(2, 2, 2)
+        self.check_save_load(module, [input])
+
+    def test_linear(self):
+        module = torch.nn.quantized.Linear(2,2,1)
+        input = torch.randn(2, 2, 2, 2)
+        input = torch.quantize_per_tensor(input, 0.1, 10, torch.quint8)
+        self.check_save_load(module, [input])
+
+
 class FunctionalAPITest(QuantizationTestCase):
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)

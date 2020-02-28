@@ -7,6 +7,8 @@ from torch import _VF
 from torch._jit_internal import Tuple, Optional, List  # noqa: F401
 from torch.nn.utils.rnn import PackedSequence
 import numbers
+from torch.nn.quantized.modules.utils import _get_module_state, \
+    _set_module_state
 
 
 def apply_permutation(tensor, permutation, dim=1):
@@ -20,12 +22,20 @@ class PackedParameter(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        return (torch.ops.quantized.linear_unpack(self.param), self.training)
+        state = (torch.ops.quantized.linear_unpack(self.param), self.training)
+
+        if not torch.jit.is_scripting():
+            state = state + _get_module_state(self)
+
+        return state
 
     @torch.jit.export
     def __setstate__(self, state):
         self.param = torch.ops.quantized.linear_prepack(*state[0])
         self.training = state[1]
+
+        if not torch.jit.is_scripting():
+            _set_module_state(self, state, start=2)
 
     # This only exists because there's a bug in recursive scripting
     # that arises only in Python 2 where a recursively scripted

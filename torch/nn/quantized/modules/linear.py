@@ -5,7 +5,8 @@ import torch
 from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, \
+    _get_module_state, _set_module_state
 
 class LinearPackedParams(torch.nn.Module):
     _version = 2
@@ -67,18 +68,22 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
-                               ' See https://github.com/pytorch/pytorch/issues/24045.'
-                               ' Please use state_dict or torch.jit serialization.')
         qweight, bias = self._weight_bias()
-        return qweight, bias, self.training, self.dtype
+
+        state = (qweight, bias, self.training, self.dtype)
+        if not torch.jit.is_scripting():
+            state = state + _get_module_state(self)
+
+        return state
 
     @torch.jit.export
     def __setstate__(self, state):
+        self.training = state[2]
         self.dtype = state[3]
         self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
+
+        if not torch.jit.is_scripting():
+            _set_module_state(self, state, start=4)
 
 class Linear(torch.nn.Module):
     r"""
