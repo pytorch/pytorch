@@ -129,7 +129,6 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
   * [src](aten/src)
     * [TH](aten/src/TH)
       [THC](aten/src/THC)
-      [THNN](aten/src/THNN)
       [THCUNN](aten/src/THCUNN) - Legacy library code from the original
       Torch. Try not to add things here; we're slowly porting these to
       [native](aten/src/ATen/native).

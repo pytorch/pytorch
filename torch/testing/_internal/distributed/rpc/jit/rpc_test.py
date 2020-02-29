@@ -204,3 +204,33 @@ class JitRpcTest(RpcAgentTestFixture):
 
         res = rref_tensor_is_owner(rref_var)
         self.assertEqual(res, False)
+
+    @dist_init
+    def test_rref_python_annotation(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        rref_var = rpc_return_rref("worker{}".format(dst_rank))
+
+        @torch.jit.ignore
+        def rref_python_annotation(rref_var):
+            # type: (RRef[Tensor]) -> RRef[Tensor]
+            return rref_var
+
+        @torch.jit.script
+        def rref_script_annotation(rref_var):
+            # type: (RRef[Tensor]) -> Tensor
+            return rref_python_annotation(rref_var).to_here()
+
+        res = rref_script_annotation(rref_var)
+        self.assertEqual(res, torch.ones(2, 2) + 1)
+
+    @dist_init
+    def test_local_rref_creation_with_ivalue(self):
+
+        # create a local RRef that holds a IValue
+        rref_local_script_class = rpc.RRef(MyScriptClass())
+        self.assertEqual(rref_local_script_class.to_here().a, 10)
+
+        # create a local RRef that holds a ScriptModule
+        rref_local_script_mod = rpc.RRef(MyScriptModule(3)._c)
+        self.assertEqual(rref_local_script_mod.to_here().forward(), torch.ones(3))
