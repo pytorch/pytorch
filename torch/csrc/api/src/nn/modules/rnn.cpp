@@ -136,6 +136,10 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
+  for(auto param = 0; param < flat_weights_.size(); param++){
+    std::cout << "flat_weights_[" << param << "] size: " << flat_weights_[param].sizes() << "\n";
+  }
+
   if (!cudnn_mode_ || !torch::cudnn_is_acceptable(w_ih.at(0))) {
     return;
   }
