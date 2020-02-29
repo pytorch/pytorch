@@ -88,6 +88,14 @@ public:
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
   /**
+   * Returns true, iff the given operator handle is still valid,
+   * i.e. the operator was not deregistered.
+   * Note that this function is somewhat expensive to call,
+   * so don't do it in a hotpath.
+   */
+  bool isValid(const OperatorHandle& op) const;
+
+  /**
    * Register a kernel to the dispatch table for an operator.
    * If dispatch_key is nullopt, then this registers a fallback kernel.
    *
@@ -113,6 +121,12 @@ public:
    * fallback kernel for the given dispatch key and, if yes, call that one.
    */
   RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
+
+  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
+  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
 
   template<class Return, class... Args>
   Return callUnboxed(const OperatorHandle& op, Args... args) const;
@@ -163,6 +177,16 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+
+  /**
+   * Returns true iff the operator handle is still valid,
+   * i.e. the operator was not deregistered.
+   * Note that this function is somewhat expensive to call,
+   * so don't do it in a hotpath.
+   */
+  bool isValid() const {
+    return c10::Dispatcher::singleton().isValid(*this);
+  }
 
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
