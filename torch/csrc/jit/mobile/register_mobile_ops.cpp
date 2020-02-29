@@ -164,7 +164,7 @@ void format_kernel(const c10::OperatorHandle& op, Stack* stack) {
   push(*stack, ss.str());
 }
 
-void to_dtype_kernal(const c10::OperatorHandle& op, Stack* stack) {
+void to_dtype_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto result_ = ((std::move(peek(*stack, 0, 5))).toTensor()).to(
      (std::move(peek(*stack, 1, 5))).toScalarType(),
      (std::move(peek(*stack, 2, 5))).toBool(),
@@ -191,7 +191,7 @@ void TupleIndex_kernel(const c10::OperatorHandle& op, Stack* stack) {
        norm_index > static_cast<int64_t>(tuple->elements().size())) {
      throw std::out_of_range("Tuple list index out of range");
    }
-   stack->emplace_back(tuple->elements()[norm_index]);
+   pack(*stack, tuple->elements()[norm_index]);
 }
 
 void pop_kernal(const c10::OperatorHandle& op, Stack* stack) {
@@ -498,7 +498,7 @@ static auto registry = torch::RegisterOperators().op(
   })
 ).op(torch::RegisterOperators::options()
     .schema("_aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor")
-    .kernel<&to_dtype_kernal>(c10::DispatchKey::CPUTensorId)
+    .kernel<&to_dtype_kernel>(c10::DispatchKey::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
 .op(torch::RegisterOperators::options()
     .schema("_prim::TupleIndex(any self, int index) -> any")

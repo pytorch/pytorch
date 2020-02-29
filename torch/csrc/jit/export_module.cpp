@@ -56,14 +56,16 @@ c10::IValue getMethodTuple(const script::Method& method) {
 
   // instructions
   std::vector<IValue> instructions;
+  instructions.reserve(code.instructions().size());
   for (Instruction ins : code.instructions()) {
     instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
   }
 
   // operators
   std::vector<IValue> operators;
+  operators.reserve(opnames.size());
   for (const auto& opname : opnames) {
-    operators.emplace_back(c10::ivalue::Tuple::create({opname.name, opname.overload_name}));
+    operators.emplace_back(Tup({opname.name, opname.overload_name}));
   }
 
   // constants
@@ -71,6 +73,7 @@ c10::IValue getMethodTuple(const script::Method& method) {
 
   // types
   std::vector<IValue> types;
+  types.reserve(code.type_table().size());
   for (const TypePtr& t : code.type_table()) {
     types.emplace_back(t->python_str());
   }

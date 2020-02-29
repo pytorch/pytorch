@@ -85,6 +85,11 @@ TORCH_API script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace = false);
 
+/** Replicate dequantize node for each use, so that we can match
+ *  quantization patterns
+ */
+TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
+
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
  *
