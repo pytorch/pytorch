@@ -54,11 +54,6 @@ void GraphFunction::ensure_defined() {
   check_single_output();
 }
 
-Function& GraphFunction::setSchema(c10::FunctionSchema schema) {
-  schema_ = std::make_unique<c10::FunctionSchema>(std::move(schema));
-  return *this;
-}
-
 const c10::FunctionSchema& GraphFunction::getSchema() const {
   if (schema_ == nullptr) {
     schema_ = std::make_unique<c10::FunctionSchema>(defaultSchemaFor(*this));
@@ -70,23 +65,6 @@ void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
   // TODO: Invoke cleanup passes before and after inlining to reduce amount of
   // code we're copying.
   Inline(*graph);
-}
-
-void GraphFunction::check_single_output() {
-  TORCH_CHECK(
-      graph()->outputs().size() == 1,
-      "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
-}
-
-size_t GraphFunction::num_inputs() const {
-  return graph()->inputs().size();
-}
-
-std::string GraphFunction::pretty_print_schema() const {
-  AT_ASSERT(schema_);
-  std::stringstream ss;
-  ss << *schema_;
-  return ss.str();
 }
 
 } // namespace jit

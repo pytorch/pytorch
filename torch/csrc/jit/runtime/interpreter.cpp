@@ -651,6 +651,7 @@ struct CodeImpl {
 
     auto build_bailout_graph = [bailout_index,
                                 unoptimized_graph](Function& func) {
+
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 

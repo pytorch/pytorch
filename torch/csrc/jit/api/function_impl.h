@@ -49,13 +49,23 @@ struct TORCH_API GraphFunction : public Function {
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
-  size_t num_inputs() const override;
+  size_t num_inputs() const override {
+    return graph()->inputs().size();
+  }
 
-  Function& setSchema(FunctionSchema schema) override;
+  Function& setSchema(FunctionSchema schema) override {
+    schema_ = make_unique<FunctionSchema>(std::move(schema));
+    return *this;
+  }
 
   const FunctionSchema& getSchema() const override;
 
-  std::string pretty_print_schema() const override;
+  std::string pretty_print_schema() const override {
+    AT_ASSERT(schema_);
+    std::stringstream ss;
+    ss << *schema_;
+    return ss.str();
+  }
 
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
@@ -68,7 +78,11 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void check_single_output() override;
+  void check_single_output() override {
+    TORCH_CHECK(
+        graph()->outputs().size() == 1,
+        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+  }
 
   GraphExecutor& get_executor() override {
     ensure_defined();
@@ -110,6 +124,5 @@ struct TORCH_API GraphFunction : public Function {
   // before a call to setSchema
   mutable std::unique_ptr<FunctionSchema> schema_;
 };
-
 } // namespace jit
 } // namespace torch
