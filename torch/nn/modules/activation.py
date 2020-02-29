@@ -275,7 +275,7 @@ class Tanh(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}} {\exp(x) + \exp(-x)}
+        \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
