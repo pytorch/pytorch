@@ -20,21 +20,16 @@ namespace torch { namespace autograd {
 struct InputMetadata {
   InputMetadata() = default;
 
-  InputMetadata(const at::DeprecatedTypeProperties& type, at::IntArrayRef shape, at::Device device)
-  : type_{&type}, shape_{shape}, device_{device} {
+  InputMetadata(const at::TensorOptions options, at::IntArrayRef shape, at::Device device)
+  : options_{options}, shape_{shape}, device_{device} {
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
   }
 
   InputMetadata(const at::Tensor& t)
-  : InputMetadata(t.type(), t.sizes(), t.device()) { }
+  : InputMetadata(t.options(), t.sizes(), t.device()) { }
 
-  bool is_valid() const {
-    return type_ != nullptr;
-  }
-
-  const at::DeprecatedTypeProperties& type() const {
-    AT_ASSERT(type_);
-    return *type_;
+  const at::TensorOptions options() const {
+    return options_;
   }
 
   at::IntArrayRef shape() const {
@@ -50,11 +45,11 @@ struct InputMetadata {
   }
 
   at::Tensor zeros_like() const {
-    return at::zeros(shape_, type_->options(device_));
+    return at::zeros(shape_, options_);
   }
 
 private:
-  const at::DeprecatedTypeProperties* type_ = nullptr;
+  const at::TensorOptions options_;
   at::DimVector shape_;
   at::Device device_ = at::kCPU;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device_);

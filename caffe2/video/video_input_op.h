@@ -532,7 +532,7 @@ void VideoInputOp<Context>::GetLabelsFromProto(
     }
   } else {
     // For multiple label case, output label is a binary vector
-    // where presented concepts are makred 1
+    // where presented concepts are marked 1
     memset(label_data, 0, sizeof(int) * num_of_class_ * num_clips);
     for (int i = 0; i < num_clips; i++) {
       for (int j = 0; j < label_proto.int32_data_size(); j++) {
@@ -574,7 +574,7 @@ bool VideoInputOp<Context>::GetImageAndLabelsFromDBValue(
             CV_8UC1,
             const_cast<char*>(encoded_image_str.data())),
         cv::IMREAD_COLOR);
-    if (src.rows == 0 or src.cols == 0) {
+    if (src.rows == 0 || src.cols == 0) {
       throw std::runtime_error("Both rows and cols are 0 for image");
     }
   } else if (image_proto.data_type() == TensorProto::BYTE) {

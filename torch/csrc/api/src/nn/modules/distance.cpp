@@ -18,7 +18,7 @@ void CosineSimilarityImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor CosineSimilarityImpl::forward(const Tensor& x1, const Tensor& x2) {
-  return F::cosine_similarity(x1, x2, options);
+  return F::detail::cosine_similarity(x1, x2, options.dim(), options.eps());
 }
 
 // ============================================================================
@@ -37,7 +37,7 @@ void PairwiseDistanceImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor PairwiseDistanceImpl::forward(const Tensor& x1, const Tensor& x2) {
-  return F::pairwise_distance(x1, x2, options);
+  return F::detail::pairwise_distance(x1, x2, options.p(), options.eps(), options.keepdim());
 }
 
 } // namespace nn

@@ -97,3 +97,5 @@ endif()
 
 # ---[ tutorials
 caffe2_binary_target("tutorial_blob.cc")
+
+caffe2_binary_target("dump_operator_names.cc")

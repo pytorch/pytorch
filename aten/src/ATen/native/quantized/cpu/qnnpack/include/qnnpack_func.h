@@ -106,4 +106,21 @@ enum pytorch_qnnp_status qnnpackConv(
     const uint8_t output_zero_point,
     uint8_t* output,
     pthreadpool_t threadpool);
+
+enum pytorch_qnnp_status qnnpackLinearDynamic(
+    const size_t batch_size,
+    const size_t input_channels,
+    const size_t output_channels,
+    const uint8_t input_zero_point,
+    const float input_scale,
+    const uint8_t kernel_zero_point,
+    const float kernel_scale,
+    const uint8_t* input,
+    const size_t input_stride,
+    void* packed_weights,
+    const float* bias,
+    float* output,
+    const size_t output_stride,
+    pthreadpool_t threadpool);
+
 } // namespace qnnpack

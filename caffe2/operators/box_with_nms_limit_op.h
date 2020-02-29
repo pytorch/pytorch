@@ -51,7 +51,7 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
         "Unexpected soft_nms_method");
     soft_nms_method_ = (soft_nms_method_str_ == "linear") ? 1 : 2;
 
-    // When input `boxes` doesn't inlcude background class, the score will skip
+    // When input `boxes` doesn't include background class, the score will skip
     // background class and start with foreground classes directly, and put the
     // background class in the end, i.e. score[:, 0:NUM_CLASSES-1] represents
     // foreground classes and score[:,NUM_CLASSES] represents background class.

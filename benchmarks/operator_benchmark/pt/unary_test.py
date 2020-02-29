@@ -18,7 +18,7 @@ unary_ops_configs_short = op_bench.config_list(
         [512, 512],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=['short']
 )
@@ -26,7 +26,7 @@ unary_ops_configs_short = op_bench.config_list(
 unary_ops_configs_long = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 
@@ -99,6 +99,8 @@ unary_ops_list = op_bench.op_list(
         ['sinh', torch.sinh],
         ['sqrt', torch.sqrt],
         ['sqrt_', torch.sqrt_],
+        ['square', torch.square],
+        ['square_', torch.square_],
         ['tan', torch.tan],
         ['tan_', torch.tan_],
         ['tanh', torch.tanh],

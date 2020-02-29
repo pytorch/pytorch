@@ -42,6 +42,7 @@ dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
 test/cpp_extensions/install/
+test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
@@ -56,11 +57,6 @@ torch/csrc/jit/generated/*
 torch/csrc/jit/fuser/config.h
 torch/csrc/nn/THCUNN.cpp
 torch/csrc/nn/THCUNN.cwrap
-torch/csrc/nn/THNN_generic.cpp
-torch/csrc/nn/THNN_generic.cwrap
-torch/csrc/nn/THNN_generic.h
-torch/csrc/nn/THNN.cpp
-torch/csrc/nn/THNN.cwrap
 torch/bin/
 torch/cmake/
 torch/lib/*.a*
@@ -249,3 +245,7 @@ GSYMS
 GPATH
 tags
 TAGS
+
+
+# ccls file
+.ccls-cache/

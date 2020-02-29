@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -21,10 +20,6 @@ class TestIndexHashOps(serial.SerializedTestCase):
         **hu.gcs_cpu_only
     )
     def test_index_hash_ops(self, indices, seed, modulo, gc, dc):
-        op = core.CreateOperator("IndexHash",
-                                 ["indices"], ["hashed_indices"],
-                                 seed=seed, modulo=modulo)
-
         def index_hash(indices):
             dtype = np.array(indices).dtype
             assert dtype == np.int32 or dtype == np.int64
@@ -37,6 +32,18 @@ class TestIndexHashOps(serial.SerializedTestCase):
                 hashed = (modulo + hashed % modulo) % modulo
                 hashed_indices.append(hashed)
             return [hashed_indices]
+
+        op = core.CreateOperator("IndexHash",
+                                 ["indices"], ["hashed_indices"],
+                                 seed=seed, modulo=modulo)
+
+        self.assertDeviceChecks(dc, op, [indices], [0])
+        self.assertReferenceChecks(gc, op, [indices], index_hash)
+
+        # In-place update
+        op = core.CreateOperator("IndexHash",
+                                 ["indices"], ["indices"],
+                                 seed=seed, modulo=modulo)
 
         self.assertDeviceChecks(dc, op, [indices], [0])
         self.assertReferenceChecks(gc, op, [indices], index_hash)

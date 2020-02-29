@@ -31,6 +31,24 @@ class MetaNetDefTest(unittest.TestCase):
         net_def = caffe2_pb2.NetDef()
         meta_net_def.nets.add(key="test_key", value=net_def)
 
+    def test_replace_blobs(self):
+        '''
+        Tests that NetDefs can be added to MetaNetDefs
+        '''
+        meta_net_def = metanet_pb2.MetaNetDef()
+        blob_name = "Test"
+        blob_def = ["AA"]
+        blob_def2 = ["BB"]
+        replaced_blob_def = ["CC"]
+        pred_utils.AddBlobs(meta_net_def, blob_name, blob_def)
+        self.assertEqual(blob_def, pred_utils.GetBlobs(meta_net_def, blob_name))
+        pred_utils.AddBlobs(meta_net_def, blob_name, blob_def2)
+        self.assertEqual(blob_def + blob_def2, pred_utils.GetBlobs(meta_net_def, blob_name))
+
+        pred_utils.ReplaceBlobs(meta_net_def, blob_name, replaced_blob_def)
+        self.assertEqual(replaced_blob_def, pred_utils.GetBlobs(meta_net_def, blob_name))
+
+
 class PredictorExporterTest(unittest.TestCase):
     def _create_model(self):
         m = cnn.CNNModelHelper()

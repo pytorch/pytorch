@@ -4,12 +4,11 @@ import torch.testing
 from itertools import product
 import warnings
 
-
 def zero_gradients(x):
     if isinstance(x, torch.Tensor):
         if x.grad is not None:
             x.grad.detach_()
-            x.grad.data.zero_()
+            x.grad.zero_()
     elif isinstance(x, container_abcs.Iterable):
         for elem in x:
             zero_gradients(elem)
@@ -58,13 +57,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     # It's much easier to iterate over flattened lists of tensors.
     # These are reference to the same objects in jacobian, so any changes
     # will be reflected in it as well.
-    x_tensors = [t for t in iter_tensors(target, True)]
-    j_tensors = [t for t in iter_tensors(jacobian)]
+    x_tensors = iter_tensors(target, True)
+    j_tensors = iter_tensors(jacobian)
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        # need data here to get around the version check because without .data,
-        # the following code updates version but doesn't change content
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -78,8 +75,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             x_nnz = x_tensor._nnz()
             x_size = list(x_tensor.size())
             x_indices = x_tensor._indices().t()
-            x_values = x_tensor._values().data
+            x_values = x_tensor._values()
             x_stride = get_stride(x_size)
+
+            # Use .data here to get around the version check
+            x_values = x_values.data
 
             for i in range(x_nnz):
                 x_value = x_values[i]
@@ -95,10 +95,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                     r = (outb - outa) / (2 * eps)
                     d_tensor[d_idx] = r.detach().reshape(-1)
         elif x_tensor.layout == torch._mkldnn:
+            # Use .data here to get around the version check
+            x_tensor = x_tensor.data
             if len(input) != 1:
                 raise ValueError('gradcheck currently only supports functions with 1 input, but got: ',
                                  len(input))
-            x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
@@ -116,6 +117,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 r = (outb - outa) / (2 * eps)
                 d_tensor[d_idx] = r.detach().reshape(-1)
         else:
+            # Use .data here to get around the version check
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 orig = x_tensor[x_idx].item()
@@ -142,7 +144,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
     diff_input_list = list(iter_tensors(input, True))
     jacobian = make_jacobian(input, output.numel())
     jacobian_reentrant = make_jacobian(input, output.numel())
-    grad_output = torch.zeros_like(output)
+    grad_output = torch.zeros_like(output, memory_format=torch.legacy_contiguous_format)
     flat_grad_output = grad_output.view(-1)
     reentrant = True
     correct_grad_sizes = True
@@ -244,9 +246,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                         'This check will likely fail if all the inputs are '
                         'not of double precision floating point. ')
                 any_input_requiring_grad = True
+                inp.retain_grad()
             else:
                 some_input_not_requiring_grad = True
-            inp.retain_grad()
     if not any_input_requiring_grad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
@@ -300,7 +302,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         diff_input_list = list(iter_tensors(tupled_inputs, True))
         if not diff_input_list:
             raise RuntimeError("no Tensors requiring grad found in input")
-        grads_input = torch.autograd.grad(output, diff_input_list, [torch.zeros_like(o) for o in output],
+        grads_input = torch.autograd.grad(output, diff_input_list,
+                                          [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output],
                                           allow_unused=True)
         for gi, i in zip(grads_input, diff_input_list):
             if gi is None:
@@ -381,7 +384,7 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(x if x.is_floating_point() else x.double())
+            y = torch.testing.randn_like(x if x.is_floating_point() else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
             return y.requires_grad_()

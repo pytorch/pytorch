@@ -1,9 +1,10 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     output: "1"
+    name: "RandomUniform_0"
     op_type: "RandomUniform"
     attribute {
       name: "shape"
@@ -18,6 +19,7 @@ graph {
     input: "1"
     input: "0"
     output: "2"
+    name: "Add_1"
     op_type: "Add"
   }
   name: "torch-jit-export"

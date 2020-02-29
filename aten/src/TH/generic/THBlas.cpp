@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THBlas.cpp"
 #else
 
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmI64.h"
+#endif // USE_FBGEMM
 
 #ifdef BLAS_F2C
 # define ffloat double
@@ -78,8 +81,18 @@ void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
   if(n == 1)
     incx = 1;
 
+  // [NOTE: cpu_zero]
+  // at least on the following version of BLAS this does not folllow the same semantics
+  // when a == 0 and there exists a NaN in the input.  Namely, the non-BLAS code below results
+  // in a value of 0, whereas this results in a value of NaN.  This is problematic because a
+  // NaN in an output tensor needs to be zero'ed explicitly through a separate mechanism.
+  // At the ATen/TH binding layer, this was via "cpu_zero", which would zero out the output
+  // tensor.
+  // BLAS version:
+  // [conda] blas                      1.0                         mkl
+  // [conda] mkl                       2019.4                      243
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (a != 0))
   {
     int i_n = (int)n;
     int i_incx = (int)incx;
@@ -380,6 +393,38 @@ void THBlas_(gemm)(
     return;
   }
 #endif
+
+#if defined(USE_FBGEMM) && defined(TH_REAL_IS_LONG)
+  if (alpha == 1 && (beta == 0 || beta == 1)) {
+    // In FBGEMM, we assume row-major ordering; However, here we assume the
+    // column-major ordering following the FORTRAN tradition in BLAS interface
+    // in this function: we can configure the layout (row/column-major ordering)
+    // of A and B by changing transa_ and transb_, but we cannot change the
+    // layout of C with this FORTRAN-style BLAS interface.
+    //
+    // The workaround is that we compute
+    // C^T (n x m) = B^T (n x k) * A^T (k x m) instead.
+    //
+    // In this way we view C^T as the row-major ordering when passing to FBGEMM.
+    fbgemm::cblas_gemm_i64_i64acc(
+        transb_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        transa_ ? fbgemm::matrix_op_t::Transpose
+                : fbgemm::matrix_op_t::NoTranspose,
+        n,
+        m,
+        k,
+        b,
+        ldb,
+        a,
+        lda,
+        beta == 1,
+        c,
+        ldc);
+    return;
+  }
+#endif
+
   {
     if(!transa_ && !transb_)
     {

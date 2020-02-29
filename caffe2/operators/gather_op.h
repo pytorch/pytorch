@@ -184,7 +184,7 @@ class GatherOp : public Operator<Context> {
     // an error.
     // Right now, we apply index wrapping by default only to axis == 0,
     // since we have ONNX conversion code that uses it. For other ops it
-    // needs to be speified explicitly with argument or you don't get it.
+    // needs to be specified explicitly with argument or you don't get it.
     if (OperatorBase::HasArgument("wrap_indices")) {
       wrap_indices_ = Operator<Context>::template GetSingleArgument<bool>(
           "wrap_indices", (false));

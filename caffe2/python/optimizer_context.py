@@ -44,7 +44,7 @@ class UseOptimizer(UseModifierBase):
             with UseOptimizer(optim2):
                 brew.func
 
-    Example useage with layer:
+    Example usage with layer:
         optimizers = {'optim1': optim1, 'optim2': optim2}
         with Optimizers(optimizers):
             optim = OptimizerContext.current().get_optimizer('optim1')

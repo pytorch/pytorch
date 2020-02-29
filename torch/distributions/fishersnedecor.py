@@ -49,13 +49,13 @@ class FisherSnedecor(Distribution):
 
     @property
     def mean(self):
-        df2 = self.df2.clone()
+        df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 2] = nan
         return df2 / (df2 - 2)
 
     @property
     def variance(self):
-        df2 = self.df2.clone()
+        df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 4] = nan
         return 2 * df2.pow(2) * (self.df1 + df2 - 2) / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
 

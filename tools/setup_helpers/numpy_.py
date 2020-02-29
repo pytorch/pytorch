@@ -1,4 +1,9 @@
-"NumPy helper."
+"""NumPy helper.
+
+Note: If you plan to add a library detection script like this one, consider it twice. Most library detection should go
+to CMake script. This one is an exception, because Python code can do a much better job due to NumPy's inherent Pythonic
+nature.
+"""
 
 from .env import check_negative_env_flag
 

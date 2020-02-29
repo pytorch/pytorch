@@ -3,6 +3,7 @@
 
 #include "ThreadPoolCommon.h"
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -36,12 +37,15 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   ~ThreadPool();
   // Returns the number of threads currently in use
   int getNumThreads() const;
+  void setNumThreads(size_t numThreads);
 
   // Sets the minimum work size (range) for which to invoke the
   // threadpool; work sizes smaller than this will just be run on the
   // main (calling) thread
   void setMinWorkSize(size_t size);
-  size_t getMinWorkSize() const { return minWorkSize_; }
+  size_t getMinWorkSize() const {
+    return minWorkSize_;
+  }
   void run(const std::function<void(int, size_t)>& fn, size_t range);
 
   // Run an arbitrary function in a thread-safe manner accessing the Workers
@@ -49,9 +53,10 @@ class CAFFE2_API /*alignas(kCacheLineSize)*/ ThreadPool {
   void withPool(const std::function<void(WorkersPool*)>& fn);
 
  private:
+  static size_t defaultNumThreads_;
   mutable std::mutex executionMutex_;
   size_t minWorkSize_;
-  size_t numThreads_;
+  std::atomic_size_t numThreads_;
   std::shared_ptr<WorkersPool> workersPool_;
   std::vector<std::shared_ptr<Task>> tasks_;
 };

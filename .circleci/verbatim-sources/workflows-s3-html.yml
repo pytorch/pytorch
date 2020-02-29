@@ -1,16 +1,3 @@
-
-  # Scheduled to run 4 hours after the binary jobs start
-  # These jobs need to run after all the binary jobs run, regardless of if the
-  # jobs failed or not. There's no way to do this in CircleCI right now, so we
-  # just schedule this to run after all the binary jobs should've finished.
-  # These jobs are all idempotent and very lightweight; they just upload html
-  # files that track what binaries are available and what their sizes are.
-  update_s3_htmls:
-    jobs:
-      - setup:
-          filters:
-            branches:
-              only: postnightly
       - update_s3_htmls_for_nightlies:
           context: org-member
           requires:

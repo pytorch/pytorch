@@ -6,7 +6,7 @@ namespace at { namespace native {
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
   TORCH_CHECK_INDEX(false, "The shape of the mask ", mask.sizes(), " at index ", maskIdx,
-  "does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
+  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
 }
 
 

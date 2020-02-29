@@ -92,7 +92,7 @@ class Fold(Module):
 
         When the ``divisor`` tensor contains no zero elements, then
         ``fold`` and ``unfold`` operations are inverses of each
-        other (upto constant divisor).
+        other (up to constant divisor).
 
     .. warning::
         Currently, only 4-D output tensors (batched image-like tensors) are
@@ -139,7 +139,7 @@ class Fold(Module):
 class Unfold(Module):
     r"""Extracts sliding local blocks from a batched input tensor.
 
-    Consider an batched :attr:`input` tensor of shape :math:`(N, C, *)`,
+    Consider a batched :attr:`input` tensor of shape :math:`(N, C, *)`,
     where :math:`N` is the batch dimension, :math:`C` is the channel dimension,
     and :math:`*` represent arbitrary spatial dimensions. This operation flattens
     each sliding :attr:`kernel_size`-sized block within the spatial dimensions
@@ -221,7 +221,7 @@ class Unfold(Module):
 
         When the ``divisor`` tensor contains no zero elements, then
         ``fold`` and ``unfold`` operations are inverses of each
-        other (upto constant divisor).
+        other (up to constant divisor).
 
     .. warning::
         Currently, only 4-D input tensors (batched image-like tensors) are

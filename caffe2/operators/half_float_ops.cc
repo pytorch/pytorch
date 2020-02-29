@@ -1,7 +1,34 @@
 #include "caffe2/operators/half_float_ops.h"
 #include <c10/util/Half.h>
+#include "caffe2/utils/cpuid.h"
+#ifdef USE_FBGEMM
+#include "fbgemm/FbgemmConvert.h"
+#endif
 
 namespace caffe2 {
+
+inline void FloatToFloat16_ref(
+    const float* in,
+    at::Half* out,
+    size_t N,
+    bool do_clip = false) {
+  if (do_clip) {
+    constexpr float FP16_MAX = 65504.f;
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = std::max(-FP16_MAX, std::min(in[i], FP16_MAX));
+    }
+  } else {
+    for (size_t i = 0; i < N; ++i) {
+      out[i] = in[i];
+    }
+  }
+}
+
+inline void Float16ToFloat_ref(const at::Half* in, float* out, size_t N) {
+  for (size_t i = 0; i < N; ++i) {
+    out[i] = in[i];
+  }
+}
 
 template <>
 bool FloatToHalfOp<CPUContext>::RunOnDevice() {
@@ -12,9 +39,20 @@ bool FloatToHalfOp<CPUContext>::RunOnDevice() {
   at::Half* out = output->template mutable_data<at::Half>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
-    out[i] = data[i];
+#ifdef USE_FBGEMM
+  // There exists a verion fbgemm::FloatToFloat16_simd which will issue avx-512
+  // instructions when possible. However, this actually doesn't give perf
+  // benefits, according to benchmarks on T1/T6. Hence we stick to avx2 versions
+  // here.
+  if (GetCpuId().avx2()) {
+    fbgemm::FloatToFloat16_avx2(
+        data, reinterpret_cast<fbgemm::float16*>(out), N, clip_);
+  } else {
+    FloatToFloat16_ref(data, out, N, clip_);
   }
+#else
+  FloatToFloat16_ref(data, out, N, clip_);
+#endif
 
   return true;
 }
@@ -28,9 +66,18 @@ bool HalfToFloatOp<CPUContext>::RunOnDevice() {
   float* out = output->template mutable_data<float>();
   auto N = input.numel();
 
-  for (size_t i = 0; i < N; i++) {
-    out[i] = data[i];
+#ifdef USE_FBGEMM
+  // Same reasoning of sticking to avx2
+  if (GetCpuId().avx2()) {
+    fbgemm::Float16ToFloat_avx2(
+        reinterpret_cast<const fbgemm::float16*>(data), out, N);
+  } else {
+    Float16ToFloat_ref(data, out, N);
   }
+#else
+  Float16ToFloat_ref(data, out, N);
+#endif
+
   return true;
 }
 

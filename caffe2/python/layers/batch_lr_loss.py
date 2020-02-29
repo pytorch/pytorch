@@ -212,7 +212,7 @@ class BatchLRLoss(ModelLayer):
             )
 
             prediction = self.input_record.prediction()
-            # focal loss = (y(1-p) + p(1-y))^gamma * orginal LR loss
+            # focal loss = (y(1-p) + p(1-y))^gamma * original LR loss
             # y(1-p) + p(1-y) = y + p - 2 * yp
             y_plus_p = net.Add(
                 [prediction, label],

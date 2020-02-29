@@ -6,7 +6,7 @@
 #include <cmath>
 #include <limits>
 
-#include <x86intrin.h>
+#include <immintrin.h>
 
 using namespace std;
 
@@ -41,7 +41,6 @@ GetNorm(float begin, float end, float density, NormMinimization::Kind kind) {
   return density * norm;
 }
 
-
 // Filter out outliers in input distributions
 // Exploit the input distributions for the quick search
 TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
@@ -58,6 +57,11 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
   vector<float> bins_f(dnnlowp::adjust_hist_to_include_zero(hist, &min, &max));
   int nbins = bins_f.size();
   float bin_width = (max - min) / nbins;
+  if (bin_width == 0) {
+    QuantizationFactory* qfactory = QuantizationFactory::GetDefaultInstance();
+    return qfactory->ChooseQuantizationParams(
+        min, max, precision, preserve_sparsity);
+  }
   int dst_nbins = 1 << precision;
 
   float org_max = max;
@@ -156,8 +160,8 @@ TensorQuantizationParams NormMinimization::NonlinearQuantizationParamsSearch(
     start_bin = next_start_bin;
     end_bin = next_end_bin;
   }
-  VLOG(2) << "best quantiation range " << start_bin << "," << end_bin + 1 << ","
-          << norm_min;
+  VLOG(2) << "best quantization range " << start_bin << "," << end_bin + 1
+          << "," << norm_min;
 
   double selected_sum = 0;
   for (int i = start_bin; i < end_bin + 1; ++i) {

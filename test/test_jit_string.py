@@ -1,5 +1,5 @@
 from test_jit import JitTestCase
-
+from torch.testing._internal.common_utils import run_tests
 
 class TestScript(JitTestCase):
     def test_str_ops(self):
@@ -310,3 +310,17 @@ class TestScript(JitTestCase):
 
         for i in range(len(inputs) - 1):
             self.checkScript(test_str_cmp, (inputs[i], inputs[i + 1]))
+
+        def test_str_join():
+            return (
+                ",".join(["a"]),
+                ",".join(["a", "b", "c"]),
+                ",".join(["aa", "bb", "cc"]),
+                ",".join(["a,a", "bb", "c,c"]),
+                "**a**".join(["b", "c", "d", "e"]),
+                "".join(["a", "b", "c"]),
+            )
+        self.checkScript(test_str_join, ())
+
+if __name__ == '__main__':
+    run_tests()

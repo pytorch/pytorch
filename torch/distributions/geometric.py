@@ -88,7 +88,7 @@ class Geometric(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        value, probs = broadcast_all(value, self.probs.clone())
+        value, probs = broadcast_all(value, self.probs.clone(memory_format=torch.contiguous_format))
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()
 

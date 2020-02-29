@@ -20,7 +20,6 @@ $storage_tensor_headers
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #include <cstddef>
 #include <functional>
@@ -42,20 +41,14 @@ Tensor * ${Type}::add(Tensor & a, Tensor & b) {
 */
 
 namespace ${Type} {
-#ifndef USE_STATIC_DISPATCH
-namespace {
-#endif
 
 ${type_derived_method_definitions}
 
-#ifndef USE_STATIC_DISPATCH
-}
-#endif
 }  // namespace ${Type}
 
 #ifndef USE_STATIC_DISPATCH
 namespace {
-auto registerer = torch::RegisterOperators()
+auto registerer = torch::import()
   ${function_registrations};
 }
 #endif

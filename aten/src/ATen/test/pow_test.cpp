@@ -105,10 +105,10 @@ void assert_eq(T val, T act, T exp) {
 }
 
 template<typename Vals, typename Pows>
-void tensor_pow_scalar(const Vals vals, const Pows pows) {
+void tensor_pow_scalar(const Vals vals, c10::ScalarType vals_dtype, const Pows pows, c10::ScalarType pows_dtype) {
   using T = typename Vals::value_type;
 
-  const auto tensor = torch::tensor(vals);
+  const auto tensor = torch::tensor(vals, vals_dtype);
 
   for (const auto pow : pows) {
     auto actual_pow = tensor.pow(pow);
@@ -144,10 +144,10 @@ void tensor_pow_scalar(const Vals vals, const Pows pows) {
 }
 
 template<typename Vals, typename Pows>
-void scalar_pow_tensor(const Vals vals, const Pows pows) {
+void scalar_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows pows, c10::ScalarType pows_dtype) {
   using T = typename Pows::value_type;
 
-  const auto pow_tensor = torch::tensor(pows);
+  const auto pow_tensor = torch::tensor(pows, pows_dtype);
 
   for (const auto val : vals) {
     const auto actual_pow = torch::pow(val, pow_tensor);
@@ -175,15 +175,15 @@ void scalar_pow_tensor(const Vals vals, const Pows pows) {
 }
 
 template<typename Vals, typename Pows>
-void tensor_pow_tensor(const Vals vals, Pows pows) {
+void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c10::ScalarType pows_dtype) {
   using T = typename Vals::value_type;
 
   typedef std::numeric_limits< double > dbl;
   std::cout.precision(dbl::max_digits10);
 
-  const auto vals_tensor = torch::tensor(vals);
+  const auto vals_tensor = torch::tensor(vals, vals_dtype);
   for (size_t shift = 0; shift < pows.size(); shift++) {
-    const auto pows_tensor = torch::tensor(pows);
+    const auto pows_tensor = torch::tensor(pows, pows_dtype);
 
     const auto actual_pow = vals_tensor.pow(pows_tensor);
 
@@ -222,67 +222,67 @@ void tensor_pow_tensor(const Vals vals, Pows pows) {
 }
 
 TEST(PowTest, IntTensorPowAllScalars) {
-  tensor_pow_scalar(ints, non_neg_ints);
-  tensor_pow_scalar(ints, non_neg_longs);
-  tensor_pow_scalar(ints, floats);
-  tensor_pow_scalar(ints, doubles);
+  tensor_pow_scalar(ints, c10::kInt, non_neg_ints, c10::kInt);
+  tensor_pow_scalar(ints, c10::kInt, non_neg_longs, c10::kLong);
+  tensor_pow_scalar(ints, c10::kInt, floats, c10::kFloat);
+  tensor_pow_scalar(ints, c10::kInt, doubles, c10::kDouble);
 }
 
 TEST(PowTest, LongTensorPowAllScalars) {
-  tensor_pow_scalar(longs, non_neg_ints);
-  tensor_pow_scalar(longs, non_neg_longs);
-  tensor_pow_scalar(longs, floats);
-  tensor_pow_scalar(longs, doubles);
+  tensor_pow_scalar(longs, c10::kLong, non_neg_ints, c10::kInt);
+  tensor_pow_scalar(longs, c10::kLong, non_neg_longs, c10::kLong);
+  tensor_pow_scalar(longs, c10::kLong, floats, c10::kFloat);
+  tensor_pow_scalar(longs, c10::kLong, doubles, c10::kDouble);
 }
 
 TEST(PowTest, FloatTensorPowAllScalars) {
-  tensor_pow_scalar(floats, ints);
-  tensor_pow_scalar(floats, longs);
-  tensor_pow_scalar(floats, floats);
-  tensor_pow_scalar(floats, doubles);
+  tensor_pow_scalar(floats, c10::kFloat, ints, c10::kInt);
+  tensor_pow_scalar(floats, c10::kFloat, longs, c10::kLong);
+  tensor_pow_scalar(floats, c10::kFloat, floats, c10::kFloat);
+  tensor_pow_scalar(floats, c10::kFloat, doubles, c10::kDouble);
 }
 
 TEST(PowTest, DoubleTensorPowAllScalars) {
-  tensor_pow_scalar(doubles, ints);
-  tensor_pow_scalar(doubles, longs);
-  tensor_pow_scalar(doubles, floats);
-  tensor_pow_scalar(doubles, doubles);
+  tensor_pow_scalar(doubles, c10::kDouble, ints, c10::kInt);
+  tensor_pow_scalar(doubles, c10::kDouble, longs, c10::kLong);
+  tensor_pow_scalar(doubles, c10::kDouble, floats, c10::kFloat);
+  tensor_pow_scalar(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
 TEST(PowTest, IntScalarPowAllTensors) {
-  scalar_pow_tensor(ints, ints);
-  scalar_pow_tensor(ints, longs);
-  scalar_pow_tensor(ints, floats);
-  scalar_pow_tensor(ints, doubles);
+  scalar_pow_tensor(ints, c10::kInt, ints, c10::kInt);
+  scalar_pow_tensor(ints, c10::kInt, longs, c10::kLong);
+  scalar_pow_tensor(ints, c10::kInt, floats, c10::kFloat);
+  scalar_pow_tensor(ints, c10::kInt, doubles, c10::kDouble);
 }
 
 TEST(PowTest, LongScalarPowAllTensors) {
-  scalar_pow_tensor(longs, longs);
-  scalar_pow_tensor(longs, floats);
-  scalar_pow_tensor(longs, doubles);
+  scalar_pow_tensor(longs, c10::kLong, longs, c10::kLong);
+  scalar_pow_tensor(longs, c10::kLong, floats, c10::kFloat);
+  scalar_pow_tensor(longs, c10::kLong, doubles, c10::kDouble);
 }
 
 TEST(PowTest, FloatScalarPowAllTensors) {
-  scalar_pow_tensor(floats, floats);
-  scalar_pow_tensor(floats, doubles);
+  scalar_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
+  scalar_pow_tensor(floats, c10::kFloat, doubles, c10::kDouble);
 }
 
 TEST(PowTest, DoubleScalarPowAllTensors) {
-  scalar_pow_tensor(doubles, doubles);
+  scalar_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }
 
 TEST(PowTest, IntTensorPowIntTensor) {
-  tensor_pow_tensor(ints, ints);
+  tensor_pow_tensor(ints, c10::kInt, ints, c10::kInt);
 }
 
 TEST(PowTest, LongTensorPowLongTensor) {
-  tensor_pow_tensor(longs, longs);
+  tensor_pow_tensor(longs, c10::kLong, longs, c10::kLong);
 }
 
 TEST(PowTest, FloatTensorPowFloatTensor) {
-  tensor_pow_tensor(floats, floats);
+  tensor_pow_tensor(floats, c10::kFloat, floats, c10::kFloat);
 }
 
 TEST(PowTest, DoubleTensorPowDoubleTensor) {
-  tensor_pow_tensor(doubles, doubles);
+  tensor_pow_tensor(doubles, c10::kDouble, doubles, c10::kDouble);
 }

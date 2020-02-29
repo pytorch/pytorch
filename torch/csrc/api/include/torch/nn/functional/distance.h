@@ -6,29 +6,50 @@ namespace torch {
 namespace nn {
 namespace functional {
 
+namespace detail {
 inline Tensor cosine_similarity(
     const Tensor& x1,
     const Tensor& x2,
-    const CosineSimilarityOptions& options) {
+    int64_t dim,
+    double eps) {
   return torch::cosine_similarity(
       x1,
       x2,
-      options.dim(),
-      options.eps());
+      dim,
+      eps);
+}
+} // namespace detail
+
+inline Tensor cosine_similarity(
+    const Tensor& x1,
+    const Tensor& x2,
+    const CosineSimilarityFuncOptions& options = {}) {
+  return detail::cosine_similarity(x1, x2, options.dim(), options.eps());
 }
 
 // ============================================================================
 
+namespace detail {
 inline Tensor pairwise_distance(
     const Tensor& x1,
     const Tensor& x2,
-    const PairwiseDistanceOptions& options) {
+    double p,
+    double eps,
+    bool keepdim) {
   return torch::pairwise_distance(
       x1,
       x2,
-      options.p(),
-      options.eps(),
-      options.keepdim());
+      p,
+      eps,
+      keepdim);
+}
+} // namespace detail
+
+inline Tensor pairwise_distance(
+    const Tensor& x1,
+    const Tensor& x2,
+    const PairwiseDistanceFuncOptions& options = {}) {
+  return detail::pairwise_distance(x1, x2, options.p(), options.eps(), options.keepdim());
 }
 
 // ============================================================================

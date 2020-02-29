@@ -3,6 +3,7 @@
 #include <THC/THCNumerics.cuh>
 #include <THC/THCApply.cuh>
 #include <THCUNN/common.h>
+#include <ATen/WrapDimUtils.h>
 
 template <typename Dtype, typename Acctype>
 struct gatedLinearCSigMul_functor

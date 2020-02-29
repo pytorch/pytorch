@@ -5,7 +5,7 @@
 
 // IPC doesn't support (re)allocation
 
-class CAFFE2_API THCIpcDeleter {
+class TORCH_CUDA_API THCIpcDeleter {
  public:
   THCIpcDeleter(std::shared_ptr<void> basePtr);
   ~THCIpcDeleter();

@@ -86,13 +86,13 @@ DEFINE_FLOAT_INT_CAST(int16_t, float, s)
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
 inline gather(const double* base_addr, const Vec256<int64_t>& vindex) {
   return _mm256_i64gather_pd(base_addr, vindex, scale);
 }
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
 inline gather(const float* base_addr, const Vec256<int32_t>& vindex) {
   return _mm256_i32gather_ps(base_addr, vindex, scale);
 }
@@ -100,14 +100,14 @@ inline gather(const float* base_addr, const Vec256<int32_t>& vindex) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<double>>
 inline mask_gather(const Vec256<double>& src, const double* base_addr,
                    const Vec256<int64_t>& vindex, const Vec256<double>& mask) {
   return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
 }
 
 template<int64_t scale = 1>
-c10::guts::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
+std::enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vec256<float>>
 inline mask_gather(const Vec256<float>& src, const float* base_addr,
                    const Vec256<int32_t>& vindex, const Vec256<float>& mask) {
   return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
@@ -145,27 +145,14 @@ inline interleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
   // swap lanes:
   //   a_swapped = {a0, a1, b0, b1}
   //   b_swapped = {a2, a3, b2, b3}
-#if __cpp_binary_literals >= 201304L
-  auto a_swapped = _mm256_permute2f128_pd(a, b, 0b0100000);
-  auto b_swapped = _mm256_permute2f128_pd(a, b, 0b0110001);
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  static constexpr int swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  auto a_swapped = _mm256_permute2f128_pd(a, b, swap_ctrl_a);
-  auto b_swapped = _mm256_permute2f128_pd(a, b, swap_ctrl_b);
-#endif
+  auto a_swapped = _mm256_permute2f128_pd(a, b, 0b0100000);  // 0, 2.   4 bits apart
+  auto b_swapped = _mm256_permute2f128_pd(a, b, 0b0110001);  // 1, 3.   4 bits apart
 
   // group cols crossing lanes:
   //   return {a0, b0, a1, b1}
   //          {a2, b2, a3, b3}
-#if __cpp_binary_literals >= 201304L
-  return std::make_pair(_mm256_permute4x64_pd(a_swapped, 0b11011000),
-                        _mm256_permute4x64_pd(b_swapped, 0b11011000));
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int group_ctrl = 0 | (2 << 2) | (1 << 4) | (3 << 6);  // 0, 2, 1, 3
-  return std::make_pair(_mm256_permute4x64_pd(a_swapped, group_ctrl),
-                        _mm256_permute4x64_pd(b_swapped, group_ctrl));
-#endif
+  return std::make_pair(_mm256_permute4x64_pd(a_swapped, 0b11011000),  // 0, 2, 1, 3
+                        _mm256_permute4x64_pd(b_swapped, 0b11011000)); // 0, 2, 1, 3
 }
 
 template <>
@@ -179,15 +166,8 @@ inline interleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
   //   a_swapped = {a0, a1, a2, a3, b0, b1, b2, b3}
   //   b_swapped = {a4, a5, a6, a7, b4, b5, b6, b7}
   // TODO: can we support caching this?
-#if __cpp_binary_literals >= 201304L
-  auto a_swapped = _mm256_permute2f128_ps(a, b, 0b0100000);
-  auto b_swapped = _mm256_permute2f128_ps(a, b, 0b0110001);
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  static constexpr int swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  auto a_swapped = _mm256_permute2f128_ps(a, b, swap_ctrl_a);
-  auto b_swapped = _mm256_permute2f128_ps(a, b, swap_ctrl_b);
-#endif
+  auto a_swapped = _mm256_permute2f128_ps(a, b, 0b0100000);  // 0, 2.   4 bits apart
+  auto b_swapped = _mm256_permute2f128_ps(a, b, 0b0110001);  // 1, 3.   4 bits apart
 
   // group cols crossing lanes:
   //   return {a0, b0, a1, b1, a2, b2, a3, b3}
@@ -209,27 +189,14 @@ inline deinterleave2<double>(const Vec256<double>& a, const Vec256<double>& b) {
   // group cols crossing lanes:
   //   a_grouped = {a0, a1, b0, b1}
   //   b_grouped = {a2, a3, b2, b3}
-#if __cpp_binary_literals >= 201304L
-  auto a_grouped = _mm256_permute4x64_pd(a, 0b11011000);
-  auto b_grouped = _mm256_permute4x64_pd(b, 0b11011000);
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int group_ctrl = 0 | (2 << 2) | (1 << 4) | (3 << 6);  // 0, 2, 1, 3
-  auto a_grouped = _mm256_permute4x64_pd(a, group_ctrl);
-  auto b_grouped = _mm256_permute4x64_pd(b, group_ctrl);
-#endif
+  auto a_grouped = _mm256_permute4x64_pd(a, 0b11011000);  // 0, 2, 1, 3
+  auto b_grouped = _mm256_permute4x64_pd(b, 0b11011000);  // 0, 2, 1, 3
 
   // swap lanes:
   //   return {a0, a1, a2, a3}
   //          {b0, b1, b2, b3}
-#if __cpp_binary_literals >= 201304L
-  return std::make_pair(_mm256_permute2f128_pd(a_grouped, b_grouped, 0b0100000),
-                        _mm256_permute2f128_pd(a_grouped, b_grouped, 0b0110001));
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  static constexpr int swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  return std::make_pair(_mm256_permute2f128_pd(a_grouped, b_grouped, swap_ctrl_a),
-                        _mm256_permute2f128_pd(a_grouped, b_grouped, swap_ctrl_b));
-#endif
+  return std::make_pair(_mm256_permute2f128_pd(a_grouped, b_grouped, 0b0100000),  // 0, 2.   4 bits apart
+                        _mm256_permute2f128_pd(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
 template <>
@@ -250,15 +217,8 @@ inline deinterleave2<float>(const Vec256<float>& a, const Vec256<float>& b) {
   // swap lanes:
   //   return {a0, a1, a2, a3, a4, a5, a6, a7}
   //          {b0, b1, b2, b3, b4, b5, b6, b7}
-#if __cpp_binary_literals >= 201304L
-  return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, 0b0100000),
-                        _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001));
-#else  // TODO Remove else case once switch to C++14 is finished
-  static constexpr int swap_ctrl_a = 0 | (2 << 4);  // 0, 2.   4 bits apart
-  static constexpr int swap_ctrl_b = 1 | (3 << 4);  // 1, 3.   4 bits apart
-  return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, swap_ctrl_a),
-                        _mm256_permute2f128_ps(a_grouped, b_grouped, swap_ctrl_b));
-#endif
+  return std::make_pair(_mm256_permute2f128_ps(a_grouped, b_grouped, 0b0100000),  // 0, 2.   4 bits apart
+                        _mm256_permute2f128_ps(a_grouped, b_grouped, 0b0110001)); // 1, 3.   4 bits apart
 }
 
 #endif  // defined(__AVX2__)

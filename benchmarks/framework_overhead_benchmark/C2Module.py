@@ -14,7 +14,7 @@ class C2SimpleNet(object):
     """
     This module constructs a net with 'op_name' operator. The net consist
     a series of such operator.
-    It intializes the workspace with input blob equal to the number of parameters
+    It initializes the workspace with input blob equal to the number of parameters
     needed for the op.
     Provides forward method to run the net niter times.
     """
