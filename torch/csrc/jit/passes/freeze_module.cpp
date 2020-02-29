@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 
-#include <torch/csrc/jit/graph_executor_impl.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <stack>
