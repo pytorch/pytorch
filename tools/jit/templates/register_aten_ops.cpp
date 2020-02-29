@@ -100,6 +100,12 @@ c10::OperatorOptions atenOperatorOptions() {
   return result;
 }
 
+int (*DUMMY_OPERATION_JITONLY)(Stack&) =
+  [](Stack& stack) -> int {
+    TORCH_CHECK(false, "Operator has been stripped in the custom build.")
+    return 0;
+  };
+
 KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
   [](c10::OperatorKernel *, const c10::OperatorHandle &, std::vector<c10::IValue> *) -> void {
     TORCH_CHECK(false, "Operator has been stripped in the custom build.")
