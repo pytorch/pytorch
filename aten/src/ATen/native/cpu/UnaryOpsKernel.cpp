@@ -440,24 +440,60 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, Generato
   }
 }
 
+std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
+  auto res = oldstride.vec();
+  for(size_t i = 0; i < res.size(); i++) {
+    res[i] = res[i] * 2;
+  }
+  res.emplace_back(1);
+  return res;
+}
+
+Tensor view_complex_as_float(const Tensor& self) {
+  auto new_sizes = self.sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.emplace_back(2);
+  auto new_strides = computeStrideForComplex(self.strides());
+  if(self.scalar_type() == at::kComplexFloat) {
+    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
+    return at::from_blob(data, new_sizes, ArrayRef<int64_t>(new_strides), dtype(at::kFloat));
+  } else {
+    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
+    return at::from_blob(data, new_sizes, ArrayRef<int64_t>(new_strides), dtype(at::kDouble));
+  }
+  return self;
+}
+
 void normal_kernel(Tensor& self, double mean, double std, Generator* gen) {
-  auto size = self.numel();
-  if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
+  auto float_tensor = self;
+  auto reqd_std = std;
+  if(self.is_complex()) {
+    if(self.scalar_type() == ScalarType::ComplexFloat) {
+      float_tensor = at::native::view_complex_as_float(self);
+    } else {
+      float_tensor = at::native::view_complex_as_float(self);
+    }
+    // variance for normal distribution of the real and imaginary values is half of the
+    // input variance
+    reqd_std = std/(std::sqrt(2));
+  }
+  auto size = float_tensor.numel();
+  if (float_tensor.scalar_type() == ScalarType::Float && size >= 16 && float_tensor.is_contiguous()) {
 #ifdef __AVX2__
-    normal_fill_AVX2(self, static_cast<float>(mean), static_cast<float>(std), gen);
+    normal_fill_AVX2(float_tensor, static_cast<float>(mean), static_cast<float>(std), gen);
 #else
-    normal_fill(self, static_cast<float>(mean), static_cast<float>(std), gen);
+    normal_fill(float_tensor, static_cast<float>(mean), static_cast<float>(std), gen);
 #endif
   } else {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "norma_cpu", [&] {
-      if (size >= 16 && self.is_contiguous()) {
-        normal_fill<scalar_t>(self, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
+    AT_DISPATCH_FLOATING_TYPES(float_tensor.scalar_type(), "norma_cpu", [&] {
+      if (size >= 16 && float_tensor.is_contiguous()) {
+        normal_fill<scalar_t>(float_tensor, static_cast<scalar_t>(mean), static_cast<scalar_t>(std), gen);
       } else {
-        auto iter = TensorIterator::nullary_op(self);
+        auto iter = TensorIterator::nullary_op(float_tensor);
         CPUGenerator* generator = get_generator_or_default<CPUGenerator>(gen, detail::getDefaultCPUGenerator());
         std::lock_guard<std::mutex> lock(generator->mutex_);
-        cpu_serial_kernel(iter, [mean, std, generator]() -> scalar_t {
-          at::normal_distribution<double> normal(mean, std);
+        cpu_serial_kernel(iter, [mean, reqd_std, generator]() -> scalar_t {
+          at::normal_distribution<double> normal(mean, reqd_std);
           return (scalar_t)normal(generator);
         });
       }
