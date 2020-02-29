@@ -1320,7 +1320,7 @@ struct getTypePtr_ final {
       throw c10::Error("Type could not be converted to any of the known types.", "");
     }
     auto res = getCustomClassType<T>();
-    return std::dynamic_pointer_cast<Type>(res.type_);
+    return std::dynamic_pointer_cast<Type>(std::move(res.type_));
   }
 };
 
