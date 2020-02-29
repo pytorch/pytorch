@@ -144,7 +144,10 @@ def replicate(network, devices, detach=False):
                     param = param_copies[j][param_idx]
                     # parameters in replicas are no longer leaves, so remove them from _parameters
                     # and setattr them as non-parameter attributes
-                    del replica._parameters[key]
+                    # scripted modules don't allow deleting parameters, but also don't complain
+                    # on assigning non-Parameter type
+                    if (not _is_script_module(replica)):
+                        del replica._parameters[key]
                     setattr(replica, key, param)
         for key, buf in module._buffers.items():
             if buf is None:
