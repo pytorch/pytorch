@@ -648,6 +648,19 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::name(Tensor a) -> str?",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           if (a.name() == "") {
+             push(stack, IValue());
+           } else {
+             push(stack, a.name());
+           }
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::layout(Tensor a) -> int",
          [](Stack& stack) {
            at::Tensor a;
