@@ -287,7 +287,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""Applies a multi-layer Elman RNN with :math:`tanh` or :math:`ReLU` non-linearity to an
+    r"""Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
     input sequence.
 
 
@@ -295,12 +295,12 @@ class RNN(RNNBase):
     function:
 
     .. math::
-        h_t = \text{tanh}(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})
+        h_t = \tanh(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
     previous layer at time `t-1` or the initial hidden state at time `0`.
-    If :attr:`nonlinearity` is ``'relu'``, then `ReLU` is used instead of `tanh`.
+    If :attr:`nonlinearity` is ``'relu'``, then :math:`\text{ReLU}` is used instead of :math:`\tanh`.
 
     Args:
         input_size: The number of expected features in the input `x`
