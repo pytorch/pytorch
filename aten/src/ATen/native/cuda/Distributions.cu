@@ -46,7 +46,7 @@
 namespace {
 
 template <typename scalar_t>
-inline void poisson_cuda_kernel(
+void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
     std::pair<uint64_t, uint64_t> seeds) {
