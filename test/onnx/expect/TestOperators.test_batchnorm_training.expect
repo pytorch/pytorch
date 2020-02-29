@@ -1,6 +1,6 @@
-ir_version: 4
+ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.3"
+producer_version: "1.4"
 graph {
   node {
     input: "input"
@@ -13,6 +13,7 @@ graph {
     output: "8"
     output: "batch_norm_dead_output-13"
     output: "batch_norm_dead_output-14"
+    name: "BatchNormalization_0"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
@@ -31,11 +32,6 @@ graph {
     data_type: 1
     name: "bias"
     raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
-    data_type: 7
-    name: "num_batches_tracked"
-    raw_data: "\001\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
@@ -125,16 +121,6 @@ graph {
           dim {
             dim_value: 2
           }
-        }
-      }
-    }
-  }
-  input {
-    name: "num_batches_tracked"
-    type {
-      tensor_type {
-        elem_type: 7
-        shape {
         }
       }
     }

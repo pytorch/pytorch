@@ -43,6 +43,24 @@ DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_8x8__aarch64_neon
 DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_2x4c8__sse2)
 DECLARE_PYTORCH_Q8GEMM_UKERNEL_FUNCTION(pytorch_q8gemm_ukernel_4x4c2__sse2)
 
+#define DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(fn_name) \
+  PYTORCH_QNNP_INTERNAL void fn_name(            \
+      size_t mr,                                 \
+      size_t nr,                                 \
+      size_t k,                                  \
+      const uint8_t* a,                          \
+      size_t a_stride,                           \
+      const void* w,                             \
+      const float* b,                            \
+      float* c,                                  \
+      size_t c_stride,                           \
+      const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
+DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_ukernel_4x8__neon)
+DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_ukernel_4x8__aarch32_neon)
+DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_ukernel_8x8__aarch64_neon)
+DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_UKERNEL_FUNCTION(pytorch_q8gemm_dq_ukernel_4x4c2__sse2)
+
 #define DECLARE_PYTORCH_Q8GEMM_XZP_UKERNEL_FUNCTION(fn_name)      \
   PYTORCH_QNNP_INTERNAL void fn_name(                     \
       size_t mr,                                          \

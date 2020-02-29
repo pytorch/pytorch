@@ -21,7 +21,7 @@ std::tuple<Tensor, Tensor> _sobol_engine_draw(const Tensor& quasi, int64_t n, co
   TORCH_CHECK(quasi.dtype() == at::kLong,
            "quasi needs to be of type ", at::kLong);
 
-  Tensor wquasi = quasi.clone();
+  Tensor wquasi = quasi.clone(at::MemoryFormat::Contiguous);
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kFloat;
   Tensor result = at::empty({n, dimension}, sobolstate.options().dtype(result_dtype));
 
@@ -93,7 +93,7 @@ Tensor& _sobol_engine_scramble_(Tensor& sobolstate, const Tensor& ltm, int64_t d
   /// Instead, we perform an element-wise product of all the matrices and sum over the last dimension.
   /// The required product of the m^{th} row in the d^{th} square matrix in `ltm` can be accessed
   /// using ltm_d_a[d][m] m and d are zero-indexed
-  Tensor diag_true = ltm.clone();
+  Tensor diag_true = ltm.clone(at::MemoryFormat::Contiguous);
   diag_true.diagonal(0, -2, -1).fill_(1);
   Tensor ltm_dots = cdot_pow2(diag_true);
   auto ltm_d_a = ltm_dots.accessor<int64_t, 2>();

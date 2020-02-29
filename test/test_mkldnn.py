@@ -13,7 +13,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 import torch
 import torch.jit
 from torch.utils import mkldnn as mkldnn_utils
-from common_utils import TestCase, run_tests, TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
@@ -393,6 +393,16 @@ class TestMkldnn(TestCase):
         x = torch.randn(1, dtype=torch.float32)
         self.assertFalse(x.is_mkldnn)
         self.assertTrue(x.to_mkldnn().is_mkldnn)
+
+    # legacy constructor/new doesn't support mkldnn tensors
+    def test_legacy_new_failure(self):
+        x = torch.randn(1, dtype=torch.float32)
+        x_mkldnn = x.to_mkldnn()
+        self.assertRaises(RuntimeError, lambda: x_mkldnn.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: x_mkldnn.new(x.storage()))
+        self.assertRaises(RuntimeError, lambda: x_mkldnn.new(x))
+        self.assertRaises(RuntimeError, lambda: x_mkldnn.new(torch.Size([2, 3])))
+        self.assertRaises(RuntimeError, lambda: x_mkldnn.new([6]))
 
     def test_is_mkldnn_jit(self):
         class EnsureMkldnn(torch.jit.ScriptModule):

@@ -14,22 +14,23 @@ import torch
 as_strided_configs_short = op_bench.config_list(
     attr_names=["M", "N", "size", "stride", "storage_offset"],
     attrs=[
+        [8, 8, (2, 2), (1, 1), 0],
         [256, 256, (32, 32), (1, 1), 0],
         [512, 512, (64, 64), (2, 2), 1],
     ],
     cross_product_configs={
-        'device': ['cpu'],
+        'device': ['cpu', 'cuda'],
     },
     tags=["short"],
 )
 
 as_strided_configs_long = op_bench.cross_product_configs(
-    M=[128, 1024],
-    N=[128, 1024],
+    M=[512],
+    N=[1024],
     size=[(16, 16), (128, 128)],
-    stride=[(1, 1), (2, 2)],
+    stride=[(1, 1)],
     storage_offset=[0, 1],
-    device=['cpu'],
+    device=['cpu', 'cuda'],
     tags=['long']
 )
 

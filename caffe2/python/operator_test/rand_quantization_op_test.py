@@ -26,6 +26,7 @@ class TestFloatToFusedRandRowwiseQuantized(hu.HypothesisTestCase):
             bitwidth_=2,
             random_=False,
             **hu.gcs)
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/28550")
     def test_rand_quantization(self, X, bitwidth_, random_, gc, dc):
 
         # python reference of encoder

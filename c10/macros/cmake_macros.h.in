@@ -7,7 +7,7 @@
 #cmakedefine C10_BUILD_SHARED_LIBS
 #cmakedefine C10_USE_GLOG
 #cmakedefine C10_USE_GFLAGS
-#cmakedefine C10_DISABLE_NUMA
+#cmakedefine C10_USE_NUMA
 
 // Used by libtorch mobile build to enable features that are not enabled by
 // caffe2 mobile build. Should only use it when necessary as we are committed

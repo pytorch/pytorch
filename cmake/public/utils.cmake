@@ -12,6 +12,30 @@ endmacro()
 
 ##############################################################################
 # Add an interface library definition that is dependent on the source.
+#
+# It's probably easiest to explain why this macro exists, by describing
+# what things would look like if we didn't have this macro.
+#
+# Let's suppose we want to statically link against torch.  We've defined
+# a library in cmake called torch, and we might think that we just
+# target_link_libraries(my-app PUBLIC torch).  This will result in a
+# linker argument 'libtorch.a' getting passed to the linker.
+#
+# Unfortunately, this link command is wrong!  We have static
+# initializers in libtorch.a that would get improperly pruned by
+# the default link settings.  What we actually need is for you
+# to do -Wl,--whole-archive,libtorch.a -Wl,--no-whole-archive to ensure
+# that we keep all symbols, even if they are (seemingly) not used.
+#
+# What caffe2_interface_library does is create an interface library
+# that indirectly depends on the real library, but sets up the link
+# arguments so that you get all of the extra link settings you need.
+# The result is not a "real" library, and so we have to manually
+# copy over necessary properties from the original target.
+#
+# (The discussion above is about static libraries, but a similar
+# situation occurs for dynamic libraries: if no symbols are used from
+# a dynamic library, it will be pruned unless you are --no-as-needed)
 macro(caffe2_interface_library SRC DST)
   add_library(${DST} INTERFACE)
   add_dependencies(${DST} ${SRC})
@@ -194,17 +218,81 @@ endmacro()
 # Usage:
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
-  target_compile_options(${libname}
-    PRIVATE
-    -Wall
-    -Wextra
-    -fexceptions
-    -Wno-missing-field-initializers
-    -Wno-strict-overflow
-    -Wno-type-limits
-    -Wno-unused-parameter
-    -Wno-unknown-warning-option
-    -Wno-unknown-pragmas)
+  set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+
+  if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
+    # until they can be unified, keep these lists synced with setup.py
+    if(MSVC)
+
+      if (MSVC_Z7_OVERRIDE)
+        set(MSVC_DEBINFO_OPTION "/Z7")
+      else()
+        set(MSVC_DEBINFO_OPTION "/Zi")
+      endif()
+
+      target_compile_options(${libname} PUBLIC
+        ${MSVC_RUNTIME_LIBRARY_OPTION}
+        ${MSVC_DEBINFO_OPTION}
+        /EHa
+        /DNOMINMAX
+        /wd4267
+        /wd4251
+        /wd4522
+        /wd4522
+        /wd4838
+        /wd4305
+        /wd4244
+        /wd4190
+        /wd4101
+        /wd4996
+        /wd4275
+        /bigobj
+        )
+    else()
+      target_compile_options(${libname} PUBLIC
+        #    -std=c++14
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        -Wno-missing-field-initializers
+        -Wno-write-strings
+        -Wno-unknown-pragmas
+        # Clang has an unfixed bug leading to spurious missing braces
+        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+        -Wno-missing-braces
+        )
+
+      if(NOT APPLE)
+        target_compile_options(${libname} PRIVATE
+          # Considered to be flaky.  See the discussion at
+          # https://github.com/pytorch/pytorch/pull/9608
+          -Wno-maybe-uninitialized)
+      endif()
+
+    endif()
+
+    if (MSVC)
+    elseif (WERROR)
+      target_compile_options(${libname} PRIVATE -Werror -Wno-strict-overflow)
+    endif()
+  endif()
+
+  if (NOT WIN32 AND NOT USE_ASAN)
+    # Enable hidden visibility by default to make it easier to debug issues with
+    # TORCH_API annotations. Hidden visibility with selective default visibility
+    # behaves close enough to Windows' dllimport/dllexport.
+    #
+    # Unfortunately, hidden visibility messes up some ubsan warnings because
+    # templated classes crossing library boundary get duplicated (but identical)
+    # definitions. It's easier to just disable it.
+    target_compile_options(${libname} PRIVATE "-fvisibility=hidden")
+  endif()
+
+  # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
+  target_compile_options(${libname} PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+
+  # ---[ Check if warnings should be errors.
+  # TODO: Dedupe with WERROR check above
   if (WERROR)
     target_compile_options(${libname} PRIVATE -Werror)
   endif()
@@ -217,8 +305,14 @@ endfunction()
 #   torch_set_target_props(lib_name)
 function(torch_set_target_props libname)
   if(MSVC AND AT_MKL_MT)
+    set(VCOMP_LIB "vcomp")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_MINSIZEREL "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
     set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_MINSIZEREL "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
+    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
   endif()
 endfunction()

@@ -7,7 +7,7 @@ circular dependency problems
 import inspect
 import weakref
 import warnings
-import torch._C
+import torch
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from typing import Tuple, List, Dict, Optional, Union, Any  # noqa: F401
@@ -106,7 +106,7 @@ def get_closure(fn):
 # because it is used as a variable inside the body of the function, and we
 # can resolve it using the captures returned from `get_closure`. However,
 # the type annotations are not captured by the closure. In Python
-# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be availiable as
+# 3.0--3.9, the _value_ of MyClass and MyGlobalClass will be available as
 # annotations on `eg``, but starting in Python 4.0, they will represented as
 # strings and no longer present. Furthermore, since the body of `eg` does
 # not reference those names, they do not appear in the list of closed over
@@ -218,6 +218,8 @@ class FunctionModifiers(object):
     IGNORE = "ignore (leave as a call to Python, cannot be torch.jit.save'd)"
     EXPORT = "export (compile this function even if nothing calls it)"
     DEFAULT = "default (compile if called from a exported function / forward)"
+    COPY_TO_SCRIPT_WRAPPER = \
+        "if this method is not scripted, copy the python method onto the scripted model"
 
 
 def export(fn):
@@ -310,8 +312,9 @@ def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
     be ignored and left as a Python function. This allows you to leave code in
-    your model that is not yet TorchScript compatible. Models with ignored
-    functions cannot be exported; use torch.jit.unused instead.
+    your model that is not yet TorchScript compatible. If called from TorchScript,
+    ignored functions will dispatch the call to the Python interpreter. Models with ignored
+    functions cannot be exported; use :func:`@torch.jit.unused <torch.jit.unused>` instead.
 
     Example (using ``@torch.jit.ignore`` on a method)::
 
@@ -383,12 +386,12 @@ def ignore(drop=False, **kwargs):
     drop_on_export = kwargs.pop("drop_on_export", None)
     if drop_on_export:
         warnings.warn("ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
         drop = drop_on_export
     elif drop:
         warnings.warn("ignore(True) has been deprecated. TorchScript will now drop the function "
-                      "call on compilation. Use torch.jit.unused now. {}", category=DeprecationWarning)
+                      "call on compilation. Use torch.jit.unused now. {}", category=FutureWarning)
 
     def decorator(fn):
         if drop:
@@ -398,6 +401,10 @@ def ignore(drop=False, **kwargs):
         return fn
     return decorator
 
+
+def _copy_to_script_wrapper(fn):
+    fn._torchscript_modifier = FunctionModifiers.COPY_TO_SCRIPT_WRAPPER
+    return fn
 
 def module_has_exports(mod):
     for name in dir(mod):
@@ -586,6 +593,37 @@ except ImportError:
         return isinstance(ann, FinalInstance)
 
 
+try:
+    from typing import TypeVar, Generic
+
+    T = TypeVar('T')
+
+    class RRef(Generic[T]):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    def is_rref(ann):
+        return getattr(ann, "__origin__", None) is RRef
+
+except ImportError:
+    class RRefInstance(object):
+        __slots__ = ['__args__']
+
+        def __init__(self, types):
+            self.__args__ = types
+
+    class RRefCls(object):
+        def __getitem__(self, types):
+            return RRefInstance(types)
+
+    RRef = RRefCls()  # noqa: T484
+
+    def is_rref(ann):
+        return isinstance(ann, RRefInstance)
+
+
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
     def __getitem__(self, types):
@@ -600,7 +638,7 @@ for i in range(2, 7):
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
     # short-circuit in cases where the object already has a known qualified name
-    if isinstance(obj, torch.jit.ScriptFunction):
+    if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
 
     name = obj.__name__

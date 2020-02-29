@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <pybind11/pybind11.h>
 
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <vector>
 #include <memory>
@@ -59,7 +59,7 @@ namespace detail {
 template <class Input, class Output, class Model>
 class BenchmarkHelper {
 public:
-  BenchmarkHelper(): initialized_{false} {}
+  BenchmarkHelper();
   explicit BenchmarkHelper(Model model): model_(model), initialized_(true) {}
 
   // This method to be used in benchmark() method
@@ -108,7 +108,14 @@ typedef BenchmarkHelper<
     at::IValue,
     jit::script::Module>
     ScriptModuleBenchmark;
+template <>
+inline BenchmarkHelper<ScriptModuleInput, at::IValue, jit::script::Module>::BenchmarkHelper()
+  : model_("Module", std::make_shared<jit::script::CompilationUnit>()),
+    initialized_(false) {}
 typedef BenchmarkHelper<ModuleInput, py::object, py::object> ModuleBenchmark;
+template <>
+inline BenchmarkHelper<ModuleInput, py::object, py::object>::BenchmarkHelper()
+  : initialized_(false) {}
 
 template <>
 void ScriptModuleBenchmark::runOnce(

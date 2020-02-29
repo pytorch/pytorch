@@ -7,7 +7,11 @@ class SyncBatchNorm(Function):
     @staticmethod
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         input = input.contiguous()
-        count = torch.Tensor([input.numel() // input.size(1)]).to(input.device)
+
+        size = input.numel() // input.size(1)
+        if size == 1:
+            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+        count = torch.Tensor([size]).to(input.device)
 
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
@@ -30,7 +34,7 @@ class SyncBatchNorm(Function):
         mean_all_reduce.wait()
         invstd_all_reduce.wait()
 
-        # calcualte global mean & invstd
+        # calculate global mean & invstd
         mean, invstd = torch.batch_norm_gather_stats_with_counts(
             input,
             mean_all,
@@ -149,11 +153,11 @@ class CrossMapLRN2d(Function):
             scale_current.copy_(scale_previous)
             if c < channels - pre_pad + 1:
                 square_next = input_square.select(1, c + pre_pad - 1)
-                scale_current.add_(1, square_next)
+                scale_current.add_(square_next, alpha=1)
 
             if c > pre_pad:
                 square_previous = input_square.select(1, c - pre_pad)
-                scale_current.add_(-1, square_previous)
+                scale_current.add_(square_previous, alpha=-1)
 
         ctx.scale.mul_(ctx.alpha / ctx.size).add_(ctx.k)
 
@@ -193,8 +197,7 @@ class CrossMapLRN2d(Function):
                 paddded_ratio.narrow(0, 0, ctx.size - 1), 0, keepdim=False, out=accum_ratio)
             for c in range(channels):
                 accum_ratio.add_(paddded_ratio[c + ctx.size - 1])
-                grad_input[n][c].addcmul_(-cache_ratio_value, input[n][c],
-                                          accum_ratio)
-                accum_ratio.add_(-1, paddded_ratio[c])
+                grad_input[n][c].addcmul_(input[n][c], accum_ratio, value=-cache_ratio_value)
+                accum_ratio.add_(paddded_ratio[c], alpha=-1)
 
         return grad_input, None, None, None, None

@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/autodiff.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
@@ -71,7 +71,7 @@ class SubgraphSlicer {
       }
       curNode = prevNode;
     }
-    // Run CSE one more time to eliminate duplicates that may have occured
+    // Run CSE one more time to eliminate duplicates that may have occurred
     // while re-inlining subgraphs.
     EliminateCommonSubexpression(graph_);
   }
@@ -80,7 +80,7 @@ class SubgraphSlicer {
   // Inline this node's group subgraph into the outer graph if it's smaller
   // than the specified minimum size.
   //
-  // Returns true if an inlining has occured, false otherwise.
+  // Returns true if an inlining has occurred, false otherwise.
   bool inlineIfTooSmall(Node* n) {
     AT_ASSERT(n->kind() == prim::DifferentiableGraph);
     auto subgraph = SubgraphUtils::getSubgraph(n);

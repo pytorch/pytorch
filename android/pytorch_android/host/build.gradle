@@ -14,7 +14,12 @@ repositories {
 
 sourceSets {
     main {
-        java.srcDir '../src/main/java'
+        java {
+            srcDir '../src/main/java'
+            exclude 'org/pytorch/PyTorchAndroid.java'
+            exclude 'org/pytorch/LiteModuleLoader.java'
+            exclude 'org/pytorch/LiteNativePeer.java'
+        }
     }
     test {
         java {
@@ -31,3 +36,6 @@ dependencies {
     implementation 'com.facebook.fbjni:fbjni-java-only:0.0.3'
     testImplementation 'junit:junit:4.12'
 }
+
+apply from: rootProject.file('gradle/release.gradle')
+

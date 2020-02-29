@@ -48,14 +48,13 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if(storage)
     {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     }
     else {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(data_type));
+      THError("Tensor: invalid new null storage");
     }
   }
 
@@ -90,14 +89,6 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
     strides = at::IntArrayRef(stride, nDimension);
   }
   at::native::resize_impl_cpu_(self, sizes, strides);
-}
-
-// See ATen/TensorUtils.cpp
-c10::optional<std::vector<int64_t>> THTensor_compute_stride(
-    at::IntArrayRef oldshape,
-    at::IntArrayRef oldstride,
-    at::IntArrayRef newshape) {
-    return at::detail::computeStride(oldshape, oldstride, newshape);
 }
 
 // NB: Steals ownership of storage

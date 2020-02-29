@@ -47,7 +47,6 @@ def fuse_conv_bn_relu(conv, bn, relu):
         "Conv and BN both must be in the same mode (train or eval)."
 
     if conv.training:
-        assert not relu.inplace, 'We only support fusion of non-inplace ReLU.'
         return torch_fused.ConvBnReLU2d(conv, bn, relu)
     else:
         return torch_fused.ConvReLU2d(
@@ -121,10 +120,15 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
-    conv, bn
-    conv, bn, relu
-    conv, relu
-    linear, relu
+
+    * conv, bn
+
+    * conv, bn, relu
+
+    * conv, relu
+
+    * linear, relu
+
     All other sequences are left unchanged.
     For these sequences, replaces the first item in the list
     with the fused module, replacing the rest of the modules

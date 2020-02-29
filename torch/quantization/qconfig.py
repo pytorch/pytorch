@@ -18,8 +18,8 @@ class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     Observer classes have usually reasonable default arguments, but they can be overwritten with `with_args`
     method (that behaves like functools.partial):
 
-      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8),
-                           weight=default_observer.with_args(dtype=torch.qint8))
+      my_qconfig = QConfig(activation=MinMaxObserver.with_args(dtype=torch.qint8), 
+      weight=default_observer.with_args(dtype=torch.qint8))
     """
     def __new__(cls, activation, weight):
         # catch common mistakes
@@ -63,6 +63,7 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['weight'])):
 
 default_dynamic_qconfig = QConfigDynamic(weight=default_weight_observer)
 float16_dynamic_qconfig = QConfigDynamic(weight=NoopObserver.with_args(dtype=torch.float16))
+per_channel_dynamic_qconfig = QConfigDynamic(weight=default_per_channel_weight_observer)
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)

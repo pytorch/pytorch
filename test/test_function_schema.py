@@ -1,7 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._C import parse_schema
 
 
@@ -86,7 +86,7 @@ class TestFunctionSchema(TestCase):
         new_schema = parse_schema('any(Tensor self, int dims, bool keepdim=False) -> Tensor')
         self.assertFalse(new_schema.is_backward_compatible_with(old_schema))
         self.assertFalse(old_schema.is_backward_compatible_with(new_schema))
-        new_schema = parse_schema('any(Tensor self, int[] dim, bool keepdim=False, bool? extra) -> Tensor')
+        new_schema = parse_schema('any(Tensor self, int[] dim, bool keepdim=False, bool? extra=None) -> Tensor')
         self.assertFalse(new_schema.is_backward_compatible_with(old_schema))
         self.assertFalse(old_schema.is_backward_compatible_with(new_schema))
 

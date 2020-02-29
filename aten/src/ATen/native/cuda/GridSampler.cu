@@ -364,7 +364,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NHW[0] = gix_mult * gix;
@@ -383,7 +383,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
@@ -569,7 +569,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NDHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NDHW
         //   2. directly assign to gGrid_ptr_NDHW[0], gGrid_ptr_NDHW[1], gGrid_ptr_NDHW[2]
         scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NDHW[0] = gix_mult * gix;
@@ -591,7 +591,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NDHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NDHW
         //   2. directly assign to gGrid_ptr_NDHW[0], gGrid_ptr_NDHW[1], gGrid_ptr_NDHW[2]
         scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NDHW[0] = static_cast<scalar_t>(0);
@@ -661,8 +661,8 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
-  auto grad_input = at::zeros_like(input);
-  auto grad_grid = at::empty_like(grid);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int count = static_cast<int>(N * H * W);
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
@@ -691,8 +691,8 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
   auto D = grid.size(1);
   auto H = grid.size(2);
   auto W = grid.size(3);
-  auto grad_input = at::zeros_like(input);
-  auto grad_grid = at::empty_like(grid);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int count = static_cast<int>(N * D * H * W);
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {

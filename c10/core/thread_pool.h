@@ -14,10 +14,6 @@
 
 namespace c10 {
 
-namespace ivalue {
-struct Future;
-} // namespace ivalue
-
 // TODO: move this to C10 and make it C10_API
 class C10_API TaskThreadPoolBase {
  public:

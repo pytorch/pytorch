@@ -20,7 +20,8 @@ namespace testing {
 // Asserts that the values of two tensors are the same.
 CAFFE2_API void assertTensorEquals(
     const TensorCPU& tensor1,
-    const TensorCPU& tensor2);
+    const TensorCPU& tensor2,
+    float eps = 1e-6);
 
 // Asserts that two float values are close within epsilon.
 CAFFE2_API void assertNear(float value1, float value2, float epsilon);
