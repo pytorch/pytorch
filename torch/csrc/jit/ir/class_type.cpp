@@ -4,6 +4,25 @@
 
 namespace c10 {
 
+ClassTypePtr ClassType::create(
+    c10::optional<QualifiedName> qualifiedName,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module) {
+  return ClassTypePtr(
+      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+}
+
+ClassType::ClassType(
+    c10::optional<QualifiedName> name,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module)
+    : NamedType(TypeKind::ClassType, std::move(name)),
+      compilation_unit_(std::move(cu)) {
+  if (is_module) {
+    parameterSlots_ = std::make_shared<std::vector<bool>>();
+  }
+}
+
 void ClassType::addMethod(Function* method) {
   TORCH_CHECK(
       getMethod(method->name()) == nullptr,

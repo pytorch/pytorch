@@ -740,14 +740,6 @@ InterfaceType::InterfaceType(QualifiedName name, bool is_module)
 
 InterfaceType::~InterfaceType() = default;
 
-ClassTypePtr ClassType::create(
-    c10::optional<QualifiedName> qualifiedName,
-    std::weak_ptr<CompilationUnit> cu,
-    bool is_module) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module));
-}
-
 const std::vector<Function*>& ClassType::methods() const {
   return methods_;
 }
@@ -880,17 +872,6 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   auto cu = compilation_unit_.lock();
   TORCH_INTERNAL_ASSERT(cu);
   return cu;
-}
-
-ClassType::ClassType(
-    c10::optional<QualifiedName> name,
-    std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
-    : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
-  }
 }
 
 static bool containsAny(const TypePtr& type) {
