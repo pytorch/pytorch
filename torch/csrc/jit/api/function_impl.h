@@ -8,11 +8,11 @@
 namespace torch {
 namespace jit {
 
-struct TORCH_API FunctionImpl : public Function {
-  FunctionImpl(
+struct TORCH_API GraphFunction : public Function {
+  GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
-      std::function<void(FunctionImpl&)> function_creator)
+      std::function<void(GraphFunction&)> function_creator)
       : name_(std::move(name)),
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
@@ -49,39 +49,15 @@ struct TORCH_API FunctionImpl : public Function {
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
-  size_t num_inputs() const override {
-    return graph()->inputs().size();
-  }
-
-  FunctionImpl& setSchema(FunctionSchema schema) override {
-    schema_ = make_unique<FunctionSchema>(std::move(schema));
-    return *this;
-  }
-
-  const FunctionSchema& getSchema() const override;
-
-  std::string pretty_print_schema() const override {
-    AT_ASSERT(schema_);
-    std::stringstream ss;
-    ss << *schema_;
-    return ss.str();
-  }
-
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
   }
 
   bool is_optimized() const {
     AT_WARN(
-        "FunctionImpl::is_optimized() is deprecated and always returns true. "
+        "GraphFunction::is_optimized() is deprecated and always returns true. "
         "Please use getGraphExecutorOptimize()");
     return true;
-  }
-
-  void check_single_output() override {
-    TORCH_CHECK(
-        graph()->outputs().size() == 1,
-        "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
   GraphExecutor& get_executor() override {
@@ -105,12 +81,11 @@ struct TORCH_API FunctionImpl : public Function {
   // here.
   mutable c10::optional<std::shared_ptr<Graph>> optimized_graph_;
 
-  // FunctionImpls are invokable from multiple threads, so this lock needs to be
-  // held when we're initializing graph executor for the first time or computing
-  // the optimized graph.
-  // We're using reentrant mutex so that we don't need to worry about causing a
-  // deadlock by calling one method from another (e.g. optimized_graph() from
-  // get_executor()).
+  // GraphFunctions are invokable from multiple threads, so this lock needs to
+  // be held when we're initializing graph executor for the first time or
+  // computing the optimized graph. We're using reentrant mutex so that we don't
+  // need to worry about causing a deadlock by calling one method from another
+  // (e.g. optimized_graph() from get_executor()).
   mutable std::recursive_mutex compile_mutex;
 
   GraphExecutor executor_; // for execution
@@ -118,7 +93,7 @@ struct TORCH_API FunctionImpl : public Function {
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so
   // that it can construct methods out of order
-  std::function<void(FunctionImpl&)> function_creator_;
+  std::function<void(GraphFunction&)> function_creator_;
 
   // if absent, then we generate a default schema based on the graph
   // mutable because getSchema caches the default schema if one is requested

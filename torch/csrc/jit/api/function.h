@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <mutex>
@@ -39,23 +40,29 @@ struct TORCH_API Function {
   // if this isn't yet defined, run its method_creator function
   virtual void ensure_defined() = 0;
 
-  virtual size_t num_inputs() const = 0;
-
-  virtual Function& setSchema(c10::FunctionSchema schema) = 0;
-
-  virtual const c10::FunctionSchema& getSchema() const = 0;
-
-  virtual std::string pretty_print_schema() const = 0;
-
-  virtual void check_single_output() = 0;
-
   virtual std::shared_ptr<Graph> graph() const = 0;
 
   virtual std::shared_ptr<Graph> optimized_graph() const = 0;
 
   virtual GraphExecutor& get_executor() = 0;
 
+  const c10::FunctionSchema& getSchema() const;
+
+  size_t num_inputs() const;
+
+  void check_single_output();
+
+  std::string pretty_print_schema() const;
+
+  Function& setSchema(c10::FunctionSchema schema);
+
   virtual ~Function() {}
+
+ private:
+  // if absent, then we generate a default schema based on the graph
+  // mutable because getSchema caches the default schema if one is requested
+  // before a call to setSchema
+  mutable std::unique_ptr<c10::FunctionSchema> schema_;
 };
 } // namespace jit
 } // namespace torch

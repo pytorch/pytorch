@@ -3418,7 +3418,7 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<FunctionImpl>(
+  auto fn = torch::make_unique<GraphFunction>(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type

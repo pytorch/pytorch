@@ -77,7 +77,7 @@ bool is_enabled(const char *cfname, JitLoggingLevels level) {
 // we won't have access to an original function, so we have to construct
 // a dummy function to give to PythonPrint
 std::string log_function(const std::shared_ptr<torch::jit::Graph> &graph) {
-  torch::jit::FunctionImpl func("source_dump", graph, nullptr);
+  torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::Tensor> tensors;
   std::vector<c10::NamedTypePtr> deps;
   PythonPrint pp(tensors, deps, false);

@@ -118,7 +118,7 @@ struct TORCH_API CompilationUnit {
     if (shouldMangle) {
       name = mangle(name);
     }
-    auto fn = torch::make_unique<FunctionImpl>(
+    auto fn = torch::make_unique<GraphFunction>(
         std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));

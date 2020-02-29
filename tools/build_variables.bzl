@@ -182,6 +182,7 @@ libtorch_sources = [
     "torch/csrc/jit/codegen/fuser/fallback.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/codegen/fuser/interface.cpp",
+    "torch/csrc/jit/api/function.cpp",
     "torch/csrc/jit/api/function_impl.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
