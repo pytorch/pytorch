@@ -45,24 +45,30 @@
 
 namespace {
 
-template <typename scalar_t>
-void poisson_cuda_kernel(
+inline void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
     std::pair<uint64_t, uint64_t> seeds) {
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-      ret,
-      lambda,
-      [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& lambda) {
+  at::TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(lambda);
+  iter.build();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "poisson_cuda", [&] {
+    at::native::gpu_kernel(iter,
+      [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
+        #ifdef __CUDA_ARCH__
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-        ret_val = static_cast<scalar_t>(curand_poisson(&state, lambda));
+        return static_cast<scalar_t>(curand_poisson(&state, lambda));
+        #else
+        return lambda;  // useless
+        #endif
       });
+    });
 }
 
 template <typename scalar_t>
@@ -153,9 +159,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(20);
   }
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cuda", [&] {
-    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);
-  });
+  poisson_cuda_kernel(ret, lambda, rng_engine_inputs);
   return ret;
 }
 
