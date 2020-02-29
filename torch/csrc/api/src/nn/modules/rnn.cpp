@@ -136,6 +136,22 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
 
+  for(auto param = 0; param < w_ih.size(); param++){
+    std::cout << "w_ih[" << param << "] size: " << w_ih[param].sizes() << "\n";
+  }
+
+  for(auto param = 0; param < w_hh.size(); param++){
+    std::cout << "w_hh[" << param << "] size: " << w_hh[param].sizes() << "\n";
+  }
+
+  for(auto param = 0; param < b_ih.size(); param++){
+    std::cout << "b_ih[" << param << "] size: " << b_ih[param].sizes() << "\n";
+  }
+
+  for(auto param = 0; param < b_hh.size(); param++){
+    std::cout << "b_hh[" << param << "] size: " << b_hh[param].sizes() << "\n";
+  }
+
   for(auto param = 0; param < flat_weights_.size(); param++){
     std::cout << "flat_weights_[" << param << "] size: " << flat_weights_[param].sizes() << "\n";
   }
