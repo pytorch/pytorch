@@ -4,7 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/grad_mode.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 #include <iostream>
 
 namespace c10 {
@@ -825,6 +825,17 @@ ClassTypePtr ClassType::create(
     bool is_module) {
   return ClassTypePtr(
       new ClassType(std::move(qualifiedName), std::move(cu), is_module));
+}
+
+ClassType::ClassType(
+    c10::optional<QualifiedName> name,
+    std::weak_ptr<CompilationUnit> cu,
+    bool is_module)
+    : NamedType(TypeKind::ClassType, std::move(name)),
+      compilation_unit_(std::move(cu)) {
+  if (is_module) {
+    parameterSlots_ = std::make_shared<std::vector<bool>>();
+  }
 }
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {

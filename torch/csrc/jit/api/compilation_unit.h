@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>

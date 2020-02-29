@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -70,6 +70,16 @@ struct TORCH_API GraphFunction : public Function {
     executor_ = GraphExecutor(optimized_graph());
     return executor_;
   }
+
+  virtual const c10::FunctionSchema& getSchema() const override;
+
+  virtual size_t num_inputs() const override;
+
+  virtual void check_single_output() override;
+
+  virtual std::string pretty_print_schema() const override;
+
+  virtual GraphFunction& setSchema(c10::FunctionSchema schema) override;
 
  private:
   c10::QualifiedName name_;

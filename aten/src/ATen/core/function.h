@@ -46,15 +46,15 @@ struct TORCH_API Function {
 
   virtual GraphExecutor& get_executor() = 0;
 
-  const c10::FunctionSchema& getSchema() const;
+  virtual const c10::FunctionSchema& getSchema() const = 0;
 
-  size_t num_inputs() const;
+  virtual size_t num_inputs() const = 0;
 
-  void check_single_output();
+  virtual void check_single_output() = 0;
 
-  std::string pretty_print_schema() const;
+  virtual std::string pretty_print_schema() const = 0;
 
-  Function& setSchema(c10::FunctionSchema schema);
+  virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
   virtual ~Function() {}
 

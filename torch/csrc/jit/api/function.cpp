@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 

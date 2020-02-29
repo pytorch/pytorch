@@ -6,7 +6,7 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/api/function.h>
+#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
