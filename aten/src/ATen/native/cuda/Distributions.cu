@@ -71,37 +71,55 @@ inline void poisson_cuda_kernel(
     });
 }
 
-template <typename scalar_t>
+struct curand_uniform_wrapper {
+  curandStatePhilox4_32_10_t &state;
+  __device__ curand_uniform_wrapper(curandStatePhilox4_32_10_t &state): state(state) {}
+  __device__ float operator()() {
+    return curand_uniform(&state);
+  }
+};
+
+struct curand_normal_wrapper {
+  curandStatePhilox4_32_10_t &state;
+  __device__ curand_normal_wrapper(curandStatePhilox4_32_10_t &state): state(state) {}
+  __device__ float operator()() {
+    return curand_normal(&state);
+  }
+};
+
 void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
     std::pair<uint64_t, uint64_t> seeds) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-      ret,
-      alpha,
-      [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& alpha) {
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
+  at::TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(alpha);
+  iter.build();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "gamma_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    at::native::gpu_kernel(iter,
+        [seeds] GPU_LAMBDA (scalar_t alpha) {
+          #ifdef __CUDA_ARCH__
+          curandStatePhilox4_32_10_t state;
+          curand_init(
+              seeds.first,
+              blockIdx.x * blockDim.x + threadIdx.x,
+              seeds.second,
+              &state);
 
-        auto uniform_lambda = [&state] __device__ () {
-          return curand_uniform(&state);
-        };
-        BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+          auto uniform_lambda = curand_uniform_wrapper(state);
+          BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
 
-        auto normal_lambda = [&state] __device__ () {
-          return curand_normal(&state);
-        };
-        BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
-        auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-        auto min_value = std::numeric_limits<scalar_t>::min();
-        ret_val = (min_value > sample) ? min_value : sample;
-      });
+          auto normal_lambda = curand_normal_wrapper(state);
+          BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
+          auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
+          auto min_value = std::numeric_limits<scalar_t>::min();
+          return (min_value > sample) ? min_value : sample;
+          #else
+          return alpha;  //useless
+          #endif
+        });
+  });
 }
 
 template <typename scalar_t>
@@ -172,9 +190,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(10);
   }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "gamma_cuda", [&] {
-     gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
-   });
+  gamma_cuda_kernel(ret, alpha, rng_engine_inputs);
   return ret;
 }
 
@@ -187,9 +203,9 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(10);
   }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
+  Tensor gamma = at::empty(alpha.sizes(), alpha.options());
+  gamma_cuda_kernel(gamma, alpha, rng_engine_inputs);
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "dirichlet", [&] {
-    Tensor gamma = at::empty(alpha.sizes(), alpha.options());
-    gamma_cuda_kernel<scalar_t>(gamma, alpha, rng_engine_inputs);
     dirichlet_scalar_cuda_kernel<scalar_t>(ret, gamma);
   });
   return ret;
