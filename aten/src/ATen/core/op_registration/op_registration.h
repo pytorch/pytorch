@@ -5,10 +5,11 @@
  * functionality needed to do so for you.
  */
 
+#include <c10/core/DispatchKey.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 #include <ATen/core/OpsAlreadyMovedToC10.h>
 
@@ -402,7 +403,7 @@ public:
     }
 
   private:
-    Options&& kernel(c10::optional<DispatchKey>&& dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
+    Options&& kernel(c10::optional<DispatchKey> dispatch_key, KernelFunction&& func, std::unique_ptr<FunctionSchema>&& inferred_function_schema) && {
       KernelRegistrationConfig config;
       config.dispatch_key = dispatch_key;
       config.func = std::move(func);
@@ -436,6 +437,7 @@ public:
     std::vector<KernelRegistrationConfig> kernels;
     optional<AliasAnalysisKind> aliasAnalysisKind_;
     friend class RegisterOperators;
+    friend class Module;
   };
 
   /**
@@ -454,6 +456,12 @@ public:
   RegisterOperators&& op(Options&& options) && {
     checkSchemaAndRegisterOp_(std::move(options));
     return std::move(*this);
+  }
+
+  // Regular mutator version of the && version above
+  RegisterOperators& op(Options&& options) & {
+    checkSchemaAndRegisterOp_(std::move(options));
+    return *this;
   }
 
   /**
@@ -586,8 +594,218 @@ private:
   static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
 };
 
+// --------------------------------------------------------------------------
+//
+// New style API
+//
+// --------------------------------------------------------------------------
+//
+// The basic concept behind the new style API is to be as similar to pybind11's
+// API as possible.
+//
+// A quick tour of a few usage examples:
+//
+//  auto register = torch::import("aten")
+//
+//    // Define a schema for an operator, but provide no implementation
+//    .def("mul(Tensor self, Tensor other) -> Tensor")
+//
+//    // Define a operator with exactly one implementation for all backends.
+//    .def("add(Tensor self, Tensor other) -> Tensor", &add_impl)
+//
+//    // Provide an implementation for a defined operator (you can
+//    // provide multiple; one per backend).  We'll take care of calling
+//    // the correct implementation depending on if we get a CPU
+//    // tensor or a CUDA tensor
+//    .impl("mul", torch::dispatch(torch::kCPU, &mul_cpu_impl))
+//    .impl("mul", torch::dispatch(torch::kCUDA, &mul_cuda_impl))
+//
+//    // Define an "optimized" operator with extra inlining
+//    // (you can use this with torch::dispatch too); mostly only used for
+//    // our internal stuff
+//    .impl("sub", TORCH_OPTIMIZED_FN(sub_impl))
+//
+// Also, you can omit the top level namespace and specify it explicitly in
+// the sub-definitions, e.g.,  torch::import().impl("aten::mul", ...)
+
+
+// Represents a C++ function that implements an operator.  Most users won't
+// interact directly with this class, except via error messages: the
+// constructors this function define the set of permissible "function"-like
+// things you can bind via the interface.
+//
+// This class erases the type of the passed in function, but durably records
+// the type via an inferred schema for the function.
+//
+// TODO: This is morally the same thing as KernelRegistrationConfig, but it's
+// opaque to the user.
+class CAFFE2_API CppFunction final {
+public:
+  // This overload accepts function pointers, e.g., CppFunction(&add_impl)
+  template <typename Func>
+  explicit CppFunction(Func* f, std::enable_if_t<guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
+    : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
+    // TODO: Don't go through WrapRuntimeKernelFunctor
+    , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Func>>>()())
+    {}
+
+  // This overload accepts lambdas, e.g., CppFunction([](const Tensor& self) { ... })
+  template <typename Lambda>
+  explicit CppFunction(Lambda&& f, std::enable_if_t<guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
+    : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
+    // TODO: Don't go through WrapRuntimeKernelFunctor
+    , schema_(detail::FunctionSchemaInferer<detail::WrapRuntimeKernelFunctor<std::decay_t<Lambda>>>()())
+    {}
+
+  // This static factory lets you create CppFunctions that (1) don't have boxing
+  // wrappers (because we don't support it yet) and (2) don't have schema
+  // inference (because some ops don't support it).
+  //
+  // TODO: Eliminate the necessity for this function entirely.
+  template <typename Func>
+  static CppFunction makeUnboxedOnly(Func* f) {
+    return CppFunction(
+      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
+      /* schema */ nullptr
+    );
+  }
+
+private:
+  c10::optional<c10::DispatchKey> dispatch_key_;
+  c10::KernelFunction func_;
+  std::unique_ptr<c10::FunctionSchema> schema_;
+
+  // The "setter" for dispatch_key_
+  template <typename Func>
+  friend CppFunction dispatch(c10::DispatchKey, Func&&);
+
+  // The only class which actually pulls out values from CppFunction (does so
+  // destructively, felt too lazy to write accessors that I don't even
+  // want users to use)
+  friend class Module;
+
+  CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema);
+};
+
+// Create a CppFunction which is associated with a specific dispatch key.
+// CppFunctions that are tagged with a DispatchKey don't get invoked /unless/
+// the dispatcher determines that the DispatchKey is the best choice for
+// a function
+template <typename Func>
+inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
+  CppFunction f(std::forward<Func>(raw_f));
+  f.dispatch_key_ = k;
+  return f;
 }
 
+// Convenience overload of dispatch which accepts DeviceType
+template <typename Func>
+inline CppFunction dispatch(DeviceType t, Func&& raw_f) {
+  auto deviceTypeToDispatchKey = [](DeviceType t){
+    switch (t) {
+      case DeviceType::CPU:
+        return c10::DispatchKey::CPUTensorId;
+      case DeviceType::CUDA:
+        return c10::DispatchKey::CUDATensorId;
+      case DeviceType::XLA:
+        return c10::DispatchKey::XLATensorId;
+      default:
+        TORCH_CHECK(false,
+          "Device type ", t, " cannot be overloaded at dispatch time, "
+          "please file a bug report explaining what you were trying to do.");
+    }
+  };
+  return dispatch(deviceTypeToDispatchKey(t), std::forward<Func>(raw_f));
+}
+
+// Represents a namespace in which we can define operators.  Conventionally
+// constructed using "torch::import".  This object lets you avoid repeatedly
+// having to specify a namespace, instead you specify it once with:
+//
+//      torch::import("aten")
+//        .def("add", [](const Tensor& a, const Tensor& b) { return a + b; })
+//        .def("mul", torch::dispatch(torch::kCPU, &cpu_add))
+//
+// versus
+//
+//      torch::import()
+//        .def("aten::add", ...)
+//        .def("aten::mul", ...)
+//
+class CAFFE2_API Module final {
+  // Could be nullptr, in which case it represents the "top-level" namespace
+  // (all subsequent definitions must be explicitly namespaced).
+  // TODO: Could store a optional<std::string> if you want to support dynamically computed
+  // namespaces; for now don't support
+  const char* ns_;
+
+  // Internal implementation details; right now implement in terms of
+  // RegisterOperators
+  RegisterOperators register_;
+
+  Module(const char* ns);
+
+  // Use these as the constructors
+  friend Module import(const char* ns);
+  friend Module import();
+
+public:
+  Module(const Module&) = delete;
+  Module& operator=(const Module&) = delete;
+
+  Module(Module&&) noexcept;
+  Module& operator=(Module&&) noexcept;
+
+  // Declare an operator with a schema, but don't provide any implementations
+  // for it.  You're expected to then provide implementations using the
+  // impl() method.
+  Module&& def(const char* schema) &&;
+
+  // Convenience method to define an operator for a schema and then register
+  // an implementation for it.  def(n, f) is almost equivalent to def(n).impl(f),
+  // except that if n is not a schema, then the schema is inferred from the
+  // static type of f.
+  Module&& def(const char* name_or_schema, CppFunction&& f) &&;
+  template <typename Func>
+  Module&& def(const char* name_or_schema, Func&& raw_f) && {
+    CppFunction f(std::forward<Func>(raw_f));
+    return std::move(*this).def(name_or_schema, std::move(f));
+  }
+
+  // Register an implementation for an operator.  You may register multiple
+  // implementations for a single operator at different dispatch keys
+  // (see torch::dispatch).  Implementations must have a corresponding
+  // declaration (from def), otherwise they are invalid.
+  //
+  // TODO: Make it possible to impl without providing a full schema.  Right
+  // now, if you have a def() with full schema, you can't impl() with only
+  // the name.
+  Module&& impl(const char* name, CppFunction&& f) &&;
+  template <typename Func>
+  Module&& impl(const char* name, Func&& raw_f) && {
+    CppFunction f(std::forward<Func>(raw_f));
+    return std::move(*this).impl(name, std::move(f));
+  }
+};
+
+// Return the namespace corresponding to the string 'ns'
+inline Module import(const char* ns) {
+  return Module(ns);
+}
+
+// Return the "top-level" namespace; subsequent definitions must be explicitly
+// namespaced
+inline Module import() {
+  return Module(nullptr);
+}
+
+} // namespace c10
+
 namespace torch {
+  // Old-style API
   using RegisterOperators = c10::RegisterOperators;
+
+  // New-style API
+  using c10::dispatch;
+  using c10::import;
 }

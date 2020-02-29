@@ -1,7 +1,9 @@
+#include <algorithm>
+
 #include <cub/block/block_reduce.cuh>
-#include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/sgd/adagrad_op.h"
 
 namespace caffe2 {
 
@@ -52,8 +54,7 @@ __global__ void SparseAdagradKernel(
     const float* grad,
     const float* lr) {
   const float LR = lr[0];
-  CUDA_1D_KERNEL_LOOP(i, N)
-  {
+  CUDA_1D_KERNEL_LOOP(i, N) {
     const size_t gradIdx = i;
     const SIndex index = indices[i / grad_slice_sz];
     const size_t paramIdx = index * grad_slice_sz + (i % grad_slice_sz);
@@ -87,6 +88,7 @@ __global__ void RowWiseSparseAdagradKernel(
     const float* lr) {
   typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ BlockReduce::TempStorage temp_storage;
+  int valid = min(N, CAFFE_CUDA_NUM_THREADS);
   // in case gridDim is smaller than M
   for (int i = blockIdx.x; i < M; i += gridDim.x) {
     const SIndex index = indices[i];
@@ -98,7 +100,7 @@ __global__ void RowWiseSparseAdagradKernel(
       const float x_ij = grad[i * N + j];
       sum_squares += x_ij * x_ij;
     }
-    float reduce_result = BlockReduce(temp_storage).Sum(sum_squares);
+    float reduce_result = BlockReduce(temp_storage).Sum(sum_squares, valid);
     if (threadIdx.x == 0) {
       row_sum_squares_avg = reduce_result / (float)N;
       param_mom[index] += row_sum_squares_avg;
@@ -195,10 +197,16 @@ bool RowWiseSparseAdagradOp<float, CUDAContext>::DoRunWithType() {
   auto GRAD_M = Input(GRAD).dim32(0);
   auto GRAD_N = N / GRAD_M;
 
+  // Cases with GRAND_N < 128 can have more swarms if number of threads is lower
+  int num_threads = CAFFE_CUDA_NUM_THREADS;
+  if (GRAD_N < num_threads) {
+    num_threads = GRAD_N;
+  }
+
   // each thread block will handle multiple rows of the input and output
   RowWiseSparseAdagradKernel<<<
-      min(GRAD_M, CAFFE_MAXIMUM_NUM_BLOCKS),
-      CAFFE_CUDA_NUM_THREADS,
+      std::min(GRAD_M, CAFFE_MAXIMUM_NUM_BLOCKS),
+      num_threads,
       0,
       context_.cuda_stream()>>>(
       GRAD_M,
@@ -217,4 +225,4 @@ REGISTER_CUDA_OPERATOR(SparseAdagrad, CUDASparseAdagradOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     RowWiseSparseAdagrad,
     RowWiseSparseAdagradOp<float, CUDAContext>);
-}
+} // namespace caffe2

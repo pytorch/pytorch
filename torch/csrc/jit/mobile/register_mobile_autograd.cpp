@@ -11,8 +11,8 @@ using at::Scalar;
 namespace torch {
 namespace autograd {
 namespace VariableType {
-Tensor mul(const Tensor & self, const Tensor & other);
-Tensor add(const Tensor & self, Scalar other, Scalar alpha);
+Tensor mul_Tensor(const Tensor &self, const Tensor &other);
+Tensor add_Scalar(const Tensor &self, Scalar other, Scalar alpha);
 }
 }
 }
@@ -20,11 +20,10 @@ Tensor add(const Tensor & self, Scalar other, Scalar alpha);
 namespace {
 static auto registry = torch::RegisterOperators().op(
     "_aten::add.Scalar",
-    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::add)
+    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::add_Scalar)
 ).op(
     "_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
-    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::mul)
+    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::mul_Tensor)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 );
 }
-
