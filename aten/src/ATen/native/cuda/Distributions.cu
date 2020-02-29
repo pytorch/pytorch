@@ -158,7 +158,9 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(20);
   }
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  poisson_cuda_kernel(ret, lambda, rng_engine_inputs);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cuda", [&] {	  poisson_cuda_kernel(ret, lambda, rng_engine_inputs);
+    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);	
+  });
   return ret;
 }
 
