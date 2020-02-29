@@ -1,5 +1,5 @@
 #include "module.h"
-#include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #if defined(PYTORCH_MOBILE_OBSERVER)
 #include <torch/csrc/jit/mobile/observer.h>
@@ -49,22 +49,22 @@ Function* Module::find_method(const std::string& basename) const {
       return fn.get();
     }
   }
-  return nullptr;
+  AT_ERROR("Method '", basename, "' is not defined.");
 }
 
 namespace {
-void slot_params_recurse(const c10::intrusive_ptr<c10::ivalue::Object>& obj,
+void slot_params_recurse(
+    const c10::intrusive_ptr<c10::ivalue::Object>& obj,
     std::vector<at::Tensor>& params) {
   for (const auto& slot : obj->slots()) {
     if (slot.isTensor()) {
       params.emplace_back(slot.toTensor());
-    }
-    else if (slot.isObject()) {
+    } else if (slot.isObject()) {
       slot_params_recurse(slot.toObject(), params);
     }
   }
 }
-}
+} // namespace
 
 const std::vector<at::Tensor> Module::parameters() const {
   std::vector<at::Tensor> params;
@@ -72,5 +72,5 @@ const std::vector<at::Tensor> Module::parameters() const {
   return params;
 }
 } // namespace mobile
-} // namespace torch
 } // namespace jit
+} // namespace torch
