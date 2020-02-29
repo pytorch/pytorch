@@ -162,7 +162,6 @@ libtorch_sources = [
     "torch/csrc/jit/frontend/script_type_parser.cpp",
     "torch/csrc/jit/frontend/sugared_value.cpp",
     "torch/csrc/jit/frontend/schema_matching.cpp",
-    "torch/csrc/jit/ir/class_type.cpp",
     "torch/csrc/jit/frontend/parser.cpp",
     "torch/csrc/jit/runtime/jit_exception.cpp",
     "torch/csrc/jit/serialization/source_range_serialization.cpp",
