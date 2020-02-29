@@ -27,21 +27,6 @@
 #include <utility>
 #include <type_traits>
 
-/**
- * Note [Register spilling in curand call for CUDA < 10]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * For CUDA < 10, curandStatePhilox4_32_10_t engine achieves poor performance (60% SOL bandwidth)
- * when called to generate one random number at a time. This is because the line
- *            unsigned ret = (&state->output.x)[state->STATE++];
- * in
- *            QUALIFIERS unsigned int curand(curandStatePhilox4_32_10_t *state)
- * in curand_kernel.h dynamically indexes into state.output, preventing the compiler from ever
- * storing state.output in registers.
- *
- * CUDA 10 fixed this problem. However, for backwards compatibility, in the following kernels
- * we are using curand distributions that utilize curand4 call. curand4 call doesn't have the
- * register spilling problem.
- */
 
 namespace {
 
