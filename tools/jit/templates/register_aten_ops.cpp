@@ -100,10 +100,10 @@ c10::OperatorOptions atenOperatorOptions() {
   return result;
 }
 
-KernelFunction::InternalBoxedKernelFunction *DUMMY_OPERATION =
-  [](c10::OperatorKernel *, const c10::OperatorHandle &, std::vector<c10::IValue> *) -> void {
-    TORCH_CHECK(false, "Operator has been stripped in the custom build.")
-  };
+int (*DUMMY_OPERATION)(Stack&) = [](Stack& stack) -> int {
+  TORCH_CHECK(false, "Operator has been stripped in the custom build.")
+  return 0;
+};
 
 class Registerer final {
 public:
