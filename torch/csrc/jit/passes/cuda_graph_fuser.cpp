@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
