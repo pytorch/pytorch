@@ -57,12 +57,6 @@ struct TORCH_API Function {
   virtual Function& setSchema(c10::FunctionSchema schema) = 0;
 
   virtual ~Function() {}
-
- private:
-  // if absent, then we generate a default schema based on the graph
-  // mutable because getSchema caches the default schema if one is requested
-  // before a call to setSchema
-  mutable std::unique_ptr<c10::FunctionSchema> schema_;
 };
 } // namespace jit
 } // namespace torch
