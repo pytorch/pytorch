@@ -2,7 +2,7 @@ from collections import namedtuple
 import warnings
 
 import torch
-from .. import _VF
+from ... import _VF
 from ..._jit_internal import Optional
 
 
@@ -244,7 +244,21 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     of the longest sequence and `B` is the batch size. If ``batch_first`` is True,
     the data will be transposed into ``B x T x *`` format.
 
-    Batch elements will be ordered decreasingly by their length.
+    Example:
+        >>> from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+        >>> seq = torch.tensor([[1,2,0], [3,0,0], [4,5,6]])
+        >>> lens = [2, 1, 3]
+        >>> packed = pack_padded_sequence(seq, lens, batch_first=True, enforce_sorted=False)
+        >>> packed
+        PackedSequence(data=tensor([4, 1, 3, 5, 2, 6]), batch_sizes=tensor([3, 2, 1]),
+                       sorted_indices=tensor([2, 0, 1]), unsorted_indices=tensor([1, 2, 0]))
+        >>> seq_unpacked, lens_unpacked = pad_packed_sequence(packed, batch_first=True)
+        >>> seq_unpacked
+        tensor([[1, 2, 0],
+                [3, 0, 0],
+                [4, 5, 6]])
+        >>> lens_unpacked
+        tensor([2, 1, 3])
 
     .. note::
         :attr:`total_length` is useful to implement the
@@ -266,6 +280,11 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     Returns:
         Tuple of Tensor containing the padded sequence, and a Tensor
         containing the list of lengths of each sequence in the batch.
+        Batch elements will be re-ordered as they were ordered originally when
+        the batch was passed to ``pack_padded_sequence`` or ``pack_sequence``.
+
+
+
 
     """
     max_seq_length = sequence.batch_sizes.size(0)
