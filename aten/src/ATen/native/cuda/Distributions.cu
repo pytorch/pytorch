@@ -31,7 +31,7 @@
 namespace {
 
 template <typename scalar_t>
-inline void poisson_cuda_kernel(
+void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
     std::pair<uint64_t, uint64_t> seeds) {
@@ -177,8 +177,8 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
   }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "gamma_cuda", [&] {
-    gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
-  });
+     gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
+   });
   return ret;
 }
 
