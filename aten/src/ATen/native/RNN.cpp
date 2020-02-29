@@ -1055,11 +1055,11 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
           std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
         }
         TensorList _fwd_params = _params.slice(_params.size() / 2);
-        TensorList _bwd_params = _params.slice(_params.size() / 2, _params.size());
         std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
           std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "\n";
         }
+        TensorList _bwd_params = _params.slice(_params.size() / 2, _params.size());
         std::cout << "_bwd_params size: " << std::to_string(_bwd_params.size()) << "\n";
         for(auto param = 0; param < _bwd_params.size(); param++){
           std::cout << "_bwd_params[" << param << "] size: " << _bwd_params[param].sizes() << "\n";
