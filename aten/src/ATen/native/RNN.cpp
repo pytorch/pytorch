@@ -1054,12 +1054,21 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         for(auto param = 0; param < _params.size(); param++){
           std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
         }
-    } // else {
+        TensorList _fwd_params = _params.slice(_params.size() / 2);
+        std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
+        for(auto param = 0; param < _fwd_params.size(); param++){
+          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "\n";
+        }
+        std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
+        for(auto param = 0; param < _params.size(); param++){
+          std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
+        }
+    } else {
       Tensor output, hy, cy;
       lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
                       num_layers, dropout_p, train, bidirectional, type_2, batch_first);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
-    //}
+    }
   }
 
   if (use_miopen(_input, dropout_p)) {
