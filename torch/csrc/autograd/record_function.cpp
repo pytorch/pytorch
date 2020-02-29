@@ -160,7 +160,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
 
   initialized_ = true;
-  runBeforeCallbacks()();
+  runBeforeCallbacks();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
