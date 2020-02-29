@@ -961,17 +961,6 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
-ClassType::ClassType(
-    c10::optional<QualifiedName> name,
-    std::weak_ptr<CompilationUnit> cu,
-    bool is_module)
-    : NamedType(TypeKind::ClassType, std::move(name)),
-      compilation_unit_(std::move(cu)) {
-  if (is_module) {
-    parameterSlots_ = std::make_shared<std::vector<bool>>();
-  }
-}
-
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
