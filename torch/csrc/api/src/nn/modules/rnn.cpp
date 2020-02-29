@@ -146,6 +146,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
     auto direction_flat_weights = flat_type1_weights();
     auto flat_weights_fwd = direction_flat_weights.at(0);
     auto flat_weights_bwd = direction_flat_weights.at(1);
+    // Flatten Forward direction weights
     torch::_cudnn_rnn_flatten_weight(
         flat_weights_fwd,
         /*weight_stride0=*/options.with_bias() ? 4 : 2,
@@ -156,6 +157,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
         /*batch_first=*/options.batch_first(),
         /*bidirectional=*/false,
         /*type_2=*/options.cat_layer_fwd_bwd_states());
+    // Flatten Backward direction weights
     torch::_cudnn_rnn_flatten_weight(
         flat_weights_bwd,
         /*weight_stride0=*/options.with_bias() ? 4 : 2,
@@ -166,7 +168,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
         /*batch_first=*/options.batch_first(),
         /*bidirectional=*/false,
         /*type_2=*/options.cat_layer_fwd_bwd_states());
-    flat_weights_ = merge_direction_weights(direction_flat_weights);
+    flat_weights_ = merge_direction_weights({flat_weights_fwd, flat_weights_bwd});
   }
   else {
     std::cout << "Should fail here?\n";
@@ -258,8 +260,8 @@ std::vector<Tensor> RNNImplBase<Derived>::merge_direction_weights(
   std::vector<std::vector<Tensor>> directions) const {
   std::vector<Tensor> flat;
   const auto num_directions = options.bidirectional() ? 2 : 1;
-  for (int64_t layer = 0; layer < options.layers(); layer++) {
-    for (auto direction = 0; direction < num_directions; direction++) {
+  for (auto direction = 0; direction < num_directions; direction++) {
+    for (int64_t layer = 0; layer < options.layers(); layer++) {
       flat.push_back(directions[direction][layer]);
     }
   }
