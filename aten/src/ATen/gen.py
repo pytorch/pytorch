@@ -187,7 +187,8 @@ top_env = {
     'cpu_type_headers': [],
     'cuda_type_headers': [],
     'function_registrations': [],
-    'list_of_aten_ops': [],
+    'aten_ops_with_unboxing_already_handled_by_c10': [],
+    'aten_ops_with_unboxing_not_handled_by_c10_yet': [],
     'type_method_declarations': [],
     'type_method_definitions': [],
     'tensor_method_declarations': [],
@@ -314,8 +315,6 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
         env['th_headers'] = [
             '#include <TH/TH.h>',
             '#include <TH/THTensor.hpp>',
-            '#include <THNN/THNN.h>',
-            '#undef THNN_',
         ]
         env['extra_cuda_headers'] = []
         env['state'] = []
