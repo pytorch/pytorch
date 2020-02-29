@@ -16,17 +16,8 @@ using at::Scalar;
 namespace torch {
 namespace autograd {
 namespace VariableType {
-Tensor mul(const Tensor &self, const Tensor &other);
-Tensor add(const Tensor &self, Scalar other, Scalar alpha);
-Tensor conv2d(const Tensor & input, const Tensor & weight, const Tensor & bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups);
-Tensor dropout(const Tensor & input, double p, bool train);
-Tensor feature_dropout(const Tensor & input, double p, bool train);
-Tensor log_softmax(const Tensor & self, int64_t dim, c10::optional<ScalarType> dtype);
-Tensor max_pool2d(const Tensor & self, IntArrayRef kernel_size, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool ceil_mode);
-Tensor relu(const Tensor & self);
-Tensor view(const Tensor & self, IntArrayRef size);
-Tensor t(const Tensor & self);
-Tensor addmm(const Tensor & self, const Tensor & mat1, const Tensor & mat2, Scalar beta, Scalar alpha);
+Tensor mul_Tensor(const Tensor &self, const Tensor &other);
+Tensor add_Scalar(const Tensor &self, Scalar other, Scalar alpha);
 }
 }
 }
@@ -71,17 +62,17 @@ void log_softmax_kernel(const c10::OperatorHandle& op, Stack* stack) {
   auto self = (std::move(peek(*stack, 0, 3))).toTensor();
   auto dim = (std::move(peek(*stack, 1, 3))).toInt();
   auto dtype = (std::move(peek(*stack, 2, 3))).toOptional<c10::ScalarType>();
-  auto result_ = torch::autograd::VariableType::log_softmax(self, dim, dtype);
+  auto result_ = torch::autograd::VariableType::log_softmax_int(self, dim, dtype);
   drop(*stack, 3);
   pack(*stack, std::move(result_));
 }
 
 static auto registry = torch::RegisterOperators().op(
     "_aten::add.Scalar",
-    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::add)
+    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::add_Scalar)
 ).op(
     "_aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
-    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::mul)
+    torch::RegisterOperators::options().kernel(c10::DispatchKey::VariableTensorId, &torch::autograd::VariableType::mul_Tensor)
         .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(torch::RegisterOperators::options()
     .schema("_aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor")
