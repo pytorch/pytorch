@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
@@ -350,7 +352,7 @@ void GatherPaddingOp<CUDAContext>::GatherPadding(
         &lengths_prefix_sum_,
         &context_);
     gather_padding_kernel<T>
-        <<<min(block_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+        <<<std::min(block_size, CAFFE_MAXIMUM_NUM_BLOCKS),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context_.cuda_stream()>>>(
