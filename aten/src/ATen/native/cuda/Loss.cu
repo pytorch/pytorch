@@ -2,6 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
+
 
 constexpr float EPSILON = 1e-12;
 
@@ -51,30 +54,31 @@ void binary_cross_entropy_out_kernel(Tensor& loss, const Tensor& input, const Te
   );
 }
 
-template<typename scalar_t>
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
-  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
-    grad_input,
-    grad,
-    input,
-    target,
-    [] __device__(
-      scalar_t& grad_input_val,
-      const scalar_t& grad_val,
-      const scalar_t& input_val,
-      const scalar_t& target_val
-    ) {
-      const scalar_t one = 1;
-      const scalar_t epsilon = EPSILON;
+  at::TensorIterator iter;
+  iter.add_output(grad_input);
+  iter.add_input(grad);
+  iter.add_input(input);
+  iter.add_input(target);
+  iter.build();
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "binary_cross_entropy_backward_out_cuda", [&]() {
+    at::native::gpu_kernel(iter, [] GPU_LAMBDA (
+        scalar_t grad_val,
+        scalar_t input_val,
+        scalar_t target_val
+      ) -> scalar_t {
+        const scalar_t one = 1;
+        const scalar_t epsilon = EPSILON;
 
-      scalar_t grad_input_denominator = max(
-        (one - input_val) * input_val,
-        epsilon
-      );
+        scalar_t grad_input_denominator = max(
+          (one - input_val) * input_val,
+          epsilon
+        );
 
-      grad_input_val = grad_val * (input_val - target_val) / grad_input_denominator;
-    }
-  );
+        return grad_val * (input_val - target_val) / grad_input_denominator;
+      }
+    );
+  });
 }
 
 } // namespace
@@ -126,9 +130,7 @@ Tensor binary_cross_entropy_backward_cuda(const Tensor& grad, const Tensor& inpu
 
 Tensor& binary_cross_entropy_backward_out_cuda(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
   Tensor grad_expand = grad.expand_as(input);
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "binary_cross_entropy_backward_out_cuda", [&]() {
-    binary_cross_entropy_backward_out_kernel<scalar_t>(grad_input, grad_expand, input, target);
-  });
+  binary_cross_entropy_backward_out_kernel(grad_input, grad_expand, input, target);
 
   if (weight.defined()) {
     grad_input.mul_(weight);
