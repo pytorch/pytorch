@@ -553,17 +553,19 @@ at::Tensor convolution_overrideable(
   AT_ERROR("You are likely triggering this with tensor backend other than CPU/CUDA/MKLDNN, if this is intended, please use torch::RegisterOperators() to override this function ");
 }
 
+// Function for dynamically dispatching convolution to the appropriate function
+// depending on the type of tensor and the DNN library to be used.
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
     bool transposed_, IntArrayRef output_padding_, int64_t groups_,
     bool benchmark, bool deterministic, bool cudnn_enabled) {
-
   const bool input_is_mkldnn = input_r.is_mkldnn();
   auto input = input_r;
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = weight.ndimension();
+
   // mkldnn conv2d weights could have been re-ordered to 5d by
   // mkldnn_reorder_conv2d_weight
   std::vector<int64_t> weight_sizes_mkl;
@@ -629,7 +631,6 @@ at::Tensor _convolution(
   Tensor output;
   if (params.is_depthwise(input, weight)) {
       /* output.resize_(output_size(input, weight)); */
-
       auto kernel_size = weight.sizes().slice(2);
       auto stride = params.stride;
       auto padding = params.padding;
@@ -657,7 +658,9 @@ at::Tensor _convolution(
              "Input type (", input.toString(), ") and bias type (", bias.toString(),
              ") should be the same");
 
+    std::cout << "---- INSIDE CUDNN -----\n";
     if (params.transposed) {
+      std::cout << "---- PARAM TRANSPOSED ----\n";
       output = at::cudnn_convolution_transpose(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.output_padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
@@ -665,6 +668,7 @@ at::Tensor _convolution(
         output = output + reshape_bias(input.dim(), bias);
       }
     } else {
+      std::cout << "---- PARAM NOT TRANSPOSED ----\n";
       output = at::cudnn_convolution(
           input.contiguous(cudnn_memory_format), weight,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);

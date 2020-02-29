@@ -1864,7 +1864,6 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         include_last_offset)
     return ret
 
-
 def _verify_batch_size(size):
     # type: (List[int]) -> None
     # XXX: JIT script does not support the reduce from functools, and mul op is a
@@ -1881,7 +1880,6 @@ def _verify_batch_size(size):
         size_prods *= size[i + 2]
     if size_prods == 1:
         raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
@@ -1914,12 +1912,15 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
+<<<<<<< HEAD
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 instance_norm, (input,), input, running_mean=running_mean,
                 running_var=running_var, weight=weight, bias=bias,
                 use_input_stats=use_input_stats, momentum=momentum, eps=eps)
+=======
+>>>>>>> 70a095bc1f81c68ed1de6e82d68c114b81d05c02
     _verify_batch_size(input.size())
     return torch.instance_norm(
         input, weight, bias, running_mean, running_var,
@@ -1943,6 +1944,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
+<<<<<<< HEAD
     if not torch.jit.is_scripting():
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
@@ -1950,6 +1952,9 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
     _verify_batch_size([
         input.size(0) * input.size(1) // num_groups, num_groups]
         + list(input.size()[2:]))
+=======
+    _verify_batch_size(input.size())
+>>>>>>> 70a095bc1f81c68ed1de6e82d68c114b81d05c02
     return torch.group_norm(input, num_groups, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
