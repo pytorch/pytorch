@@ -122,7 +122,7 @@ struct TORCH_API RecordFunction {
   }
 
  protected:
-  void processCallbacks();
+  void runBeforeCallbacks();
   // Runs the end callbacks that were pushed to the callback manager. Throws if
   // the current RecordFunction is not initialized.
   void runEndCallbacks();

@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/scale_blobs_op.h"
 
@@ -47,7 +49,7 @@ bool ScaleBlobsOp<CUDAContext>::DoRunWithType() {
   for (int i = 0; i < numBlobs; ++i) {
     hostBlobSizesData[i] = Input(i).numel();
     totalSize += hostBlobSizesData[i];
-    maxSize = max(maxSize, hostBlobSizesData[i]);
+    maxSize = std::max(maxSize, hostBlobSizesData[i]);
     hostInputsData[i] = Input(i).template data<T>();
     hostOutputsData[i] = Output(i)->template mutable_data<T>();
   }

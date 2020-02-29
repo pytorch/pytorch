@@ -160,7 +160,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
 
   initialized_ = true;
-  processCallbacks();
+  runBeforeCallbacks()();
 }
 
 void RecordFunction::before(std::string name, int64_t sequence_nr) {
@@ -172,7 +172,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
   sequence_nr_ = sequence_nr;
 
   initialized_ = true;
-  processCallbacks();
+  runBeforeCallbacks();
 }
 
 void RecordFunction::before(Node* fn, int64_t sequence_nr) {
@@ -185,10 +185,10 @@ void RecordFunction::before(Node* fn, int64_t sequence_nr) {
   sequence_nr_ = (sequence_nr >= 0) ? sequence_nr : fn->sequence_nr();
 
   initialized_ = true;
-  processCallbacks();
+  runBeforeCallbacks();
 }
 
-void RecordFunction::processCallbacks() {
+void RecordFunction::runBeforeCallbacks() {
   parent_ = thread_local_func_;
   thread_local_func_ = this;
 
