@@ -1049,10 +1049,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       bool type_2, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
-    Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, type_2, batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    if(bidirectional && !type_2) {
+        std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
+    } // else {
+      Tensor output, hy, cy;
+      lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                      num_layers, dropout_p, train, bidirectional, type_2, batch_first);
+      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    //}
   }
 
   if (use_miopen(_input, dropout_p)) {
