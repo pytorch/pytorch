@@ -292,6 +292,37 @@ void testLLVMVecLoadStoreTest() {
   EXPECT_EQ(b_buffer[3], 1);
 }
 
+void testLLVMVectorizerLoadStoreTest() {
+  KernelScope kernel_scope;
+  Buffer a(VarHandle("A", kHandle), kInt, {1});
+  Buffer b(VarHandle("B", kHandle), kInt, {1});
+  std::vector<int32_t> a_buffer = {1, 1, 1, 1};
+  std::vector<int32_t> b_buffer = {2, 2, 2, 2};
+
+  auto mask = IntImm::make(1);
+  VarHandle i("i", kInt);
+  auto expr = For::make(
+      i,
+      0,
+      4,
+      Store::make(b, i, Load::make(a, i, mask), mask));
+  auto vectorized = Vectorize(expr);
+  EXPECT_EQ(dynamic_cast<For*>(vectorized), nullptr);
+
+  LLVMCodeGen cg(vectorized, {a, b});
+  std::vector<void*> args({a_buffer.data(), b_buffer.data()});
+  EXPECT_EQ(cg.value<int>(args), 0);
+  EXPECT_EQ(a_buffer[0], 1);
+  EXPECT_EQ(a_buffer[1], 1);
+  EXPECT_EQ(a_buffer[2], 1);
+  EXPECT_EQ(a_buffer[3], 1);
+  EXPECT_EQ(b_buffer[0], 1);
+  EXPECT_EQ(b_buffer[1], 1);
+  EXPECT_EQ(b_buffer[2], 1);
+  EXPECT_EQ(b_buffer[3], 1);
+}
+
+
 void testLLVMMemcpyTest() {
   KernelScope kernel_scope;
   constexpr int N = 32;

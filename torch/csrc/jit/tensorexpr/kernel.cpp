@@ -865,7 +865,16 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       Tensor* tensor = tensor_outputs_[i];
       ExprHandle total_count = ExprHandle(tensor->dim(0));
       for (int i = 1; i < tensor->ndim(); i++) {
-        total_count = total_count * ExprHandle(tensor->dim(i));
+        const IntImm* total_count_i = total_count.AsNode<IntImm>();
+        const IntImm* tensor_dim_i =
+            dynamic_cast<const IntImm*>(tensor->dim(i));
+        if (total_count_i && tensor_dim_i) {
+          // TODO: switch to real constant folding when it is available.
+          total_count =
+              ExprHandle(total_count_i->value() * tensor_dim_i->value());
+        } else {
+          total_count = total_count * ExprHandle(tensor->dim(i));
+        }
       }
       // Flatten the index for GPU kernels.
       // TODO: move this to fusing axis when it is ready.
@@ -1115,12 +1124,11 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
               "input",
               inputTensorDims,
               [&](const std::vector<VarHandle>& axes) {
-                std::vector<ExprHandle> idxs;
-                idxs.push_back(axes[0] * (int32_t)*strides[0]);
-                for (int i = 1; i < axes.size(); i++) {
-                  idxs.push_back(idxs[i - 1] + axes[i] * (int32_t)*strides[i]);
+                ExprHandle idx = 0;
+                for (int64_t i = 0; i < axes.size(); i++) {
+                  idx = idx + axes[i] * int32_t{*strides[i]};
                 }
-                return in_buffer(idxs.back());
+                return in_buffer(idx);
               }));
       kernelArgs_.emplace_back(
           in_buffer,

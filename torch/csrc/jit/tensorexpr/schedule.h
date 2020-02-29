@@ -671,6 +671,8 @@ class TORCH_API Schedule {
   ScheduleNode* node_ = nullptr;
 };
 
+TORCH_API Stmt* Vectorize(const Stmt*);
+
 } // namespace schedule
 } // namespace tensorexpr
 } // namespace jit

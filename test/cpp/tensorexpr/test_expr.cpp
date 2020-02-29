@@ -384,6 +384,17 @@ void testExprBinaryMath01() {
   }
 }
 
+void testExprBitwiseOps() {
+  KernelScope kernel_scope;
+  ExprHandle a(59);
+  ExprHandle b(11);
+  ExprHandle c(101);
+  ExprHandle f = ((a ^ (b << 1)) & c) >> 2;
+
+  SimpleIRExprEval eval(f);
+  EXPECT_EQ(eval.value<int>(), 9);
+}
+
 void testExprDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {

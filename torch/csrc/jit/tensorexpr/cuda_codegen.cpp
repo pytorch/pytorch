@@ -510,14 +510,14 @@ void CudaCodeGen::Initialize() {
     if (i > 0) {
       std::cout << ", ";
     }
-    std::cout << gpu_block_extents[i];
+    std::cout << *gpu_block_extents[i];
   }
   std::cout << "), thread(";
   for (int i = 0; i < gpu_thread_extents.size(); i++) {
     if (i > 0) {
       std::cout << ", ";
     }
-    std::cout << gpu_thread_extents[i];
+    std::cout << *gpu_thread_extents[i];
   }
   std::cout << ")" << std::endl;
   ;
@@ -549,6 +549,13 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args());
     gpu_thread_extents_v[i] = eval.value<int>(args);
+  }
+
+  // Skip launching the kernel if there are no elements to process.
+  for (int extent : gpu_block_extents_v) {
+    if (extent == 0) {
+      return;
+    }
   }
 
   // Bind the buffer addresses into arguments

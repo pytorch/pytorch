@@ -108,7 +108,7 @@ Stmt* Function::ElementStmt(size_t index) {
     strides[i] = stride;
   }
 
-  ExprHandle total_index;
+  ExprHandle total_index = int32_t{0};
   for (size_t i = 0; i < dims_.size(); i++) {
     ExprHandle index = VarHandle(this->args_[i]) * ExprHandle(strides[i]);
     if (i == 0) {

@@ -920,7 +920,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
 
-  if (v->dtype() == kFloat) {
+  if (v->dtype().scalar_type() == ScalarType::Float) {
     switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \
@@ -992,7 +992,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
         LOG(FATAL) << "Unimplemented: Intrinsics: " << ExprHandle(v);
       } break;
     }
-  } else if (v->dtype() == kDouble) {
+  } else if (v->dtype().scalar_type() == ScalarType::Double) {
     switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \

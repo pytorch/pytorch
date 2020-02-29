@@ -376,6 +376,73 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b)
         np.testing.assert_allclose(a.numpy() + b.numpy(), x.numpy())
 
+    def test_double(self):
+        TENSOR_LEN = 8
+        def easy(x, y):
+            aaa = torch.add(x, y)
+            bbb = torch.mul(aaa, y);
+            return bbb
+
+        traced = torch.jit.trace(
+            easy,
+            (torch.rand(TENSOR_LEN, dtype=torch.float64), torch.full((TENSOR_LEN,), 0.5, dtype=torch.float64)),
+        )
+
+        a = torch.rand(TENSOR_LEN, dtype=torch.double)
+        b = torch.full((TENSOR_LEN,), 0.5, dtype=torch.double)
+        x = traced(a, b)
+        np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
+
+    def test_short(self):
+        TENSOR_LEN = 8
+        def easy(x, y):
+            aaa = torch.add(x, y)
+            bbb = torch.mul(aaa, y);
+            return bbb
+
+        traced = torch.jit.trace(
+            easy,
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)),
+        )
+
+        a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)
+        x = traced(a, b)
+        np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
+
+    def test_char(self):
+        TENSOR_LEN = 8
+        def easy(x, y):
+            aaa = torch.add(x, y)
+            bbb = torch.mul(aaa, y);
+            return bbb
+
+        traced = torch.jit.trace(
+            easy,
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+        )
+
+        a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)
+        x = traced(a, b)
+        np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
+
+    def test_int64_promotion(self):
+        TENSOR_LEN = 8
+        def easy(x, y):
+            aaa = torch.add(x, y)
+            bbb = torch.mul(aaa, y);
+            return bbb
+
+        traced = torch.jit.trace(
+            easy,
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)),
+        )
+
+        a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
+        b = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)
+        x = traced(a, b)
+        np.testing.assert_allclose((a.numpy() + b.numpy()) * b.numpy(), x.numpy())
 
     def test_eq(self):
         def easy(x, y):

@@ -349,6 +349,10 @@ Stmt* IRMutator::mutate(const Cond* v) {
   return new Cond(cond_new, true_new, false_new);
 }
 
+const Expr* IRMutator::DefaultMutator(const BaseCallNode* v, std::vector<const Expr*>& params) {
+  return v->DefaultMutator(params);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

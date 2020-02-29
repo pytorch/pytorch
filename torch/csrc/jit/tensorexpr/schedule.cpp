@@ -392,6 +392,237 @@ ScheduleObject* ScheduleNode::CloneScheduleObject(ScheduleObject* object) {
   return new_object;
 }
 
+
+class Vectorizer : public IRMutator {
+  public:
+  Stmt* vectorize(const For* v) {
+    Stmt* body = v->body();
+    const Var* var = v->var();
+    const Expr* start = v->start();
+    const Expr* stop = v->stop();
+
+    const IntImm* start_imm = dynamic_cast<const IntImm*>(start);
+    const IntImm* stop_imm = dynamic_cast<const IntImm*>(stop);
+    if (!start_imm) {
+      throw std::runtime_error("Can't vectorize due to non-constant loop start!");
+    }
+
+    if (!stop_imm) {
+      throw std::runtime_error("Can't vectorize due to non-constant loop stop!");
+    }
+
+    var_ = var;
+    start_ = start_imm;
+    lanes_ = stop_imm->value();
+
+    Stmt* new_body = body->accept_mutator(this);
+    if (new_body == body) {
+      throw std::runtime_error("Vectorization failed!");
+    }
+
+    return new_body;
+  }
+
+  const Expr* mutate(const Add* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return ExprHandle(inputs[0]) + ExprHandle(inputs[1]); });
+  }
+
+  const Expr* mutate(const Sub* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return ExprHandle(inputs[0]) - ExprHandle(inputs[1]); });
+  }
+
+  const Expr* mutate(const Mul* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return ExprHandle(inputs[0]) * ExprHandle(inputs[1]); });
+  }
+
+  const Expr* mutate(const Div* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return ExprHandle(inputs[0]) / ExprHandle(inputs[1]); });
+  }
+
+  const Expr* mutate(const Max* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return Max::make(ExprHandle(inputs[0]), ExprHandle(inputs[1]), v->propagate_nans()); });
+  }
+
+  const Expr* mutate(const Min* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs() };
+    return try_vectorize(v, inputs,
+      [&](){ return Min::make(ExprHandle(inputs[0]), ExprHandle(inputs[1]), v->propagate_nans()); });
+  }
+
+  const Expr* mutate(const CompareSelect* v) override {
+    std::vector<const Expr*> inputs = { v->lhs(), v->rhs(), v->ret_val1(), v->ret_val2() };
+    return try_vectorize(v, inputs,
+      [&](){
+        return CompareSelect::make(ExprHandle(inputs[0]), ExprHandle(inputs[1]), 
+                                   ExprHandle(inputs[2]), ExprHandle(inputs[3]),
+                                   v->compare_select_op());
+      });
+  }
+
+  const Expr* mutate(const Cast* v) override {
+    std::vector<const Expr*> inputs = { v->src_value() };
+    return try_vectorize(v, inputs,
+      [&](){ return Cast::make(Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0])); });
+  }
+
+  const Expr* mutate(const Var* v) override {
+    if (v == var_) {
+      return Ramp::make(ExprHandle(start_), 1, lanes_).node();
+    }
+
+    return v;
+  }
+
+  const Expr* mutate(const Let* v) override {
+    const Expr* var = v->var();
+    const Expr* value = v->value();
+    const Expr* body = v->body();
+
+    std::vector<const Expr*> inputs = { body };
+    return try_vectorize(v, inputs,
+      [&]() { return Let::make(ExprHandle(var), ExprHandle(value), ExprHandle(inputs[0])); });
+  }
+
+  const Expr* mutate(const Ramp* v) override {
+    const Expr* base = v->base();
+    const Expr* stride = v->stride();
+
+    const Expr* base_new = base->accept_mutator(this);
+    const Expr* stride_new = stride->accept_mutator(this);
+
+    if (base_new == base && stride_new == stride) {
+      return v;
+    }
+
+    throw std::runtime_error("Can't vectorize a Ramp!");
+  }
+
+  const Expr* mutate(const Load* v) override {
+    Dtype dtype(v->dtype().scalar_type(), lanes_);
+    const Var* base_handle = v->base_handle();
+    std::vector<const Expr*> inputs = { v->index(), v->mask() };
+    return try_vectorize(v, inputs,
+      [&]() { return Load::make(dtype, VarHandle(base_handle), ExprHandle(inputs[0]), ExprHandle(inputs[1])); });
+  }
+
+  const Expr* mutate(const Broadcast* v) override {
+    const Expr* val = v->value();
+    const Expr* new_val = val->accept_mutator(this);
+    if (new_val == val) {
+      return v;
+    }
+
+    throw std::runtime_error("Can't vectorize a Broadcast!");
+  }
+
+  const Expr* mutate(const IfThenElse* v) override {
+    const Expr* condition = v->condition();
+    const Expr* new_condition = condition->accept_mutator(this);
+    if (new_condition != condition) {
+      throw std::runtime_error("Can't vectorize an IfThenElse condition!");
+    }
+
+    std::vector<const Expr*> inputs = { v->true_value(), v->false_value() };
+    return try_vectorize(v, inputs,
+      [&]() { return IfThenElse::make(ExprHandle(condition), ExprHandle(inputs[0]), ExprHandle(inputs[1])); });
+  }
+
+  const Expr* mutate(const BaseCallNode* v) override {
+    std::vector<const Expr*> inputs = v->params();
+    return try_vectorize(v, inputs,
+      [&]() { return ExprHandle(DefaultMutator(v, inputs)); });
+  }
+
+  Stmt* mutate(const Store* v) override {
+    const Var* base_handle = v->base_handle();
+    std::vector<const Expr*> inputs = { v->index(), v->value(), v->mask() };
+    return try_vectorize(v, inputs,
+      [&]() { return Store::make(VarHandle(base_handle), ExprHandle(inputs[0]), ExprHandle(inputs[1]), ExprHandle(inputs[2])); });
+  }
+
+  Stmt* mutate(const For* v) override {
+    throw std::runtime_error("Can't vectorize nested For!");
+  }
+
+  template <typename T>
+  const Expr* try_vectorize(const Expr* e, std::vector<const Expr*>& inputs, T&& vec_ctor) {
+    bool vectorize = vectorize_inputs(inputs);
+    if (vectorize) {
+      return vec_ctor().node();
+    }
+
+    return e;
+  }
+
+  template <typename T>
+  Stmt* try_vectorize(const Stmt* s, std::vector<const Expr*>& inputs, T&& vec_ctor) {
+    bool vectorize = vectorize_inputs(inputs);
+    if (vectorize) {
+      return vec_ctor();
+    }
+
+    return (Stmt*)s;
+  }
+
+  bool vectorize_inputs(std::vector<const Expr*>& inputs) {
+    bool any_vectorized = false;
+    bool all_vectorized = true;
+    std::vector<const Expr*> new_inputs;
+
+    // Attempt to vectorize each input.
+    for (const Expr*& in : inputs) {
+      const Expr* new_in = in->accept_mutator(this);
+      new_inputs.push_back(new_in);
+      if (new_in != in) {
+        any_vectorized = true;
+      } else {
+        all_vectorized = false;
+      }
+    }
+
+    // If none of them vectorized, then don't vectorize this.
+    if (!any_vectorized) {
+      return false;
+    }
+
+    // Insert broadcasts for any inputs that weren't vectorized.
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (inputs[i] == new_inputs[i]) {
+        inputs[i] = Broadcast::make(ExprHandle(inputs[i]), lanes_).node();
+      } else {
+        inputs[i] = new_inputs[i];
+      }
+    }
+
+    // And then vectorize this node.
+    return true;
+  }
+
+  const Var* var_;
+  int lanes_;
+  const Expr* start_;
+};
+
+Stmt* Vectorize(const Stmt* stmt) {
+  const For* f = dynamic_cast<const For*>(stmt);
+  if (!f) {
+    throw std::runtime_error("Statement is not a For loop!");
+  }
+
+  Vectorizer v;
+  return v.vectorize(f);
+}
+
 class Flattener : public IRMutator {
  private:
   Expr* mutate(const FunctionCall* v) override {
@@ -784,21 +1015,24 @@ SplitAxisWithMask::SplitAxisWithMask(
   // TODO: support factor_on_inner == false;
   CHECK(factor_on_inner) << "only factor_on_inner = True is supported for now";
 
-  // TODO: Support dynamic shapes
-  auto const& sizeExpr = this->stop() - this->start();
+  ExprHandle split_count;
   bool needsPredicate = true;
   if (this->stop().AsNode<IntImm>() && this->start().AsNode<IntImm>()) {
     int size = stop().AsNode<IntImm>()->value() - start().AsNode<IntImm>()->value();
     if ((size % factor) == 0) {
       needsPredicate = false;
     }
+    // TODO: Switch to real constant folding when it is available.
+    split_count = (size + factor - 1) / factor;
+  } else {
+    auto const& sizeExpr = this->stop() - this->start();
+    split_count = (sizeExpr + factor - 1) / factor;
   }
   if (needsPredicate) {
     IntImm* start = this->start().AsNode<IntImm>();
     CHECK(start && start->value() == 0) << "Non-zero start is not implemented yet";
     predicate_ = CompareSelect::make(loop_axis->var(), this->stop(), kLT);
   }
-  auto const& split_count = (sizeExpr + factor - 1) / factor;
 
   this->set_output_group_count(1);
   const std::string& loop_var_name = loop_axis->var().name_hint();

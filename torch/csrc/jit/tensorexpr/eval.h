@@ -164,6 +164,19 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
     visit_binary_op(v, v->propagate_nans());
   }
 
+  TORCH_API void visit(const And* v) override {
+    visit_binary_op(v);
+  }
+  TORCH_API void visit(const Xor* v) override {
+    visit_binary_op(v);
+  }
+  TORCH_API void visit(const Lshift* v) override {
+    visit_binary_op(v);
+  }
+  TORCH_API void visit(const Rshift* v) override {
+    visit_binary_op(v);
+  }
+
   void visit(const CompareSelect* v) override {
     visit_compare_select_op(v, v->compare_select_op());
   }
@@ -306,7 +319,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     IRNodeType expr_type = v->expr_type();
     if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kXor ||
-        expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kLshift) {
+        expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kRshift) {
       value_ = bitwise_binary_op(lhs_v, rhs_v, expr_type);
       return;
     }

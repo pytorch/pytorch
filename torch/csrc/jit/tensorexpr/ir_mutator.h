@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -90,6 +91,9 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);
   virtual Stmt* mutate(const Cond* v);
+
+  protected:
+  const Expr* DefaultMutator(const BaseCallNode* v, std::vector<const Expr*>& params);
 };
 
 } // namespace tensorexpr

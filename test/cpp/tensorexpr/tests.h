@@ -29,6 +29,7 @@ namespace jit {
   _(ExprUnaryMath01)            \
   _(ExprBinaryMath01)           \
   _(ExprDynamicShapeAdd)        \
+  _(ExprBitwiseOps)             \
   _(IRPrinterBasicValueTest)    \
   _(IRPrinterBasicValueTest02)  \
   _(IRPrinterLetTest01)         \
@@ -160,7 +161,8 @@ namespace jit {
   _(LLVMBindDynamicShapeAdd)    \
   _(LLVMTensorDynamicShapeAdd)  \
   _(LLVMDynamicShape2D)         \
-  _(LLVMIfThenElseTest)
+  _(LLVMIfThenElseTest)         \
+  _(LLVMVectorizerLoadStoreTest)
 
 #define TH_FORALL_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)        \
