@@ -41,7 +41,7 @@ void bernoulli_tensor_cuda_kernel(
 
   at::native::gpu_kernel(iter,
     [seeds] GPU_LAMBDA (prob_t p) -> scalar_t {
-      #ifdef __CUDA_ARCH__
+      #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       curandStatePhilox4_32_10_t state;
       curand_init(
           seeds.first,
