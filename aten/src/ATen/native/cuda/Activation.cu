@@ -125,20 +125,27 @@ void prelu_cuda_backward_kernel_share_weights(
   Tensor& input_grad,
   Tensor& weight_grad_collector,
   const scalar_t* weight_data) {
+  at::TensorIterator iter1;
+  iter1.add_output(input_grad);
+  iter1.add_input(input);
+  iter1.add_input(grad_out);
+  iter1.build();
+  gpu_kernel(iter1,
+    [=] GPU_LAMBDA (scalar_t input_val, scalar_t grad_out_val) -> scalar_t {
+        return (input_val > 0) ? grad_out_val : *weight_data * grad_out_val;
+    }
+  );
 
-  at::cuda::CUDA_tensor_apply4<scalar_t, scalar_t, scalar_t, scalar_t>(
-    input,
-    grad_out,
-    input_grad,
-    weight_grad_collector,
-    [=] __device__ (
-      const scalar_t& input_val,
-      const scalar_t& grad_out_val,
-      scalar_t& input_grad_val,
-      scalar_t& weight_grad_collector_val) {
-        input_grad_val = (input_val > 0) ? grad_out_val : *weight_data * grad_out_val;
-        weight_grad_collector_val = (input_val > 0) ? scalar_t(0) : input_val * grad_out_val;
-  });
+  at::TensorIterator iter2;
+  iter2.add_output(weight_grad_collector);
+  iter2.add_input(input);
+  iter2.add_input(grad_out);
+  iter2.build();
+  gpu_kernel(iter2,
+    [=] GPU_LAMBDA (scalar_t input_val, scalar_t grad_out_val) {
+        return (input_val > 0) ? scalar_t(0) : input_val * grad_out_val;
+    }
+  );
 }
 
 template <typename scalar_t>
