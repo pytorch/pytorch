@@ -34,6 +34,7 @@ void bernoulli_tensor_cuda_kernel(
     at::Tensor& ret, const at::Tensor& p,
     std::pair<uint64_t, uint64_t> seeds) {
   at::TensorIterator iter;
+  iter.dont_compute_common_dtype();
   iter.add_output(ret);
   iter.add_input(p);
   iter.build();
