@@ -45,6 +45,7 @@
 
 namespace {
 
+template <typename scalar_t>
 inline void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
@@ -53,21 +54,19 @@ inline void poisson_cuda_kernel(
   iter.add_output(ret);
   iter.add_input(lambda);
   iter.build();
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "poisson_cuda", [&] {
-    at::native::gpu_kernel(iter,
-      [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
-        #ifdef __CUDA_ARCH__
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
-        return static_cast<scalar_t>(curand_poisson(&state, lambda));
-        #else
-        return lambda;  // useless
-        #endif
-      });
+  at::native::gpu_kernel(iter,
+    [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
+      #ifdef __CUDA_ARCH__
+      curandStatePhilox4_32_10_t state;
+      curand_init(
+          seeds.first,
+          blockIdx.x * blockDim.x + threadIdx.x,
+          seeds.second,
+          &state);
+      return static_cast<scalar_t>(curand_poisson(&state, lambda));
+      #else
+      return lambda;  // useless
+      #endif
     });
 }
 
@@ -87,39 +86,39 @@ struct curand_normal_wrapper {
   }
 };
 
+template <typename scalar_t>
 void gamma_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& alpha,
     std::pair<uint64_t, uint64_t> seeds) {
+  using accscalar_t = at::acc_type<scalar_t, true>;
   at::TensorIterator iter;
   iter.add_output(ret);
   iter.add_input(alpha);
   iter.build();
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "gamma_cuda", [&] {
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    at::native::gpu_kernel(iter,
-        [seeds] GPU_LAMBDA (scalar_t alpha) {
-          #ifdef __CUDA_ARCH__
-          curandStatePhilox4_32_10_t state;
-          curand_init(
-              seeds.first,
-              blockIdx.x * blockDim.x + threadIdx.x,
-              seeds.second,
-              &state);
 
-          auto uniform_lambda = curand_uniform_wrapper(state);
-          BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+  at::native::gpu_kernel(iter,
+    [seeds] GPU_LAMBDA (scalar_t alpha) {
+      #ifdef __CUDA_ARCH__
+      curandStatePhilox4_32_10_t state;
+      curand_init(
+          seeds.first,
+          blockIdx.x * blockDim.x + threadIdx.x,
+          seeds.second,
+          &state);
 
-          auto normal_lambda = curand_normal_wrapper(state);
-          BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
-          auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
-          auto min_value = std::numeric_limits<scalar_t>::min();
-          return (min_value > sample) ? min_value : sample;
-          #else
-          return alpha;  //useless
-          #endif
-        });
-  });
+      auto uniform_lambda = curand_uniform_wrapper(state);
+      BaseSampler<accscalar_t, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
+
+      auto normal_lambda = curand_normal_wrapper(state);
+      BaseSampler<accscalar_t, decltype(normal_lambda)> standard_normal(normal_lambda);
+      auto sample = sample_gamma<scalar_t, accscalar_t, decltype(uniform_lambda), decltype(normal_lambda)>(alpha, standard_uniform, standard_normal);
+      auto min_value = std::numeric_limits<scalar_t>::min();
+      return (min_value > sample) ? min_value : sample;
+      #else
+      return alpha;  //useless
+      #endif
+    });
 }
 
 template <typename scalar_t>
@@ -177,7 +176,9 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(20);
   }
   Tensor ret = at::empty(lambda.sizes(), lambda.options());
-  poisson_cuda_kernel(ret, lambda, rng_engine_inputs);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cuda", [&] {
+    poisson_cuda_kernel<scalar_t>(ret, lambda, rng_engine_inputs);
+  });
   return ret;
 }
 
@@ -190,7 +191,9 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
     rng_engine_inputs = gen->philox_engine_inputs(10);
   }
   Tensor ret = at::empty(alpha.sizes(), alpha.options());
-  gamma_cuda_kernel(ret, alpha, rng_engine_inputs);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, ret.scalar_type(), "gamma_cuda", [&] {
+    gamma_cuda_kernel<scalar_t>(ret, alpha, rng_engine_inputs);
+  });
   return ret;
 }
 
