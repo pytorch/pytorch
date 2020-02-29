@@ -45,6 +45,7 @@
 
 namespace {
 
+template <typename scalar_t>
 inline void poisson_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& lambda,
@@ -53,21 +54,19 @@ inline void poisson_cuda_kernel(
   iter.add_output(ret);
   iter.add_input(lambda);
   iter.build();
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "poisson_cuda", [&] {
-    at::native::gpu_kernel(iter,
-      [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
-        #ifdef __CUDA_ARCH__
-        curandStatePhilox4_32_10_t state;
-        curand_init(
-            seeds.first,
-            blockIdx.x * blockDim.x + threadIdx.x,
-            seeds.second,
-            &state);
-        return static_cast<scalar_t>(curand_poisson(&state, lambda));
-        #else
-        return lambda;  // useless
-        #endif
-      });
+  at::native::gpu_kernel(iter,
+    [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
+      #ifdef __CUDA_ARCH__
+      curandStatePhilox4_32_10_t state;
+      curand_init(
+          seeds.first,
+          blockIdx.x * blockDim.x + threadIdx.x,
+          seeds.second,
+          &state);
+      return static_cast<scalar_t>(curand_poisson(&state, lambda));
+      #else
+      return lambda;  // useless
+      #endif
     });
 }
 
