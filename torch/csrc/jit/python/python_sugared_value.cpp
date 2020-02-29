@@ -380,7 +380,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
   // 4. Check if it's a function attribute.
   if (const auto fnAttr = concreteType_->findFunctionAttribute(field)) {
     return std::make_shared<FunctionValue>(*fnAttr);
-  } else if (const auto builtin = concreteType_->findBuiltinFunction(field)) {
+  } else if (
+      const auto builtin = concreteType_->findBuiltinFunction(field)) {
     return std::make_shared<BuiltinFunction>(*builtin, /*self=*/c10::nullopt);
   }
 
@@ -448,9 +449,9 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
 }
 
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
-    const SourceRange& loc,
-    Function& m,
-    const std::string& field) {
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) {
   // Resolve values from the Python object first (e.g. for static methods on
   // this type, resolve them as functions)
   auto py_attr = py::getattr(py_type_, field.c_str(), py::none());
@@ -518,6 +519,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     Function& m,
     SourceRange loc,
     bool is_constant) {
+
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant

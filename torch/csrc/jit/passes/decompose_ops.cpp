@@ -137,7 +137,8 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       };
 
       // inline the compiled decomposed batchnorm
-      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("batch_norm").graph();
+      std::shared_ptr<Graph> d_graph =
+          decompose_funcs.get_function("batch_norm").graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph
@@ -171,7 +172,8 @@ bool DecomposeOps(Block* block, script::CompilationUnit& decompose_funcs) {
       };
 
       // inline the compiled decomposed layernorm
-      std::shared_ptr<Graph> d_graph = decompose_funcs.get_function("layer_norm").graph();
+      std::shared_ptr<Graph> d_graph =
+          decompose_funcs.get_function("layer_norm").graph();
       Value* new_output = insertGraph(*graph, *d_graph, inputs).at(0);
 
       // post processing the graph

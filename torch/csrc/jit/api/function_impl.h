@@ -49,6 +49,14 @@ struct TORCH_API GraphFunction : public Function {
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 
+  size_t num_inputs() const override;
+
+  Function& setSchema(FunctionSchema schema) override;
+
+  const FunctionSchema& getSchema() const override;
+
+  std::string pretty_print_schema() const override;
+
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
   }
@@ -60,6 +68,8 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
+  void check_single_output() override;
+
   GraphExecutor& get_executor() override {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
@@ -70,16 +80,6 @@ struct TORCH_API GraphFunction : public Function {
     executor_ = GraphExecutor(optimized_graph());
     return executor_;
   }
-
-  virtual const c10::FunctionSchema& getSchema() const override;
-
-  virtual size_t num_inputs() const override;
-
-  virtual void check_single_output() override;
-
-  virtual std::string pretty_print_schema() const override;
-
-  virtual GraphFunction& setSchema(c10::FunctionSchema schema) override;
 
  private:
   c10::QualifiedName name_;

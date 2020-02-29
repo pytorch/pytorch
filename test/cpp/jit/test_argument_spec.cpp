@@ -131,12 +131,12 @@ void testArgumentSpec() {
   auto& GF = at::CUDA(at::kFloat);
   auto& GD = at::CUDA(at::kDouble);
 
-  auto& fn = jit::compile(R"JIT(
+  auto graph = jit::compile(R"JIT(
    def fn(a, b, c, d, e):
       return a, b, c, d, e
    )JIT")
-                 ->get_function("fn");
-  auto graph = fn.graph();
+                   ->get_function("fn")
+                   .graph();
 
   ArgumentSpecCreator arg_spec_creator(*graph);
 
