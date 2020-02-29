@@ -6,7 +6,7 @@
 #
 # There are three custom build types:
 #
-# 1. `TEST_DEFAULT=1 ./build.sh` - it is similar to the prebuilt libtorch
+# 1. `TEST_DEFAULT_BUILD=1 ./build.sh` - it is similar to the prebuilt libtorch
 # libraries released for Android and iOS (same CMake build options + host
 # toolchain), which doesn't contain autograd function nor backward ops thus is
 # smaller than full LibTorch.
@@ -16,8 +16,11 @@
 #
 # 3. `TEST_CUSTOM_BUILD_DYNAMIC=1 ./build.sh` - similar as 2) except that it
 # relies on the op dependency graph (instead of static dispatch) to calculate
-# and keep all transitively dependent ops by the model. Type 2) will be
-# deprecated by type 3) in the future.
+# and keep all transitively dependent ops by the model.
+# Note that LLVM_DIR environment variable should be set to the location of
+# LLVM-dev toolchain.
+#
+# Type 2) will be deprecated by type 3) in the future.
 ###############################################################################
 
 set -ex -o pipefail
@@ -55,38 +58,32 @@ run_default_build() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_default_libtorch"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
-  if [ ! -d "${LIBTORCH_INSTALL_PREFIX}" ]; then
-    BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-      "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DUSE_STATIC_DISPATCH=ON
-  fi
+  BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
+    "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DUSE_STATIC_DISPATCH=ON
 }
 
 run_custom_build_with_static_dispatch() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_static"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
-  if [ ! -d "${LIBTORCH_INSTALL_PREFIX}" ]; then
-    BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-      SELECTED_OP_LIST="${ROOT_OPS}" \
-      "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-      -DUSE_STATIC_DISPATCH=ON
-  fi
+  BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
+    SELECTED_OP_LIST="${ROOT_OPS}" \
+    "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
+    -DUSE_STATIC_DISPATCH=ON
 }
 
 run_custom_build_with_dynamic_dispatch() {
   LIBTORCH_BUILD_ROOT="${BUILD_ROOT}/build_custom_libtorch_dynamic"
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
-  if [ ! -d "${LIBTORCH_INSTALL_PREFIX}" ]; then
-    BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-      SELECTED_OP_LIST="${ROOT_OPS}" \
-      OP_DEP_GRAPH="${OP_DEP_GRAPH}" \
-      "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-      -DUSE_STATIC_DISPATCH=OFF
-  fi
+  BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
+    SELECTED_OP_LIST="${ROOT_OPS}" \
+    OP_DEP_GRAPH="${OP_DEP_GRAPH}" \
+    "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
+    -DUSE_STATIC_DISPATCH=OFF
 }
 
 build_predictor() {
@@ -137,7 +134,7 @@ test_custom_build_with_dynamic_dispatch() {
   run_predictor
 }
 
-if [ -n "${TEST_DEFAULT}" ]; then
+if [ -n "${TEST_DEFAULT_BUILD}" ]; then
   test_default_build
 fi
 
