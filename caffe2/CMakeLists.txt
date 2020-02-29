@@ -50,6 +50,21 @@ endif()
 # Note: the folders that are being commented out have not been properly
 # addressed yet.
 
+# For pthreadpool_new_if_impl. TODO: Remove when threadpools are unitied.
+if (NOT MSVC)
+  IF(NOT TARGET fxdiv)
+    SET(FXDIV_BUILD_TESTS OFF CACHE BOOL "")
+    SET(FXDIV_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${FXDIV_SOURCE_DIR}"
+      "${CMAKE_BINARY_DIR}/FXdiv")
+  ENDIF()
+  if (NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
+    set_source_files_properties(
+        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp) 
+  endif()
+endif()
+
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
@@ -677,6 +692,9 @@ ELSEIF(USE_CUDA)
 ENDIF()
 
 
+if (NOT MSVC)
+  TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
+endif()
 
 # ==========================================================
 # formerly-libtorch flags
