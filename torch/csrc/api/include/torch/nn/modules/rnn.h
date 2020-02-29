@@ -102,6 +102,13 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// other sequentially in (w_ih, w_hh, b_ih, b_hh) order.
   std::vector<Tensor> flat_weights() const;
 
+  // Returns a vector that contains a vector for each direction with all weights
+  // in a flat vector in (w_ih, w_hh, b_ih, b_hh) order.
+  std::vector<std::vector<Tensor>> flat_type1_weights() const;
+
+  // Returns a flat vector of all weights, given flat vectors for all directions
+  std::vector<Tensor> merge_direction_weights(std::vector<std::vector<Tensor>> directions) const;
+
   /// Very simple check if any of the parameters (weights, biases) are the same.
   bool any_parameters_alias() const;
 

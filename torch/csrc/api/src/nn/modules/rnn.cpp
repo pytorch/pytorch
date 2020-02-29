@@ -141,17 +141,46 @@ void RNNImplBase<Derived>::flatten_parameters() {
   }
 
   NoGradGuard no_grad;
-  std::cout << "Should fail here?\n";
-  torch::_cudnn_rnn_flatten_weight(
-      flat_weights_,
-      /*weight_stride0=*/options.with_bias() ? 4 : 2,
-      options.input_size(),
-      static_cast<int64_t>(*cudnn_mode_),
-      options.hidden_size(),
-      options.layers(),
-      /*batch_first=*/options.batch_first(),
-      /*bidirectional=*/options.bidirectional(),
-      /*type_2=*/options.cat_layer_fwd_bwd_states());
+
+  if(options.bidirectional() && !options.cat_layer_fwd_bwd_states()) {
+    auto direction_flat_weights = flat_type1_weights();
+    auto flat_weights_fwd = direction_flat_weights.at(0);
+    auto flat_weights_bwd = direction_flat_weights.at(1);
+    torch::_cudnn_rnn_flatten_weight(
+        flat_weights_fwd,
+        /*weight_stride0=*/options.with_bias() ? 4 : 2,
+        options.input_size(),
+        static_cast<int64_t>(*cudnn_mode_),
+        options.hidden_size(),
+        options.layers(),
+        /*batch_first=*/options.batch_first(),
+        /*bidirectional=*/false,
+        /*type_2=*/options.cat_layer_fwd_bwd_states());
+    torch::_cudnn_rnn_flatten_weight(
+        flat_weights_bwd,
+        /*weight_stride0=*/options.with_bias() ? 4 : 2,
+        options.input_size(),
+        static_cast<int64_t>(*cudnn_mode_),
+        options.hidden_size(),
+        options.layers(),
+        /*batch_first=*/options.batch_first(),
+        /*bidirectional=*/false,
+        /*type_2=*/options.cat_layer_fwd_bwd_states());
+    flat_weights_ = merge_direction_weights(direction_flat_weights);
+  }
+  else {
+    std::cout << "Should fail here?\n";
+    torch::_cudnn_rnn_flatten_weight(
+        flat_weights_,
+        /*weight_stride0=*/options.with_bias() ? 4 : 2,
+        options.input_size(),
+        static_cast<int64_t>(*cudnn_mode_),
+        options.hidden_size(),
+        options.layers(),
+        /*batch_first=*/options.batch_first(),
+        /*bidirectional=*/options.bidirectional(),
+        /*type_2=*/options.cat_layer_fwd_bwd_states());
+  }
 }
 
 template <typename Derived>
@@ -197,6 +226,41 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
         flat.push_back(b_ih[layer_idx]);
         flat.push_back(b_hh[layer_idx]);
       }
+    }
+  }
+  return flat;
+}
+
+template <typename Derived>
+std::vector<std::vector<Tensor>> RNNImplBase<Derived>::flat_type1_weights() const {
+  // For each direction, organize all weights in a flat vector in the order
+  // (w_ih, w_hh, b_ih, b_hh), repeated for each layer (next to each other).
+  std::vector<std::vector<Tensor>> directions;
+  const auto num_directions = options.bidirectional() ? 2 : 1;
+  for (auto direction = 0; direction < num_directions; direction++) {
+    std::vector<Tensor> flat;
+    for (int64_t layer = 0; layer < options.layers(); layer++) {
+      const auto layer_idx = (layer * num_directions) + direction;
+      flat.push_back(w_ih[layer_idx]);
+      flat.push_back(w_hh[layer_idx]);
+      if (options.with_bias()) {
+        flat.push_back(b_ih[layer_idx]);
+        flat.push_back(b_hh[layer_idx]);
+      }
+    }
+    directions.push_back(flat);
+  }
+  return directions;
+}
+
+template <typename Derived>
+std::vector<Tensor> RNNImplBase<Derived>::merge_direction_weights(
+  std::vector<std::vector<Tensor>> directions) const {
+  std::vector<Tensor> flat;
+  const auto num_directions = options.bidirectional() ? 2 : 1;
+  for (int64_t layer = 0; layer < options.layers(); layer++) {
+    for (auto direction = 0; direction < num_directions; direction++) {
+      flat.push_back(directions[direction][layer]);
     }
   }
   return flat;
