@@ -1,6 +1,6 @@
 #include <torch/jit.h>
 #include <torch/script.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <iostream>
 #include <fstream>

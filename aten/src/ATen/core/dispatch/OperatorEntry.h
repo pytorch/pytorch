@@ -44,6 +44,14 @@ public:
     options_.setAliasAnalysis(a);
   }
 
+  // This function is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
+  void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
+    dispatchTable_.setManuallyBoxedKernel_(func);
+  }
+
 private:
   void deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel);
   void deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel);

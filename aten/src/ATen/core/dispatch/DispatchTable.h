@@ -62,6 +62,10 @@ public:
     return kernels_[static_cast<uint8_t>(dispatchKey)];
   }
 
+  KernelFunction& operator[](DispatchKey dispatchKey) {
+    return kernels_[static_cast<uint8_t>(dispatchKey)];
+  }
+
   size_t size() const {
     return kernelCount_;
   }
@@ -95,6 +99,9 @@ class DispatchTable final {
    * @param kernel Concrete kernel function implementation to register
    */
   void setKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+    if (manuallyBoxedKernel_.has_value()) {
+      kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
+    }
     auto result = kernels_.setKernel(dispatchKey, std::move(kernel));
     dispatchKeyExtractor_.setOperatorHasKernelForBackend(dispatchKey, true);
     if (result == impl::KernelFunctionTable::SetKernelResult::OVERWROTE_EXISTING_KERNEL) {
@@ -121,6 +128,9 @@ class DispatchTable final {
   void setCatchallKernel(KernelFunction kernel) {
     if (catchallKernel_.isValid()) {
       TORCH_WARN("Registered a catch-all kernel for operator ", operatorName_," that overwrote a previously registered catch-all kernel for the same operator.");
+    }
+    if (manuallyBoxedKernel_.has_value()) {
+      kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
     }
     catchallKernel_ = std::move(kernel);
   }
@@ -188,12 +198,32 @@ class DispatchTable final {
     return operatorName_;
   }
 
+  // This function is a temporary hack, see comment at manuallyBoxedKernel_ member
+  void setManuallyBoxedKernel_(KernelFunction::InternalBoxedKernelFunction* func) {
+    TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_.has_value(), "Cannot set multiple manually boxed kernels for the same operator ", operatorName_);
+    manuallyBoxedKernel_ = func;
+
+    // make sure that all previously registered kernels get this manually boxed kernel
+    for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+      auto& kernel = kernels_[static_cast<DispatchKey>(iter)];
+      if (kernel.isValid()) {
+        kernel.setManuallyBoxedKernel_(func);
+      }
+    }
+  }
+
 private:
 
   impl::KernelFunctionTable kernels_;
   KernelFunction catchallKernel_;
   DispatchKeyExtractor dispatchKeyExtractor_;
   std::string operatorName_;
+
+  // This manuallyBoxedKernel_ member is a temporary hack that allows register_aten_ops.cpp to register its codegen'ed
+  // unboxing wrapper for aten operators. We still need those for some operators because not all work
+  // with the templated unboxing logic yet.
+  // TODO Delete manuallyBoxedKernel_ once all operators work with the templated boxing logic
+  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel_;
 };
 
 } // namespace c10

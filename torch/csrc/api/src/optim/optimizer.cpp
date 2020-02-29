@@ -4,6 +4,7 @@
 #include <torch/ordered_dict.h>
 #include <torch/types.h>
 
+#include <string>
 #include <utility>
 #include <vector>
 
