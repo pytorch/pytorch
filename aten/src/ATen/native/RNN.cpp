@@ -1051,7 +1051,9 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (at::cudnn_is_acceptable(_input)) {
     if(bidirectional && !type_2) {
         std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
-        std::cout << "_params[0] size: " << _params[0].sizes() << "\n";
+        for(auto param = 0; param < _params.size(); param++){
+          std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
+        }
     } // else {
       Tensor output, hy, cy;
       lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
