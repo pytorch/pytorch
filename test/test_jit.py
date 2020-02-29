@@ -7704,6 +7704,23 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(next(g.outputs()).type().str(), "int[]")
 
+    def test_alias_covariant_type_containers(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (bool)
+            if x: 
+                a = (None,)
+            else:
+                a = ([],)
+            return a
+
+        @torch.jit.script
+        def foo2(x, li):
+            # type: (bool, Tuple[Optional[List[Tensor]]])
+            if x:
+                li = (None,)
+            return li
+
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):
