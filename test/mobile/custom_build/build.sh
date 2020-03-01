@@ -48,7 +48,6 @@ generate_op_dependency_graph() {
 
   if [ ! -f "${OP_DEP_GRAPH}" ]; then
     BUILD_ROOT="${ANALYZER_BUILD_ROOT}" \
-      LLVM_DIR="${LLVM_DIR:-$(llvm-config-5.0 --prefix)}" \
       ANALYZE_TORCH=1 \
       "${SRC_ROOT}/tools/code_analyzer/build.sh" -closure=false
   fi
