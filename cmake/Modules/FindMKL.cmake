@@ -216,7 +216,11 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
       ELSE()
-        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library} ${_library}_dll)
+        SET(lib_names ${_library})
+        IF (BUILD_SHARED_LIBS)
+          LIST(APPEND lib_names ${_library}_dll)
+        ENDIF()
+        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))
