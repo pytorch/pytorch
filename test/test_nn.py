@@ -104,10 +104,7 @@ class PackedSequenceTest(TestCase):
         """Create ordered list of random sequences"""
         seqs = [tensor_type(random.randint(1, self.max_length))
                 for _ in range(self.batch_size)]
-        if tensor_type == torch.ByteTensor:
-            seqs = [s.random_(0, 256) for s in seqs]
-        else:
-            seqs = [s.random_(-128, 128) for s in seqs]
+        seqs = [s.random_(-128, 128) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
