@@ -1,7 +1,7 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
 
-#include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/frontend/code_template.h"
 
 namespace torch {
 namespace jit {

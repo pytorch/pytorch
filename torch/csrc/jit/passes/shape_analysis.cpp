@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/exception_message.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/runtime/exception_message.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <torch/csrc/autograd/variable.h>
 
