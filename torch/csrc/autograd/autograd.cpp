@@ -100,7 +100,7 @@ variable_list run_backward(
   variable_list grad_inputs = Engine::get_default_engine().execute(
       roots, grad_outputs, keep_graph, create_graph, output_edges);
   // check if grad_inputs contains None or not base on the allow_unused flag
-  if (inputs.empty()) {
+  if (!inputs.empty()) {
     size_t num_inputs = inputs.size();
     for (size_t i = 0; i < num_inputs; ++i) {
       TORCH_CHECK(
