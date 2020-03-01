@@ -64,6 +64,16 @@ at::Tensor& random_impl(at::Tensor& self, at::Generator* generator) {
   return self;
 }
 
+static void check_from_to(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
+  const auto scalar_type = typeMetaToScalarType(dtype);
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, scalar_type, "check_random_fp_bounds", [&] {
+    const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
+    const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
+    TORCH_CHECK(min <= from && from <= max, "from is out of bounds for ", dtype);
+    TORCH_CHECK(min <= to_inc && to_inc <= max, "to - 1 is out of bounds for ", dtype);
+  });
+}
+
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator* generator) {
   auto gen = (RNG*)generator;
@@ -80,6 +90,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         TORCH_CHECK(from < to, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " >= to=", to);
       });
     }
+    check_from_to(from, to - 1, self.dtype());
     range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
@@ -102,6 +113,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     } else {
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }
+    check_from_to(from, to_inc, self.dtype());
     range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else {
