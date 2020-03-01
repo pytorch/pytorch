@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
@@ -21,6 +22,10 @@
 namespace torch {
 namespace jit {
 namespace {
+
+using graph_rewrite_helper::getValue;
+using graph_rewrite_helper::getIValue;
+using graph_rewrite_helper::replaceConvolutionWithConv2d;
 
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
 // Map of quantization parameter name and value
@@ -53,20 +58,6 @@ struct PatternsAndModules {
   const PatternInfo& pattern;
   script::Module packed_params_module;
 };
-
-static Value* getValue(
-    const std::string& name,
-    const std::unordered_map<const Value*, Value*>& match_vmap,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return match_vmap.at(vmap.at(name));
-}
-
-static c10::optional<IValue> getIValue(
-    const std::string& name,
-    const std::unordered_map<const Value*, Value*>& match_vmap,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return toIValue(getValue(name, match_vmap, vmap));
-}
 
 void fillQConfigMap(
     const script::Module& module,
@@ -570,45 +561,6 @@ bool isWeightOfConvOrLinear(Value* v) {
 script::Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
   return
     isWeightOfConvOrLinear(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
-}
-
-void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
-  std::string convolution = R"(
-graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %r = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
-        return (%r) )";
-
-  std::string conv2d = R"(
-graph(%a, %w, %b, %stride, %padding, %dilation, %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled):
-        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
-        return (%r) )";
-
-  // Filter the unsupported case
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto transposed_value =
-        getIValue("transposed", match_vmap, vmap).value().toBool();
-    auto benchmark_value =
-        getIValue("benchmark", match_vmap, vmap).value().toBool();
-    auto deterministic_value =
-        getIValue("deterministic", match_vmap, vmap).value().toBool();
-    auto cudnn_enabled_value =
-        getIValue("cudnn_enabled", match_vmap, vmap).value().toBool();
-    auto output_padding_value =
-        getIValue("output_padding", match_vmap, vmap).value().toIntList();
-
-    if (!transposed_value && !benchmark_value && !deterministic_value &&
-        cudnn_enabled_value && (output_padding_value[0] == 0) &&
-        (output_padding_value[1] == 0)) {
-      return true;
-    }
-    return false;
-  };
-
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(convolution, conv2d);
-  rewriter.runOnGraph(graph, filter);
 }
 
 ModuleMethodVector InsertObserversHelper::getInvokedMethods(
