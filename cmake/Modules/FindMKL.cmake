@@ -135,6 +135,10 @@ IF (EXISTS ${INTEL_MKL_DIR})
   IF (MSVC)
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
       "${INTEL_MKL_DIR}/lib/${iccvers}")
+    IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+      SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+        "${INTEL_MKL_DIR}/win-x64")
+    ENDIF ()
   ENDIF()
   IF (APPLE)
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
@@ -212,7 +216,7 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
       ELSE()
-        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
+        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library} ${_library}_dll)
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))
