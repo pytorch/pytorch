@@ -3,6 +3,7 @@ import warnings
 
 from torch._utils import _accumulate
 from torch import randperm
+from torch.random import manual_seed, get_rng_state, set_rng_state
 
 
 class Dataset(object):
@@ -260,16 +261,25 @@ class Subset(Dataset):
         return len(self.indices)
 
 
-def random_split(dataset, lengths):
+def random_split(dataset, lengths, random_state=None):
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+    Optionally fix the random seed for reproducible results.
 
     Arguments:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
+        random_state (int): seed used by the random number generator
     """
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
+    if random_state is not None:
+        state = get_rng_state()
+        manual_seed(random_state)
+
     indices = randperm(sum(lengths)).tolist()
-    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    splits = [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    if random_state is not None:
+        set_rng_state(state)
+    return splits

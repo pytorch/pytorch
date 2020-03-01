@@ -1,4 +1,4 @@
-from typing import TypeVar, Generic, Iterable, Sequence, List, Tuple
+from typing import TypeVar, Generic, Iterable, Sequence, List, Optional, Tuple
 from ... import Tensor
 
 T_co = TypeVar('T_co', covariant=True)
@@ -29,4 +29,4 @@ class Subset(Dataset[T_co]):
 
     def __init__(self, dataset: Dataset[T_co], indices: Sequence[int]) -> None: ...
 
-def random_split(dataset: Dataset[T], lengths: Sequence[int]) -> List[Subset[T]]: ...
+def random_split(dataset: Dataset[T], lengths: Sequence[int], random_state: Optional[int]) -> List[Subset[T]]: ...
