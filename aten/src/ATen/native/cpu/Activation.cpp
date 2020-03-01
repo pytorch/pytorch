@@ -227,6 +227,20 @@ void hardshrink_backward_cpu_kernel(TensorIterator& iter, Scalar lambd) {
   });
 }
 
+void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "hardshrink_backward_cpu", [&] {
+    auto min_val = min.to<scalar_t>();
+    auto max_val = max.to<scalar_t>();
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t grad_val, scalar_t self_val) {
+          return (self_val <= min_val || self_val >= max_val) ? scalar_t(0) : grad_val;
+        },
+        [=](Vec256<scalar_t> grad_val, Vec256<scalar_t> self_val) {
+          return ((self_val > min_val) & (self_val < max_val)) & grad_val;
+        });
+  });
+}
 } // namespace
 
 REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
@@ -236,6 +250,7 @@ REGISTER_DISPATCH(hardshrink_cpu_stub, &hardshrink_cpu_kernel);
 REGISTER_DISPATCH(
     hardshrink_backward_cpu_stub,
     &hardshrink_backward_cpu_kernel);
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 
 } // namespace native
 } // namespace at

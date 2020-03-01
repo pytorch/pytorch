@@ -296,7 +296,7 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.type() == tensor_table_[i].type() && t.equal(tensor_table_[i])) {
+      if (t.options().type_equal(tensor_table_[i].options()) && t.equal(tensor_table_[i])) {
         return i;
       }
     }

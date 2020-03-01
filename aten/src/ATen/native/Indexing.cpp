@@ -165,7 +165,7 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
 
   // For CUDA tensors, force all index tensors to have the same striding to
   // simplify the CUDA kernel.
-  if (indices.size() >= 2 && this->src.type().device_type() == kCUDA) {
+  if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
       for (size_t i = 0; i < indices.size(); i++) {
         indices[i] = indices[i].contiguous();
@@ -251,8 +251,8 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   if (indices.size() > (size_t)self.dim()) {
     AT_INDEX_ERROR("too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  if (accumulate && self.type().device_type() == kCUDA) {
-      index_put_accum_stub(self.type().device_type(), self, indices, value, unsafe);
+  if (accumulate && self.device().type() == kCUDA) {
+      index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
   auto info = make_info(self, indices);

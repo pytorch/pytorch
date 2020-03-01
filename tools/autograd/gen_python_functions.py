@@ -656,7 +656,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             }
             python_binding_arguments.append(dtype_arg)
         if is_factory_function or is_like_or_new_function_with_options:
-            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_or_new_function_with_options else None
+            py_default_layout = '*torch::getLayout(self.options().backend())' if is_like_or_new_function_with_options else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',

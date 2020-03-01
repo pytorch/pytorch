@@ -1297,7 +1297,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
   // tensors must have the same device, layout and type.
   assertLayoutMatch(invalidArgument, tensors);
   if (!std::all_of(tensors.begin(), tensors.end(), [&](at::Tensor& t) {
-        return t.type() == tensors[0].type();
+        return t.options().type_equal(tensors[0].options());
       })) {
     invalidArgument("tensors must all have the same type");
   }
@@ -1670,11 +1670,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
   assertDense(invalidArgument, inputs);
 
   // Expect all input/output tensors to have the same type and sizes
-  const auto& type = inputs[0].type();
+  const auto& options = inputs[0].options();
   const auto& sizes = inputs[0].sizes();
-  assertTypeAndSizesMatch(invalidArgument, inputs, type, sizes);
+  assertTypeAndSizesMatch(invalidArgument, inputs, options, sizes);
   for (size_t i = 0; i < outputs.size(); i++) {
-    assertTypeAndSizesMatch(invalidArgument, outputs[i], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[i], options, sizes);
   }
 
   const auto& device = inputs[0].device();
@@ -1807,11 +1807,11 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
             " (expected length " + toString(expected) + ", got " +
             toString(actual) + ")");
       }
-      if (input_list[i].type() != output_list[i].type()) {
+      if (!input_list[i].options().type_equal(output_list[i].options())) {
         invalidArgument(
             "invalid tensor type at index " + std::to_string(i) +
-            " (expected " + input_list[i].type().toString() + ", got " +
-            output_list[i].type().toString() + ")");
+            " (expected " + input_list[i].toString() + ", got " +
+            output_list[i].toString() + ")");
       }
     }
   }
@@ -1992,9 +1992,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
       invalidArgument(ss.str());
     }
 
-    const auto& type = inputs[0].type();
+    const auto& options = inputs[0].options();
     const auto& sizes = inputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, outputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, outputs[0], options, sizes);
   } else {
     if (outputs.size() != 0) {
       invalidArgument("requires empty output on non-root");
@@ -2178,9 +2178,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
          << ", same as size of the process group.";
       invalidArgument(ss.str());
     }
-    const auto& type = outputs[0].type();
+    const auto& options = outputs[0].options();
     const auto& sizes = outputs[0].sizes();
-    assertTypeAndSizesMatch(invalidArgument, inputs[0], type, sizes);
+    assertTypeAndSizesMatch(invalidArgument, inputs[0], options, sizes);
   } else {
     if (inputs.size() != 0) {
       invalidArgument("requires empty input on non-root");

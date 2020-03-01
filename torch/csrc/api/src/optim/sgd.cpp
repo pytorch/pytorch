@@ -50,13 +50,11 @@ void SGD::step() {
 }
 
 void SGD::save(serialize::OutputArchive& archive) const {
-  optim::serialize(archive, "momentum_buffers", momentum_buffers);
-  optim::serialize(archive, "iteration_", iteration_);
+  serialize(*this, archive);
 }
 
 void SGD::load(serialize::InputArchive& archive) {
-  optim::serialize(archive, "momentum_buffers", momentum_buffers);
-  optim::serialize(archive, "iteration_", iteration_);
+  serialize(*this, archive);
 }
 
 int64_t SGD::iteration() const {

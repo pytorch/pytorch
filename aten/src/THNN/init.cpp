@@ -67,9 +67,6 @@
 #include <THNN/generic/ELU.c>
 #include <TH/THGenerateFloatTypes.h>
 
-#include <THNN/generic/HardTanh.c>
-#include <TH/THGenerateFloatTypes.h>
-
 #include <THNN/generic/GatedLinearUnit.c>
 #include <TH/THGenerateFloatTypes.h>
 

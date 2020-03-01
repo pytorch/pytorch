@@ -1021,28 +1021,43 @@ void testAliasRegistration() {
     ASSERT_TRUE(aliasDb.mayAlias(a, b));
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor) -> at::Tensor {
+              return at::rand({2, 2});
+            })
+            .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+
+    const auto rand_op = Symbol::fromQualString("foo::rand3");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
-                    return at::rand({2, 2});
-                  })
-                  .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+        [&graph] {
+          AliasDb aliasDb(graph);
         },
         "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
+        torch::RegisterOperators::options()
+            .catchAllKernel([](at::Tensor) -> at::Tensor {
+              return at::rand({2, 2});
+            })
+            .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+    const auto rand_op = Symbol::fromQualString("foo::rand4");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel([](at::Tensor) -> at::Tensor {
-                    return at::rand({2, 2});
-                  })
-                  .aliasAnalysis(AliasAnalysisKind::CONSERVATIVE));
+        [&graph] {
+          AliasDb aliasDb(graph);
         },
         "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
@@ -1138,26 +1153,40 @@ void testAliasRegistration() {
     ASSERT_FALSE(aliasDb.mayAlias(a, b));
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
+        torch::RegisterOperators::options()
+            .catchAllKernel(
+                [](at::Tensor t) -> at::Tensor { return t * 2; })
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+    const auto rand_op = Symbol::fromQualString("foo::rand11");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel(
-                      [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+        [&graph] {
+          AliasDb aliasDb(graph);
         },
         "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }
   {
+    auto registry = torch::RegisterOperators().op(
+        "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
+        torch::RegisterOperators::options()
+            .catchAllKernel(
+                [](at::Tensor t) -> at::Tensor { return t * 2; })
+            .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+    const auto rand_op = Symbol::fromQualString("foo::rand12");
+    auto graph = std::make_shared<Graph>();
+    auto a = graph->addInput();
+    graph->insert(rand_op, {a});
+
+    // Registration time is okay, but throw exception when fetch from registration.
     expectThrows<c10::Error>(
-        [] {
-          torch::RegisterOperators().op(
-              "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
-              torch::RegisterOperators::options()
-                  .catchAllKernel(
-                      [](at::Tensor t) -> at::Tensor { return t * 2; })
-                  .aliasAnalysis(AliasAnalysisKind::PURE_FUNCTION));
+        [&graph] {
+          AliasDb aliasDb(graph);
         },
         "Tried to register operator foo::rand12(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
   }

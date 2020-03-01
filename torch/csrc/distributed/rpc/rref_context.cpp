@@ -71,7 +71,7 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
           << "GC has deleted them before calling shutdown(): \n"
           << ss.str();
     } else {
-      AT_ERROR(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
 }

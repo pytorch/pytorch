@@ -88,7 +88,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
 Tensor pinverse(const Tensor& self, double rcond) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
-              "pinverse(", self.type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of floating types");
   if (self.numel() == 0) {
     // Match NumPy
@@ -118,7 +118,7 @@ static inline Tensor _matrix_rank_helper(const Tensor& self, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -127,7 +127,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() == 2,
-              "matrix_rank(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+              "matrix_rank(", self.scalar_type(), "{", self.sizes(), "}): expected a 2D tensor "
               "of floating types");
 
   Tensor S = _matrix_rank_helper(self, symmetric);
@@ -479,7 +479,7 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
 
 Tensor matrix_power(const Tensor& a, int64_t n) {
   TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
-              "matrix_power(", a.type(), "{", a.sizes(), "}): expected a tensor "
+              "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of floating types with dim at least 2");
   if (n == 0) {
     return a.clone(at::MemoryFormat::Contiguous).copy_(at::eye(a.size(-2), a.options()).expand_as(a));

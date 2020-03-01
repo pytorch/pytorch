@@ -69,6 +69,14 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_debug_info",
+              &RpcAgent::getDebugInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_metrics",
+              &RpcAgent::getMetrics,
               py::call_guard<py::gil_scoped_release>());
 
   auto pyRRef =

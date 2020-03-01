@@ -65,11 +65,13 @@ struct maybe_real<true, src_t> {
 
 
 template <typename dest_t, typename src_t>
-C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
-  constexpr bool real = needs_real<dest_t, src_t>::value;
-  return static_cast<dest_t>(
-    static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
-}
+struct static_cast_with_inter_type {
+  C10_HOST_DEVICE static inline dest_t apply(src_t src) {
+    constexpr bool real = needs_real<dest_t, src_t>::value;
+    return static_cast<dest_t>(
+      static_cast<inter_copy_type_t<dest_t>>(maybe_real<real, src_t>::apply(src)));
+  }
+};
 
 // Dynamic type casting utils:
 // - fetch_and_cast
@@ -124,7 +126,7 @@ C10_HOST_DEVICE inline dest_t static_cast_with_inter_type(src_t src) {
 #endif
 
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
-#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t>(*(const type *)ptr);
+#define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast_with_inter_type<dest_t, type>::apply(*(const type *)ptr);
 template<typename dest_t>
 C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
   switch (src_type) {
@@ -136,7 +138,7 @@ C10_HOST_DEVICE inline dest_t fetch_and_cast(const ScalarType src_type, const vo
 }
 
 // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
-#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type>(value); return;
+#define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast_with_inter_type<type, src_t>::apply(value); return;
 template<typename src_t>
 C10_HOST_DEVICE inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
   switch (dest_type) {

@@ -42,7 +42,7 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
       using dest_t = scalar_t;
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, iter.dtype(1), "copy_", [&] {
-        cpu_kernel(iter, c10::static_cast_with_inter_type<dest_t, scalar_t>);
+        cpu_kernel(iter, c10::static_cast_with_inter_type<dest_t, scalar_t>::apply);
       });
     });
   }

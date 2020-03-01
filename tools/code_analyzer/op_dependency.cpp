@@ -99,8 +99,8 @@ struct RegexOpt {
   };
 };
 
-static RegexOpt FunctionSchemaPatternLoc;
-static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
+RegexOpt FunctionSchemaPatternLoc;
+cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     "op_schema_pattern",
     cl::desc("Regular expression used to identify aten op schema strings. "
              "Example: -op_schema_pattern '^(aten|quantized)::[^ ]+'"),
@@ -108,8 +108,8 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> FunctionSchemaPattern(
     cl::Required,
     cl::ValueRequired);
 
-static RegexOpt OpRegistrationPatternLoc;
-static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
+RegexOpt OpRegistrationPatternLoc;
+cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
     "op_register_pattern",
     cl::desc("Regular expression used to identify c10 op registration API. "
              "Example: -op_register_pattern 'c10::RegisterOperators::op'"),
@@ -117,8 +117,8 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> OpRegistrationPattern(
     cl::Required,
     cl::ValueRequired);
 
-static RegexOpt OpInvocationPatternLoc;
-static cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
+RegexOpt OpInvocationPatternLoc;
+cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     "op_invoke_pattern",
     cl::desc("Regular expression used to identify c10 op invocation API. "
              "Example: -op_invoke_pattern 'c10::Dispatcher::findSchema'"),
@@ -126,39 +126,39 @@ static cl::opt<RegexOpt, true, cl::parser<std::string>> OpInvocationPattern(
     cl::Required,
     cl::ValueRequired);
 
-enum OutputFormatType { Dot, YAML };
-static cl::opt<OutputFormatType> OutputFormat(
+enum class OutputFormatType { Dot, YAML };
+cl::opt<OutputFormatType> OutputFormat(
     "format",
     cl::desc("Output format."),
-    cl::values(clEnumValN(Dot, "dot", "print as dot"),
-               clEnumValN(YAML, "yaml", "print as yaml")));
+    cl::values(clEnumValN(OutputFormatType::Dot, "dot", "print as dot"),
+               clEnumValN(OutputFormatType::YAML, "yaml", "print as yaml")));
 
-static cl::opt<bool> TransitiveClosure(
+cl::opt<bool> TransitiveClosure(
     "closure",
     cl::desc("Output transitive closure."),
     cl::init(true));
 
-static cl::opt<int> Verbose(
+cl::opt<int> Verbose(
     "v",
     cl::desc("Verbose level"),
     cl::Hidden,
     cl::init(0));
 
-static cl::opt<bool> DebugPath(
+cl::opt<bool> DebugPath(
     "debug_path",
     cl::desc("Output path between two nodes."),
     cl::init(false));
 
-typedef std::set<std::string> SET;
-typedef std::unordered_map<std::string, std::set<std::string>> GRAPH;
-typedef std::unordered_map<Value*, Value*> VALUE_MAP;
-typedef std::unordered_set<Value*> VALUE_SET;
+using SET = std::set<std::string>;
+using GRAPH = std::unordered_map<std::string, std::set<std::string>>;
+using VALUE_MAP = std::unordered_map<Value*, Value*>;
+using VALUE_SET = std::unordered_set<Value*>;
 
 // SRC -> Inverse "tree" from all reachable destinations back to SRC, e.g.:
 // (DEST-1 -> PREV_11, PREV_11 -> PREV_12, ..., PREV_1n -> SRC)
 // (DEST-2 -> PREV_21, PREV_21 -> PREV_22, ..., PREV_2n -> SRC)
-typedef std::unordered_map<std::string,
-                           std::unordered_map<std::string, std::string>> PATH;
+using PATH = std::unordered_map<std::string,
+                                std::unordered_map<std::string, std::string>>;
 
 // Referenced the logic in llvm-cxxfilt.cpp.
 std::string demangle(const std::string& mangled) {
