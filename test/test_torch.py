@@ -6058,8 +6058,6 @@ class TestTorchDeviceType(TestCase):
         for dtype in float_types + int_types:
             if dtype in float_types:
                 a = torch.randn(100, 90).type(dtype).to(device)
-            if dtype == torch.uint8:
-                a = torch.randint(0, 256, (100, 90), dtype=dtype, device=device)
             else:
                 a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
             zeros = torch.Tensor().type(dtype).resize_as_(a).zero_().to(device)
@@ -10379,9 +10377,6 @@ class TestTorchDeviceType(TestCase):
             elif dt == torch.half and device == 'cpu':
                 # fix once random is implemented for Half on CPU
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.bool:
-                x = torch.randint(2, (0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
                 x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
@@ -10475,9 +10470,6 @@ class TestTorchDeviceType(TestCase):
                 elif dt == torch.half and device == "cpu":
                     # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.bool:
-                    self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
                 else:
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
@@ -13988,43 +13980,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
 
-    def test_random_from_to_bool(self, device):
-        size = 2000
-
-        int64_min_val = torch.iinfo(torch.int64).min
-        int64_max_val = torch.iinfo(torch.int64).max
-
-        min_val = 0
-        max_val = 1
-
-        froms = [int64_min_val, -42, min_val, max_val, max_val + 1, 42]
-        tos = [-42, min_val, max_val, max_val + 1, 42, int64_max_val]
-
-        for from_ in froms:
-            for to_ in tos:
-                t = torch.empty(size, dtype=torch.bool, device=device)
-                if to_ > from_:
-                    if not (min_val <= from_ <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "from is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    elif not (min_val <= (to_ - 1) <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "to - 1 is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    else:
-                        t.random_(from_, to_)
-                else:
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
-                        lambda: t.random_(from_, to_)
-                    )
-
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
             torch.int64, torch.float, torch.double, torch.bfloat16)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
@@ -14037,26 +13992,22 @@ class TestTorchDeviceType(TestCase):
         size = 2000
         alpha = 0.1
 
-        int64_min_val = torch.iinfo(torch.int64).min
-        int64_max_val = torch.iinfo(torch.int64).max
-
         t = torch.empty(size, dtype=dtype, device=device)
 
         if dtype in [torch.float, torch.double, torch.half]:
-            from_ = int(max(torch.finfo(dtype).min, int64_min_val))
-            to_inc_ = int(min(torch.finfo(dtype).max, int64_max_val))
+            from_ = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max))
         elif dtype == torch.bfloat16:
-            from_ = int(max(-3.389531389251535e+38, int64_min_val))
-            to_inc_ = int(min(3.389531389251535e+38, int64_max_val))
+            from_ = int(max(-3.389531389251535e+38, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(3.389531389251535e+38, torch.iinfo(torch.int64).max))
         else:
-            from_ = int(max(torch.iinfo(dtype).min, int64_min_val))
-            to_inc_ = int(min(torch.iinfo(dtype).max, int64_max_val))
+            from_ = int(max(torch.iinfo(dtype).min, torch.iinfo(torch.int64).min))
+            to_inc_ = int(min(torch.iinfo(dtype).max, torch.iinfo(torch.int64).max))
         range_ = to_inc_ - from_ + 1
 
         t.random_(from_, None)
-        delta = max(1, alpha * range_)
-        self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-        self.assertTrue((to_inc_ - delta) < t.to(torch.double).max() <= to_inc_)
+        self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
+        self.assertTrue((to_inc_ - alpha * range_) < t.to(torch.double).max() <= to_inc_)
 
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
             torch.int64, torch.float, torch.double, torch.bfloat16)
@@ -14070,69 +14021,33 @@ class TestTorchDeviceType(TestCase):
         size = 2000
         alpha = 0.1
 
-        int64_min_val = torch.iinfo(torch.int64).min
-        int64_max_val = torch.iinfo(torch.int64).max
-
         if dtype in [torch.float, torch.double, torch.half]:
-            min_val = int(max(torch.finfo(dtype).min, int64_min_val))
-            max_val = int(min(torch.finfo(dtype).max, int64_max_val))
+            min_val = int(max(torch.finfo(dtype).min, torch.iinfo(torch.int64).min))
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max / 2))
             froms = [min_val, -42, 0, 42]
-            tos = [-42, 0, 42, max_val >> 1]
-        elif dtype == torch.bfloat16:
-            min_val = int64_min_val
-            max_val = int64_max_val
-            froms = [min_val, -42, 0, 42]
-            tos = [-42, 0, 42, max_val >> 1]
+            tos = [-42, 0, 42, max_val]
         elif dtype == torch.uint8:
             min_val = torch.iinfo(dtype).min
             max_val = torch.iinfo(dtype).max
-            froms = [int64_min_val, -42, min_val - 1, min_val, 42, max_val, max_val + 1]
-            tos = [-42, min_val - 1, min_val, 42, max_val, max_val + 1, int64_max_val]
-        elif dtype == torch.int64:
-            min_val = int64_min_val
-            max_val = int64_max_val
-            froms = [min_val, -42, 0, 42]
-            tos = [-42, 0, 42, max_val]
+            froms = [min_val, 42]
+            tos = [42, max_val]
+        elif dtype == torch.bfloat16:
+            froms = [24]
+            tos = [42]
         else:
             min_val = torch.iinfo(dtype).min
             max_val = torch.iinfo(dtype).max
-            froms = [int64_min_val, min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1]
-            tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
+            froms = [min_val, -42, 0, 42]
+            tos = [-42, 0, 42, max_val]
 
         for from_ in froms:
             for to_ in tos:
-                t = torch.empty(size, dtype=dtype, device=device)
                 if to_ > from_:
-                    if not (min_val <= from_ <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "from is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    elif not (min_val <= (to_ - 1) <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "to - 1 is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    else:
-                        t.random_(from_, to_)
-                        range_ = to_ - from_
-                        delta = max(1, alpha * range_)
-                        if dtype == torch.bfloat16:
-                            # Less strict checks because of rounding errors
-                            # TODO investigate rounding errors
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
-                        else:
-                            self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                            self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
-                else:
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
-                        lambda: t.random_(from_, to_)
-                    )
+                    range_ = to_ - from_
+                    t = torch.empty(size, dtype=dtype, device=device)
+                    t.random_(from_, to_)
+                    self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
+                    self.assertTrue((to_ - alpha * range_) < t.to(torch.double).max() < to_)
 
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
             torch.int64, torch.float, torch.double, torch.bfloat16)
@@ -14146,58 +14061,20 @@ class TestTorchDeviceType(TestCase):
         size = 2000
         alpha = 0.1
 
-        int64_min_val = torch.iinfo(torch.int64).min
-        int64_max_val = torch.iinfo(torch.int64).max
-
         if dtype in [torch.float, torch.double, torch.half]:
-            min_val = int(max(torch.finfo(dtype).min, int64_min_val))
-            max_val = int(min(torch.finfo(dtype).max, int64_max_val))
-            tos = [-42, 0, 42, max_val >> 1]
+            max_val = int(min(torch.finfo(dtype).max, torch.iinfo(torch.int64).max) / 2)
+            tos = [42, max_val]
         elif dtype == torch.bfloat16:
-            min_val = int64_min_val
-            max_val = int64_max_val
-            tos = [-42, 0, 42, max_val >> 1]
-        elif dtype == torch.uint8:
-            min_val = torch.iinfo(dtype).min
-            max_val = torch.iinfo(dtype).max
-            tos = [-42, min_val - 1, min_val, 42, max_val, max_val + 1, int64_max_val]
-        elif dtype == torch.int64:
-            min_val = int64_min_val
-            max_val = int64_max_val
-            tos = [-42, 0, 42, max_val]
+            tos = [42]
         else:
-            min_val = torch.iinfo(dtype).min
             max_val = torch.iinfo(dtype).max
-            tos = [min_val - 1, min_val, -42, 0, 42, max_val, max_val + 1, int64_max_val]
+            tos = [42, max_val]
 
-        from_ = 0
         for to_ in tos:
             t = torch.empty(size, dtype=dtype, device=device)
-            if to_ > from_:
-                if not (min_val <= (to_ - 1) <= max_val):
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "to - 1 is out of bounds",
-                        lambda: t.random_(from_, to_)
-                    )
-                else:
-                    t.random_(to_)
-                    range_ = to_ - from_
-                    delta = max(1, alpha * range_)
-                    if dtype == torch.bfloat16:
-                        # Less strict checks because of rounding errors
-                        # TODO investigate rounding errors
-                        self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                        self.assertTrue((to_ - delta) < t.to(torch.double).max() <= to_)
-                    else:
-                        self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
-                        self.assertTrue((to_ - delta) <= t.to(torch.double).max() < to_)
-            else:
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "random_ expects 'from' to be less than 'to', but got from=" + str(from_) + " >= to=" + str(to_),
-                    lambda: t.random_(from_, to_)
-                )
+            t.random_(to_)
+            self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_)
+            self.assertTrue((to_ - alpha * to_) < t.to(torch.double).max() < to_)
 
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
             torch.int64, torch.float, torch.double, torch.bfloat16)
