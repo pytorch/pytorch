@@ -52,7 +52,6 @@ white_list = [
     ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
     ('prim::Constant', datetime.date(2020, 3, 1)),
     ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
-    ('_aten::format', datetime.date(2020, 3, 1)),
     ('aten::random_', datetime.date(2020, 3, 1)),
     ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
     ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
@@ -63,6 +62,7 @@ white_list = [
     ('aten::index', datetime.date(2020, 3, 6)),
     ('aten::_index_put_impl', datetime.date(2020, 3, 6)),
     ('aten::index_put_', datetime.date(2020, 3, 6)),
+    ('_aten', datetime.date(2020, 4, 1)),
 ]
 
 
