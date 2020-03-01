@@ -763,6 +763,8 @@ void testGPU_FusionTwoAdds() {
   
   fusion.print();
 }
+
+
 void testGPU_FusionCodeGen() {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -771,6 +773,7 @@ void testGPU_FusionCodeGen() {
   dom.push_back(new IterDomain(new Int()));
   dom.push_back(new IterDomain(new Int()));
   dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int(), ParallelType::Serial, true));
 
   TensorDomain* td = new TensorDomain(dom);
   TensorView* tv0 = new TensorView(td, DataType::Float);
@@ -795,7 +798,7 @@ void testGPU_FusionCodeGen() {
 
   std::cout
   << "Code gen-ing:\n"
-  << "%TV0[ I0i{4} * I1, I0o, I2] compute_at( %TV1, 1 ) = 0f + 1f\n"
+  << "%TV0[ I0i{4} * I1, I0o, I2, R3] compute_at( %TV1, 1 ) = 0f + 1f\n"
   << "%TV1[ I0i{4} * I1, I0o, I2] compute_at( %TV2, 1 ) = %TV0 + 2f\n"
   << "%TV2[ I0i{4} * I1, I0o, I2i{2}, I2o]              = %TV1 + 3f\n"
   << ":::::::" << std::endl;

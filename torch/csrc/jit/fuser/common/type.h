@@ -48,7 +48,9 @@ enum class TORCH_API BinaryOpType {
   , Sub
   , Mul
   , Div
+  //Int operations, leave position oif Mod we depend on its location of first Int op
   , Mod
+  , LT
   , CeilDiv
 };
 

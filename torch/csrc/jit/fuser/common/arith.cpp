@@ -66,8 +66,15 @@ TORCH_API Val* unary_op(UnaryOpType type, Val* v1){
   return out;
 }
 
+//Mod, CeilDiv, and LT are considered Int only output operations
+//TODO: Should also support Bool only output operations
 TORCH_API Val* binary_op(BinaryOpType type, Val* v1, Val* v2){
   Val* out = promote_new(v1, v2);
+  if(type >= BinaryOpType::Mod){
+    if(out->getDataType().value() != DataType::Int)
+      out = new_val_like(out, DataType::Int);
+  } else
+    out = promote_new(v1, v2);
   Statement* expr = new BinaryOp(type, out, v1, v2);
   return out;
 }
@@ -92,9 +99,12 @@ TORCH_API Val* mod(Val* v1, Val* v2){
   return binary_op(BinaryOpType::Mod, v1, v2);
 }
 
+TORCH_API Val* lt(Val* v1, Val* v2){
+  return binary_op(BinaryOpType::LT, v1, v2);
+}
+
 TORCH_API Val* ceilDiv(Val* v1, Val* v2){
-  TORCH_CHECK(v1->getDataType().value() == DataType::Int
-      && v2->getDataType().value() == DataType::Int);
+  
   return binary_op(BinaryOpType::CeilDiv, v1, v2);
 }
 

@@ -32,39 +32,30 @@ std::ostream& CodeWrite::print_indices(
 
 std::ostream& CodeWrite::print(std::ostream& os, const TensorView* const tv) {
   TensorDomain* td = tv->domain();
+
+  const TensorView* tv2 = tv;
+
   if (producer && consumer != nullptr) {
     // get new reference so replay inline doesn't change the original.
     TensorView* tv_ = tv->clone();
-
     tv_->resetView();
-
     TransformReplay::fullReplay(consumer, tv_);
-
-    if (tv_->tensor() != nullptr) {
-      os << "%T" << tv_->tensor()->name();
-    } else {
-      os << "%TV" << tv_->name();
-    }
-
-    std::vector<Int*> indices =
-        IndexCompute::computeIndices(tv_, getLoopIndices());
-
-    print_indices(os, indices);
-
+    tv2 = tv_;
   } else if (producer) {
     throw std::runtime_error(
         "Could not find consumer for producer in CodeWrite.");
-  } else {
-    if (tv->tensor() != nullptr)
-      os << "%T" << tv->tensor()->name();
-    else
-      os << "%TV" << tv->name();
-
-    std::vector<Int*> indices =
-        IndexCompute::computeIndices(tv, getLoopIndices());
-
-    print_indices(os, indices);
   }
+
+  if (tv2->tensor() != nullptr) {
+    os << "%T" << tv2->tensor()->name();
+  } else {
+    os << "%TV" << tv2->name();
+  }
+
+  std::vector<Int*> indices =
+      IndexCompute::computeIndices(tv2, getLoopIndices());
+
+  print_indices(os, indices);
 
   return os;
 }
@@ -77,16 +68,43 @@ std::ostream& CodeWrite::print(std::ostream& os, const Val* const val) {
   return os << val;
 }
 
-std::ostream& CodeWrite::print(std::ostream& os, const UnaryOp* const uop) {
-  if (!parse_inline) {
-    print(os, uop->out());
-    os << " = ";
-  }
+bool CodeWrite::print_predicate(std::ostream& os, const Expr* const expr) {
+  //TensorView to base the predicate on:
+  TensorView* pred_tv  = static_cast<TensorView*>(expr->output(0));
+  
+  std::vector<Int*> indices =
+    IndexCompute::computeIndices(pred_tv, getLoopIndices());
 
-  if (uop->out()->getValType().value() == ValType::TensorView) {
-    consumer = static_cast<TensorView*>(uop->out());
-    producer = true;
+  std::vector<Int*> preds = computePredicates(pred_tv, indices);
+
+  if(preds.size() == 0)
+    return false;
+  
+  std::cout<<"if( ";
+  for(decltype(preds.size()) i{0}; i < preds.size(); i++){
+    print_inline(std::cout, preds[i]);
+    if(i != preds.size() - 1)
+      std::cout<<" && ";
   }
+  std::cout << ") {\n";
+  return true;
+  
+
+
+}
+
+//Already filtered so output is a TensorView
+std::ostream& CodeWrite::print(std::ostream& os, const UnaryOp* const uop) {
+
+  consumer = static_cast<TensorView*>(uop->out());
+
+  //Print predicates, first need to find predicate.
+  bool predicated = print_predicate(os, uop);
+  if(predicated) ++extra_indent;
+
+  print(os, consumer) << " = " ;
+
+  producer = true;
 
   if (auto inline_uop = inline_op_str(uop->type())) {
     os << inline_uop.value();
@@ -96,25 +114,27 @@ std::ostream& CodeWrite::print(std::ostream& os, const UnaryOp* const uop) {
     print(os, uop->in());
     os << ")";
   }
+
   consumer = nullptr;
   producer = false;
 
-  if (!parse_inline)
-    os << std::endl;
+  if(predicated)
+    --extra_indent;
 
   return os;
 }
 
 std::ostream& CodeWrite::print(std::ostream& os, const BinaryOp* const bop) {
-  if (!parse_inline) {
-    print(os, bop->out());
-    os << " = ";
-  }
 
-  if (bop->out()->getValType().value() == ValType::TensorView) {
-    consumer = static_cast<TensorView*>(bop->out());
-    producer = true;
-  }
+  //Print predicates, first need to find predicate.
+  bool predicated = print_predicate(os, bop);
+  if(predicated) ++extra_indent;
+
+  print(os, bop->out());
+  os << " = ";
+
+  consumer = static_cast<TensorView*>(bop->out());
+  producer = true;
 
   if (auto inline_bop = inline_op_str(bop->type())) {
     print(os, bop->lhs());
@@ -131,14 +151,14 @@ std::ostream& CodeWrite::print(std::ostream& os, const BinaryOp* const bop) {
   consumer = nullptr;
   producer = false;
 
-  if (!parse_inline)
-    os << std::endl;
+  if(predicated)
+    --extra_indent;
 
   return os;
 }
 
 void CodeWrite::indent() {
-  for (int i = 0; i < fors.size(); i++)
+  for (int i = 0; i < fors.size() + extra_indent; i++)
     std::cout << "  ";
 }
 
@@ -153,7 +173,7 @@ void CodeWrite::openFor(IterDomain* id) {
   fors.push_back(std::pair<Int*, Int*>{new Int(), id->size()});
 
   std::cout << "for( " << fors.back().first << " : ";
-  print_inline(std::cout, id->size());
+  print_inline(std::cout, id);
   std::cout << " ) {" << std::endl;
 }
 
@@ -202,18 +222,40 @@ void CodeWrite::updateView(TensorView* tv) {
 }
 
 void CodeWrite::handle(UnaryOp* uop) {
-  if (uop->out()->getValType().value() == ValType::TensorView) {
-    updateView(static_cast<TensorView*>(uop->out()));
-    indent();
-    print(std::cout, uop);
-  }
+  updateView(static_cast<TensorView*>(uop->out()));
+  indent();
+  print(std::cout, uop);
 }
+
 void CodeWrite::handle(BinaryOp* bop) {
-  if (bop->out()->getValType().value() == ValType::TensorView) {
-    updateView(static_cast<TensorView*>(bop->out()));
-    indent();
-    print(std::cout, bop);
+  updateView(static_cast<TensorView*>(bop->out()));
+  indent();
+  print(std::cout, bop);
+}
+
+//Grab BinaryOps and UnaryOps that have a TensorView output
+void CodeWrite::handle(Expr* expr){
+  if(expr->nOutputs() != 1){
+    for(auto out : expr->outputs())
+      if(out->getValType().value() == ValType::TensorView)
+        throw std::runtime_error(
+          "Cannot write code with multiple TensorView Outputs.");
   }
+  if(expr->output(0)->getValType().value() == ValType::TensorView){
+    switch(expr->getExprType().value()){
+      case(ExprType::BinaryOp):
+        handle(static_cast<BinaryOp*>(expr));
+        break;
+      case(ExprType::UnaryOp):
+        handle(static_cast<UnaryOp*>(expr));
+        break;
+      default:
+        throw std::runtime_error(
+          "CodeWrite found an ExprType it could not dispatch.");
+    }
+    return;
+  }
+  return;
 }
 
 void CodeWrite::traverse(

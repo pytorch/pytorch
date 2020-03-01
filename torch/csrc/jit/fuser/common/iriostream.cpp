@@ -175,7 +175,17 @@ std::ostream& operator<<(std::ostream& os, const Int* const i) {
   }
 }
 
+void check_inlineable(const IRInputOutput* const irio){
+  for(auto inp : irio->inputs())
+    TORCH_CHECK(inp->getValType().value() == ValType::Scalar);
+  TORCH_CHECK(irio->nOutputs() == 1)
+  TORCH_CHECK(irio->output(0)->getValType().value() == ValType::Scalar);
+}
+
 std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
+  if(print_inline_)
+    check_inlineable(uop);
+
   if(!print_inline_)
     os << uop->out() << " = ";
   if(auto inline_uop = inline_op_str(uop->type())) {
@@ -186,6 +196,9 @@ std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
 }
 
 std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
+  if(print_inline_)
+    check_inlineable(bop);
+
   if(!print_inline_)
     os << bop->out() << " = ";
   if(auto inline_bop = inline_op_str(bop->type())) {
