@@ -14074,8 +14074,8 @@ class TestTorchDeviceType(TestCase):
         int64_max_val = torch.iinfo(torch.int64).max
 
         if dtype in [torch.float, torch.double, torch.half]:
-            min_val = int(max(torch.finfo(dtype).min, int64_min_val))  #  = int64_min_val
-            max_val = int(min(torch.finfo(dtype).max, int64_max_val))  #  = int64_max_val
+            min_val = int(max(torch.finfo(dtype).min, int64_min_val))
+            max_val = int(min(torch.finfo(dtype).max, int64_max_val))
             froms = [min_val, -42, 0, 42]
             tos = [-42, 0, 42, max_val >> 1]
         elif dtype == torch.bfloat16:
@@ -14084,8 +14084,8 @@ class TestTorchDeviceType(TestCase):
             froms = [min_val, -42, 0, 42]
             tos = [-42, 0, 42, max_val >> 1]
         elif dtype == torch.uint8:
-            min_val = torch.iinfo(dtype).min  #  = 0
-            max_val = torch.iinfo(dtype).max  #  = 255
+            min_val = torch.iinfo(dtype).min
+            max_val = torch.iinfo(dtype).max
             froms = [int64_min_val, -42, min_val - 1, min_val, 42, max_val, max_val + 1]
             tos = [-42, min_val - 1, min_val, 42, max_val, max_val + 1, int64_max_val]
         elif dtype == torch.int64:
@@ -14150,16 +14150,16 @@ class TestTorchDeviceType(TestCase):
         int64_max_val = torch.iinfo(torch.int64).max
 
         if dtype in [torch.float, torch.double, torch.half]:
-            min_val = int(max(torch.finfo(dtype).min, int64_min_val))  #  = int64_min_val
-            max_val = int(min(torch.finfo(dtype).max, int64_max_val))  #  = int64_max_val
+            min_val = int(max(torch.finfo(dtype).min, int64_min_val))
+            max_val = int(min(torch.finfo(dtype).max, int64_max_val))
             tos = [-42, 0, 42, max_val >> 1]
         elif dtype == torch.bfloat16:
             min_val = int64_min_val
             max_val = int64_max_val
             tos = [-42, 0, 42, max_val >> 1]
         elif dtype == torch.uint8:
-            min_val = torch.iinfo(dtype).min  #  = 0
-            max_val = torch.iinfo(dtype).max  #  = 255
+            min_val = torch.iinfo(dtype).min
+            max_val = torch.iinfo(dtype).max
             tos = [-42, min_val - 1, min_val, 42, max_val, max_val + 1, int64_max_val]
         elif dtype == torch.int64:
             min_val = int64_min_val
