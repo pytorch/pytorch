@@ -9,6 +9,8 @@ namespace native {
 namespace xnnpack {
 namespace internal {
 
+Tensor allocate_padded_if_needed(const Tensor& input_contig);
+
 // TODO: Remove this function when at::native::empty() is modified to accept a
 // custom memory allocator.
 
