@@ -248,6 +248,11 @@ if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
     if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
       set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
     endif()
+    if (NOT DEFINED CLOG_SOURCE_DIR)
+      # XNNPACK gets clog from inside the cpuinfo repository,
+      # so lets just do the same for now.
+      set(CLOG_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo/deps/clog" CACHE STRING "cpuinfo source directory")
+    endif()
 
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
@@ -274,6 +279,26 @@ endif()
 # subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
 # does so, which will prevent it from installing the default pthreadpool library.
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK OR USE_XNNPACK))
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
+
+  IF(NOT TARGET pthreadpool)
+    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+      EXCLUDE_FROM_ALL)
+  ENDIF()
+endif()
+
+# XNNPACK has not option of like QNNPACK_CUSTOM_THREADPOOL
+# that allows us to hijack pthreadpool interface.
+# Thus not doing this ends up building pthreadpool as well as
+# the internal implemenation of pthreadpool which results in symbol conflicts.
+if (USE_XNNPACK)
   if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
     set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")

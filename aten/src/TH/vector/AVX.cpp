@@ -24,59 +24,6 @@ void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
   }
 }
 
-void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
-  ptrdiff_t i;
-  __m256d YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-8); i+=8) {
-    YMM0 = _mm256_loadu_pd(x+i);
-    YMM1 = _mm256_loadu_pd(x+i+4);
-    YMM2 = _mm256_loadu_pd(y+i);
-    YMM3 = _mm256_loadu_pd(y+i+4);
-    YMM2 = _mm256_div_pd(YMM0, YMM2);
-    YMM3 = _mm256_div_pd(YMM1, YMM3);
-    _mm256_storeu_pd(z+i, YMM2);
-    _mm256_storeu_pd(z+i+4, YMM3);
-  }
-  for (; i<(n); i++) {
-    z[i] = x[i] / y[i];
-  }
-}
-
-void THDoubleVector_divs_AVX(double *y, const double *x, const double c, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
-  ptrdiff_t i;
-  __m256d YMM15 = _mm256_set_pd(c, c, c, c);
-  __m256d YMM0, YMM1;
-  for (i=0; i<=((n)-8); i+=8) {
-    YMM0 = _mm256_loadu_pd(x+i);
-    YMM1 = _mm256_loadu_pd(x+i+4);
-    YMM0 = _mm256_div_pd(YMM0, YMM15);
-    YMM1 = _mm256_div_pd(YMM1, YMM15);
-    _mm256_storeu_pd(y+i, YMM0);
-    _mm256_storeu_pd(y+i+4, YMM1);
-  }
-  for (; i<(n); i++) {
-    y[i] = x[i] / c;
-  }
-}
-
-void THDoubleVector_cmul_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256d YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-8); i+=8) {
-    YMM0 = _mm256_loadu_pd(x+i);
-    YMM1 = _mm256_loadu_pd(x+i+4);
-    YMM2 = _mm256_loadu_pd(y+i);
-    YMM3 = _mm256_loadu_pd(y+i+4);
-    YMM2 = _mm256_mul_pd(YMM0, YMM2);
-    YMM3 = _mm256_mul_pd(YMM1, YMM3);
-    _mm256_storeu_pd(z+i, YMM2);
-    _mm256_storeu_pd(z+i+4, YMM3);
-  }
-  for (; i<n; i++) {
-    z[i] = x[i] * y[i];
-  }
-}
-
 void THDoubleVector_muls_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
@@ -91,39 +38,6 @@ void THDoubleVector_muls_AVX(double *y, const double *x, const double c, const p
   }
   for (; i<n; i++) {
     y[i] = x[i] * c;
-  }
-}
-
-void THDoubleVector_cadd_AVX(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256d YMM15 = _mm256_set_pd(c, c, c, c);
-  __m256d YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-4); i+=4) {
-    YMM0 = _mm256_loadu_pd(y+i);
-    YMM1 = _mm256_loadu_pd(x+i);
-    YMM2 = _mm256_mul_pd(YMM0, YMM15);
-    YMM3 = _mm256_add_pd(YMM1, YMM2);
-    _mm256_storeu_pd(z+i, YMM3);
-  }
-  for (; i<(n); i++) {
-    z[i] = x[i] + y[i] * c;
-  }
-}
-
-void THDoubleVector_adds_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256d YMM15 = _mm256_set_pd(c, c, c, c);
-  __m256d YMM0, YMM1;
-  for (i=0; i<=((n)-8); i+=8) {
-    YMM0 = _mm256_loadu_pd(x+i);
-    YMM1 = _mm256_loadu_pd(x+i+4);
-    YMM0 = _mm256_add_pd(YMM0, YMM15);
-    YMM1 = _mm256_add_pd(YMM1, YMM15);
-    _mm256_storeu_pd(y+i, YMM0);
-    _mm256_storeu_pd(y+i+4, YMM1);
-  }
-  for (; i<(n); i++) {
-    y[i] = x[i] + c;
   }
 }
 
@@ -143,59 +57,6 @@ void THFloatVector_fill_AVX(float *x, const float c, const ptrdiff_t n) {
   }
 }
 
-void THFloatVector_cdiv_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
-  ptrdiff_t i;
-  __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-16); i+=16) {
-    YMM0 = _mm256_loadu_ps(x+i);
-    YMM1 = _mm256_loadu_ps(x+i+8);
-    YMM2 = _mm256_loadu_ps(y+i);
-    YMM3 = _mm256_loadu_ps(y+i+8);
-    YMM2 = _mm256_div_ps(YMM0, YMM2);
-    YMM3 = _mm256_div_ps(YMM1, YMM3);
-    _mm256_storeu_ps(z+i, YMM2);
-    _mm256_storeu_ps(z+i+8, YMM3);
-  }
-  for (; i<(n); i++) {
-    z[i] = x[i] / y[i];
-  }
-}
-
-void THFloatVector_divs_AVX(float *y, const float *x, const float c, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
-  ptrdiff_t i;
-  __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
-  __m256 YMM0, YMM1;
-  for (i=0; i<=((n)-16); i+=16) {
-    YMM0 = _mm256_loadu_ps(x+i);
-    YMM1 = _mm256_loadu_ps(x+i+8);
-    YMM0 = _mm256_div_ps(YMM0, YMM15);
-    YMM1 = _mm256_div_ps(YMM1, YMM15);
-    _mm256_storeu_ps(y+i, YMM0);
-    _mm256_storeu_ps(y+i+8, YMM1);
-  }
-  for (; i<(n); i++) {
-    y[i] = x[i] / c;
-  }
-}
-
-void THFloatVector_cmul_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-16); i+=16) {
-    YMM0 = _mm256_loadu_ps(x+i);
-    YMM1 = _mm256_loadu_ps(x+i+8);
-    YMM2 = _mm256_loadu_ps(y+i);
-    YMM3 = _mm256_loadu_ps(y+i+8);
-    YMM2 = _mm256_mul_ps(YMM0, YMM2);
-    YMM3 = _mm256_mul_ps(YMM1, YMM3);
-    _mm256_storeu_ps(z+i, YMM2);
-    _mm256_storeu_ps(z+i+8, YMM3);
-  }
-  for (; i<n; i++) {
-    z[i] = x[i] * y[i];
-  }
-}
-
 void THFloatVector_muls_AVX(float *y, const float *x, const float c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
@@ -210,39 +71,6 @@ void THFloatVector_muls_AVX(float *y, const float *x, const float c, const ptrdi
   }
   for (; i<n; i++) {
     y[i] = x[i] * c;
-  }
-}
-
-void THFloatVector_cadd_AVX(float *z, const float *x, const float *y, const float c, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
-  __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i=0; i<=((n)-8); i+=8) {
-    YMM0 = _mm256_loadu_ps(y+i);
-    YMM1 = _mm256_loadu_ps(x+i);
-    YMM2 = _mm256_mul_ps(YMM0, YMM15);
-    YMM3 = _mm256_add_ps(YMM1, YMM2);
-    _mm256_storeu_ps(z+i, YMM3);
-  }
-  for (; i<(n); i++) {
-    z[i] = x[i] + y[i] * c;
-  }
-}
-
-void THFloatVector_adds_AVX(float *y, const float *x, const float c, const ptrdiff_t n) {
-  ptrdiff_t i;
-  __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
-  __m256 YMM0, YMM1;
-  for (i=0; i<=((n)-16); i+=16) {
-    YMM0 = _mm256_loadu_ps(x+i);
-    YMM1 = _mm256_loadu_ps(x+i+8);
-    YMM0 = _mm256_add_ps(YMM0, YMM15);
-    YMM1 = _mm256_add_ps(YMM1, YMM15);
-    _mm256_storeu_ps(y+i, YMM0);
-    _mm256_storeu_ps(y+i+8, YMM1);
-  }
-  for (; i<(n); i++) {
-    y[i] = x[i] + c;
   }
 }
 
