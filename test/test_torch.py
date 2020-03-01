@@ -10374,9 +10374,6 @@ class TestTorchDeviceType(TestCase):
             if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
                 # TODO: https://github.com/pytorch/pytorch/issues/33793
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.bool:
-                x = torch.randint(2, (0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
             else:
                 x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
@@ -10467,9 +10464,6 @@ class TestTorchDeviceType(TestCase):
                 if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
                     # TODO: https://github.com/pytorch/pytorch/issues/33793
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.bool:
-                    self.assertEqual(shape, torch.randint(2, shape, device=device, dtype=dt).shape)
-                    self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 2).shape)
                 else:
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
