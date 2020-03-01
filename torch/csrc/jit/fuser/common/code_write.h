@@ -25,6 +25,36 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
   return os;
 }
 
+bool hasPredicates(const TensorView* tv, const std::vector<Int*> _indices){
+  std::vector<Int*> preds;
+  for(auto ind : _indices)
+    if(FusionGuard::getCurFusion()->origin(ind) != nullptr)
+      return true;
+  return false;
+}
+
+
+std::vector<Int*> computePredicates(const TensorView* tv, const std::vector<Int*> _indices){
+  std::vector<Int*> preds;
+  if(!hasPredicates(tv, _indices))
+    return preds;
+
+  TensorDomain* root = TransformIter::getRoot(tv->domain());
+  TORCH_CHECK(root->size() == _indices.size());
+  for(decltype(_indices.size()) i{0}; i < _indices.size(); i++)
+    
+    if(FusionGuard::getCurFusion()->origin(_indices[i]) != nullptr){
+      Val* pred = lt(_indices[i], root->axis(i)->size());
+      TORCH_CHECK(pred->getValType().value() == ValType::Scalar
+               && pred->getDataType().value() == DataType::Int);
+      preds.push_back(static_cast<Int*>(pred));
+    }else{
+      preds.push_back(new Int(1));
+    }
+
+  return preds;
+}
+
 struct TORCH_API IndexCompute : public TransformIter {
  protected:
   void replayBackward(Split* expr) override {
@@ -92,7 +122,7 @@ void replayBackward(Reorder* expr) override {
     TORCH_CHECK(root->size() == indices.size());
     //Remove indices associated with reduction axes
     if(exclude_reduction){
-      for(auto i = root->size() - 1; i >= 0; i--)
+      for(int i = root->size() - 1; i >= 0; i--)
         if(root->axis(i)->isReduction())
           indices.erase(indices.begin() + i);
     }
@@ -109,14 +139,18 @@ struct TORCH_API CodeWrite : public IterVisitor {
   bool parse_inline = false;
   bool producer = false;
   TensorView* consumer = nullptr;
+  int extra_indent = 0;
 
   std::ostream& print_indices(std::ostream& os, const std::vector<Int*>&);
+  bool print_predicate(std::ostream& os, const Expr* const expr);
+
   std::ostream& print(std::ostream& os, const TensorView* const);
   std::ostream& print(std::ostream& os, const Val* const);
   std::ostream& print(std::ostream& os, const UnaryOp* const);
   std::ostream& print(std::ostream& os, const BinaryOp* const);
 
   void indent();
+  void handle(Expr*);
   void handle(UnaryOp*);
   void handle(BinaryOp*);
 

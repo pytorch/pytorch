@@ -59,6 +59,7 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
   , {BinaryOpType::Mul, "Mul"}
   , {BinaryOpType::Div, "Div"}
   , {BinaryOpType::Mod, "Mod"}
+  , {BinaryOpType::LT, "LessThan"}
   , {BinaryOpType::CeilDiv, "ceilDiv"}
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_string_map {
@@ -67,6 +68,7 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_st
   , {BinaryOpType::Mul, "*"}
   , {BinaryOpType::Div, "/"}
   , {BinaryOpType::Mod, "%"}
+  , {BinaryOpType::LT, "<"}
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
