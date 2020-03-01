@@ -3529,7 +3529,8 @@
   use_c10_dispatcher: full
   variants: function, method
   dispatch:
-    QuantizedCPU: int_repr_quant
+    QuantizedCPU: int_repr_quant_cpu
+    QuantizedCUDA: int_repr_quant_cuda
 
 - func: _make_per_tensor_quantized_tensor(Tensor self, float scale, int zero_point) -> Tensor
   use_c10_dispatcher: full
@@ -3743,6 +3744,7 @@
   variants: method
   dispatch:
     QuantizedCPU: set_quantizer_
+    QuantizedCUDA: set_quantizer_
 
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   use_c10_dispatcher: full

@@ -70,7 +70,7 @@ int64_t q_per_channel_axis_quant(const Tensor& self) {
 // is larger than the memory used by all the elements, we'll
 // convert it to dense tensor, otherwise we'll keep the memory
 // format of the output the same as input
-Tensor int_repr_quant(const Tensor& self) {
+Tensor int_repr_quant_cpu(const Tensor& self) {
   Tensor dst;
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(
@@ -83,6 +83,22 @@ Tensor int_repr_quant(const Tensor& self) {
     iter.dont_compute_common_dtype();
     iter.build();
     cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
+  });
+  return dst;
+}
+
+Tensor int_repr_quant_cuda(const Tensor& self) {
+  TORCH_CHECK(self.is_contiguous());
+  Tensor dst;
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
+    // auto impl = c10::make_intrusive<TensorImpl>(
+    //     Storage(self.storage()), 
+    //     self.type_set().remove(TensorTypeId::QuantizedCUDATensorId).add(TensorTypeId::CUDATensorId));
+    // impl->storage().set_dtype(caffe2::TypeMeta::Make<int8_t>());
+    // impl->set_storage_offset(self.storage_offset());
+    // impl->set_sizes_and_strides(self.sizes(), self.strides());
+    // dst = Tensor(std::move(impl));
+    dst = at::from_blob(self.data_ptr(), self.sizes(), self.options().dtype(UNDERLYING_TYPE));
   });
   return dst;
 }

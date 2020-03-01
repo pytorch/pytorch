@@ -399,7 +399,7 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   switch (qtensor.device().type())
   {
   case DeviceType::CUDA:
-    std::cout << "HEY! Nothing will happen." << std::endl;
+    dequantize_tensor_cuda<T>(qtensor, rtensor, scale, zero_point);
     break;
   case DeviceType::CPU:
     dequantize_tensor_cpu<T>(qtensor, rtensor, scale, zero_point);
@@ -420,7 +420,7 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   switch (qtensor.device().type())
   {
   case DeviceType::CUDA:
-    std::cout << "HEY! Nothing will happen." << std::endl;
+    quantize_tensor_cuda<T>(rtensor, qtensor, scale, zero_point);
     break;
   case DeviceType::CPU:
     quantize_tensor_cpu<T>(rtensor, qtensor, scale, zero_point);

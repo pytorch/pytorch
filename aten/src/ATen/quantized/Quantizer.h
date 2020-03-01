@@ -245,6 +245,11 @@ CAFFE2_API Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale
 template <typename SRC_T, typename DST_T>
 CAFFE2_API DST_T requantize_val(double, int64_t, double, int64_t, SRC_T src);
 
+template <typename T>
+CAFFE2_API Tensor quantize_tensor_cuda(Tensor rtensor, Tensor qtensor, double scale, int64_t zero_point);
+template <typename T>
+CAFFE2_API Tensor dequantize_tensor_cuda(Tensor qtensor, Tensor rtensor, double scale, int64_t zero_point);
+
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
 CAFFE2_API QuantizerPtr

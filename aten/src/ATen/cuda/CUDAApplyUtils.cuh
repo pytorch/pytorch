@@ -640,7 +640,7 @@ inline bool CUDA_tensor_apply2(at::Tensor a,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply2", {a, b}, Backend::CUDA);
+  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {
@@ -801,7 +801,7 @@ inline bool CUDA_tensor_apply3(at::Tensor a,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly,
                                TensorArgType cType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply3", {a, b, c}, Backend::CUDA);
+  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel() ||
@@ -1005,7 +1005,7 @@ inline bool CUDA_tensor_apply4(at::Tensor a,
                                TensorArgType bType = TensorArgType::ReadOnly,
                                TensorArgType cType = TensorArgType::ReadOnly,
                                TensorArgType dType = TensorArgType::ReadOnly) {
-  checkBackend("CUDA_tensor_apply4", {a, b, c, d}, Backend::CUDA);
+  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel() ||
