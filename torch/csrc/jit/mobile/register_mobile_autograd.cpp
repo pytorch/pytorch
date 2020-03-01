@@ -1,7 +1,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <ATen/TypeDefault.h>
 
 using Stack = std::vector<c10::IValue>;
