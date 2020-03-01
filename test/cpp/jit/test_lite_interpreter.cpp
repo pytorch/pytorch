@@ -271,6 +271,5 @@ void testLiteInterpreterParams() {
   }
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
-} // namespace torch
 } // namespace jit
 } // namespace torch
