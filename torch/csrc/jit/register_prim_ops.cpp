@@ -3054,6 +3054,23 @@ RegisterOperators reg2({
           return 0;
         },
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::any(bool[] self) -> bool",
+        [](Stack& stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          push(stack, std::move(l));
+          for(int i = 0; i < l.size(); i++){
+            if(l[i] == 1){
+              push(stack, true);
+              break;
+            }
+            else{
+              push(stack, false);
+            }
+          }
+          return 0;
+        },
+        aliasAnalysisFromSchema()),
 #define CREATE_DICT_OPS(key_type)                                             \
   Operator(                                                                   \
       "aten::len(Dict(" key_type ", t) self) -> int",                         \
