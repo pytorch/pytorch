@@ -1,6 +1,6 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
 
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
