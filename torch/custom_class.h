@@ -10,10 +10,10 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/csrc/jit/custom_class.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/tracer.h>
+#include <torch/csrc/jit/api/custom_class.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
@@ -75,10 +75,10 @@ class class_ {
                                                // torch::jit::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
-      auto capsule = IValue(genericPtr);
-      auto object = self.ivalue.toObject();
-      object->setSlot(0, capsule);
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(classObj));
+      auto capsule = IValue(std::move(genericPtr));
+      auto object = std::move(self.ivalue).toObject();
+      object->setSlot(0, std::move(capsule));
     };
 
     defineMethod("__init__", std::move(func));
