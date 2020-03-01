@@ -16,6 +16,7 @@
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/device_vector.h>
 
+#include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 
 #include <c10/macros/Macros.h>
@@ -312,6 +313,50 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   THCudaCheck(cudaGetLastError());
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+}
+
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+Tensor _embedding_bag_backward_cuda(const Tensor &grad, const Tensor &indices,
+                              const Tensor &offsets,
+                              const Tensor &offset2bag,
+                              const Tensor &bag_size_,
+                              const Tensor &max_indices_,
+                              int64_t num_weights,
+                              bool scale_grad_by_freq, int64_t mode,
+                              bool sparse,
+                              const Tensor& per_sample_weights) {
+  auto indices_arg = TensorArg(indices, "indices", 1);
+  checkScalarType("embedding_bag", indices_arg, kLong);
+  checkContiguous("embedding_bag", indices_arg);
+  auto offsets_arg = TensorArg(offsets, "offsets", 1);
+  checkScalarType("embedding_bag", offsets_arg, kLong);
+  checkContiguous("embedding_bag", offsets_arg);
+
+  Tensor offset2bag_;
+  if (indices.numel() != 0 && offset2bag.numel() == 0) {
+    offset2bag_ = at::zeros(
+       {indices.sizes()[0] + 1}, indices.options()); // offset2bag = [0 0 0 0 0]
+
+    make_offset2bag(offsets, indices, offset2bag_);
+
+    offset2bag_.resize_({indices.sizes()[0]});
+  } else {
+    auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
+    checkScalarType("embedding_bag", offset2bag_arg, kLong);
+    checkContiguous("embedding_bag", offset2bag_arg);
+    offset2bag_ = offset2bag;
+  }
+
+  if (sparse) {
+    return at::_embedding_bag_sparse_backward(
+        grad, indices, offsets, offset2bag_, bag_size_, num_weights,
+        scale_grad_by_freq, mode, per_sample_weights);
+  } else {
+    return at::_embedding_bag_dense_backward(
+        grad, indices, offsets, offset2bag_, bag_size_, max_indices_, num_weights,
+        scale_grad_by_freq, mode, per_sample_weights);
+  }
 }
 
 Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
