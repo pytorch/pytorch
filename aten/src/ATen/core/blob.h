@@ -69,7 +69,7 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
   // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+    AT_ASSERTM(
         IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
@@ -155,10 +155,11 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
         TypeMeta::Make<typename std::remove_const<T>::type>()));
   }
 
+  // TODO Remove ShareExternal() and have Blob always own its content
   void* ShareExternal(void* allocated, const TypeMeta& meta) {
     free_();
     meta_ = meta;
-    pointer_ = allocated;
+    pointer_ = static_cast<void*>(allocated);
     has_ownership_ = false;
     return allocated;
   }
@@ -185,14 +186,15 @@ class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
 
  private:
   void free_() {
-    if (has_ownership_ && pointer_ != nullptr) {
+    if (has_ownership_) {
+      AT_ASSERTM(pointer_ != nullptr, "Can't have ownership of nullptr");
       (*meta_.deleteFn())(pointer_);
     }
   }
 
   TypeMeta meta_;
-  void* pointer_;
-  bool has_ownership_;
+  void* pointer_ = nullptr;
+  bool has_ownership_ = false;
 
   C10_DISABLE_COPY_AND_ASSIGN(Blob);
 };
