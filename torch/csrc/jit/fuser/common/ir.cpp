@@ -259,12 +259,12 @@ template Statement* Val::dispatch_mutator(BaseMutator*, Val*);
 template Statement* Expr::dispatch_mutator(BaseMutator, Expr*);
 template Statement* Expr::dispatch_mutator(BaseMutator*, Expr*);
 
-template void Statement::dispatch(IRPrinter, Statement*);
-template void Statement::dispatch(IRPrinter*, Statement*);
-template void Val::dispatch(IRPrinter, Val*);
-template void Val::dispatch(IRPrinter*, Val*);
-template void Expr::dispatch(IRPrinter, Expr*);
-template void Expr::dispatch(IRPrinter*, Expr*); 
+template void Statement::dispatch(IROperExprPrinter, Statement*);
+template void Statement::dispatch(IROperExprPrinter*, Statement*);
+template void Val::dispatch(IROperExprPrinter, Val*);
+template void Val::dispatch(IROperExprPrinter*, Val*);
+template void Expr::dispatch(IROperExprPrinter, Expr*);
+template void Expr::dispatch(IROperExprPrinter*, Expr*); 
 
 /*
  * Val member definitions

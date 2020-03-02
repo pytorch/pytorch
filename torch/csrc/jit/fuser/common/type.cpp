@@ -54,21 +54,20 @@ static std::unordered_map<UnaryOpType, std::string> unary_op_type_inline_op_stri
     {UnaryOpType::Neg,  "~"}
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
-    {BinaryOpType::Add, "Add"}
-  , {BinaryOpType::Sub, "Sub"}
-  , {BinaryOpType::Mul, "Mul"}
-  , {BinaryOpType::Div, "Div"}
-  , {BinaryOpType::Mod, "Mod"}
-  , {BinaryOpType::LT, "LessThan"}
+    {BinaryOpType::Add,     "Add"    }
+  , {BinaryOpType::Sub,     "Sub"    }
+  , {BinaryOpType::Mul,     "Mul"    }
+  , {BinaryOpType::Div,     "Div"    }
+  , {BinaryOpType::Mod,     "Mod"    }
   , {BinaryOpType::CeilDiv, "ceilDiv"}
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_string_map {
-    {BinaryOpType::Add, "+"}
-  , {BinaryOpType::Sub, "-"}
-  , {BinaryOpType::Mul, "*"}
-  , {BinaryOpType::Div, "/"}
-  , {BinaryOpType::Mod, "%"}
-  , {BinaryOpType::LT, "<"}
+    {BinaryOpType::Add,     "+"  }
+  , {BinaryOpType::Sub,     "-"  }
+  , {BinaryOpType::Mul,     "*"  }
+  , {BinaryOpType::Div,     "/"  }
+  , {BinaryOpType::Mod,     "%"  }
+  , {BinaryOpType::CeilDiv, "⌈/⌉"}
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
@@ -103,18 +102,9 @@ std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   return out << data_type_string_map[dtype];
 }
 
-<<<<<<< HEAD
 std::ostream& operator<<(std::ostream& out, const ExprType etype) {
   TORCH_CHECK(expr_type_string_map.count(etype) != 0);
   return out << expr_type_string_map[etype];
-=======
-std::ostream& operator<<(std::ostream& out, const DataType datatype) {
-  return out << stringify(datatype);
-}
-
-std::ostream& operator<<(std::ostream& out, const ValType valtype) {
-  return out << stringify(valtype);
->>>>>>> Add cast_op container function
 }
 
 std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
