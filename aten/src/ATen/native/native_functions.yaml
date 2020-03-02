@@ -2397,8 +2397,6 @@
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: quantized_relu_
 
-- func: mkldnn_relu_backward(Tensor grad_output, Tensor input) -> Tensor
-
 - func: prelu(Tensor self, Tensor weight) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -2837,6 +2835,7 @@
   dispatch:
     CPU: threshold_backward
     CUDA: threshold_backward_cuda
+    MkldnnCPU: mkldnn_relu_backward
 
 - func: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   variants: function, method
