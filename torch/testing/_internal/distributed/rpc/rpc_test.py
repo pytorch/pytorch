@@ -1526,6 +1526,21 @@ class RpcTest(RpcAgentTestFixture):
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
 
+    def retry_timeout_test(self, rpc_func, dst_worker, func, args, timeout, num_retries=10):
+        for i in range(num_retries):
+            try:
+                ret = rpc_func(dst_worker, func, args=args, timeout=timeout)
+                if isinstance(ret, rpc.Future) or isinstance(ret, rpc._pyFuture):
+                    ret.wait()
+            except RuntimeError as e:
+                if "RPC ran for" in str(e):
+                    if i > 0: print("Took {} retries".format(i))
+                    return True
+
+        print("Failing because exhausted {} retries".format(num_retries))
+        print("Ret was type {}".format(type(ret)))
+        return False
+
     @dist_init
     def test_rpc_timeouts(self):
         # TODO: enable timeouts for rpc.remote/RRef (https://github.com/pytorch/pytorch/issues/33803)
@@ -1547,41 +1562,43 @@ class RpcTest(RpcAgentTestFixture):
 
         # Test async builtin
         builtin_timeout = timedelta(milliseconds=1)
-        fut = rpc.rpc_async(
+        success = self.retry_timeout_test(
+            rpc.rpc_async,
             dst_worker,
             torch.add,
             args=(torch.ones(100, 100), torch.ones(100, 100)),
             timeout=builtin_timeout,
         )
-        with self.assertRaisesRegex(RuntimeError, "RPC ran for"):
-            fut.wait()
+        self.assertTrue(success)
 
         rpc.rpc_async(
             dst_worker, torch.add, args=(torch.ones(100, 100), torch.ones(100, 100))
         ).wait()
 
         # Test sync builtin
-        with self.assertRaisesRegex(RuntimeError, "RPC ran for"):
-            rpc.rpc_sync(
-                dst_worker,
-                torch.add,
-                args=(torch.ones(100, 100), torch.ones(100, 100)),
-                timeout=builtin_timeout,
-            )
+        success = self.retry_timeout_test(
+            rpc.rpc_sync,
+            dst_worker,
+            torch.add,
+            args=(torch.ones(100, 100), torch.ones(100, 100)),
+            timeout=builtin_timeout,
+        )
+        self.assertTrue(success)
+
 
         rpc.rpc_sync(
             dst_worker, torch.add, args=(torch.ones(100, 100), torch.ones(100, 100))
         )
 
         # Test async torchscript
-        fut = rpc._rpc_async_torchscript(
+        success = self.retry_timeout_test(
+            rpc._rpc_async_torchscript,
             dst_worker,
             torch.jit._qualified_name(heavy_rpc_torchscript),
             args=(torch.ones(100, 100),),
             timeout=builtin_timeout,
         )
-        with self.assertRaisesRegex(RuntimeError, "RPC ran for"):
-            fut.wait()
+        self.assertTrue(success)
 
         rpc._rpc_async_torchscript(
             dst_worker,
@@ -1590,13 +1607,14 @@ class RpcTest(RpcAgentTestFixture):
         ).wait()
 
         # Test sync torchscript
-        with self.assertRaisesRegex(RuntimeError, "RPC ran for"):
-            rpc._rpc_sync_torchscript(
-                dst_worker,
-                torch.jit._qualified_name(heavy_rpc_torchscript),
-                args=(torch.ones(100, 100),),
-                timeout=builtin_timeout,
-            )
+        success = self.retry_timeout_test(
+            rpc._rpc_sync_torchscript,
+            dst_worker,
+            torch.jit._qualified_name(heavy_rpc_torchscript),
+            args=(torch.ones(100, 100),),
+            timeout=builtin_timeout,
+        )
+        self.assertTrue(success)
 
         rpc._rpc_sync_torchscript(
             dst_worker,

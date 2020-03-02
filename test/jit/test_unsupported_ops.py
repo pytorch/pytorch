@@ -48,16 +48,17 @@ class TestUnsupportedOps(JitTestCase):
 
         # Complete issue and set of ops is https://github.com/pytorch/pytorch/issues/30763
         # only testing one here because they should be fixed all at once
+        # ezyang: But actually, I handled all of the _like overloads first
+        # because they're special
 
         with self.assertRaisesRegex(Exception, "Argument layout not provided."):
-            def foo(x):
-                return torch.ones_like(x, dtype=torch.double)
-            foo(torch.tensor([2.]))
+            def foo():
+                return torch.sparse_coo_tensor((2, 2), dtype=torch.double)
+            foo()
             print(torch.jit.script(foo).graph)
 
     def test_ops_bound_in_functional(self):
-        ops_bound_in_functional = "lu_unpack", "unique", "lu"
-
+        ops_bound_in_functional = "unique",
         tensor = torch.tensor([2])
         funcs_template = dedent('''
         def func():
@@ -70,14 +71,6 @@ class TestUnsupportedOps(JitTestCase):
             f = scope['func']
             with self.assertRaisesRegex(Exception, "Unknown builtin op"):
                 cu = torch.jit.CompilationUnit(funcs_str)
-
-        def fn():
-            a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
-            b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
-            return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
-        fn()
-        with self.assertRaisesRegex(Exception, "Expected a value of type"):
-            torch.jit.script(fn)
 
         def norm():
             c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
@@ -120,7 +113,7 @@ class TestUnsupportedOps(JitTestCase):
             return torch.nn.init.orthogonal_(torch.empty(3, 5))
 
         def sparse():
-            return torch.nn.init.sparse(torch.empty(3, 5), sparsity=.1)
+            return torch.nn.init.sparse_(torch.empty(3, 5), sparsity=.1)
 
         for func in [calculate_gain, eye_, dirac_, kaiming_uniform_, orthogonal_, sparse]:
             # doesn't error in eager

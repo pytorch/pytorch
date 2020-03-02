@@ -284,9 +284,6 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
     // millisecond level precision of when request started.
     auto futureStartTime = std::chrono::steady_clock::now();
     // Prepare endTime from timeout.
-    // HACK: using the passed in timeout now.
-    LOG(INFO) << "IN PG AGENT: send got passed in timeout of "
-              << rpcTimeout.count();
     auto timeout = rpcTimeout;
     // Set infinite timeout if specified.
     steady_clock_time_point endTime = timeout.count() == 0
