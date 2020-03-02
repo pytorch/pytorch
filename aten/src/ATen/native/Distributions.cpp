@@ -240,6 +240,11 @@ Tensor& normal_out(Tensor& output, const Tensor& mean, double std, Generator* ge
 Tensor& normal_out(Tensor& output, double mean, const Tensor& std, Generator* gen) {
   normal_(output, 0, 1, gen);
   auto mean_tensor = at::full({}, mean, output.options());
+  // CUDA NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
   output.mul_(std).add_(mean_tensor);
   return output;
 }
@@ -247,6 +252,11 @@ Tensor& normal_out(Tensor& output, double mean, const Tensor& std, Generator* ge
 Tensor& normal_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
   bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
   normal_(output, 0, 1, gen);
+  // CUDA NB: addcmul_out copies the tensor to be added into the output.
+  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
+  // The previous function here was addcmul_out(output, mean, output, std, 1);
+  // The third argument is not a constant reference and hence the samples in output are overwritten.
+  // Consequently, the computation performed is mean + mean * std instead of mean + output * std
   if (is_deprecated_th_impl) {
     output.mul_(std.reshape(mean.sizes())).add_(mean);
   }
