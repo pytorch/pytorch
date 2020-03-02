@@ -10782,7 +10782,8 @@ class TestTorchDeviceType(TestCase):
                                               [0, 0, 0, 0]], device=device))
 
     def test_scatter_reduce_operations_to_large_input(self, device):
-        device = torch.device('cpu') # restrict to CPU until CUDA implementation is done.
+        # restrict to CPU until CUDA implementation is done.
+        device = torch.device('cpu')
         index = torch.tensor([[1], [2]], device=device, dtype=torch.long)
         test_data = [
             (torch.zeros(4, 4, device=device),
@@ -10825,29 +10826,30 @@ class TestTorchDeviceType(TestCase):
         input.scatter_add_(0, index, src)
 
         self.assertEqual(input,
-                         torch.tensor([[3],[1]], device=device).repeat(1, width))
+                         torch.tensor([[3], [1]], device=device).repeat(1, width))
 
     def test_scatter_reduce_non_unique_index(self, device):
-        device = torch.device('cpu') # restrict to CPU until CUDA implementation is done.
+        # restrict to CPU until CUDA implementation is done.
+        device = torch.device('cpu')
         height = 2
         width = 65536
         index = torch.zeros(height, width, dtype=torch.long, device=device)
         test_data = [
             (torch.ones(height, width, device=device),
              torch.ones(height, width, device=device),
-             torch.tensor([[3],[1]], device=device).repeat(1, width), "sum"),
+             torch.tensor([[3], [1]], device=device).repeat(1, width), "sum"),
 
             (torch.ones(height, width, device=device),
              torch.ones(height, width, device=device),
-             torch.tensor([[-1],[1]], device=device).repeat(1, width), "subtract"),
+             torch.tensor([[-1], [1]], device=device).repeat(1, width), "subtract"),
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[8],[2]], device=device).repeat(1, width), "multiply"),
+             torch.tensor([[8], [2]], device=device).repeat(1, width), "multiply"),
 
             (torch.tensor([2], device=device).repeat(height, width),
              torch.tensor([2], device=device).repeat(height, width),
-             torch.tensor([[0.5],[2]], device=device).repeat(1, width), "divide"),
+             torch.tensor([[0.5], [2]], device=device).repeat(1, width), "divide"),
         ]
 
         for input, src, result, operation in test_data:
