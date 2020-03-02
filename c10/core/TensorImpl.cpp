@@ -96,63 +96,62 @@ bool TensorImpl::compute_contiguous() const {
   return is_contiguous;
 }
 
-bool TensorImpl::compute_channels_last_contiguous(MemoryFormat memory_format) const {
+bool TensorImpl::compute_channels_last_contiguous_2d() const {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
-  switch (memory_format) {
-    case MemoryFormat::ChannelsLast:
+  switch (sizes_.size()) {
+    case 4:
       {
-        switch (sizes_.size()) {
-          case 4:
-            {
-              int64_t expected = 1;
-              for (auto& d : {1, 3, 2, 0}) {
-                if (sizes_[d] != 1) {
-                  if (strides_[d] != expected) {
-                    return false;
-                  }
-                  expected *= sizes_[d];
-                  }
-                }
-              return true;
+        int64_t expected = 1;
+        for (auto& d : {1, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
             }
-          case 3:
-            // TODO dim == 3 case will be enabled once it is fully tested
-            return false;
-          default:
-            return false;
+            expected *= sizes_[d];
+          }
         }
+        return true;
       }
-    case MemoryFormat::ChannelsLast3d:
-      {
-        switch (sizes_.size()) {
-          case 5:
-            {
-              int64_t expected = 1;
-              for (auto& d : {1, 4, 3, 2, 0}) {
-                if (sizes_[d] != 1) {
-                  if (strides_[d] != expected) {
-                    return false;
-                  }
-                  expected *= sizes_[d];
-                }
-              }
-              return true;
-            }
-          case 4:
-            // TODO dim == 4 case will be enabled once it is fully tested
-            return false;
-          default:
-            return false;
-        }
-      }
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return false;
     default:
       return false;
   }
 }
 
-bool TensorImpl::compute_strides_like_channels_last(MemoryFormat memory_format) const {
-  return is_channels_last_strides(sizes_, strides_, memory_format);
+bool TensorImpl::compute_channels_last_contiguous_3d() const {
+  // Please don't combine these code, constant array is used here to let
+  // compiler fully unroll the loop to get better performance
+  switch (sizes_.size()) {
+    case 5:
+      {
+        int64_t expected = 1;
+        for (auto& d : {1, 4, 3, 2, 0}) {
+          if (sizes_[d] != 1) {
+            if (strides_[d] != expected) {
+              return false;
+            }
+            expected *= sizes_[d];
+          }
+        }
+        return true;
+      }
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
+}
+
+bool TensorImpl::compute_strides_like_channels_last_2d() const {
+  return is_channels_last_strides_2d(sizes_, strides_);
+}
+
+bool TensorImpl::compute_strides_like_channels_last_3d() const {
+  return is_channels_last_strides_3d(sizes_, strides_);
 }
 
 bool TensorImpl::compute_non_overlapping_and_dense() const {

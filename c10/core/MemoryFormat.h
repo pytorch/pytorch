@@ -53,55 +53,48 @@ inline std::ostream& operator<<(
 }
 
 // Note: Hardcoded the channel last stride indices here to get better performance
-// The channel last stride indices here must by the same as get_channels_last_stride_indices()
-inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes, MemoryFormat memory_format) {
+inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
-  switch (memory_format) {
-    case MemoryFormat::ChannelsLast:
-      {
-        switch (sizes.size()) {
-          case 4:
-            strides[1] = 1;
-            strides[3] = sizes[1];
-            strides[2] = strides[3] * sizes[3];
-            strides[0] = strides[2] * sizes[2];
-            return strides;
-          case 3:
-            strides[0] = 1;
-            strides[2] = sizes[0];
-            strides[1] = strides[2] * sizes[2];
-            return strides;
-          default:
-            TORCH_INTERNAL_ASSERT(false, "ChannelsLast2d doesn't support size ", sizes.size());
-        }
-      }
-    case MemoryFormat::ChannelsLast3d:
-      {
-        switch (sizes.size()) {
-          case 5:
-            strides[1] = 1;
-            strides[4] = sizes[1];
-            strides[3] = strides[4] * sizes[4];
-            strides[2] = strides[3] * sizes[3];
-            strides[0] = strides[2] * sizes[2];
-            return strides;
-          case 4:
-            strides[0] = 1;
-            strides[3] = sizes[0];
-            strides[2] = strides[3] * sizes[3];
-            strides[1] = strides[2] * sizes[2];
-            return strides;
-          default:
-            TORCH_INTERNAL_ASSERT(false, "ChannelsLast3d doesn't support size ", sizes.size());
-        }
-      }
+  switch (sizes.size()) {
+    case 4:
+      strides[1] = 1;
+      strides[3] = sizes[1];
+      strides[2] = strides[3] * sizes[3];
+      strides[0] = strides[2] * sizes[2];
+      return strides;
+    case 3:
+      strides[0] = 1;
+      strides[2] = sizes[0];
+      strides[1] = strides[2] * sizes[2];
+      return strides;
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported channels last memory format ", memory_format);
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast2d doesn't support size ", sizes.size());
+  }
+}
+
+inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  switch (sizes.size()) {
+    case 5:
+      strides[1] = 1;
+      strides[4] = sizes[1];
+      strides[3] = strides[4] * sizes[4];
+      strides[2] = strides[3] * sizes[3];
+      strides[0] = strides[2] * sizes[2];
+      return strides;
+    case 4:
+      strides[0] = 1;
+      strides[3] = sizes[0];
+      strides[2] = strides[3] * sizes[3];
+      strides[1] = strides[2] * sizes[2];
+      return strides;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast3d doesn't support size ", sizes.size());
   }
 }
 
 // NOTE:
-// Below are Helper functions for is_channels_last_strides.
+// Below are Helper functions for is_channels_last_strides_xd.
 // 1. Please do not combine these helper functions, each helper function handles
 // exactly one case of sizes + memory_format, by doing this, the strides indices
 // will be a constant array and we can access it using constant index number,
@@ -170,7 +163,7 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
   return true;
 }
 
-// Note [Ambiguous is_channels_last_strides]
+// Note [Ambiguous is_channels_last_strides_xd]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // The flaw of carrying memory_format implicitly through strides is very hard
 // to WAR properly. issue #24090
@@ -216,35 +209,28 @@ inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArr
 // issues in our tests.
 //
 // We use Channels Last 2d as an example above.
-// This is a general problem for all the is_channels_last_strides implementation.
+// This is a general problem for all the is_channels_last_strides_xd implementation.
 // Please check the helper functions (is_channels_last_strides_*d_s*) for more details.
 
-inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef strides, MemoryFormat memory_format) {
-  switch (memory_format) {
-    case MemoryFormat::ChannelsLast:
-      {
-        switch (sizes.size()) {
-          case 4:
-            return is_channels_last_strides_2d_s4(sizes, strides);
-          case 3:
-            // TODO dim == 3 case will be enabled once it is fully tested
-            return false;
-          default:
-            return false;
-        }
-      }
-    case MemoryFormat::ChannelsLast3d:
-      {
-        switch (sizes.size()) {
-          case 5:
-            return is_channels_last_strides_3d_s5(sizes, strides);
-          case 4:
-            // TODO dim == 4 case will be enabled once it is fully tested
-            return false;
-          default:
-            return false;
-        }
-      }
+inline bool is_channels_last_strides_2d(const IntArrayRef sizes, const IntArrayRef strides) {
+  switch (sizes.size()) {
+    case 4:
+      return is_channels_last_strides_2d_s4(sizes, strides);
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
+}
+
+inline bool is_channels_last_strides_3d(const IntArrayRef sizes, const IntArrayRef strides) {
+  switch (sizes.size()) {
+    case 5:
+      return is_channels_last_strides_3d_s5(sizes, strides);
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
     default:
       return false;
   }

@@ -1353,14 +1353,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes(), MemoryFormat::ChannelsLast));
+        set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
         break;
       }
       case MemoryFormat::ChannelsLast3d: {
         TORCH_CHECK(
             dim() == 5,
             "required rank 5 tensor to use channels_last_3d format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes(), MemoryFormat::ChannelsLast3d));
+        set_sizes_and_strides(sizes(), get_channels_last_strides_3d(sizes()));
         break;
       }
       case MemoryFormat::Preserve:
@@ -1462,9 +1462,13 @@ private:
    */
   bool compute_contiguous() const;
 
-  bool compute_channels_last_contiguous(MemoryFormat memory_format) const;
+  bool compute_channels_last_contiguous_2d() const;
 
-  bool compute_strides_like_channels_last(MemoryFormat memory_format) const;
+  bool compute_channels_last_contiguous_3d() const;
+
+  bool compute_strides_like_channels_last_2d() const;
+
+  bool compute_strides_like_channels_last_3d() const;
 
   bool compute_non_overlapping_and_dense() const;
 
@@ -1482,32 +1486,36 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
+    // Note:
+    // Dim 0, 1, 2 will never be a channels last 2d/3d format
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this point)
+    // Dim 4+ is possibly be a channels last 3d format (Dim 5 only at this point)
     switch (dim()) {
       case 0:
       case 1:
       case 2:
         is_channels_last_contiguous_ = false;
         is_channels_last_3d_contiguous_ = false;
+        // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
+        // Being channels_last_contiguous doesn't necessarily mean the tensor is
+        // strided like channels_last: for strides on channel dimension could suggest
+        // desired memory_layout, but it doesn't affect memory storage
         is_channels_last_ = false;
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
         break;
       case 3:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
         is_channels_last_3d_contiguous_ = false;
-        is_channels_last_ = is_channels_last_contiguous_ || compute_strides_like_channels_last(MemoryFormat::ChannelsLast);
+        is_channels_last_ = compute_strides_like_channels_last_2d();
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
         break;
       default:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous(MemoryFormat::ChannelsLast);
-        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous(MemoryFormat::ChannelsLast3d);
-        // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
-        // Being channels_last_contiguous doesn't necessarily mean the tensor is
-        // strided like channels_last: for strides on channel dimension could suggest
-        // desired memory_layout, but it doesn't affect memory storage
-        is_channels_last_ = is_channels_last_contiguous_ || (!is_channels_last_3d_contiguous_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast));
-        is_channels_last_3d_ = is_channels_last_3d_contiguous_ || (!is_channels_last_ && compute_strides_like_channels_last(MemoryFormat::ChannelsLast3d));
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
         is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
     }
   }
