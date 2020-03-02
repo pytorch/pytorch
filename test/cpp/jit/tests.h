@@ -117,6 +117,7 @@ namespace jit {
   _(GPU_FusionTwoAdds)           \
   _(GPU_FusionParser)            \
   _(GPU_FusionCodeGen)           \
+  _(GPU_FusionCodeGen2)          \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

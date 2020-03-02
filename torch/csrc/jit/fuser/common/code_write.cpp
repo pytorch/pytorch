@@ -80,13 +80,18 @@ bool CodeWrite::print_predicate(std::ostream& os, const Expr* const expr) {
   if(preds.size() == 0)
     return false;
   
-  std::cout<<"if( ";
+  os << "if( ";
   for(decltype(preds.size()) i{0}; i < preds.size(); i++){
-    print_inline(std::cout, preds[i]);
-    if(i != preds.size() - 1)
-      std::cout<<" && ";
+    if(preds[i]->same_as(new Int(1.0)))
+      continue;
+    if(i != 0)
+      os << " && ";
+
+    print_inline(os , preds[i]);
   }
-  std::cout << ") {\n";
+  os  << ") {\n";
+  ++extra_indent;
+  indent();
   return true;
   
 
@@ -100,7 +105,6 @@ std::ostream& CodeWrite::print(std::ostream& os, const UnaryOp* const uop) {
 
   //Print predicates, first need to find predicate.
   bool predicated = print_predicate(os, uop);
-  if(predicated) ++extra_indent;
 
   print(os, consumer) << " = " ;
 
@@ -118,8 +122,13 @@ std::ostream& CodeWrite::print(std::ostream& os, const UnaryOp* const uop) {
   consumer = nullptr;
   producer = false;
 
-  if(predicated)
+  os << ";\n";
+
+  if(predicated){
     --extra_indent;
+    indent();
+    os << "}\n";
+  }
 
   return os;
 }
@@ -128,7 +137,6 @@ std::ostream& CodeWrite::print(std::ostream& os, const BinaryOp* const bop) {
 
   //Print predicates, first need to find predicate.
   bool predicated = print_predicate(os, bop);
-  if(predicated) ++extra_indent;
 
   print(os, bop->out());
   os << " = ";
@@ -151,8 +159,13 @@ std::ostream& CodeWrite::print(std::ostream& os, const BinaryOp* const bop) {
   consumer = nullptr;
   producer = false;
 
-  if(predicated)
+  os << ";\n";
+
+  if(predicated){
     --extra_indent;
+    indent();
+    os << "}\n";
+  }
 
   return os;
 }
@@ -190,20 +203,31 @@ void CodeWrite::resetFors() {
   clearActiveView();
 }
 
+
+// Update fors based on tv.
 void CodeWrite::updateView(TensorView* tv) {
+  // If previous tv flaged that fors need to be reset, clear them all
   if (reset_fors)
     resetFors();
 
   // Hit the final statment in a string of compute_at's. Need to close the for
   // loops down to the previous compute_at axis, then need to put my remaining
   // for loops on there. Also need to set reset_fors flag.
+
+  // tv is not part of a computeAt structure, or it's the final tv in a 
+  // computeAt structure.
   if (!tv->hasComputeAt()) {
+    // If we're the last computeAt of a block of computeAt TVs.
     if (active_view != nullptr && tv->same_as(active_view)) {
       int depth = fors.size();
+      // reduce down to previous active view_axis
       for (int i = active_view_axis; i < depth; i++)
         closeScope();
+      //Remove the active view
       clearActiveView();
     } else {
+    // I'm not the final computeAt of a block, I'm independent.
+    // Reset the loop structure
       resetFors();
     }
     for (int i = fors.size(); i < tv->domain()->size(); i++)

@@ -813,6 +813,52 @@ void testGPU_FusionCodeGen() {
   */
  }
 
+void testGPU_FusionCodeGen2() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<IterDomain*> dom;
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+  dom.push_back(new IterDomain(new Int()));
+
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(2.0)));
+  TensorView* tv3 = static_cast<TensorView*>(add(tv0, tv2));
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addOutput(tv3);
+
+  //[I0, I1, I2]
+  reorder(tv3, {{0, 2}, {2, 0}});
+  //[I2, I1, I0]
+  split(tv3, -1, 4);
+  //[I2, I1, I0o, I0i{4}]
+  reorder(tv3, {{2, 0}, {3, 1}, {0, 3}});
+  //I0o, I0i{4}, I1, I2]
+
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+  
+
+  //std::cout<<fusion<<std::endl;
+  std::cout
+  << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
+  << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
+  << "::::::::::::" << std::endl;
+    
+  CodeWrite cw;
+  cw.traverse(&fusion);
+  /*
+  std::vector<Int*> indices;
+  for(int i=0; i < tv2->domain()->size(); i++)
+    indices.push_back(new Int());
+  IndexCompute test(tv2, indices);
+  */
+ }
+
 void testGPU_Fusion() {}
 
 } // namespace jit
