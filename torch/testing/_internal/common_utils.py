@@ -817,7 +817,7 @@ class TestCase(expecttest.TestCase):
                             b = b.to(torch.int)
 
                         diff = a - b
-                        if a.is_floating_point():
+                        if a.dtype.is_complex or a.dtype.is_floating_point:
                             # check that NaNs are in the same locations
                             nan_mask = torch.isnan(a)
                             self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
@@ -829,8 +829,15 @@ class TestCase(expecttest.TestCase):
                                 self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
                                 diff[inf_mask] = 0
                         # TODO: implement abs on CharTensor (int8)
+                        # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
+                            # if diff is complex, the imaginary component for diff will be 0
+                            # from the previous step, hence converting it to float and double is fine.
+                            if diff.dtype == torch.complex64:
+                                diff = diff.to(torch.float)
+                            elif diff.dtype == torch.complex128:
+                                diff = diff.to(torch.double)
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
