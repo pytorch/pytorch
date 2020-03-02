@@ -489,7 +489,7 @@ class InsertObserversHelper {
   std::unordered_set<Graph*> visited_graph_of_observer_map_;
   std::unordered_map<Value*, script::Module> observer_for_value_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, std::vector<Value*>> boundary_value_map_;
+  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
@@ -773,11 +773,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // add mapping from callsite value to value in called graph
         for (auto i = 0; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
-          boundary_value_map_[n->outputs()[i]].push_back(return_val);
+          boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0; i < g->inputs().size(); ++i) {
           auto* input_val = g->inputs()[i];
-          boundary_value_map_[n->inputs()[i]].push_back(input_val);
+          boundary_value_map_[n->input(i)].insert(input_val);
         }
       }
       for (Block* subblock : n->blocks()) {
@@ -973,12 +973,14 @@ std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::in
         auto input_observers = std::get<0>(input_output_observers);
         auto output_observers = std::get<1>(input_output_observers);
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i]) && !values_to_observe.count(n->inputs()[i])) {
+          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i])
+              && !values_to_observe.count(n->inputs()[i])) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i]) && !values_to_observe.count(n->outputs()[i])) {
+          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i])
+              && !values_to_observe.count(n->outputs()[i])) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
           }
         }
