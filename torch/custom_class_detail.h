@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/function.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeTraits.h>
 
@@ -63,7 +64,8 @@ Func wrap_func(Func f) {
 } // namespace detail
 
 TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
-TORCH_API std::shared_ptr<script::CompilationUnit>& classCU();
+TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
+TORCH_API void registerCustomClassMethod(std::shared_ptr<Function> method);
 
 } // namespace jit
 } // namespace torch

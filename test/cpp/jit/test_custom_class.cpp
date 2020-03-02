@@ -125,7 +125,6 @@ at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
 }
 
 torch::RegisterOperators& register_take_instance() {
-  static int ensure_custom_class_handler_registered = register_custom_class_handler();
   static auto instance_registry = torch::RegisterOperators().op(
   torch::RegisterOperators::options()
       .schema(

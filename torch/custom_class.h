@@ -1,6 +1,6 @@
-
 #pragma once
 
+#include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -10,18 +10,20 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/csrc/jit/api/custom_class.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
 
-
 namespace torch {
 namespace jit {
+
+TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
+
+TORCH_API bool isCustomClass(const c10::IValue& v);
 
 template <class... Types>
 detail::types<void, Types...> init() {
@@ -58,16 +60,21 @@ class class_ {
 
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
-    classTypePtr =
-        ClassType::create(c10::QualifiedName(qualClassName), classCU());
+    classTypePtr = ClassType::create(
+        c10::QualifiedName(qualClassName),
+        std::weak_ptr<script::CompilationUnit>());
     classTypePtr->addAttribute("capsule", CapsuleType::get());
 
-    c10::getCustomClassTypeMap().insert({typeid(c10::intrusive_ptr<CurClass>).name(),
-                              c10::StrongTypePtr(classCU(), classTypePtr)});
-    c10::getCustomClassTypeMap().insert({typeid(c10::tagged_capsule<CurClass>).name(),
-                              c10::StrongTypePtr(classCU(), classTypePtr)});
+    c10::getCustomClassTypeMap().insert(
+        {typeid(c10::intrusive_ptr<CurClass>).name(),
+         c10::StrongTypePtr(
+             std::shared_ptr<script::CompilationUnit>(), classTypePtr)});
+    c10::getCustomClassTypeMap().insert(
+        {typeid(c10::tagged_capsule<CurClass>).name(),
+         c10::StrongTypePtr(
+             std::shared_ptr<script::CompilationUnit>(), classTypePtr)});
 
-    classCU()->register_type(classTypePtr);
+    registerCustomClass(classTypePtr);
   }
 
   template <typename... Types>
@@ -163,40 +170,15 @@ class class_ {
  private:
   template <typename Func>
   void defineMethod(std::string name, Func func) {
-    auto graph = std::make_shared<Graph>();
     auto qualFuncName = className + "::" + name;
-    ensure_c10_registerer_defined();
     registeredOps().push_back(
         torch::RegisterOperators().op(qualFuncName, std::move(func)));
     auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
-    auto ops = torch::jit::getAllOperatorsFor(func_symbol);
-    TORCH_CHECK(ops.size() == 1);
-    auto &schema = ops[0]->schema();
 
-    for (const auto& arg : schema.arguments()) {
-      graph->addInput()->setType(arg.type());
-    }
-
-    auto opCall = graph->insertNode(graph->create(
-        func_symbol, graph->inputs(), schema.returns().size()));
-    Value* res;
-    if (schema.returns().size() > 1) {
-      const auto& returns = schema.returns();
-      size_t op_invocation_idx = 0;
-      for (const auto& ret : returns) {
-        opCall->output(op_invocation_idx++)->setType(ret.type());
-      }
-      res = graph->insertNode(graph->createTuple(opCall->outputs()))->output();
-    } else if (schema.returns().size() == 1) {
-      const auto& returns = schema.returns();
-      res = opCall->output()->setType(returns[0].type());
-    } else {
-      res = graph->insertConstant(IValue())->setType(NoneType::get());
-    }
-    graph->registerOutput(res);
-
-    auto method = classCU()->create_function(qualClassName + "." + name, graph);
-    classTypePtr->addMethod(method);
+    auto method = std::make_shared<BuiltinOpFunction>(
+        qualClassName + "." + name, func_symbol);
+    registerCustomClassMethod(method);
+    classTypePtr->addMethod(method.get());
   }
 };
 

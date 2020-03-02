@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/ir/ir.h>
 
+#include <ATen/core/builtin_function.h>
+#include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -1825,6 +1826,19 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
 
 std::vector<Value*> inlineCallTo(Node* to_replace, Function* callee) {
   WithInsertPoint guard(to_replace);
+  if (!callee->isGraphFunction()) {
+    auto builtin_callee = static_cast<BuiltinOpFunction*>(callee);
+    auto symbol = builtin_callee->op_symbol();
+    std::vector<NamedValue> new_inputs;
+    for (auto& inp : to_replace->inputs()) {
+      new_inputs.emplace_back(inp);
+    }
+    Value* new_output = to_replace->owningGraph()->insert(
+        symbol, new_inputs, {}, to_replace->sourceRange());
+    to_replace->output()->replaceAllUsesWith(new_output);
+    to_replace->destroy();
+    return {new_output};
+  }
   std::unordered_map<Value*, Value*> value_map;
   auto new_outputs = insertGraph(
       *to_replace->owningGraph(),
