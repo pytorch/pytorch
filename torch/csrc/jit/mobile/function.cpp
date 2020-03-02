@@ -2,6 +2,7 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/core/op_registration/op_registration.h>
 
 namespace torch{
@@ -25,16 +26,24 @@ void Function::append_operator(const std::string& name,
   auto opname = code_->op_names_.back();
   // Add "_" prefix to work around the double registration both of jit/generated
   // and here. TODO: remove it when we have separate build for lite interpreter.
-  if (opname.name != "aten::Int") {
-    opname.name = "_" + opname.name;
-  }
-  auto op = c10::Dispatcher::singleton().findSchema(opname);
-  TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
-  // TODO: operator.h now does not depend on Node* so we can also look up operators from
-  // that registry for use in mobile as a way to share implementations.
-  auto fn = [op](Stack& stack) {
-    c10::Dispatcher::singleton().callBoxed(*op, &stack);
+//  if (opname.name != "aten::Int") {
+//    opname.name = "_" + opname.name;
+//  }
+
+  auto jit_op = findOperatorFor(opname);
+  TORCH_CHECK(jit_op, opname.name, ".", opname.overload_name, " cannot be found.");
+  auto fn = [jit_op](Stack& stack) {
+    jit_op->getOperation()(stack);
   };
+
+//// Some unit tests fail with this option. For example, testLiteInterpreterConv,
+//// with error message:
+//// "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::callUnboxed().
+//  auto op = c10::Dispatcher::singleton().findSchema(opname);
+//  TORCH_CHECK(op.has_value(), opname.name, ".", opname.overload_name, " cannot be found.");
+//  auto fn = [op](Stack& stack) {
+//    c10::Dispatcher::singleton().callBoxed(*op, &stack);
+//  };
   code_->operators_.emplace_back(fn);
 }
 
