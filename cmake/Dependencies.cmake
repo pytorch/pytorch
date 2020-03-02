@@ -845,6 +845,12 @@ else()
             DESTINATION ${CMAKE_INSTALL_PREFIX}
             FILES_MATCHING PATTERN "*.h")
 endif()
+if (MSVC)
+  if ((GENERATOR_IS_MULTI_CONFIG AND "Debug" IN_LIST CMAKE_CONFIGURATION_TYPES)
+      OR ${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+    add_compile_definitions(Py_DEBUG)
+  endif()
+endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
 
