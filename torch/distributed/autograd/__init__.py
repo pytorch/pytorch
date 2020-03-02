@@ -28,7 +28,7 @@ class context(object):
         >>   t1 = torch.rand((3, 3), requires_grad=True)
         >>   t2 = torch.rand((3, 3), requires_grad=True)
         >>   loss = rpc.rpc_sync("worker1", torch.add, args=(t1, t2)).sum()
-        >>   dist_autograd.backward([loss])
+        >>   dist_autograd.backward(context_id, [loss])
     '''
     def __enter__(self):
         self.autograd_context = _new_context()
