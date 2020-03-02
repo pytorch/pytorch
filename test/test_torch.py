@@ -5319,6 +5319,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
             self.assertEqual(len(w), 1)
 
     def test_normal_shape(self):
+        warned = False
         for device in torch.testing.get_all_device_types():
             tensor1 = torch.rand(1, device=device)
             tensor4 = torch.rand(4, device=device)
@@ -5346,9 +5347,13 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
 
             # inputs are non-expandable tensors, but they have same number of elements
             # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
-            self.assertWarnsRegex(
-                lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
-                "deprecated and the support will be removed")
+            if not warned:
+                self.assertWarnsRegex(
+                    lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)),
+                    "deprecated and the support will be removed")
+                warned = True
+            else:
+                self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
             self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
