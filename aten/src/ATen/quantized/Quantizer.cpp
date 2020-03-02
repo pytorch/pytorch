@@ -504,9 +504,10 @@ using QAllocator = native::GuardingAllocator<8u, 0u>;
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format=MemoryFormat::Contiguous) {
+    QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
+
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
 
   at::Allocator* allocator = at::getCPUAllocator();
 
