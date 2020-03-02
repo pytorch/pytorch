@@ -30,7 +30,7 @@ void prelu_cuda_kernel_share_weights(
   iter.build();
 
   at::native::gpu_kernel(iter,
-    [=] GPU_LAMBDA (scalar_t input_val) {
+    [weight_data] GPU_LAMBDA (scalar_t input_val) {
         return (input_val > 0) ? input_val : *weight_data * input_val;
     });
 }
