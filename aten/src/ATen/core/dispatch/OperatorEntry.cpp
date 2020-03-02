@@ -4,7 +4,7 @@ namespace c10 {
 namespace impl {
 
 namespace {
-  std::string listAllDispatchKeys(const ska::flat_hash_map<TensorTypeId, std::list<KernelFunction>>& kernels) {
+  std::string listAllDispatchKeys(const ska::flat_hash_map<DispatchKey, std::list<KernelFunction>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -33,7 +33,7 @@ void OperatorEntry::prepareForDeregistration() {
   TORCH_INTERNAL_ASSERT(catchAllKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
 }
 
-RegistrationHandleRAII OperatorEntry::registerKernel(TensorTypeId dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII OperatorEntry::registerKernel(DispatchKey dispatch_key, KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
@@ -70,7 +70,7 @@ RegistrationHandleRAII OperatorEntry::registerCatchallKernel(KernelFunction kern
   });
 }
 
-void OperatorEntry::deregisterKernel_(TensorTypeId dispatch_key, std::list<KernelFunction>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
@@ -93,7 +93,7 @@ void OperatorEntry::deregisterCatchallKernel_(std::list<KernelFunction>::iterato
   updateCatchallDispatchTable_();
 }
 
-void OperatorEntry::updateDispatchTable_(TensorTypeId dispatch_key) {
+void OperatorEntry::updateDispatchTable_(DispatchKey dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
   auto k = kernels_.find(dispatch_key);

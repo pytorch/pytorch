@@ -73,7 +73,7 @@ class IDEEPMomentumSGDOp final : public IDEEPOperator {
   }
 
  protected:
-  float momentum_{0.9};
+  float momentum_ = 0.9f;
   bool nesterov_;
   INPUT_TAGS(GRAD, MOMENTUM, LR);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENTUM);
@@ -115,7 +115,7 @@ class IDEEPMomentumSGDUpdateOp final : public IDEEPOperator {
   }
 
  protected:
-  float momentum_{0.9};
+  float momentum_ = 0.9f;
   bool nesterov_;
   INPUT_TAGS(GRAD, MOMENTUM, LR, PARAM);
   OUTPUT_TAGS(OUTPUT_GRAD, OUTPUT_MOMENTUM, OUTPUT_PARAM);

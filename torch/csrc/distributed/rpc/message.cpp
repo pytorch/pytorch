@@ -10,14 +10,17 @@ Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type)
-    : payload_(payload), tensors_(tensors), type_(type) {}
+    : payload_(std::move(payload)), tensors_(std::move(tensors)), type_(type) {}
 
 Message::Message(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
     int64_t id)
-    : payload_(payload), tensors_(tensors), type_(type), id_(id) {}
+    : payload_(std::move(payload)),
+      tensors_(std::move(tensors)),
+      type_(type),
+      id_(id) {}
 
 Message::Message(const Message& other) = default;
 
@@ -99,10 +102,6 @@ bool Message::isResponse() const {
       MessageType::FORWARD_AUTOGRAD_RESP == type_ ||
       // Cleanup autograd context response
       MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_;
-}
-
-bool Message::isShutdown() const {
-  return MessageType::SHUTDOWN == type_;
 }
 
 int64_t Message::id() const {

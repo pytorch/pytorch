@@ -3,8 +3,6 @@
 
 using namespace c10;
 
-static_assert(std::is_same<IValue, typename List<string>::internal_value_type_test_only>::value, "If this fails, then it seems we changed List<string> to store it as std::vector<string> instead of std::vector<IValue>. We need to change ListTest_IValueBasedList test cases to use a different type that is still based on IValue.");
-
 TEST(ListTest_IValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
     List<string> list;
     EXPECT_TRUE(list.empty());
@@ -540,9 +538,6 @@ TEST(ListTest_IValueBasedList, givenDifferentLists_thenIsNotEqual) {
 
   EXPECT_FALSE(list_is_equal(list1, list2));
 }
-
-
-static_assert(std::is_same<int64_t, typename List<int64_t>::internal_value_type_test_only>::value, "If this fails, then it seems we changed List<int64_t> to store it as std::vector<IValue> instead of std::vector<int64_t>. We need to change ListTest_NonIValueBasedList test cases to use a different type that is still not based on IValue.");
 
 TEST(ListTest_NonIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
     List<int64_t> list;

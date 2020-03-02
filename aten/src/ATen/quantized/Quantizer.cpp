@@ -1,9 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
@@ -27,15 +30,6 @@ QuantizerPtr make_per_tensor_affine_quantizer(
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
-    const std::vector<double>& scales,
-    const std::vector<int64_t>& zero_points,
-    int64_t axis,
-    ScalarType scalar_type) {
-  return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
-                                                        scales, zero_points, axis);
-}
-
-QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
@@ -54,13 +48,9 @@ QuantizerPtr make_per_channel_affine_quantizer(
       "zero_points tensor must have integral type");
   Tensor scales_double = scales.to(kDouble).contiguous();
   Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
-  double* scales_data = scales_double.data_ptr<double>();
-  int64_t* zero_points_data = zero_points_int64.data_ptr<int64_t>();
-  std::vector<double> scale_vals(scales_data, scales_data + scales.numel());
-  std::vector<int64_t> zero_point_vals(
-      zero_points_data, zero_points_data + zero_points.numel());
-  return make_per_channel_affine_quantizer(
-      scale_vals, zero_point_vals, axis, scalar_type);
+  return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
+                                                        scales_double, zero_points_int64,
+                                                        axis);
 }
 
 QTensorImpl* get_qtensorimpl(const Tensor& self) {
@@ -71,14 +61,36 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
+#ifdef USE_PYTORCH_QNNPACK
+
+// QNNPACK can access up to 8 bytes beyond the beginning of the tensor's storage
+// boundary which does trigger ASAN, and can result in a segfault if the memory falls
+// on a different page out of the process's address space.
+// Here we define a custom allocator that allocates the extra storage required to keep
+// this behavior safe.  This same allocator can be used for FBGEMM as well.
+
+using QAllocator = native::GuardingAllocator<8u, 0u>;
+
+#endif
+
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format=MemoryFormat::Contiguous) {
-  native::check_size_nonnegative(sizes);
+    QuantizerPtr quantizer) {
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   at::Allocator* allocator = GetAllocator(options.device().type());
+
+  #ifdef USE_PYTORCH_QNNPACK
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
+      static QAllocator qallocator;
+      allocator = &qallocator;
+    }
+  #endif
+
+
+
   at::TensorTypeId tensorTypeId = options.computeTensorTypeId();
+  native::check_size_nonnegative(sizes);
   int64_t nelements = at::prod_intlist(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(isQIntType(typeMetaToScalarType(dtype)),
@@ -90,7 +102,7 @@ inline Tensor new_qtensor(
       allocator,
       /*resizable=*/true);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage, at::TensorTypeSet(tensorTypeId), quantizer);
+      storage, at::DispatchKeySet(at::DispatchKey::QuantizedCPUTensorId), quantizer);
   get_qtensorimpl(tensor)->set_sizes_contiguous(sizes);
   get_qtensorimpl(tensor)->empty_tensor_restride(memory_format);
   return tensor;

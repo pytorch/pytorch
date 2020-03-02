@@ -1,11 +1,9 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
-#include <ATen/core/EnableNamedTensor.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <bitset>
 #include <sstream>
 
-#ifdef BUILD_NAMEDTENSOR
 namespace at {
 
 // Returns "Tensor['N', 'C', 'H', 'W']" for a tensor with names ('N', 'C', 'H', 'W').
@@ -541,4 +539,3 @@ bool are_names_equal(TensorImpl* self, TensorImpl* other) {
 
 } // namespace namedinference
 } // namespace at
-#endif

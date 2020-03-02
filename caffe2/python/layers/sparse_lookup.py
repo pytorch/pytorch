@@ -130,7 +130,8 @@ class SparseLookup(ModelLayer):
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
-                 name='sparse_lookup', regularizer=None, use_external_weights=False, **kwargs):
+                 name='sparse_lookup', regularizer=None, use_external_weights=False,
+                 uniform_weight_init_scale_numerator=1.0, **kwargs):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
@@ -186,6 +187,7 @@ class SparseLookup(ModelLayer):
             weight_optim
         )
 
+        self.uniform_weight_init_scale_numerator = uniform_weight_init_scale_numerator
         default_init_op = self._get_default_init_op()
 
         self.weight_init = weight_init or default_init_op
@@ -286,7 +288,7 @@ class SparseLookup(ModelLayer):
             return [RowwiseQuantized8BitsWeight(self.w, self.scale_bias)]
 
     def _get_default_init_op(self):
-        scale = math.sqrt(1.0 / self.input_dim)
+        scale = math.sqrt(self.uniform_weight_init_scale_numerator / self.input_dim)
 
         if self.trainer_version == 'fp32':
             default_weight_init = ('UniformFill', {'min': -scale, 'max': scale})

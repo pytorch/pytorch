@@ -62,4 +62,14 @@ ProcessGroup::ProcessGroup(int rank, int size) : rank_(rank), size_(size) {
 
 ProcessGroup::~ProcessGroup() {}
 
+// This is introduced so that implementors of ProcessGroup would not need to
+// have this implmentation.
+std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+    std::vector<std::vector<at::Tensor>>& /* usused */,
+    std::vector<at::Tensor>& /* usused */,
+    const AllgatherOptions& /* usused */) {
+  throw std::runtime_error(
+      "no support for allgather_coalesced in this process group");
+}
+
 } // namespace c10d

@@ -6,6 +6,7 @@ Tensors
 ----------------------------------
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
+.. autofunction:: is_complex
 .. autofunction:: is_floating_point
 .. autofunction:: set_default_dtype
 .. autofunction:: get_default_dtype
@@ -103,6 +104,7 @@ Random sampling
 .. autofunction:: bernoulli
 .. autofunction:: multinomial
 .. autofunction:: normal
+.. autofunction:: poisson
 .. autofunction:: rand
 .. autofunction:: rand_like
 .. autofunction:: randint
@@ -197,6 +199,8 @@ Pointwise Ops
 .. autofunction:: atan
 .. autofunction:: atan2
 .. autofunction:: bitwise_not
+.. autofunction:: bitwise_and
+.. autofunction:: bitwise_or
 .. autofunction:: bitwise_xor
 .. autofunction:: ceil
 .. autofunction:: clamp
@@ -211,6 +215,7 @@ Pointwise Ops
 .. autofunction:: exp
 .. autofunction:: expm1
 .. autofunction:: floor
+.. autofunction:: floor_divide
 .. autofunction:: fmod
 .. autofunction:: frac
 .. autofunction:: imag
@@ -239,6 +244,7 @@ Pointwise Ops
 .. autofunction:: sin
 .. autofunction:: sinh
 .. autofunction:: sqrt
+.. autofunction:: square
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
@@ -306,6 +312,8 @@ Other Operations
 .. autofunction:: cdist
 .. autofunction:: combinations
 .. autofunction:: cross
+.. autofunction:: cummax
+.. autofunction:: cummin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: diag
@@ -375,4 +383,3 @@ Utilities
 .. autofunction:: result_type
 .. autofunction:: can_cast
 .. autofunction:: promote_types
-.. autofunction:: export_opnames

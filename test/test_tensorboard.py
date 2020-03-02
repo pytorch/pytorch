@@ -44,7 +44,7 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from common_utils import TestCase, run_tests, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -170,6 +170,16 @@ class TestTensorBoardUtils(BaseTestCase):
         test_image = np.random.randint(0, 256, size=(32, 32), dtype=np.uint8)
         converted = convert_to_HWC(test_image, 'hw')
         self.assertEqual(converted.shape, (32, 32, 3))
+
+    def test_convert_to_HWC_dtype_remains_same(self):
+        # test to ensure convert_to_HWC restores the dtype of input np array and
+        # thus the scale_factor calculated for the image is 1
+        test_image = torch.tensor([[[[1, 2, 3], [4, 5, 6]]]], dtype=torch.uint8)
+        tensor = make_np(test_image)
+        tensor = convert_to_HWC(tensor, 'NCHW')
+        scale_factor = summary._calc_scale_factor(tensor)
+        self.assertEqual(scale_factor, 1, 'Values are already in [0, 255], scale factor should be 1')
+
 
     def test_prepare_video(self):
         # At each timeframe, the sum over all other
@@ -450,13 +460,21 @@ class TestTensorBoardSummary(BaseTestCase):
 def remove_whitespace(string):
     return string.replace(' ', '').replace('\t', '').replace('\n', '')
 
-def read_expected_content(function_ptr):
+def get_expected_file(function_ptr):
     module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
+    test_file = sys.modules[module_id].__file__
+    # Look for the .py file (since __file__ could be pyc).
+    test_file = ".".join(test_file.split('.')[:-1]) + '.py'
+
+    # Use realpath to follow symlinks appropriately.
+    test_dir = os.path.dirname(os.path.realpath(test_file))
     functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    return os.path.join(test_dir,
+                        "expect",
+                        'TestTensorBoard.' + functionName + ".expect")
+
+def read_expected_content(function_ptr):
+    expected_file = get_expected_file(function_ptr)
     assert os.path.exists(expected_file)
     with open(expected_file, "r") as f:
         return f.read()
@@ -484,12 +502,7 @@ def compare_proto(str_to_compare, function_ptr):
     return remove_whitespace(str_to_compare) == remove_whitespace(expected)
 
 def write_proto(str_to_compare, function_ptr):
-    module_id = function_ptr.__class__.__module__
-    test_dir = os.path.dirname(sys.modules[module_id].__file__)
-    functionName = function_ptr.id().split('.')[-1]
-    expected_file = os.path.join(test_dir,
-                                 "expect",
-                                 'TestTensorBoard.' + functionName + ".expect")
+    expected_file = get_expected_file(function_ptr)
     with open(expected_file, 'w') as f:
         f.write(str(str_to_compare))
 

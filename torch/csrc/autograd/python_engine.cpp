@@ -9,7 +9,6 @@
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <pybind11/pybind11.h>
-#include <ATen/core/EnableNamedTensor.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -62,6 +61,10 @@ variable_list PythonEngine::execute(
     bool keep_graph,
     bool create_graph,
     const edge_list& outputs) {
+  TORCH_CHECK(!PyGILState_Check(), "The autograd engine was called while holding the GIL. If you are using the C++ "
+                                   "API, the autograd engine is an expensive operation that does not require the "
+                                   "GIL to be held so you should release it with 'pybind11::gil_scoped_release no_gil;'"
+                                   ". If you are not using the C++ API, please report a bug to the pytorch team.")
   try {
     return Engine::execute(roots, inputs, keep_graph, create_graph, outputs);
   } catch (python_error& e) {
@@ -70,8 +73,8 @@ variable_list PythonEngine::execute(
   }
 }
 
-variable_list PythonEngine::execute_with_graph_task(
-    std::shared_ptr<GraphTask> graph_task,
+std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+    const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
     return Engine::execute_with_graph_task(graph_task, graph_root);
@@ -150,7 +153,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     PyObject *grad = PyTuple_GET_ITEM(grad_tensors, i);
     if (THPVariable_Check(grad)) {
       const Variable& grad_var = ((THPVariable*)grad)->cdata;
-#ifdef BUILD_NAMEDTENSOR
       if (grad_var.has_names()) {
         TORCH_WARN(
             "Autograd was passed a named grad tensor with dims ", grad_var.names(),
@@ -158,7 +160,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
             "will be ignored. In practice all computed gradients will still be correct "
             "according to regular tensor semantics.");
       }
-#endif
       grads.push_back(grad_var);
     } else {
       THPUtils_assert(grad == Py_None,

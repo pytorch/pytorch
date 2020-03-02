@@ -674,4 +674,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::barrier(
   return enqueue(std::move(entry));
 }
 
+std::shared_ptr<ProcessGroup::Work> ProcessGroupMPI::allgather_base(
+    at::Tensor& /*unused */,
+    at::Tensor& /*unused */,
+    const AllgatherOptions& /*unused */) {
+  throw std::runtime_error(
+      "no support for allgather_base in MPI process group");
+}
+
 } // namespace c10d

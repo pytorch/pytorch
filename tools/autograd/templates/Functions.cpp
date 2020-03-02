@@ -146,12 +146,28 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
   return at::where(exponent == 0.0, at::zeros({}, grad.options()), grad * exponent * self.pow(exponent - 1));
 }
 
-Tensor pow_backward_exponent(Tensor grad, const Tensor & self, Tensor result) {
-  return grad * result * self.log();
+// Caveats:
+// We define d(a^b)/db at a = 0 and b < 0 to be -inf. This is due to
+// d(a^b)/db -> -inf for a fixed b as a -> +0
+// Currently, tensorflow defines d(a^b)/db = nan for a = 0 and b < 0.
+//
+// We define d(a^b)/db = 0 for a = 0 and b = 0 by continuity as
+// d(a^b)/db = 0 for a > 0 and b -> +0.
+// Currently, tensorflow agrees with us.
+Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
+  return grad * at::where(at::logical_and(self == 0, exponent >= 0),
+                          at::zeros({}, grad.options()),
+                          result * self.log());
 }
 
-Tensor pow_backward_exponent(Tensor grad, const Scalar & base, Tensor result) {
-  return grad * result * std::log(base.toDouble());
+Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exponent, Tensor result) {
+  if (base.toDouble() == 0) {
+    return grad * at::where(exponent >= 0,
+                            at::zeros({}, grad.options()),
+                            result * std::log(base.toDouble()));
+  } else {
+    return grad * result * std::log(base.toDouble());
+  }
 }
 
 Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
@@ -351,7 +367,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     dy_j / dx_k = 0, which is done right after the assert.
   */
 
-  if (input.dim() == 0) {
+  if (input.dim() == 0 || input.numel() == 0) {
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
@@ -415,7 +431,8 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
-  if (x.dim() == 0) {
+  // Need to check numel to see if there are no values (such as shape [0,2], and dim to see if x is a scalar.
+  if (x.dim() == 0 || x.numel() == 0) {
     return x;
   }
   auto ret = at::cumsum(-x, dim);
@@ -423,6 +440,22 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   ret -= ret_sum.expand(ret.sizes());
   ret += x;
   return ret;
+}
+
+Tensor cummax_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
+  if (input.numel() == 0) {
+    return input;
+  }
+  auto result = at::zeros(input.sizes(), input.options());
+  return result.scatter_add_(dim, indices, grad);
+}
+
+Tensor cummin_backward(const Tensor &indices, const Tensor &grad, const Tensor &input, int64_t dim) {
+  if (input.numel() == 0) {
+    return input;
+  }
+  auto result = at::zeros(input.sizes(), input.options());
+  return result.scatter_add_(dim, indices, grad);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -1757,6 +1790,55 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   return u_term + sigma_term + v_term;
+}
+
+// "An extended collection of matrix derivative results for forward and reverse mode algorithmic differentiation"
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, const Tensor& lambda, const Tensor& v) {
+  // This gradient only works for real eigenvalues at the moment.
+  TORCH_CHECK(eigenvectors,
+           "eig_backward: Setting eigenvectors to false in torch.eig doesn't compute eigenvectors ",
+           "and hence we cannot compute backward. Please use torch.eig(eigenvectors=True)");
+  auto zeros = at::zeros({1}, lambda.options());
+  TORCH_CHECK(
+      at::allclose(lambda.slice(/*dim=*/-1, /*start=*/1, /*end=*/2), zeros),
+      "eig_backward: Backward calculation does not support complex eigenvalues at the moment.");
+
+  auto glambda = grads[0];
+  auto gv = grads[1];
+  auto vt = v.transpose(-2, -1);
+
+  Tensor result;
+  // contribution from the eigenvectors
+  if (gv.defined()) {
+    auto rlambda = lambda.slice(/*dim=*/-1, /*start=*/0, /*end=*/1);
+
+    auto hm = rlambda.transpose(-2,-1) - rlambda;
+    hm.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+    hm.pow_(-1.0);
+
+    auto gvortho = gv - at::sum(gv * v, /*dim=*/-2, /*keepdim=*/true) * v;
+    auto B = hm * at::matmul(vt, gvortho);
+    auto A = at::matmul(B, vt);
+
+    std::tie(result, std::ignore) = at::solve(A, vt);
+  }
+  // contribution from eigenvalues
+  if (glambda.defined()) {
+    auto grlambda = glambda.slice(/*dim=*/-1, /*start=*/0, /*end=*/1) * vt;
+    auto A = at::matmul(v, grlambda);
+    auto vvt = at::matmul(v, vt);
+    if (result.defined()) {
+      Tensor result1;
+      std::tie(result1, std::ignore) = at::solve(A, vvt);
+      result = result.add(result1);
+    }
+    else {
+      std::tie(result, std::ignore) = at::solve(A, vvt);
+    }
+  }
+  return result;
 }
 
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf

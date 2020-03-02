@@ -59,7 +59,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
       implementation.
 
     .. warning::
-        Labels passed as inputs to this module should be sorted accoridng to
+        Labels passed as inputs to this module should be sorted according to
         their frequency. This means that the most frequent label should be
         represented by the index `0`, and the least frequent
         label should be represented by the index `n_classes - 1`.

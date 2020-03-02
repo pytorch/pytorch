@@ -1,6 +1,6 @@
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
-#include <torch/csrc/jit/script/function_schema_parser.h>
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #endif
 
 namespace c10 {
@@ -12,7 +12,7 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 // table deregisters it in the destructor.
 class RegisterOperators::OperatorRegistrar final {
 public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<TensorTypeId> dispatch_key, c10::optional<KernelFunction> kernel)
+  explicit OperatorRegistrar(FunctionSchema&& schema, OperatorOptions&& operatorOptions, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
   : op_(Dispatcher::singleton().registerSchema(std::move(schema), std::move(operatorOptions))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
@@ -111,7 +111,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorNam
 }
 
 void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
-  std::unordered_set<TensorTypeId> dispatch_keys;
+  std::unordered_set<DispatchKey> dispatch_keys;
   bool has_catchall_kernel = false;
 
   for (const auto& kernel : options.kernels) {
@@ -164,5 +164,58 @@ RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
+
+
+CppFunction::CppFunction(KernelFunction func, std::unique_ptr<c10::FunctionSchema> schema)
+  : func_(std::move(func))
+  , schema_(std::move(schema))
+  {}
+
+Module::Module(const char* ns)
+  : ns_(ns)
+  {}
+
+Module::Module(Module&&) noexcept = default;
+Module& Module::operator=(Module&&) noexcept = default;
+
+// TODO: Error if an operator is def'ed multiple times.  Right now we just
+// merge everything
+
+namespace {
+  std::string addNamespace(const char* ns, const char* name_or_schema) { if (ns) {
+      // TODO: slow!  Fix internal data structures so I don't have to paste the
+      // names together
+      std::ostringstream oss;
+      oss << ns << "::" << name_or_schema;
+      return oss.str();
+    } else {
+      return name_or_schema;
+    }
+  }
+}
+
+Module&& Module::def(const char* schema) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, schema))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+  return std::move(*this);
+}
+
+Module&& Module::def(const char* name_or_schema, CppFunction&& f) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, name_or_schema))
+    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
+
+Module&& Module::impl(const char* name_or_schema, CppFunction&& f) && {
+  register_.op(c10::RegisterOperators::options()
+    .schema(addNamespace(ns_, name_or_schema))
+    // NB: Don't specify AliasAnalysis; the def() is expected to provide
+    // this
+    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+  return std::move(*this);
+}
 
 }

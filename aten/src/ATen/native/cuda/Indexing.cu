@@ -1,4 +1,4 @@
-#include <ATen/native/Indexing.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
@@ -42,14 +42,14 @@ __global__ void indexing_backward_kernel(
   // 8     <warp 4>
 
   // Number of values processed by each thread (grain size)
-  for (int z = blockIdx.z; z < outer_dim; z += gridDim.z){
-    int idx = blockIdx.x * blockDim.y + threadIdx.y;
+  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
     if (idx < numel
         && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
       do {
-        int start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-        const int weight_row = ((int) sorted_indices[idx]) * stride + z * stride_before;
-        const int grad_row = ((int) indices[idx]) * stride + z * numel * stride;
+        int64_t start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+        const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
+        const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
         const accscalar_t scale = (accscalar_t)1.0;
 
         accscalar_t gradient[SZ];
@@ -58,7 +58,7 @@ __global__ void indexing_backward_kernel(
         while (start_feature < stride) {
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
-            int feature_dim = start_feature + ii * C10_WARP_SIZE;
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
               gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
               weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
@@ -72,7 +72,7 @@ __global__ void indexing_backward_kernel(
 
           #pragma unroll
           for (int ii = 0; ii < SZ; ii++) {
-            int feature_dim = start_feature + ii * C10_WARP_SIZE;
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
             }
@@ -108,7 +108,7 @@ static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size,
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
-  // computes the stride as if tensor were contigous
+  // computes the stride as if tensor were contiguous
   auto sizes = tensor.sizes();
   std::vector<int64_t> stride(tensor.dim());
   stride[tensor.dim() - 1] = 1;
@@ -216,16 +216,15 @@ void index_put_accum_kernel(Tensor & self, TensorList indices, const Tensor & va
       thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data, ThrustLTOp<int64_t>());
       }
       TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
-      TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", self.numel(), "file a support request on github");
-      TORCH_CHECK(value.numel() < std::numeric_limits<int>::max(), "index_put_ with accumulation is not supported on large tensors, number of source elements =", value.numel(), "file a support request on github");
       const int UNROLL = 4;
       const int indices_per_block = 4;
       dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
            std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(C10_WARP_SIZE, indices_per_block);
-  
-      AT_DISPATCH_FLOATING_TYPES_AND_HALF(value_.scalar_type(), "embedding_backward", [&] {
+      
+      AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::Bool,
+      value_.scalar_type(), "indexing_backward", [&] {
       indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
         sorted_indices.data_ptr<int64_t>(),
         orig_indices.data_ptr<int64_t>(),

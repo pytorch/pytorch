@@ -25,10 +25,14 @@ void THNN_(MultiMarginCriterion_updateOutput)(
                "inconsistent target size");
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
-    THCTensor_(resize1d)(state, output, 1);
+    if (reduction == at::Reduction::None) {
+      THCTensor_(resizeAs)(state, output, target);
+    } else {
+      THCTensor_(resize0d)(state, output);
+    }
     if (p == 1)
     {
-      cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
@@ -40,7 +44,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
     else if (p == 2)
     {
-      cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
@@ -62,10 +66,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 
     if (reduction == at::Reduction::None)
     {
-      THCTensor_(resize1d)(state, output, input->size(0));
+      THCTensor_(resizeAs)(state, output, target);
       if (p == 1)
       {
-        cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+        cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -77,7 +81,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
       else if (p == 2)
       {
-        cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+        cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -91,11 +95,11 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
     else
     {
-      THCTensor_(resize1d)(state, output, 1);
+      THCTensor_(resize0d)(state, output);
       THCTensor *output_ = THCTensor_(newWithSize1d)(state, input->size(0));  // tmp output buffer
       if (p == 1)
       {
-        cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+        cunn_MultiMarginCriterion_updateOutput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output_),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -107,7 +111,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
       else if (p == 2)
       {
-        cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+        cunn_MultiMarginCriterion_updateOutput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
           THCTensor_(data)(state, output_),
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
@@ -119,7 +123,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
       }
       THCudaCheck(cudaGetLastError());
       float sum = THCTensor_(sumall)(state, output_);
-      THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, scalar_t>::to(sum));
+      THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
       THCTensor_(free)(state, output_);
     }
   }
@@ -159,7 +163,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
     if (p == 1)
     {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),
@@ -173,7 +177,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     }
     else if (p == 2)
     {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),
@@ -197,7 +201,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
     if (p == 1)
     {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateGradInput_kernel<1, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),
@@ -211,7 +215,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     }
     else if (p == 2)
     {
-      cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, THCState_getCurrentStream(state)>>>(
+      cunn_MultiMarginCriterion_updateGradInput_kernel<2, scalar_t, accreal> <<<blocks,threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
         THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, gradOutput),
         THCTensor_(data)(state, input),

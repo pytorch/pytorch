@@ -174,7 +174,7 @@ std::unique_ptr<cub::CachingDeviceAllocator> g_cub_allocator;
 static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 
 // Data structures for optional memory tracking. Access to these structures
-// is garded by the CUDAContext::mutex.
+// is guarded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
 static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
@@ -455,7 +455,7 @@ void TrackMemoryAlloc(size_t nbytes) {
   int this_gpu = CaffeCudaGetDevice();
   g_total_by_gpu_map[this_gpu] += nbytes;
   g_max_by_gpu_map[this_gpu] =
-      max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
+      std::max(g_max_by_gpu_map[this_gpu], g_total_by_gpu_map[this_gpu]);
   g_total_mem += nbytes;
   if (g_total_mem - g_last_rep >
       FLAGS_caffe2_gpu_memory_report_interval_mb * 1024 * 1024) {

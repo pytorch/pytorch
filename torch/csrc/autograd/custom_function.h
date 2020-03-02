@@ -71,7 +71,7 @@ struct TORCH_API Function {
   // The enable_if check is to ensure that the user doesn't explicitly provide
   // the parameter X.
   template<typename X=T, typename... Args>
-  static auto apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
+  static auto apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>>;
 };
 
 // Context to save information during forward that can be accessed in backward
@@ -98,7 +98,7 @@ struct TORCH_API AutogradContext {
   // save_for_backward(). Before returning them to the user, a check is made to
   // ensure that they were not modified by any in-place operations.
   variable_list get_saved_variables() const;
-  const std::unordered_set<at::TensorImpl*>& get_dirty() const;
+  const std::unordered_set<at::TensorImpl*>& get_and_bump_dirty() const;
   const std::unordered_set<at::TensorImpl*>& get_non_differentiable() const;
 
 private:
@@ -175,7 +175,7 @@ typename std::enable_if<std::is_same<T, Variable>::value, T>::type to_output_typ
 
 template<class T>
 template<typename X, typename... Args>
-auto Function<T>::apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
+auto Function<T>::apply(Args&&... args) -> std::enable_if_t<std::is_same<X,T>::value, forward_t<X,Args...>> {
   std::shared_ptr<CppNode<T>> node(new CppNode<T>(), deleteNode);
   variable_list input_vars;
 
@@ -203,7 +203,7 @@ auto Function<T>::apply(Args&&... args) -> c10::guts::enable_if_t<std::is_same<X
     outputs = T::forward(&node->ctx_, std::forward<Args>(args)...);
   }
 
-  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx_.get_non_differentiable(), node->ctx_.get_dirty(), outputs, is_executable ? node : nullptr);
+  auto wrapped_outputs = _wrap_outputs(input_vars, node->ctx_.get_non_differentiable(), node->ctx_.get_and_bump_dirty(), outputs, is_executable ? node : nullptr);
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {

@@ -364,7 +364,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NHW[0] = gix_mult * gix;
@@ -383,7 +383,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
         //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
         scalar_t *gGrid_ptr_NHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
@@ -569,7 +569,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NDHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NDHW
         //   2. directly assign to gGrid_ptr_NDHW[0], gGrid_ptr_NDHW[1], gGrid_ptr_NDHW[2]
         scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NDHW[0] = gix_mult * gix;
@@ -591,7 +591,7 @@ namespace {
 
         // assuming grad_grid is contiguous
         // thus we can
-        //   1. use index with gGrid_sW to diectly compute gGrid_ptr_NDHW
+        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NDHW
         //   2. directly assign to gGrid_ptr_NDHW[0], gGrid_ptr_NDHW[1], gGrid_ptr_NDHW[2]
         scalar_t *gGrid_ptr_NDHW = grad_grid.data + index * gGrid_sW;
         gGrid_ptr_NDHW[0] = static_cast<scalar_t>(0);

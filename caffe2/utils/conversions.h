@@ -7,13 +7,14 @@
 // has necessary diagnostic guards.
 #include <caffe2/core/common_gpu.h>
 #endif
-#if __HIP_DEVICE_COMPILE__
+#ifdef __HIP_DEVICE_COMPILE__
 #include <caffe2/core/hip/common_gpu.h>
 #endif
 
 // See Note [hip-clang differences to hcc]
 
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIP__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__) || \
+    defined(__HIP__) || (defined(__clang__) && defined(__CUDA__))
 #define CONVERSIONS_DECL __host__ __device__ inline
 #else
 #define CONVERSIONS_DECL inline

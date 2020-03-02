@@ -1,0 +1,84 @@
+  docker_build_job:
+      parameters:
+        image_name:
+          type: string
+          default: ""
+      machine:
+        image: ubuntu-1604:201903-01
+      resource_class: large
+      environment:
+        IMAGE_NAME: << parameters.image_name >>
+      steps:
+        - checkout
+        - run:
+            name: build_docker_image_<< parameters.image_name >>
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              set -x
+              cd .circleci/docker && ./build_docker.sh
+  docker_for_ecr_gc_build_job:
+      machine:
+        image: ubuntu-1604:201903-01
+      steps:
+        - checkout
+        - run:
+            name: build_docker_image_for_ecr_gc
+            no_output_timeout: "1h"
+            command: |
+              cd .circleci/ecr_gc_docker
+              docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              eval $(aws ecr get-login --no-include-email --region us-east-1)
+              set -x
+              docker push 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+  ecr_gc_job:
+      parameters:
+        project:
+          type: string
+          default: "pytorch"
+        tags_to_keep:  # comma separate values
+          type: string
+      environment:
+        PROJECT: << parameters.project >>
+        IMAGE_TAG: << parameters.tags_to_keep >>
+      docker:
+        - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+          aws_auth:
+            aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+            aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+
+      steps:
+        - run:
+            name: garbage collecting for ecr images
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              set -x
+              /usr/bin/gc.py --filter-prefix ${PROJECT}  --ignore-tags ${IMAGE_TAG}
+
+  docker_hub_index_job:
+      docker:
+        - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
+          aws_auth:
+            aws_access_key_id: ${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+            aws_secret_access_key: ${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+
+      steps:
+        - run:
+            name: garbage collecting for ecr images
+            no_output_timeout: "1h"
+            command: |
+              set +x
+              export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
+              export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_DOCKER_BUILDER_V1}
+              export DOCKER_HUB_USERNAME=${CIRCLECI_DOCKER_HUB_USERNAME}
+              export DOCKER_HUB_PASSWORD=${CIRCLECI_DOCKER_HUB_PASSWORD}
+              set -x
+              /usr/bin/docker_hub.py

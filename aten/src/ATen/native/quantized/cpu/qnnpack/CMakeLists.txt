@@ -147,11 +147,13 @@ SET(PYTORCH_QNNPACK_INIT_SRCS
   src/max-pooling.c
   src/sigmoid.c
   src/softargmax.c
+  src/tanh.c
   src/operator-delete.c)
 
 SET(PYTORCH_QNNPACK_EXEC_SRCS
   src/conv-run.cc
   src/fc-run.cc
+  src/fc-dynamic-run.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -175,6 +177,7 @@ SET(PYTORCH_QNNPACK_ARM_NEON_UKERNELS
   src/q8gavgpool/up8xm-neon.c
   src/q8gemm/4x-sumrows-neon.c
   src/q8gemm/4x8-neon.c
+  src/q8gemm/4x8-dq-neon.c
   src/q8gemm/4x8c2-xzp-neon.c
   src/q8gemm/6x4-neon.c
   src/q8gemm/8x8-neon.c
@@ -195,11 +198,13 @@ SET(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8conv/4x8-aarch32-neon.S
   src/q8dwconv/up8x9-aarch32-neon.S
   src/q8gemm/4x8-aarch32-neon.S
+  src/q8gemm/4x8-dq-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S)
 
 SET(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS
   src/q8conv/8x8-aarch64-neon.S
-  src/q8gemm/8x8-aarch64-neon.S)
+  src/q8gemm/8x8-aarch64-neon.S
+  src/q8gemm/8x8-dq-aarch64-neon.S)
 
 SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8avgpool/mp8x9p8q-sse2.c
@@ -212,6 +217,7 @@ SET(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8gavgpool/up8x7-sse2.c
   src/q8gavgpool/up8xm-sse2.c
   src/q8gemm/2x4c8-sse2.c
+  src/q8gemm/4x4c2-dq-sse2.c
   src/q8gemm/4x4c2-sse2.c
   src/q8vadd/sse2.c
   src/u8clamp/sse2.c
@@ -446,6 +452,15 @@ IF(PYTORCH_QNNPACK_BUILD_TESTS)
   TARGET_LINK_LIBRARIES(softargmax-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
   ADD_TEST(softargmax-test softargmax-test)
 
+  ADD_EXECUTABLE(tanh-test test/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_INCLUDE_DIRECTORIES(tanh-test PRIVATE src test)
+  TARGET_LINK_LIBRARIES(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  ADD_TEST(tanh-test tanh-test)
+
   ADD_EXECUTABLE(max-pooling-test test/max-pooling.cc)
   SET_TARGET_PROPERTIES(max-pooling-test PROPERTIES
     CXX_STANDARD 14
@@ -666,6 +681,13 @@ IF(PYTORCH_QNNPACK_BUILD_BENCHMARKS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   TARGET_LINK_LIBRARIES(softargmax-bench PRIVATE pytorch_qnnpack benchmark)
+
+  ADD_EXECUTABLE(tanh-bench bench/tanh.cc)
+  SET_TARGET_PROPERTIES(tanh-bench PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  TARGET_LINK_LIBRARIES(tanh-bench PRIVATE pytorch_qnnpack benchmark)
 
   ADD_EXECUTABLE(q8gemm-bench bench/q8gemm.cc)
   SET_TARGET_PROPERTIES(q8gemm-bench PROPERTIES

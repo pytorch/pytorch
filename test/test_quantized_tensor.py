@@ -7,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis_utils import no_deadline
 
-from common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 import tempfile
 
 class Foo(torch.nn.Module):
@@ -88,6 +88,18 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, dtype)
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(r.cpu().numpy(), rqr.cpu().numpy(), atol=2 / scale))
+
+    # legacy constructor/new doesn't support qtensors
+    def test_qtensor_legacy_new_failure(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4 - 2
+        scale = 0.02
+        zero_point = 2
+        qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
+        self.assertRaises(RuntimeError, lambda: qr.new(device='cpu'))
+        self.assertRaises(RuntimeError, lambda: qr.new(r.storage()))
+        self.assertRaises(RuntimeError, lambda: qr.new(r))
+        self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
+        self.assertRaises(RuntimeError, lambda: qr.new([6]))
 
     @given(dtype=st.sampled_from([torch.qint8, torch.quint8]))
     def test_per_channel_qtensor_creation(self, dtype):
@@ -250,7 +262,7 @@ class TestQuantizedTensor(TestCase):
     def test_qtensor_per_channel_load_save(self, dtype):
         return
         r = torch.rand(20, 10, dtype=torch.float) * 4 - 2
-        scales = torch.rand(10) * 0.02 + 0.01
+        scales = torch.rand(10, dtype=torch.double) * 0.02 + 0.01
         zero_points = torch.round(torch.rand(10) * 20 + 1).to(torch.long)
 
         qr = torch.quantize_per_channel(r, scales, zero_points, 1, dtype)
@@ -292,6 +304,12 @@ class TestQuantizedTensor(TestCase):
         q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
         qc = deepcopy(q)
         self.assertEqual(qc, q)
+        
+        # can't copy from quantized tensor to non-quantized tensor
+        r = torch.empty([numel], dtype=torch.float)
+        q = torch._empty_affine_quantized([numel], scale=scale, zero_point=zero_point, dtype=torch.quint8)
+        with self.assertRaisesRegex(RuntimeError, "please use dequantize"):
+            r.copy_(q)
 
     @no_deadline
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))

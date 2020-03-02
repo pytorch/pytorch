@@ -22,8 +22,18 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // Pass serialized onnx model if true, otherwise pass serialized c2 model
   bool use_onnx{false};
 
-  // Whether to adjust batch at the ouptuts or not
+  // Whether to adjust batch at the outputs or not
   bool adjust_batch{true};
+
+  // Whether to lower model blob by blob
+  bool load_model_by_blob{false};
+
+  // Whether to combine fp32 batched inputs into one tensor and convert it to
+  // fp16 or not
+  bool merge_fp32_inputs_into_fp16{false};
+
+  // Enter loop test mode
+  bool loop_test{false};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -35,7 +45,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
-      const std::unordered_map<std::string, TensorShape>& shape_hints,
+      const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blacklisted_ops) override;
 
  private:
