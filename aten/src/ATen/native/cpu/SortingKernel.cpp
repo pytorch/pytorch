@@ -17,7 +17,7 @@ static void topk_kernel(
     int64_t dim,
     bool largest,
     bool sorted) {
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "topk_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "topk_cpu", [&] {
     dim_apply(
         {self, values, indices},
         dim,
@@ -41,35 +41,35 @@ static void topk_kernel(
             if (largest) {
               std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
                 [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                  return ((_isnan(x.first) && !_isnan(y.first)) || (x.first > y.first));
                 });
             } else {
               std::partial_sort(queue.begin(), queue.begin() + k, queue.end(),
                 [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                  return ((!_isnan(x.first) && _isnan(y.first)) || (x.first < y.first));
                 });
             }
           } else {
             if (largest) {
               std::nth_element(queue.begin(), queue.begin() + k - 1, queue.end(),
                 [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                  return ((_isnan(x.first) && !_isnan(y.first)) || (x.first > y.first));
                 });
               if (sorted) {
                 std::sort(queue.begin(), queue.begin() + k - 1,
                   [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((_isnan<scalar_t>(x.first) && !_isnan<scalar_t>(y.first)) || (x.first > y.first));
+                    return ((_isnan(x.first) && !_isnan(y.first)) || (x.first > y.first));
                   });
               }
             } else {
               std::nth_element(queue.begin(), queue.begin() + k -1, queue.end(),
                 [](const elem_t& x, const elem_t& y) -> bool {
-                  return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                  return ((!_isnan(x.first) && _isnan(y.first)) || (x.first < y.first));
                 });
               if (sorted) {
                 std::sort(queue.begin(), queue.begin() + k -1,
                   [](const elem_t& x, const elem_t& y) -> bool {
-                    return ((!_isnan<scalar_t>(x.first) && _isnan<scalar_t>(y.first)) || (x.first < y.first));
+                    return ((!_isnan(x.first) && _isnan(y.first)) || (x.first < y.first));
                   });
               }
             }

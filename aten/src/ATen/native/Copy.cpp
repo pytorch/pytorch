@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/mkldnn/Copy.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/MemoryOverlap.h>
@@ -109,6 +110,10 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_INTERNAL_ASSERT(is_supported_device(self.device()));
     at::_copy_from(src, self, non_blocking);
     return self;
+  }
+
+  if (self.is_mkldnn()) {
+    return mkldnn_copy_from(self, src);
   }
 
   if (self.is_quantized() && !src.is_quantized()) {

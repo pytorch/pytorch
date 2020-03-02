@@ -223,14 +223,36 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_backward_weights(
       dilation,
       groups,
       bias_defined);
+
+  ideep::tensor grad_weight, grad_bias;
+  if (mkldnn_grad_weight.get_data_type() != get_mkldnn_dtype(weight.scalar_type())) {
+    grad_weight.init<AllocForMKLDNN>({
+        mkldnn_grad_weight.get_dims(),
+        get_mkldnn_dtype(weight.scalar_type()),
+        mkldnn_grad_weight.get_internal_format()});
+    grad_weight.feed_from(mkldnn_grad_weight);
+  } else {
+    grad_weight = mkldnn_grad_weight;
+  }
+
+  if (bias_defined) {
+    if (mkldnn_grad_bias.get_data_type() != get_mkldnn_dtype(weight.scalar_type())) {
+      grad_bias.init<AllocForMKLDNN>(
+          {mkldnn_grad_bias.get_dims(), get_mkldnn_dtype(weight.scalar_type())});
+      grad_bias.feed_from(mkldnn_grad_bias);
+    } else {
+      grad_bias = mkldnn_grad_bias;
+    }
+  }
+
   if (weight.is_mkldnn()) {
     return std::tuple<Tensor, Tensor>{
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), grad_output.options()),
-        new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), grad_output.options())};
+        new_with_itensor_mkldnn(std::move(grad_weight), weight.options()),
+        new_with_itensor_mkldnn(std::move(grad_bias), weight.options())};
   } else {
     return std::tuple<Tensor, Tensor>{
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_weight), grad_output.options())),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(mkldnn_grad_bias), grad_output.options()))};
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(grad_weight), weight.options())),
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(grad_bias), weight.options()))};
   }
 }
 

@@ -81,8 +81,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),
-        new_with_itensor_mkldnn(std::move(saved_mean), input.options()),
-        new_with_itensor_mkldnn(std::move(saved_var), input.options()));
+        new_with_itensor_mkldnn(std::move(saved_mean), weight.options()),
+        new_with_itensor_mkldnn(std::move(saved_var), weight.options()));
   } else {
     if (use_running_stat) {
       ideep::tensor m = itensor_from_tensor(running_mean);
@@ -95,8 +95,8 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), input.options()),
-        new_with_itensor_mkldnn(ideep::tensor{}, input.options()),
-        new_with_itensor_mkldnn(ideep::tensor{}, input.options()));
+        new_with_itensor_mkldnn(ideep::tensor{}, weight.options()),
+        new_with_itensor_mkldnn(ideep::tensor{}, weight.options()));
   }
 }
 
@@ -124,13 +124,13 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   if (weight.is_mkldnn()) {
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(gradx), input.options()),
-        new_with_itensor_mkldnn(std::move(gradw), input.options()),
-        new_with_itensor_mkldnn(std::move(gradb), input.options()));
+        new_with_itensor_mkldnn(std::move(gradw), weight.options()),
+        new_with_itensor_mkldnn(std::move(gradb), weight.options()));
   } else {
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(gradx), input.options()),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), input.options())),
-        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), input.options())));
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradw), weight.options())),
+        mkldnn_to_dense(new_with_itensor_mkldnn(std::move(gradb), weight.options())));
   }
 }
 
