@@ -5,8 +5,6 @@ for custom mobile build.
 """
 
 import argparse
-import os
-import sys
 import yaml
 
 from collections import defaultdict
