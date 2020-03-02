@@ -360,7 +360,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
       // the slots to the right size
       resizeObject(slot);
     }
-    slots_[slot] = v;
+    slots_[slot] = std::move(v);
   }
 
   const IValue& getSlot(size_t slot) const {
@@ -526,7 +526,7 @@ T generic_to(
     IValue ivalue,
     _fake_type<T>) {
     using ElemType = typename std::remove_pointer<T>::type::element_type;
-    auto obj = ivalue.toObject();
+    auto obj = std::move(ivalue).toObject();
     auto capsule = obj->getSlot(0);
     return c10::static_intrusive_pointer_cast<ElemType>(capsule.toCapsule());
 }
@@ -535,7 +535,7 @@ template <typename T>
 tagged_capsule<T> generic_to(
     IValue ivalue,
     _fake_type<tagged_capsule<T>>) {
-    return tagged_capsule<T>{ivalue};
+    return tagged_capsule<T>{std::move(ivalue)};
 }
 
 template <typename Elem>
@@ -855,7 +855,7 @@ template<class T> struct has_constructor<
 
 template <typename T>
 IValue from_(T x, std::true_type) {
-  return IValue(x);
+  return IValue(std::move(x));
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
@@ -864,10 +864,10 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
     throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
   }
   auto res = getCustomClassType<inputType>();
-  auto retObject = ivalue::Object::create(res, 1);
-  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(x);
+  auto retObject = ivalue::Object::create(std::move(res), 1);
+  auto objPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(x));
 
-  retObject->setSlot(0, IValue(objPtr));
+  retObject->setSlot(0, IValue(std::move(objPtr)));
   auto resIVal = IValue(std::move(retObject));
   return resIVal;
 }
@@ -880,7 +880,7 @@ IValue from_(T x, std::false_type) {
 
 template <typename T>
 IValue from(T x) {
-  return detail::from_(x, detail::has_constructor<T>{});
+  return detail::from_(std::move(x), detail::has_constructor<T>{});
 }
 
 }

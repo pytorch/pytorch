@@ -502,7 +502,7 @@ class InsertObserversHelper {
   std::unordered_map<Value*, script::Module> observer_for_value_;
   std::unordered_map<Value*, Value*> caller_to_callee_;
   // Map from values from callsite into the values in the CallMethod graph
-  std::unordered_map<Value*, std::vector<Value*>> boundary_value_map_;
+  std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
   // This is used for the observed values to pass through the ops like max_pool2d,
   // so that output values of max_pool2d do not need to be observed
@@ -832,12 +832,12 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // add mapping from callsite value to value in called graph
         for (auto i = 0; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
-          boundary_value_map_[n->outputs()[i]].push_back(return_val);
+          boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0; i < g->inputs().size(); ++i) {
           auto* input_val = g->inputs()[i];
-          boundary_value_map_[n->inputs()[i]].push_back(input_val);
-          caller_to_callee_[n->inputs()[i]] = input_val;
+          boundary_value_map_[n->input(i)].insert(input_val);
+          caller_to_callee_[n->input(i)] = input_val;
         }
       }
       for (Block* subblock : n->blocks()) {
@@ -1037,13 +1037,15 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
           graph_observed_values.insert(n->outputs()[idx]);
         }
         for (auto i = 0; i < n->inputs().size(); ++i) {
-          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i]) && !graph_observed_values.count(n->inputs()[i])) {
+          if (input_observers[i] && !graph_inputs_outputs.count(n->inputs()[i])
+              && !graph_observed_values.count(n->inputs()[i])) {
             values_to_observe[n->inputs()[i]] = *input_observers[i];
             graph_observed_values.insert(n->inputs()[i]);
           }
         }
         for (auto i = 0; i < n->outputs().size(); ++i) {
-          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i]) && !graph_observed_values.count(n->outputs()[i])) {
+          if (output_observers[i] && !graph_inputs_outputs.count(n->outputs()[i])
+              && !graph_observed_values.count(n->outputs()[i])) {
             values_to_observe[n->outputs()[i]] = *output_observers[i];
             graph_observed_values.insert(n->outputs()[i]);
           }
