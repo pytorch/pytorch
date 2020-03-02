@@ -510,13 +510,7 @@ Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Te
 
 Tensor & scatter_cpu_reduce_(Tensor & self, int64_t dim, const Tensor & index,
                       const Tensor & src, std::string reduce) {
-  if (reduce == "sum") {
-    scatter_add_stub(self.device().type(), self, dim, index, src);
-  }
-  else {
-    scatter_reduce_stub(self.device().type(), self, dim, index, src, reduce);
-  }
-
+  scatter_reduce_stub(self.device().type(), self, dim, index, src, reduce);
   return self;
 }
 
