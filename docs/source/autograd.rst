@@ -11,6 +11,25 @@ Automatic differentiation package - torch.autograd
 
 .. autofunction:: grad
 
+.. _functional-api:
+
+Functional higher level api
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This section contains higher level functions that build on the basic api above.
+
+.. autofunction:: torch.autograd.functional.jacobian
+
+.. autofunction:: torch.autograd.functional.hessian
+
+.. autofunction:: torch.autograd.functional.vjp
+
+.. autofunction:: torch.autograd.functional.jvp
+
+.. autofunction:: torch.autograd.functional.vhp
+
+.. autofunction:: torch.autograd.functional.hvp
+
 .. _locally-disable-grad:
 
 Locally disabling gradient computation
