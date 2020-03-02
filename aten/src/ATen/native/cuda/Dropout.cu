@@ -40,8 +40,12 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
                             at::cuda::detail::TensorInfo<uint8_t, IndexType> c,
                             IndexType totalElements, accscalar_t p, std::pair<uint64_t, uint64_t> seeds
                            ) {
-  typedef typename std::aligned_storage<VEC*sizeof(scalar_t), VEC*alignof(scalar_t)>::type LoadT;
-  typedef typename std::aligned_storage<VEC*sizeof(uint8_t), VEC*alignof(uint8_t)>::type MaskLoadT;
+
+  // make sure we don't break assumption that we can't have > 4 elements / thread
+  static_assert(VEC <= 4);
+
+  using LoadT = memory::aligned_vector<scalar_t, VEC>;
+  using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
 
   accscalar_t pinv = accscalar_t(1)/p;
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -232,9 +236,6 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
 
       if (vec_size > 1) {
         switch (vec_size) {
-         case 8:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 8><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
          case 4:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, unsigned int, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
           break;
@@ -267,9 +268,6 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
 
       if (vec_size > 1) {
         switch (vec_size) {
-         case 8:
-          fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 8><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
-          break;
          case 4:
           fused_dropout_kernel_vec<scalar_t, accscalar_t, uint64_t, 1, 4><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, rng_engine_inputs);
           break;
