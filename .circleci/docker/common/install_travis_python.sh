@@ -72,11 +72,12 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
 
   as_jenkins pip install \
       future \
-      hypothesis \
+      hypothesis==4.53.2 \
       protobuf \
       pytest \
       pillow \
-      typing
+      typing \
+      unittest-xml-reporting
 
   as_jenkins pip install mkl mkl-devel
 
