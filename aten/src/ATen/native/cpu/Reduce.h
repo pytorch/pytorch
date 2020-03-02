@@ -214,7 +214,7 @@ void binary_kernel_reduce(TensorIterator& iter, ops_t ops, init_t init) {
           in += stride;
         }
       }, {begin, end});
-      return acc;
+      return ops.translate_idx(acc, sub_iter.view_offsets()[0]);
     };
     acc_t total_acc = init;
     auto numel = sub_iter.numel();

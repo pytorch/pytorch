@@ -40,7 +40,10 @@ inline PyObject* load_scalar(void* data, at::ScalarType scalarType) {
     case at::kHalf: return PyFloat_FromDouble(at::convert<double, at::Half>(*(at::Half*)data));
     case at::kFloat: return PyFloat_FromDouble(*(float*)data);
     case at::kDouble: return PyFloat_FromDouble(*(double*)data);
-    case at::kComplexFloat: return PyComplex_FromCComplex(*reinterpret_cast<Py_complex *>((std::complex<float>*)data));
+    case at::kComplexFloat: {
+      std::complex<float>* data_ = (std::complex<float>*)data;
+      return PyComplex_FromDoubles(data_->real(), data_->imag());
+    }
     case at::kComplexDouble: return PyComplex_FromCComplex(*reinterpret_cast<Py_complex *>((std::complex<double>*)data));
     case at::kBool: return PyBool_FromLong(*(bool*)data);
     case at::kBFloat16: return PyFloat_FromDouble(at::convert<double, at::BFloat16>(*(at::BFloat16*)data));

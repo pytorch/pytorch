@@ -689,7 +689,7 @@ Workspace chooseAlgorithm(
   using search = algorithm_search<perf_t>;
   try {
     return Workspace(algoPerf->memory);
-  } catch (const std::exception& e) {
+  } catch (const c10::CUDAOutOfMemoryError& e) {
 
     cudaGetLastError(); // clear OOM error
 

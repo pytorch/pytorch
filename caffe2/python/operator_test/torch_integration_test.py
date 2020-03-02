@@ -786,6 +786,42 @@ class TorchIntegration(hu.HypothesisTestCase):
         x_cpu = torch.ops._caffe2.CopyGPUToCPU(x_gpu)
         torch.testing.assert_allclose(x_cpu, x_cpu_ref)
 
+    def test_index_hash_op(self):
+        data = np.random.randint(low=0, high=1000, size=(4, 4, 4))
+
+        def _index_hash_ref(X):
+            ref_op = core.CreateOperator(
+                "IndexHash", ["X"], ["Y"], seed=0, modulo=100
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _index_hash_ref(data)
+        actual_output = torch.ops._caffe2.IndexHash(
+            torch.tensor(data), seed=0, modulo=100
+        )
+
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_bucketize_op(self):
+        data = np.random.rand(8, 10).astype(np.float32) * 1000
+        boundaries = np.array([1, 10, 100, 1000, 100000]).astype(np.float32)
+
+        def _bucketize_ref(X):
+            ref_op = core.CreateOperator(
+                "Bucketize", ["X"], ["Y"], boundaries=boundaries
+            )
+            workspace.FeedBlob("X", X)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _bucketize_ref(data)
+        actual_output = torch.ops._caffe2.Bucketize(
+            torch.tensor(data), boundaries
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
 
 if __name__ == '__main__':
     unittest.main()

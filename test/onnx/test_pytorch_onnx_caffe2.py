@@ -95,18 +95,18 @@ except ImportError:
 
 
 model_urls = {
-    'alexnet': 'https://download.pytorch.org/models/alexnet-owt-4df8aa71.pth',
+    'alexnet': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/alexnet-owt-4df8aa71.pth',
     'dcgan_b': 'https://s3.amazonaws.com/pytorch/test_data/export/netG_bedroom_epoch_1-0649e76b.pth',
     'dcgan_f': 'https://s3.amazonaws.com/pytorch/test_data/export/netG_faces_epoch_49-d86035a6.pth',
-    'densenet121': 'https://download.pytorch.org/models/densenet121-d66d3027.pth',
-    'inception_v3_google': 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth',
-    'resnet50': 'https://download.pytorch.org/models/resnet50-19c8e357.pth',
+    'densenet121': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/densenet121-d66d3027.pth',
+    'inception_v3_google': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/inception_v3_google-1a9a5a14.pth',
+    'resnet50': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/resnet50-19c8e357.pth',
     'srresNet': 'https://s3.amazonaws.com/pytorch/demos/srresnet-e10b2039.pth',
     'super_resolution': 'https://s3.amazonaws.com/pytorch/test_data/export/superres_epoch100-44c6958e.pth',
-    'squeezenet1_0': 'https://download.pytorch.org/models/squeezenet1_0-a815701f.pth',
-    'squeezenet1_1': 'https://download.pytorch.org/models/squeezenet1_1-f364aa15.pth',
-    'vgg16': 'https://download.pytorch.org/models/vgg16-397923af.pth',
-    'vgg19': 'https://download.pytorch.org/models/vgg19-dcbb9e9d.pth',
+    'squeezenet1_0': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/squeezenet1_0-a815701f.pth',
+    'squeezenet1_1': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/squeezenet1_1-f364aa15.pth',
+    'vgg16': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/vgg16-397923af.pth',
+    'vgg19': 'https://s3.amazonaws.com/download.caffe2.ai/test_data/vgg19-dcbb9e9d.pth',
 }
 
 
