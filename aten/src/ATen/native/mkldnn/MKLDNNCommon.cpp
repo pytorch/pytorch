@@ -91,9 +91,15 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
       !tensor.is_variable(),
       "itensor_view_from_dense: should not be a variable");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
-           ideep::tensor::data_type::f32},
-          tensor.template data_ptr<float>()};
+  if (tensor.scalar_type() == ScalarType::Float) {
+    return {tensor.sizes().vec(),
+            get_mkldnn_dtype(tensor.scalar_type()),
+            tensor.template data_ptr<float>()};
+  } else {
+    return {tensor.sizes().vec(),
+            get_mkldnn_dtype(tensor.scalar_type()),
+            tensor.template data_ptr<BFloat16>()};
+  }
 }
 
 // Note in case the aten Tensor is a dense tensor, the retured ideep

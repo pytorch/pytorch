@@ -93,7 +93,7 @@ ideep::tensor _mkldnn_conv2d_backward_input(
     int64_t groups) {
 
   ideep::tensor gradx;
-  ideep::convolution_backward_data::compute<AllocForMKLDNN>(
+  ideep::convolution_backward_data::compute(
       grady,
       w,
       {input_sizes.cbegin(), input_sizes.cend()},
@@ -120,7 +120,7 @@ std::tuple<ideep::tensor, ideep::tensor> _mkldnn_conv2d_backward_weights(
 
   ideep::tensor gradw, gradb;
   if (bias_defined) {
-    ideep::convolution_backward_weights::compute<AllocForMKLDNN>(
+    ideep::convolution_backward_weights::compute(
         x,
         grady,
         {weight_sizes.cbegin(), weight_sizes.cend()},
@@ -133,7 +133,7 @@ std::tuple<ideep::tensor, ideep::tensor> _mkldnn_conv2d_backward_weights(
         groups,
         ideep::algorithm::convolution_direct);
   } else {
-    ideep::convolution_backward_weights::compute<AllocForMKLDNN>(
+    ideep::convolution_backward_weights::compute(
         x,
         grady,
         {weight_sizes.cbegin(), weight_sizes.cend()},
@@ -146,7 +146,7 @@ std::tuple<ideep::tensor, ideep::tensor> _mkldnn_conv2d_backward_weights(
         ideep::algorithm::convolution_direct);
   }
 
-  return std::tuple<ideep::tensor, ideep::tensor>{gradw, gradb};
+  return std::make_tuple(gradw, gradb);
 }
 
 Tensor mkldnn_convolution(

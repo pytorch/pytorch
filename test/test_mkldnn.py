@@ -157,7 +157,7 @@ class TestMkldnn(TestCase):
             N = 64
             C = 3 * groups
             M = 3 * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32) * 100
+            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
             for bias in [False]:
                 conv2d = torch.nn.Conv2d(in_channels=C,
                                          out_channels=M,
@@ -169,12 +169,14 @@ class TestMkldnn(TestCase):
                 mkldnn_conv2d = copy.deepcopy(conv2d)
                 x1 = x.clone().requires_grad_()
                 x2 = x.clone().to_mkldnn().requires_grad_()
-                y1 = conv2d(x1).sum()
+                with torch.backends.mkldnn.flags(enabled=False):
+                    y1 = conv2d(x1).sum()
                 y2 = mkldnn_conv2d(x2).to_dense().sum()
                 y1.backward()
                 y2.backward()
                 self.assertEqual(x1.grad, x2.grad.to_dense())
-                self.assertEqual(conv2d.weight.grad, mkldnn_conv2d.weight.grad)
+                self.assertEqual(conv2d.weight.grad, mkldnn_conv2d.weight.grad,
+                                 0.01) # TODO: maybe use torch.allclose instead?
                 if bias:
                     self.assertEqual(conv2d.bias.grad, mkldnn_conv2d.bias.grad)
 

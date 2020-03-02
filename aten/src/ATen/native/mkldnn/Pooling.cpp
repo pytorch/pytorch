@@ -251,7 +251,7 @@ static Tensor _mkldnn_pool2d_backward(
   const ideep::tensor& y = itensor_from_mkldnn(output);
   const ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor gradx;
-  ideep::pooling_backward::compute<AllocForMKLDNN>(
+  ideep::pooling_backward::compute(
       grady,
       y,
       x,

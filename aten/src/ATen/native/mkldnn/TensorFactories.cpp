@@ -11,9 +11,8 @@ Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::option
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());
-  ideep::tensor it;
   auto data_type = get_mkldnn_dtype(typeMetaToScalarType(options.dtype()));
-  it.resize<AllocForMKLDNN>(dst_dims, data_type);
+  ideep::tensor it {dst_dims, data_type};
   return new_with_itensor_mkldnn(std::move(it), options);
 }
 

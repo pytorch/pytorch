@@ -19,13 +19,14 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
   Tensor cpu_tensor = at::empty(
     std::vector<int64_t>(dims.begin(), dims.end()),
     mkldnn_tensor.options().layout(c10::kStrided).dtype(data_type));
-  if (!stensor.is_empty()) {
-    if (cpu_tensor.scalar_type() == ScalarType::Float) {
-      stensor.to_public(cpu_tensor.template data_ptr<float>(), get_mkldnn_dtype(data_type));
-    } else {
-      stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(), get_mkldnn_dtype(data_type));
-    }
-  }
+  if (stensor.is_empty()) return cpu_tensor;
+  auto pub_tensor =
+      cpu_tensor.scalar_type() == ScalarType::Float
+          ? stensor.to_public(cpu_tensor.template data_ptr<float>(),
+                              get_mkldnn_dtype(data_type))
+          : stensor.to_public(cpu_tensor.template data_ptr<BFloat16>(),
+                              get_mkldnn_dtype(data_type));
+  cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
   return cpu_tensor;
 }
 

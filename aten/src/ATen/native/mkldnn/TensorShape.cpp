@@ -116,7 +116,7 @@ Tensor& mkldnn_cat_out(Tensor& result, TensorList tensors, int64_t dim) {
     x.push_back(itensor_from_mkldnn(tensors[i]));
   }
   ideep::tensor& y = itensor_from_mkldnn(result);
-  ideep::concat::compute<AllocForMKLDNN>(x, dim, y);
+  ideep::concat::compute(x, dim, y);
   return result;
 }
 
@@ -130,7 +130,7 @@ Tensor mkldnn_cat(TensorList tensors, int64_t dim) {
     x.push_back(itensor_from_mkldnn(tensors[i]));
   }
   ideep::tensor y;
-  ideep::concat::compute<AllocForMKLDNN>(x, dim, y);
+  ideep::concat::compute(x, dim, y);
   return new_with_itensor_mkldnn(std::move(y), tensors[0].options());
 }
 
@@ -146,7 +146,7 @@ std::vector<Tensor> mkldnn_split_with_sizes(const Tensor& self, IntArrayRef spli
              "entries, but got split_sizes=", split_sizes);
     sizes.push_back((int32_t)length);
   }
-  auto y = ideep::spliter::compute<AllocForMKLDNN>(x, sizes, dim, false);
+  auto y = ideep::spliter::compute(x, sizes, dim, false);
   for (auto j = 0; j < num_splits; j++) {
     splits[j] = new_with_itensor_mkldnn(std::move(y[j]), self.options());
   }
