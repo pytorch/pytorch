@@ -222,66 +222,36 @@ Tensor& geometric_(Tensor& self, double p, Generator* gen) {
 template<typename RNG>
 struct NormalStub {
   void operator()(Tensor& self, double mean, double std, RNG* gen) {
-    auto iter = TensorIterator::nullary_op(self);
-    normal_stub(iter.device_type(), self, mean, std, gen);
+    normal_stub(self.device().type(), self, mean, std, gen);
   }
 };
 
 Tensor& normal_(Tensor& self, double mean, double std, Generator* gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(self, mean, std, gen);
+  return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
 Tensor& normal_out(Tensor& output, const Tensor& mean, double std, Generator* gen) {
-  normal_(output, 0, std, gen);
-  output.add_(mean);
-  return output;
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
 Tensor& normal_out(Tensor& output, double mean, const Tensor& std, Generator* gen) {
-  normal_(output, 0, 1, gen);
-  auto mean_tensor = at::full({}, mean, output.options());
-  // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
-  // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
-  // The third argument is not a constant reference and hence the samples in output are overwritten.
-  // Consequently, the computation performed is mean_tensor + mean_tensor * std instead of mean_tensor + output * std
-  output.mul_(std).add_(mean_tensor);
-  return output;
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
 Tensor& normal_out(Tensor& output, const Tensor& mean, const Tensor& std, Generator* gen) {
-  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
-  normal_(output, 0, 1, gen);
-  // CUDA NB: addcmul_out copies the tensor to be added into the output.
-  // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
-  // The previous function here was addcmul_out(output, mean, output, std, 1);
-  // The third argument is not a constant reference and hence the samples in output are overwritten.
-  // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  if (is_deprecated_th_impl) {
-    output.mul_(std.reshape(mean.sizes())).add_(mean);
-  }
-  else {
-    output.mul_(std).add_(mean);
-  }
-  return output;
+  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
 Tensor normal(const Tensor& mean, double std, Generator* gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  at::native::normal_out(ret, mean, std, gen);
-  return ret;
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
 Tensor normal(double mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
-  at::native::normal_out(ret, mean, std, gen);
-  return ret;
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
 Tensor normal(const Tensor& mean, const Tensor& std, Generator* gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
-  at::native::normal_out(ret, mean, std, gen);
-  return ret;
+  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
 template<typename RNG>

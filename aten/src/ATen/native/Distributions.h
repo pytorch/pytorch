@@ -387,45 +387,4 @@ C10_DEVICE static inline scalar_t dirichlet_grad_one(scalar_t x, scalar_t alpha,
   return static_cast<scalar_t>(p / q * approx);
 }
 
-// This function computes broadcasted size of mean and std, resize the output to the broadcasted size if it was empty
-// [Note] The following features will be deprecated in version 1.6 release and function signature will be changed after
-//   When mean and std are not broadcastable but have same number of elements:
-//     This function will resize the output to the size of mean if it was empty.
-//     This function will reshape the std to the shape of mean.
-//     This function will return true in deprecated case, false in broadcastable case and throw in all other cases before deprecation.
-//     This function will not return and throw if mean and std are not broadcastable after deprecation
-bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean, const at::Tensor& std) {
-  bool expandable = at::are_expandable(mean.sizes(), std.sizes());
-  bool empty_output = output.numel() == 0;
-
-  if (expandable) {
-    auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(shape),
-        "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
-    if (empty_output) {
-      at::native::resize_(output, shape);
-    }
-    return false;
-  }
-  else {
-    TORCH_CHECK(
-        mean.numel() == std.numel(),
-        "inconsistent tensor, std and mean are not broadcastable and have different number of elements, "
-        "expected mean ", mean.sizes(), " and std ", std.sizes(), " to have same number of elements)");
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(mean.sizes()),
-        "inconsistent tensor, std and mean are not broadcastable, output size (", output.sizes(), ") is not the same as mean size (", mean.sizes(), ")");
-    TORCH_WARN_ONCE(
-        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
-        "supported mode of operation, but is now deprecated and the support will be removed in version 1.6 release. "
-        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
-        "Please ensure that std and mean are broadcastable to avoid these issues.");
-    if (empty_output) {
-      at::native::resize_(output, mean.sizes());
-    }
-    return true;
-  }
-}
-
 } // namespace

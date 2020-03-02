@@ -222,6 +222,13 @@ void normal_kernel(Tensor& self, double mean, double std, RNG* generator) {
   }
 }
 
+template<typename RNG>
+struct NormalKernel {
+  void operator()(Tensor& self, double mean, double std, RNG* gen) {
+    normal_kernel(self, mean, std, gen);
+  }
+};
+
 // =======================================================================================================================================
 
 template<typename RNG>
