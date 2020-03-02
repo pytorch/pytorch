@@ -13806,8 +13806,8 @@ class TestTorchDeviceType(TestCase):
             return A.cpu().numpy().copy()
 
         niter = 1000
-        repeat = 2
-        m = 5000  # size of the square matrix
+        repeat = 10
+        m = 500   # size of the square matrix
         k = 7     # the number of requested eigenpairs
         A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
         B1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
@@ -13825,7 +13825,7 @@ class TestTorchDeviceType(TestCase):
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-4)        # std
-        self.assertLess(eq_err_scipy, 1e-1)  # std
+        self.assertLess(eq_err_scipy, 1e-4)  # std
 
         self.assertEqual(E1, torch.from_numpy(E2.copy()))
 
@@ -13837,10 +13837,10 @@ class TestTorchDeviceType(TestCase):
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-5)        # general
-        self.assertLess(eq_err_scipy, 1e-1)  # general
+        self.assertLess(eq_err_scipy, 1e-5)  # general
 
-        #self.assertEqual(E1, torch.from_numpy(E2.copy()))
-        print(E1, E2.copy())
+        self.assertEqual(E1, torch.from_numpy(E2.copy()))
+
         # Timings
         elapsed_ortho = 0
         elapsed_ortho_general = 0
