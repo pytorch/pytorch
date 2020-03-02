@@ -1056,7 +1056,6 @@
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
     QuantizedCPU: empty_per_channel_affine_quantized_cpu
-    QuantizedCUDA: empty_per_channel_affine_quantized_other_backends_stub
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   supports_named_tensor: True
@@ -3524,6 +3523,7 @@
   use_c10_dispatcher: full
   dispatch:
     CPU: make_per_tensor_quantized_tensor_cpu
+    CUDA: make_per_tensor_quantized_tensor_cuda
 
 - func: _make_per_channel_quantized_tensor(Tensor self, Tensor scale, Tensor zero_point, int axis) -> Tensor
   dispatch:
@@ -3714,6 +3714,7 @@
     CPU: legacy::cpu::_th_set_
     CUDA: legacy::cuda::_th_set_
     QuantizedCPU: set_storage
+    QuantizedCUDA: set_storage
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method

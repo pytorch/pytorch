@@ -1,12 +1,6 @@
 #include <ATen/ATen.h>
-#include <ATen/quantized/Quantizer.h>
-#include <c10/core/Allocator.h>
-#include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/quantized/QTensorImpl.h>
-#include <ATen/core/Tensor.h>
-#include <typeinfo>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/quantized/QuantizerUtilities.cuh>
 
 namespace at {
 

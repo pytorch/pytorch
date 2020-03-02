@@ -17,6 +17,9 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
   TORCH_CHECK(
       self.sizes().equals(src.sizes()),
       "Quantized copy only works with Tensors with the same shape");
+  TORCH_CHECK(
+      self.device() == kCPU,
+      "Quantized copy only works with QuantizedCPU Tensors");
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "Copy", [&]() {
     float* src_data = src.data_ptr<float>();
     scalar_t* self_data = self.data_ptr<scalar_t>();
