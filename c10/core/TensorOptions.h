@@ -147,8 +147,7 @@ struct C10_API TensorOptions {
   }
 
   /// Constructs a `TensorOptions` object with the given memory format.
-  /// TODO: Make this an implicit constructor
-  explicit TensorOptions(MemoryFormat memory_format) : TensorOptions() {
+  /* implicit */ TensorOptions(MemoryFormat memory_format) : TensorOptions() {
     set_memory_format(memory_format);
   }
 
