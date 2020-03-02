@@ -259,13 +259,6 @@ template Statement* Val::dispatch_mutator(BaseMutator*, Val*);
 template Statement* Expr::dispatch_mutator(BaseMutator, Expr*);
 template Statement* Expr::dispatch_mutator(BaseMutator*, Expr*);
 
-template void Statement::dispatch(IRMathPrinter, Statement*);
-template void Statement::dispatch(IRMathPrinter*, Statement*);
-template void Val::dispatch(IRMathPrinter, Val*);
-template void Val::dispatch(IRMathPrinter*, Val*);
-template void Expr::dispatch(IRMathPrinter, Expr*);
-template void Expr::dispatch(IRMathPrinter*, Expr*); 
-
 /*
  * Val member definitions
  */
