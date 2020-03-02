@@ -31,6 +31,7 @@ TORCH_API Val* sub(Val* v1, Val* v2);
 TORCH_API Val* mul(Val* v1, Val* v2);
 TORCH_API Val* div(Val* v1, Val* v2);
 TORCH_API Val* mod(Val* v1, Val* v2);
+TORCH_API Val* lt(Val* v1, Val* v2);
 TORCH_API Val* ceilDiv(Val* v1, Val* v2);
 
 }}}

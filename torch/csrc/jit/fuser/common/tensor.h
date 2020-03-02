@@ -253,6 +253,8 @@ struct TORCH_API TensorView : public Val {
   
   TensorView* computeAt(TensorView* consumer, int axis);
 
+  void resetView();
+
   friend TensorView* split(TensorView*, int axis, int factor);
   friend TensorView* reorder(TensorView*, std::unordered_map<int, int>);
   friend TensorView* merge(TensorView*, int axis);

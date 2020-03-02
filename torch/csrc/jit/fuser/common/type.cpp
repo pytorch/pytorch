@@ -54,12 +54,13 @@ static std::unordered_map<UnaryOpType, std::string> unary_op_type_inline_op_stri
     {UnaryOpType::Neg,  "~"}
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_string_map {
-    {BinaryOpType::Add,     "Add"    }
-  , {BinaryOpType::Sub,     "Sub"    }
-  , {BinaryOpType::Mul,     "Mul"    }
-  , {BinaryOpType::Div,     "Div"    }
-  , {BinaryOpType::Mod,     "Mod"    }
-  , {BinaryOpType::CeilDiv, "ceilDiv"}
+    {BinaryOpType::Add,     "Add"     }
+  , {BinaryOpType::Sub,     "Sub"     }
+  , {BinaryOpType::Mul,     "Mul"     }
+  , {BinaryOpType::Div,     "Div"     }
+  , {BinaryOpType::Mod,     "Mod"     }
+  , {BinaryOpType::LT,      "LessThan"}
+  , {BinaryOpType::CeilDiv, "ceilDiv" }
 };
 static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_string_map {
     {BinaryOpType::Add,     "+"  }
@@ -67,6 +68,7 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_st
   , {BinaryOpType::Mul,     "*"  }
   , {BinaryOpType::Div,     "/"  }
   , {BinaryOpType::Mod,     "%"  }
+  , {BinaryOpType::LT,      "<"  }
   , {BinaryOpType::CeilDiv, "⌈/⌉"}
 };
 

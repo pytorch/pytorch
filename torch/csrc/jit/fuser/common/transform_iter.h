@@ -43,6 +43,11 @@ struct TORCH_API TransformIter : public IterVisitor {
   std::vector<Expr*> record;
 
  public:
+
+  static TensorDomain* getRoot(TensorDomain* td) {
+    TransformIter ti;
+    return ti.runBackward(td, false);
+  }
 };
 
 } // namespace fuser
