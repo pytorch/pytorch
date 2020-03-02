@@ -48,7 +48,7 @@ TypePtr IValue::type() const {
     case Tag::Future:
       return toFuture()->type();
     case Tag::RRef:
-      return toRRef()->type();
+      return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
     case Tag::Object:

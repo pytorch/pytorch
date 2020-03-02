@@ -177,6 +177,11 @@ inline InferredType tryToInferType(py::handle input) {
   if (py::isinstance<script::Object>(input)) {
     auto object = py::cast<script::Object>(input);
     return InferredType(object.type());
+#ifdef USE_DISTRIBUTED
+  } else if (py::isinstance<torch::distributed::rpc::PyRRef>(input)) {
+    auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
+    return InferredType(rref_ivalue.type());
+#endif
   }
 
   // Try container types
