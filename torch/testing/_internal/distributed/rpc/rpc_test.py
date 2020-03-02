@@ -1534,7 +1534,6 @@ class RpcTest(RpcAgentTestFixture):
                     ret.wait()
             except RuntimeError as e:
                 if "RPC ran for" in str(e):
-                    if i > 0: print("Took {} retries".format(i))
                     return True
 
         print("Failing because exhausted {} retries".format(num_retries))
