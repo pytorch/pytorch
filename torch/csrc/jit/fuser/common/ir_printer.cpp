@@ -29,18 +29,19 @@ void IRMathPrinter::print(const Fusion* const fusion) {
 
 // Just printing the expressions as of now. 
 void IRMathPrinter::handle(Statement* s) { 
-  if(s->isExpr()) Statement::dispatch(this, s); 
+  if(s->isExpr()) 
+    IRPrinter::handle(s); 
 }
 
 void IRMathPrinter::handle(Expr* e) {
   irstream_ << "\t" << cnt_++ << " ";
-  Expr::dispatch(this, e); 
+  IRPrinter::handle(e); 
   irstream_ << "\n"; 
 }
 
 void IRMathPrinter::handle(Tensor* t) {
   irstream_ << "%T" << t->name(); 
-  Val::dispatch(this, t->domain());
+  handle(t->domain());
 }
 
 void IRMathPrinter::handle(TensorView* tv) {
@@ -55,7 +56,7 @@ void IRMathPrinter::handle(TensorView* tv) {
         irstream_ << "@ ";
       }
     }
-    Val::dispatch(this, td->axis(i));
+    handle(td->axis(i));
   }
   if(tv->hasComputeAt()) {
     if(static_cast<std::vector<const IterDomain*>::size_type>(tv->getComputeAtAxis()) == td->size()) {
@@ -69,7 +70,7 @@ void IRMathPrinter::handle(TensorDomain* tdom) {
   irstream_ << "[";
   for(std::vector<const IterDomain*>::size_type i = 0; i < tdom->size(); i++){
     if(i > 0) irstream_ << ", ";
-    Val::dispatch(this, tdom->axis(i));
+    handle(tdom->axis(i));
   }
   irstream_ << "]";
 }
@@ -109,30 +110,30 @@ void IRMathPrinter::handle(Float* val) {
 }
 
 void IRMathPrinter::handle(BinaryOp* bop) {
-  Val::dispatch(this, bop->out());
+  IRPrinter::handle(bop->out());
   irstream_ << " = ";
   if(auto inline_bop = inline_op_str(bop->type())) {
-    Val::dispatch(this, bop->lhs());
+    IRPrinter::handle(bop->lhs());
     irstream_  << " " << inline_bop.value() << " ";
-    Val::dispatch(this, bop->rhs());
+    IRPrinter::handle(bop->rhs());
   } else {
     irstream_ << bop->type() << "("; 
-    Val::dispatch(this, bop->lhs()); 
+    IRPrinter::handle(bop->lhs()); 
     irstream_ << ", ";
-    Val::dispatch(this, bop->rhs());
+    IRPrinter::handle(bop->rhs());
     irstream_  << ")";
   }
 }
 
 void IRMathPrinter::handle(UnaryOp* uop) {
-  Val::dispatch(this, uop->out());
+  IRPrinter::handle(uop->out());
   irstream_ << " = ";
   if(auto inline_uop = inline_op_str(uop->type())) {
     irstream_  << inline_uop.value();
-    Val::dispatch(this, uop->in());
+    IRPrinter::handle(uop->in());
   } else {
     irstream_ << uop->type() << "("; 
-    Val::dispatch(this, uop->in()); 
+    IRPrinter::handle(uop->in()); 
     irstream_  << ")";
   }
 }
