@@ -1,5 +1,4 @@
 import torch
-from torch import autograd
 
 # Utility functions
 
@@ -124,7 +123,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         # No differentiable output, we don't need to call the autograd engine
         return (None,) * len(inputs)
     else:
-        return autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True, create_graph=create_graph, retain_graph=retain_graph)
+        return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True, create_graph=create_graph, retain_graph=retain_graph)
 
 # Public API
 
