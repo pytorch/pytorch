@@ -160,7 +160,8 @@ class DistributedDataParallel(Module):
         reduction functions might not get called.
 
     .. note::
-        Parameters are never broadcast between processes. The module performs
+        Parameters are only broadcast between processes during the
+        DistributedDataParallel constructor. The module performs
         an all-reduce step on gradients and assumes that they will be modified
         by the optimizer in all processes in the same way. Buffers
         (e.g. BatchNorm stats) are broadcast from the module in process of rank
