@@ -78,7 +78,7 @@ if (std::isnan(val)) break;
 #else
 #define PRAGMA(P)         _Pragma(#P)
 #define PRAGMA_IVDEP      PRAGMA(ivdep)
-#define PRAGMA_SIMD       PRAGMA(simd)
+#define PRAGMA_SIMD       PRAGMA(omp simd)
 #endif
 
 #define TH_TENSOR_APPLY2_PARALLEL(SIZE, CONTIG1, CONTIG2, TYPE1, TENSOR1, TYPE2, TENSOR2, CODE, THRESHOLD) \

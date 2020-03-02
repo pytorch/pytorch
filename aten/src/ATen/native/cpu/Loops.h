@@ -205,7 +205,7 @@ template <typename func_t, typename vec_func_t>
 void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
   using traits = function_traits<func_t>;
   TORCH_INTERNAL_ASSERT(iter.ntensors() >= traits::arity + 1);
-
+  const int loop_vec_parallel_grain_size = 1024;
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
       return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
@@ -219,7 +219,7 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
         }
       });
     }
-  });
+  }, loop_vec_parallel_grain_size);
   iter.cast_outputs();
 }
 

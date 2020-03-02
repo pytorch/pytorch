@@ -280,7 +280,7 @@ class TestOptim(TestCase):
             lambda params: optim.SGD(params, lr=5e-3)
         )
         self._test_rosenbrock_sparse(
-            lambda params: optim.SGD(params, lr=0.005),
+            lambda params: optim.SGD(params, lr=0.0048),
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
 
