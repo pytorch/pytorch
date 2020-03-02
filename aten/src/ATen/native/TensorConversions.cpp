@@ -39,7 +39,8 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
       memory_format = self.suggest_memory_format();
     }
   }
-  auto r = at::empty(self.sizes(), options.memory_format(memory_format));
+  // See Note [Explicit nullopt MemoryFormat argument]
+  auto r = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
