@@ -70,7 +70,7 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 namespace at { namespace native {
 
 Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::empty_like(input);
   TensorIterator iter;
   iter.add_output(grad_input);
   iter.add_input(target);
@@ -79,7 +79,7 @@ Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tenso
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
     scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
     gpu_kernel(iter,
-      [=] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
+      [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
         return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
       });
   });
