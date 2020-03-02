@@ -324,8 +324,7 @@ __global__ void DepthwiseConv3dBackpropInputGPUKernelNCHW(
           sum += __ldg(out_backprop + out_backprop_offset) *
               __ldg(filter + filter_offset);
 #else
-          sum += out_backprop[out_backprop_offset] *
-              filter[filter_offset];
+          sum += out_backprop[out_backprop_offset] * filter[filter_offset];
 #endif
         }
       }
@@ -464,8 +463,8 @@ class ChannelwiseConv3dGradientOp final : public ConvPoolOpBase<CUDAContext> {
  public:
   USE_CONV_POOL_BASE_FUNCTIONS(CUDAContext);
   ChannelwiseConv3dGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : cudnn_wrapper_(&context_),
-        ConvPoolOpBase<CUDAContext>(operator_def, ws),
+      : ConvPoolOpBase<CUDAContext>(operator_def, ws),
+        cudnn_wrapper_(&context_),
         no_bias_(OperatorBase::GetSingleArgument<int>("no_bias", 0)) {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
