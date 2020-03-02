@@ -988,6 +988,10 @@ class _TestTorchMixin(object):
         expected = torch.tensor([[0.]], dtype=torch.bfloat16)
         self.assertEqual(bfloat16Tensor, expected)
 
+        complexTensor = torch.zeros(2, 2, dtype=torch.complex64)
+        expected = torch.tensor([[0., 0.], [0., 0.]], dtype=torch.complex64)
+        self.assertEqual(complexTensor, expected)
+
     def test_zeros_out(self):
         shape = (3, 4)
         out = torch.zeros(shape)
@@ -1345,6 +1349,7 @@ class _TestTorchMixin(object):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
             torch.set_default_dtype(default_dtype)
+            default_complex_dtype = torch.complex64 if default_dtype == torch.float32 else torch.complex128
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
@@ -1353,7 +1358,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
-            self.assertIs(torch.complex128, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
+            self.assertIs(default_complex_dtype, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
 
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
@@ -6487,6 +6492,14 @@ class TestTorchDeviceType(TestCase):
         b = torch.cat([w[:2], w[4:6]], out=w[6:10])
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
+
+    def test_cat_out_channels_last(self, device):
+        x = torch.randn((4, 3, 8, 8))
+        y = torch.randn(x.shape)
+        res1 = torch.cat((x, y))
+        z = res1.clone().contiguous(memory_format=torch.channels_last)
+        res2 = torch.cat((x, y), out=z)
+        self.assertEqual(res1, res2)
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)

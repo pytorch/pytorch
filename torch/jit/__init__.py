@@ -2057,7 +2057,8 @@ def _get_named_tuple_properties(obj):
     has_annotations = hasattr(obj, '__annotations__')
     for field in fields:
         if has_annotations and field in obj.__annotations__:
-            annotations.append(torch.jit.annotations.ann_to_type(obj.__annotations__[field]))
+            the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], _jit_internal.fake_range())
+            annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.get())
     return type(obj).__name__, fields, annotations
