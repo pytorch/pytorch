@@ -304,11 +304,18 @@ void AliasDb::analyzeImpl(Node* node) {
           c10::toString(analysis));
     }
   } else {
-    TORCH_INTERNAL_ASSERT(
-        hasSpecialCase,
-        "We don't have an op for ",
-        node->kind().toDisplayString(),
-        " but it isn't a special case.");
+    if (!hasSpecialCase) {
+      std::ostringstream oss;
+      for (const auto input : node->inputs()) {
+        oss << input->type()->str() << ", ";
+      }
+      TORCH_INTERNAL_ASSERT(
+          0,
+          "We don't have an op for ",
+          node->kind().toDisplayString(),
+          " but it isn't a special case.  ",
+          "Argument types: ", oss.str());
+    }
   }
 
   // These nodes are not schematized, so we need to handle them specially
