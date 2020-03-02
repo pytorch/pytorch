@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/exception_message.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/runtime/exception_message.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -189,7 +189,11 @@ class ShapePropagator {
       bool complete = false) {
     std::vector<TensorTypePtr> tensor_types;
 
-    auto& schema = node->schema();
+    auto schema_opt = node->maybeSchema();
+    if (!schema_opt) {
+      return c10::nullopt;
+    }
+    auto& schema = *schema_opt;
     auto& args = schema.arguments();
     // can't handle varargs primitives because we don't know what should be a
     // Tensor

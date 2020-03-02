@@ -15,7 +15,8 @@ import copy
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfNoLapack, enableScriptTest
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, enableScriptTest,
+                                 skipIfNoLapack)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 import model_defs.word_language_model as word_language_model
@@ -123,6 +124,78 @@ class TestONNXRuntime(unittest.TestCase):
             script_model = torch.jit.script(model)
             _run_test(script_model)
         _run_test(model)
+
+    def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
+                                          example_outputs=None, do_constant_folding=True,
+                                          dynamic_axes=None, input_names=None, output_names=None,
+                                          ort_optim_on=True):
+        import os
+        import tempfile
+
+        model.eval()
+        with torch.no_grad():
+            if isinstance(input, torch.Tensor):
+                input = (input,)
+            # In-place operators will update input tensor data as well.
+            # Thus inputs are replicated before every forward call.
+            input_copy = copy.deepcopy(input)
+            output = model(*input_copy)
+            if isinstance(output, torch.Tensor):
+                output = (output,)
+
+            # export the model to ONNX
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                model_file_name = os.path.join(tmpdirname, 'model.onnx')
+                input_copy = copy.deepcopy(input)
+                torch.onnx.export(model, input_copy, model_file_name,
+                                  opset_version=self.opset_version,
+                                  example_outputs=output,
+                                  verbose=False,
+                                  do_constant_folding=do_constant_folding,
+                                  keep_initializers_as_inputs=self.keep_initializers_as_inputs,
+                                  dynamic_axes=dynamic_axes,
+                                  input_names=input_names, output_names=output_names,
+                                  use_external_data_format=True)
+                # compute onnxruntime output prediction                
+                ort_sess_opt = onnxruntime.SessionOptions()
+                ort_sess_opt.graph_optimization_level = \
+                    onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED if ort_optim_on else \
+                    onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+                ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt)                
+                input_copy = copy.deepcopy(input)
+                ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
+
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_embedding_model_with_external_data(self):
+        class LargeModel(torch.nn.Module):
+            def __init__(self):
+                super(LargeModel, self).__init__()
+                dim = 15
+                n = 4 * 100
+                self.emb = torch.nn.Embedding(n, dim)
+                self.lin1 = torch.nn.Linear(dim, 1)
+                self.seq = torch.nn.Sequential(
+                    self.emb,
+                    self.lin1,
+                )
+
+            def forward(self, input):
+                return self.seq(input)
+
+        model = LargeModel()
+        x = torch.tensor([2], dtype=torch.long)
+        self.run_model_test_with_external_data(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
+    def test_mobilenet_v2_with_external_data(self):
+        model = torchvision.models.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        # We are turning off Onnx Runtime optimization off in this test,
+        # because external data format is not supported to in ORT optimizer.
+        # Once that support is added, we can set ort_optim_on=True (default).
+        self.run_model_test_with_external_data(model, x, rtol=1e-3, atol=1e-5, 
+                                               ort_optim_on=False)
 
     # Export Torchvision models
 

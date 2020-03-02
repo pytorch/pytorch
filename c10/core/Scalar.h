@@ -98,6 +98,20 @@ class C10_API Scalar {
 
   Scalar operator-() const;
 
+  ScalarType type() const {
+    if (isComplex()) {
+      return ScalarType::ComplexDouble;
+    } else if (isFloatingPoint()) {
+      return ScalarType::Double;
+    } else if (isIntegral(/*includeBool=*/false)) {
+      return ScalarType::Long;
+    } else if (isBoolean()) {
+      return ScalarType::Bool;
+    } else {
+      throw std::runtime_error("Unknown scalar type.");
+    }
+  }
+
  private:
     template<typename T,
              typename std::enable_if<std::numeric_limits<T>::is_integer && ! std::is_same<T, bool>::value, bool>::type* =

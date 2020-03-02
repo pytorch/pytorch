@@ -28,7 +28,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
 
 #define FILL_INDEX(T, DIM)                                         \
     fillSliceWithIndex<T, DIM>                                     \
-      <<<grid, block, 0, THCState_getCurrentStream(state)>>>(      \
+      <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(      \
         info, numSlices, sliceSize, info.strides[collapseDim])
 
     if (THCTensor_canUse32BitIndexMath(state, t)) {

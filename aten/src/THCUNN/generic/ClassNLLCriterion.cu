@@ -55,7 +55,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     }
 
     ClassNLLCriterion_updateOutput_no_reduce_kernel<scalar_t>
-      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         batch_size,
         toDeviceTensor<scalar_t, 2>(state, input),
         toDeviceTensor<THCIndex_t, 1>(state, target),
@@ -86,7 +86,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateOutput_kernel1<scalar_t>
-      <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+      <<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(
         output_data,
         total_weight_data,
         input_data,
@@ -99,7 +99,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   } else if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 2) {
     cunn_ClassNLLCriterion_updateOutput_kernel<scalar_t, accreal>
-      <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         output_data,
         total_weight_data,
         input_data,
@@ -178,7 +178,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     }
 
     ClassNLLCriterion_updateGradInput_no_reduce_kernel<scalar_t>
-      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         batch_size,
         toDeviceTensor<THCIndex_t, 1>(state, target),
         toDeviceTensor<scalar_t, 1>(state, gradOutput),
@@ -207,7 +207,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   if (THCTensor_(nDimensionLegacyNoScalars)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateGradInput_kernel1<scalar_t>
-      <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
+      <<<1, 1, 0, c10::cuda::getCurrentCUDAStream()>>>(
         gradInput_data,
         gradOutput_data,
         weights_data,
@@ -219,7 +219,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   } else {
     cunn_ClassNLLCriterion_updateGradInput_kernel<scalar_t>
-      <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
+      <<<1, NTHREADS, 0, c10::cuda::getCurrentCUDAStream()>>>(
         gradInput_data,
         gradOutput_data,
         target_data,
