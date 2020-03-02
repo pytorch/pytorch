@@ -10393,7 +10393,7 @@ a")
             self.assertEqual(o, v)
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print(list(m))
-                
+
     def test_script_modulelist_index(self):
         class Sub(torch.nn.Module):
             def __init__(self, i):
@@ -10418,6 +10418,17 @@ a")
 
         x = torch.tensor(1)
         self.checkModule(M(), (x,))
+
+        class M2(M):
+            def __init__(self):
+                super(M2, self).__init__()
+
+            def forward(self, v):
+                return self.mods[-11].forward(v)
+
+        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+            torch.jit.script(M2())
+
 
         class M2(M):
             def __init__(self):
