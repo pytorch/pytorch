@@ -1349,6 +1349,7 @@ class _TestTorchMixin(object):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
             torch.set_default_dtype(default_dtype)
+            default_complex_dtype = torch.complex64 if default_dtype == torch.float32 else torch.complex128
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
@@ -1357,7 +1358,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
-            self.assertIs(torch.complex128, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
+            self.assertIs(default_complex_dtype, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
 
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
