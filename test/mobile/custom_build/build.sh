@@ -44,9 +44,9 @@ prepare_model_and_dump_root_ops() {
 generate_op_dependency_graph() {
   # Regular users should get this graph from prebuilt package.
   ANALYZER_BUILD_ROOT="${BUILD_ROOT}/build_analyzer"
-  OP_DEP_GRAPH="${ANALYZER_BUILD_ROOT}/work/torch_result.yaml"
+  OP_DEPENDENCY="${ANALYZER_BUILD_ROOT}/work/torch_result.yaml"
 
-  if [ ! -f "${OP_DEP_GRAPH}" ]; then
+  if [ ! -f "${OP_DEPENDENCY}" ]; then
     BUILD_ROOT="${ANALYZER_BUILD_ROOT}" \
       ANALYZE_TORCH=1 \
       "${SRC_ROOT}/tools/code_analyzer/build.sh" -closure=false
@@ -58,8 +58,7 @@ run_default_build() {
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-    "${SRC_ROOT}/scripts/build_mobile.sh" \
-    -DUSE_STATIC_DISPATCH=ON
+    "${SRC_ROOT}/scripts/build_mobile.sh"
 }
 
 run_custom_build_with_static_dispatch() {
@@ -67,10 +66,10 @@ run_custom_build_with_static_dispatch() {
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-    SELECTED_OP_LIST="${ROOT_OPS}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DUSE_STATIC_DISPATCH=ON
+    -DUSE_STATIC_DISPATCH=ON \
+    -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 
 run_custom_build_with_dynamic_dispatch() {
@@ -78,11 +77,11 @@ run_custom_build_with_dynamic_dispatch() {
   LIBTORCH_INSTALL_PREFIX="${LIBTORCH_BUILD_ROOT}/install"
 
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
-    SELECTED_OP_LIST="${ROOT_OPS}" \
-    OP_DEP_GRAPH="${OP_DEP_GRAPH}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DUSE_STATIC_DISPATCH=OFF
+    -DUSE_STATIC_DISPATCH=OFF \
+    -DSELECTED_OP_LIST="${ROOT_OPS}" \
+    -DOP_DEPENDENCY="${OP_DEPENDENCY}"
 }
 
 build_predictor() {
