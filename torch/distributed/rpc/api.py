@@ -177,7 +177,8 @@ def _wait_all_workers():
         worker_name_to_response_future_dict = dict()
         set_proceed_signal_rpc_timeout = timedelta(seconds=5)
         for follower_worker_name in _ALL_WORKER_NAMES - {leader_worker_name}:
-            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,), timeout=set_proceed_signal_rpc_timeout)
+            fut = rpc_async(follower_worker_name, _set_proceed_shutdown_signal, args=(sequence_id,),
+             timeout=set_proceed_signal_rpc_timeout)
             worker_name_to_response_future_dict[follower_worker_name] = fut
         for follower_worker_name, fut in worker_name_to_response_future_dict.items():
             try:
