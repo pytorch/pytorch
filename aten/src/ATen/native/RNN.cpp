@@ -1059,8 +1059,11 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // See pytorch/pytorch#4930
         auto h = hx[0];
         auto c = hx[1];
-        auto h_slices = h.chunk(2, h.dim() - 1);
-        auto c_slices = c.chunk(2, c.dim() - 1);
+        at::print(h, 32);
+        at::print(c, 32);
+
+        auto h_slices = h.chunk(2, -1);
+        auto c_slices = c.chunk(2, -1);
         auto h_fwd = h[0];
         auto h_bwd = h[1];
         auto c_fwd = c[0];
