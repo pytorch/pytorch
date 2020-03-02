@@ -1351,6 +1351,14 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
+@parse_args('v', 'v', 'i', 'v', 'v', 'v')
+def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
+    if dtype is None:
+        dtype = self.type().scalarType()
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
 @parse_args('v', 'i', 'v', 'v', 'v')
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
