@@ -93,7 +93,7 @@ void cpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 }
 
 void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_cpu", [&] {
     cpu_index_kernel<scalar_t>(iter, index_size, index_stride, [](char* dst, char* src, int64_t offset) {
       *(scalar_t*)dst = *(scalar_t*)(src + offset);
@@ -103,7 +103,7 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
 
 void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   // NOTE: duplicate indices are only supported if accumulate is true.
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
     iter.dtype(), "index_put", [&] {
     if (accumulate) {
       // TODO: investigate parallelization of the accumulate kernel. Unlike the non-accumulate case,
@@ -119,10 +119,43 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   });
 }
 
+template <typename scalar_t, typename mask_t>
+void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
+  auto is_mask_bool = std::is_same<mask_t, bool>::value;
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    char* dst = data[0];
+    char* mask = data[1];
+    for (int64_t i = 0; i < n; i++) {
+      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
+      if (!is_mask_bool) {
+        TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
+      }
+      if (mask_value) {
+        *(scalar_t*)(dst + strides[0] * i) = value;
+      }
+    }
+  };
+  iter.for_each(loop);
+}
+
+void masked_fill_kernel(TensorIterator& iter, Scalar value) {
+  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16,
+    iter.dtype(), "masked_fill", [&] {
+      scalar_t scalar_val = value.to<scalar_t>();
+      auto mask_dtype = iter.input_dtype(0);
+      if (mask_dtype == at::ScalarType::Bool) {
+        cpu_masked_fill_kernel<scalar_t, bool>(iter, scalar_val);
+      } else {
+        cpu_masked_fill_kernel<scalar_t, unsigned char>(iter, scalar_val);
+      }
+    });
+}
+
 } // anonymous namespace
 
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 
 }} // namespace at::native

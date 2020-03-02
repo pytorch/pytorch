@@ -73,6 +73,11 @@ SKIP_PYTHON_BINDINGS = [
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad'
 ]
 
+NATIVE_NAMESPACE_MAPPING = {
+    "torch": "THPVariableFunctionsModule",
+    "torch.nn": "THPNNVariableFunctionsModule"
+}
+
 def should_generate_python_binding(declaration):
     name = declaration['name']
     for pattern in SKIP_PYTHON_BINDINGS:
@@ -108,7 +113,8 @@ def gen_py_variable_methods(out, declarations, template_path):
 
     py_variable_methods = get_py_variable_methods(declarations)
 
-    env = create_python_bindings(py_variable_methods, is_python_method=True, is_module=False)
+    env = create_python_bindings(py_variable_methods, is_python_method=True, module=None)
+
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
 
 
@@ -132,7 +138,8 @@ def gen_py_nn_functions(out, declarations, template_path):
 
     py_nn_functions = get_py_nn_functions(declarations)
 
-    env = create_python_bindings(py_nn_functions, is_python_method=False, is_module=True)
+    env = create_python_bindings(py_nn_functions, is_python_method=False, module="torch.nn")
+
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
 
 
@@ -157,7 +164,8 @@ def gen_py_torch_functions(out, declarations, template_path):
 
     py_torch_functions = get_py_torch_functions(declarations)
 
-    env = create_python_bindings(py_torch_functions, is_python_method=False, is_module=False)
+    env = create_python_bindings(py_torch_functions, is_python_method=False, module="torch")
+
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
 
 
@@ -168,7 +176,7 @@ def group_declarations_by_op_name(declarations):
     return groups
 
 
-def create_python_bindings(python_functions, is_python_method, is_module):
+def create_python_bindings(python_functions, is_python_method, module):
     """Generates Python bindings to ATen functions"""
     py_methods = []
     py_method_defs = []
@@ -176,9 +184,9 @@ def create_python_bindings(python_functions, is_python_method, is_module):
 
     for name in sorted(python_functions.keys()):
         overload_decls = python_functions[name]
-        py_methods.append(method_impl(name, overload_decls, is_python_method, is_module))
-        py_method_defs.append(method_def(name, overload_decls, is_python_method, is_module))
-        py_forwards.extend(forward_decls(name, overload_decls, is_python_method, is_module))
+        py_methods.append(method_impl(name, overload_decls, is_python_method, module))
+        py_method_defs.append(method_def(name, overload_decls, is_python_method, module))
+        py_forwards.extend(forward_decls(name, overload_decls, is_python_method, module))
 
     return {
         'py_forwards': py_forwards,
@@ -700,7 +708,6 @@ def namedtuple_fieldnames(declaration):
                 return x['field_name']
         return [get_field_name(x) for x in returns]
 
-
 PY_NAMEDTUPLE_FIELDSDEF = CodeTemplate("""\
 static PyStructSequence_Field ${fieldsname}[] = { ${fields,} {nullptr} };
 """)
@@ -827,11 +834,11 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args)
 
 """)
 
-TORCH_FUNCTION_CHECK = """\
-if (_r.has_torch_function()) {
-  return handle_torch_function(_r, args, kwargs, THPVariableFunctions);
+TORCH_FUNCTION_CHECK = CodeTemplate("""\
+if(_r.has_torch_function()) {
+  return handle_torch_function(_r, args, kwargs, ${namespace}, ${modulename});
 }
-"""
+""")
 
 # NOTE: we type the unpacked self as Tensor not Variable to avoid return type
 # discrepancies on method resolution (e.g. Variable::detach_ returns void
@@ -839,7 +846,7 @@ if (_r.has_torch_function()) {
 UNPACK_SELF = "Tensor& self = reinterpret_cast<THPVariable*>(self_)->cdata;"
 
 
-def method_impl(name, declarations, is_python_method, is_module):
+def method_impl(name, declarations, is_python_method, module):
     """
     Generate a python binding for all overloads of an op.
     """
@@ -884,8 +891,11 @@ def method_impl(name, declarations, is_python_method, is_module):
     else:
         template = PY_VARIABLE_METHOD_VARARGS
 
-    if not is_module and not is_python_method:
-        check_has_torch_function = TORCH_FUNCTION_CHECK
+    if module:
+        check_has_torch_function = TORCH_FUNCTION_CHECK.substitute(
+            namespace=NATIVE_NAMESPACE_MAPPING[module],
+            modulename='"' + module + '"',
+        )
     else:
         check_has_torch_function = ''
 
@@ -918,8 +928,8 @@ static PyObject * ${pycname}(PyObject* self_, PyObject* args);
 """)
 
 
-def forward_decls(name, declarations, is_python_method, is_module):
-    if is_module or is_python_method:
+def forward_decls(name, declarations, is_python_method, module):
+    if is_python_method:
         return []
 
     if is_noarg_binding(declarations):
@@ -966,7 +976,7 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycfunc_voidcast}${pycname}, ${flags}, NULL},""")
 
 
-def method_def(name, declarations, is_python_method, is_module):
+def method_def(name, declarations, is_python_method, module):
     """
     Generate method def entry.
     """
@@ -979,7 +989,7 @@ def method_def(name, declarations, is_python_method, is_module):
         pycfunc_voidcast = '(void(*)(void))'
         flags = 'METH_VARARGS | METH_KEYWORDS'
 
-    if not is_module and not is_python_method:
+    if module == "torch":
         flags += ' | METH_STATIC'
 
     if name in BINARY_OP_NAMES:

@@ -10,7 +10,7 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
-#include <torch/csrc/jit/script/jit_exception.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
@@ -53,6 +53,11 @@
     catch (const c10::IndexError& e) {                               \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_IndexError, msg.c_str());                \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const c10::ValueError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+      PyErr_SetString(PyExc_ValueError, msg.c_str());                \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \

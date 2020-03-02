@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 
 namespace torch {
