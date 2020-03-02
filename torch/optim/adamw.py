@@ -118,5 +118,3 @@ class AdamW(Optimizer):
                 p.data.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss
-
-        return loss
