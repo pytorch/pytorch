@@ -273,8 +273,16 @@ static void min_values_kernel_impl(TensorIterator& iter) {
         return c;
       },
       true);
+  } else if (isIntegralType(iter.dtype(), /* includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "min_values_cpu", [&]() {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::min(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return minimum(a, b); },
+        upper_bound<scalar_t>());
+    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "min_values_cpu", [&iter] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "min_values_cpu", [&iter] {
       binary_kernel_reduce_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -297,8 +305,16 @@ static void max_values_kernel_impl(TensorIterator& iter) {
         return c;
       },
       false);
+  } else if (isIntegralType(iter.dtype(), /* includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "max_values_cpu", [&]() {
+      binary_kernel_reduce_vec(
+        iter,
+        [](scalar_t a, scalar_t b) -> scalar_t { return std::max(a, b); },
+        [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return maximum(a, b); },
+        lower_bound<scalar_t>());
+    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "max_values_cpu", [&iter] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "max_values_cpu", [&iter] {
       binary_kernel_reduce_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t { return max_impl(a, b); },
