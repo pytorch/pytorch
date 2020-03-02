@@ -395,8 +395,9 @@ def jacobian(func, inputs, create_graph=False, strict=False):
                                            "input {}. This is not allowed in strict mode.".format(i, el_idx))
                     jac_i_el.append(torch.zeros_like(inp_el))
 
-        jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size() + inputs[el_idx].size())
-                      for el_idx, jac_i_el in enumerate(jac_i)),)
+        jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size()
+                     + inputs[el_idx].size()) for (el_idx, jac_i_el) in
+                     enumerate(jac_i)), )
 
     jacobian = _grad_postprocess(jacobian, create_graph)
 

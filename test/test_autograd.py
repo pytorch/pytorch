@@ -4561,7 +4561,7 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hessian must"):
             res = autogradF.hessian(bar, inp)
 
-        err_msg_out ="The Tensor returned by the function given to hessian should contain a single element"
+        err_msg_out = "The Tensor returned by the function given to hessian should contain a single element"
         with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.hessian(bar2, inp)
 

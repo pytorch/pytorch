@@ -6492,6 +6492,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
+    def test_cat_out_channels_last(self, device):
+        x = torch.randn((4, 3, 8, 8))
+        y = torch.randn(x.shape)
+        res1 = torch.cat((x, y))
+        z = res1.clone().contiguous(memory_format=torch.channels_last)
+        res2 = torch.cat((x, y), out=z)
+        self.assertEqual(res1, res2)
+
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)

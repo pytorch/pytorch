@@ -49,7 +49,7 @@ Function* Module::find_method(const std::string& basename) const {
       return fn.get();
     }
   }
-  return nullptr;
+  AT_ERROR("Method '", basename, "' is not defined.");
 }
 
 } // namespace mobile

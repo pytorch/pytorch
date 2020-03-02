@@ -307,7 +307,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 
@@ -503,10 +503,11 @@ def gen_variable_type(out, aten_declarations, template_path):
     REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
     registration_declarations = []
 
-    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
-            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+        if dispatch_strategy(declaration) == 'use_derived':
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
+        else:
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
 
     env = {
         'registration_declarations': registration_declarations,

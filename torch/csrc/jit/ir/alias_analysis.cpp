@@ -769,8 +769,18 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
+  // covariant type containers can be point to types which are not
+  // also mutable/immutable because we unify the contained types
+  if (mutableType(from) != mutableType(to)) {
+    auto from_kind = from->type()->kind();
+    TORCH_INTERNAL_ASSERT(
+        from_kind == TypeKind::OptionalType ||
+        from_kind == TypeKind::FutureType || from_kind == TypeKind::TupleType);
+    return;
+  }
+
+  // both immutable
   if (!mutableType(from)) {
-    TORCH_INTERNAL_ASSERT(!mutableType(to));
     return;
   }
 
@@ -778,16 +788,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // Special case: if `from` is an optional, `to` could be a None. Don't
-  // create a pointer in that case
-  if (from->type()->kind() == TypeKind::OptionalType &&
-      to->type()->kind() == TypeKind::NoneType) {
-    return;
-  }
-
-  // At this point, we should be dealing with two mutable types.
-  TORCH_INTERNAL_ASSERT(mutableType(from) && mutableType(to));
-
+  // At this point, we are dealing with two mutable types.
   auto fromEl = getOrCreateElement(from);
   auto toEl = getOrCreateElement(to);
 
