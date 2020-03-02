@@ -20,9 +20,12 @@ using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 struct RpcBackendOptions {
-  RpcBackendOptions() = default;
-  std::chrono::milliseconds rpcTimeout;
-  std::string initMethod;
+  RpcBackendOptions(
+      std::chrono::milliseconds rpcTimeout,
+      std::string initMethod)
+      : rpcTimeout_(rpcTimeout), initMethod_(initMethod) {}
+  std::chrono::milliseconds rpcTimeout_;
+  std::string initMethod_;
 };
 
 // A globally unique ID to identify an RpcAgent

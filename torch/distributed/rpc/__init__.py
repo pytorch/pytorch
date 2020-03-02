@@ -58,7 +58,9 @@ if is_available():
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
                 meaning that environment variables ``MASTER_ADDRESS`` and
-                ``MASTER_PORT`` needs to be set properly.
+                ``MASTER_PORT`` needs to be set properly. See
+                :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
+                for examples.
         """
 
         if not rpc_backend_options:

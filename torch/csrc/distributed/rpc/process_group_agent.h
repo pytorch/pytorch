@@ -13,8 +13,14 @@ namespace distributed {
 namespace rpc {
 
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() = default;
-  int numSendRecvThreads;
+  ProcessGroupRpcBackendOptions(
+      int num_send_recv_threads,
+      std::chrono::milliseconds rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numSendRecvThreads_(num_send_recv_threads) {}
+
+  int numSendRecvThreads_;
 };
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by

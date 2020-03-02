@@ -103,7 +103,8 @@ to appropriate devices if necessary.
     :members:
 .. autoclass:: RpcBackendOptions
     :members:
-
+.. autoclass:: ProcessGroupRpcBackendOptions
+    :members:
 
 .. _rref:
 
