@@ -69,9 +69,7 @@ void remainder_kernel_cuda(TensorIterator& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
-        // TODO: there should be a divide by zero check here, but
-        //    TORCH_CHECK won't work in a cuda kernel
-        // TORCH_CHECK(b != 0, "ZeroDivisionError");
+        CUDA_KERNEL_ASSERT(b != 0);
         thrust_t r = a % b;
         if ((a != 0) && ((a < 0) != (b < 0))) {
           r += b;
