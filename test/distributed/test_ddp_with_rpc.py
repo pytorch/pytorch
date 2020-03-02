@@ -262,7 +262,7 @@ class Trainer:
                 )
             loss = self.criterion(output, mini_batch.labels)
             # grads will be stored in dist_autograd context
-            dist_autograd.backward([loss])
+            dist_autograd.backward(context_id, [loss])
             gLogger.debug(
                 f"Distributed grads: {dist_autograd.get_gradients(context_id)}"
             )
@@ -276,7 +276,7 @@ class Trainer:
                 ],
                 lr=LR,
             )
-            dist_optimizer.step()
+            dist_optimizer.step(context_id)
 
             self.print_parameters()
 
