@@ -21,6 +21,8 @@ white_list = [
     # We export some functions and classes for test_jit.py directly from libtorch.so,
     # it's not important to have BC for them
     ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('aten::tril_indices', datetime.date(2020, 3, 1)),
+    ('aten::triu_indices', datetime.date(2020, 3, 1)),
     ('prim::Drop', datetime.date(2020, 3, 1)),
     ('prim::Store', datetime.date(2020, 3, 1)),
     ('aten::_ncf_view', datetime.date(2020, 3, 1)),
@@ -49,6 +51,22 @@ white_list = [
     ('prim::Print', datetime.date(2020, 3, 1)),
     ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
     ('prim::Constant', datetime.date(2020, 3, 1)),
+    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('_aten::format', datetime.date(2020, 3, 1)),
+    ('aten::random_', datetime.date(2020, 3, 1)),
+    ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
 ]
 
 
