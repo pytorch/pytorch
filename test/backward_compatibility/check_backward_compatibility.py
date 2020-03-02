@@ -53,6 +53,20 @@ white_list = [
     ('prim::Constant', datetime.date(2020, 3, 1)),
     ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
     ('_aten::format', datetime.date(2020, 3, 1)),
+    ('aten::random_', datetime.date(2020, 3, 1)),
+    ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
 ]
 
 

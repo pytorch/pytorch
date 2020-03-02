@@ -32,6 +32,7 @@ class ASGD(Optimizer):
                         weight_decay=weight_decay)
         super(ASGD, self).__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -41,45 +42,46 @@ class ASGD(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
-        with torch.no_grad():
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    grad = p.grad
-                    if grad.is_sparse:
-                        raise RuntimeError('ASGD does not support sparse gradients')
-                    state = self.state[p]
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad
+                if grad.is_sparse:
+                    raise RuntimeError('ASGD does not support sparse gradients')
+                state = self.state[p]
 
-                    # State initialization
-                    if len(state) == 0:
-                        state['step'] = 0
-                        state['eta'] = group['lr']
-                        state['mu'] = 1
-                        state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['eta'] = group['lr']
+                    state['mu'] = 1
+                    state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
 
-                    state['step'] += 1
+                state['step'] += 1
 
-                    if group['weight_decay'] != 0:
-                        grad = grad.add(group['weight_decay'], p)
+                if group['weight_decay'] != 0:
+                    grad = grad.add(p, alpha=group['weight_decay'])
 
-                    # decay term
-                    p.mul_(1 - group['lambd'] * state['eta'])
+                # Need to avoid version tracking for parameter.
+                # decay term
+                p.data.mul_(1 - group['lambd'] * state['eta'])
 
-                    # update parameter
-                    p.add_(-state['eta'], grad)
+                # update parameter
+                p.data.add_(grad, alpha=-state['eta'])
 
-                    # averaging
-                    if state['mu'] != 1:
-                        state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
-                    else:
-                        state['ax'].copy_(p)
+                # averaging
+                if state['mu'] != 1:
+                    state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
+                else:
+                    state['ax'].copy_(p)
 
-                    # update eta and mu
-                    state['eta'] = (group['lr'] /
-                                    math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
-                    state['mu'] = 1 / max(1, state['step'] - group['t0'])
+                # update eta and mu
+                state['eta'] = (group['lr'] /
+                                math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
+                state['mu'] = 1 / max(1, state['step'] - group['t0'])
 
         return loss

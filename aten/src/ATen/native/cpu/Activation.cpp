@@ -1,4 +1,6 @@
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 
 #include <ATen/native/Activation.h>
 
@@ -446,6 +448,40 @@ void softplus_backward_kernel(TensorIterator& iter, Scalar beta_, Scalar thresho
   });
 }
 
+void glu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
+    cpu_kernel_vec(
+      iter,
+      [one_val](scalar_t a, scalar_t b) -> scalar_t {
+        return a * (one_val / (one_val + std::exp(-b)));
+      },
+      [one_vec](Vec a, Vec b) -> Vec {
+        return a * (one_vec / (one_vec + b.neg().exp()));
+      }
+    );
+  });
+}
+
+void glu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "glu_backward_cpu", [&] {
+    using Vec = Vec256<scalar_t>;
+    const scalar_t one_val(1);
+    const Vec one_vec(one_val);
+    cpu_kernel_vec(
+      iter,
+      [one_val](scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
+        return (one_val - a) * a * b * c;
+      },
+      [one_vec](Vec a, Vec b, Vec c) -> Vec {
+        return (one_vec - a) * a * b * c;
+      }
+    );
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -463,6 +499,8 @@ REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel);
+REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
 
 } // namespace native
 } // namespace at

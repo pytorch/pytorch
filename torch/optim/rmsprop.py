@@ -52,6 +52,7 @@ class RMSprop(Optimizer):
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -61,49 +62,51 @@ class RMSprop(Optimizer):
         """
         loss = None
         if closure is not None:
-            loss = closure()
+            with torch.enable_grad():
+                loss = closure()
 
-        with torch.no_grad():
-            for group in self.param_groups:
-                for p in group['params']:
-                    if p.grad is None:
-                        continue
-                    grad = p.grad
-                    if grad.is_sparse:
-                        raise RuntimeError('RMSprop does not support sparse gradients')
-                    state = self.state[p]
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad
+                if grad.is_sparse:
+                    raise RuntimeError('RMSprop does not support sparse gradients')
+                state = self.state[p]
 
-                    # State initialization
-                    if len(state) == 0:
-                        state['step'] = 0
-                        state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        if group['momentum'] > 0:
-                            state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                        if group['centered']:
-                            state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
-                    square_avg = state['square_avg']
-                    alpha = group['alpha']
-
-                    state['step'] += 1
-
-                    if group['weight_decay'] != 0:
-                        grad = grad.add(group['weight_decay'], p)
-
-                    square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
-
-                    if group['centered']:
-                        grad_avg = state['grad_avg']
-                        grad_avg.mul_(alpha).add_(1 - alpha, grad)
-                        avg = square_avg.addcmul(-1, grad_avg, grad_avg).sqrt_().add_(group['eps'])
-                    else:
-                        avg = square_avg.sqrt().add_(group['eps'])
-
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    state['square_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
                     if group['momentum'] > 0:
-                        buf = state['momentum_buffer']
-                        buf.mul_(group['momentum']).addcdiv_(grad, avg)
-                        p.add_(-group['lr'], buf)
-                    else:
-                        p.addcdiv_(-group['lr'], grad, avg)
+                        state['momentum_buffer'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+                    if group['centered']:
+                        state['grad_avg'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+
+                square_avg = state['square_avg']
+                alpha = group['alpha']
+
+                state['step'] += 1
+
+                if group['weight_decay'] != 0:
+                    grad = grad.add(p, alpha=group['weight_decay'])
+
+                square_avg.mul_(alpha).addcmul_(grad, grad, value=1 - alpha)
+
+                if group['centered']:
+                    grad_avg = state['grad_avg']
+                    grad_avg.mul_(alpha).add_(grad, alpha=1 - alpha)
+                    avg = square_avg.addcmul(grad_avg, grad_avg, value=-1).sqrt_().add_(group['eps'])
+                else:
+                    avg = square_avg.sqrt().add_(group['eps'])
+
+                if group['momentum'] > 0:
+                    buf = state['momentum_buffer']
+                    buf.mul_(group['momentum']).addcdiv_(grad, avg)
+                    # Need to avoid version tracking for parameter.
+                    p.data.add_(buf, alpha=-group['lr'])
+                else:
+                    # Need to avoid version tracking for parameter.
+                    p.data.addcdiv_(grad, avg, value=-group['lr'])
 
         return loss
