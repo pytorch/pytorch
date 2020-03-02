@@ -5,6 +5,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Device.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/DispatchKeySet.h>
 
 #include <c10/util/Optional.h>
@@ -106,6 +107,7 @@ struct C10_API TensorOptions {
     , has_layout_(false)
     , has_requires_grad_(false)
     , has_pinned_memory_(false)
+    , has_memory_format_(false)
     {}
 
   /// Constructs a `TensorOptions` object with the given layout.
@@ -142,6 +144,12 @@ struct C10_API TensorOptions {
   /// legacy constructor to support ScalarType
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
     this->set_dtype(dtype);
+  }
+
+  /// Constructs a `TensorOptions` object with the given memory format.
+  /// TODO: Make this an implicit constructor
+  explicit TensorOptions(MemoryFormat memory_format) : TensorOptions() {
+    set_memory_format(memory_format);
   }
 
   /// Return a copy of `TensorOptions` with `device` set to the given one, or
@@ -209,6 +217,13 @@ struct C10_API TensorOptions {
   C10_NODISCARD TensorOptions pinned_memory(c10::optional<bool> pinned_memory) const noexcept {
     TensorOptions r = *this;
     r.set_pinned_memory(pinned_memory);
+    return r;
+  }
+
+  /// Sets the `memory_format` property on `TensorOptions`.
+  C10_NODISCARD TensorOptions memory_format(c10::optional<MemoryFormat> memory_format) const noexcept {
+    TensorOptions r = *this;
+    r.set_memory_format(memory_format);
     return r;
   }
 
@@ -308,6 +323,20 @@ struct C10_API TensorOptions {
     return has_pinned_memory_ ? c10::make_optional(pinned_memory_) : c10::nullopt;
   }
 
+  /// Returns whether the `memory_layout` is specified
+  bool has_memory_format() const noexcept {
+    return has_memory_format_;
+  }
+
+  // NB: memory_format() getter is PURPOSELY not defined, as the default
+  // behavior of memory_format varies from function to function.
+
+  /// Returns the `memory_layout` property of `TensorOptions, or
+  /// `c10::nullopt` if `memory_format` is not specified.
+  c10::optional<MemoryFormat> memory_format_opt() const noexcept {
+    return has_memory_format_ ? c10::make_optional(memory_format_) : c10::nullopt;
+  }
+
   // Resolves the ATen backend specified by the current construction axes.
   // TODO: Deprecate this
   Backend backend() const noexcept {
@@ -332,6 +361,7 @@ struct C10_API TensorOptions {
     // NB: requires grad is right biased; not a logical AND/OR!
     if (!r.has_requires_grad()) r.set_requires_grad(requires_grad_opt());
     if (!r.has_pinned_memory()) r.set_pinned_memory(pinned_memory_opt());
+    if (!r.has_memory_format()) r.set_memory_format(memory_format_opt());
     return r;
   }
 
@@ -469,8 +499,24 @@ struct C10_API TensorOptions {
     }
   }
 
+  /// Mutably set the `memory_Format` property of `TensorOptions`.
+  void set_memory_format(c10::optional<MemoryFormat> memory_format) & noexcept {
+    if (memory_format) {
+      memory_format_ = *memory_format;
+      has_memory_format_ = true;
+    } else {
+      has_memory_format_ = false;
+    }
+  }
+
   // WARNING: If you edit TensorOptions to add more options, you
-  // must adjust the implementation of Tensor::options
+  // may need to adjust the implementation of Tensor::options.
+  // The criteria for whether or not Tensor::options must be adjusted
+  // is whether or not the new option you added should preserved
+  // by functions such as empty_like(); if it should be preserved,
+  // you must adjust options().
+  //
+  // TODO: MemoryFormat is not implemented in this way
 
   // NB: We didn't use c10::optional here, because then we can't pack
   // the has_***_ boolean fields.
@@ -478,6 +524,7 @@ struct C10_API TensorOptions {
   caffe2::TypeMeta dtype_ = caffe2::TypeMeta::Make<float>(); // 64-bit
   Device device_ = at::kCPU; // 32-bit
   Layout layout_ = at::kStrided; // 8-bit
+  MemoryFormat memory_format_ = MemoryFormat::Contiguous; // 8-bit
 
   // Bitmask required here to get this to fit inside 32 bits (or even 64 bits,
   // for that matter)
@@ -491,6 +538,7 @@ struct C10_API TensorOptions {
   bool has_layout_        : 1;
   bool has_requires_grad_ : 1;
   bool has_pinned_memory_ : 1;
+  bool has_memory_format_ : 1;
 };
 
 // We should aspire to fit in one machine-size word; but a size greater than two
@@ -532,6 +580,12 @@ inline TensorOptions device_index(int16_t device_index) {
 /// `requires_grad` set to the given one.
 inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
+}
+
+/// Convenience function that returns a `TensorOptions` object with the
+/// `memory_format` set to the given one.
+inline TensorOptions memory_format(MemoryFormat memory_format) {
+  return TensorOptions().memory_format(memory_format);
 }
 
 C10_API std::ostream& operator<<(
