@@ -208,7 +208,9 @@ If the future completes with an error, an exception is thrown.
               )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions,
+      module,
+      "ProcessGroupRpcBackendOptions",
+      rpcBackendOptions,
       R"(
           The backend options class for ``ProcessGroupAgent``. This is derived
           from ``RpcBackendOptions`` by introducing an additional argument
@@ -242,10 +244,7 @@ If the future completes with an error, an exception is thrown.
               >>> # omitting init_rpc invocation on worker2
       )")
       .def(
-          py::init<
-              int,
-              std::chrono::milliseconds,
-              std::string>(),
+          py::init<int, std::chrono::milliseconds, std::string>(),
           py::arg("num_send_recv_threads") = 4,
           py::arg("rpc_timeout") = std::chrono::seconds(60),
           py::arg("init_method") = "env://")
