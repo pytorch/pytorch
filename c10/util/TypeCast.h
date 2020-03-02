@@ -59,6 +59,9 @@ struct maybe_real {
 
 template<typename src_t>
 struct maybe_real<true, src_t> {
+#ifdef __CUDACC__
+#pragma nv_exec_check_disable
+#endif
   C10_HOST_DEVICE static inline auto apply(src_t src) -> decltype(src.real()) {
     return src.real();
   }
@@ -67,6 +70,9 @@ struct maybe_real<true, src_t> {
 
 template <typename dest_t, typename src_t>
 struct static_cast_with_inter_type {
+#ifdef __CUDACC__
+#pragma nv_exec_check_disable
+#endif
   C10_HOST_DEVICE static inline dest_t apply(src_t src) {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     return static_cast<dest_t>(
