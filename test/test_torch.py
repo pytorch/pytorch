@@ -5118,6 +5118,11 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         b_expanded = b.expand(4, 3)
         self.assertEqual(torch._debug_has_internal_overlap(b_expanded), OVERLAP_YES)
 
+        # Check for zero strided, size 1 axis, in non-contiguous storage (gh-33812)
+        c = torch.randn(2, 1, 2).T
+        c_expanded = c.expand(2, 2, 2)[:, :1, :]
+        self.assertEqual(torch._debug_has_internal_overlap(c_expanded), OVERLAP_TOO_HARD)
+
     def test_allow_tensor_metadata_change(self):
         def do_test(t):
             with self.assertRaisesRegex(
