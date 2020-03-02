@@ -92,5 +92,62 @@ void testIValue() {
   }
 }
 
+void testIValueFuture() {
+  // Basic set value
+  {
+    IValue iv;
+    auto f1 = iv.toFuture();
+    EXPECT_FALSE(f1->completed());
+
+    f1->markCompleted(IValue(42));
+    EXPECT_TRUE(f1->completed());
+    EXPECT_EQ(42, f1->value().toInt());
+  }
+
+  // Callbacks
+  {
+    IValue iv;
+    auto f2 = iv.toFuture();
+    int calledTimesA = 0;
+    int calledTimesB = 0;
+    f2->addCallback([f2, &calledTimesA]() {
+      EXPECT_TRUE(f2->completed());
+      EXPECT_EQ(f2->value().toInt(), 43);
+      ++calledTimesA;
+    });
+    f2->markCompleted(IValue(43));
+    EXPECT_EQ(calledTimesA, 1);
+    EXPECT_EQ(calledTimesB, 0);
+    // Post-markCompleted()
+    f2->addCallback([f2, &calledTimesB]() {
+      EXPECT_TRUE(f2->completed());
+      EXPECT_EQ(f2->value().toInt(), 43);
+      ++calledTimesB;
+    });
+    EXPECT_EQ(calledTimesA, 1);
+    EXPECT_EQ(calledTimesB, 1);
+  }
+
+  // Exceptions
+  {
+    IValue iv;
+    auto f3 = iv.toFuture();
+    int calledTimes = 0;
+    f3->addCallback([f3, &calledTimes]() {
+      EXPECT_TRUE(f3->completed());
+      try {
+        (void)f3->value();
+      } catch (const std::exception& e) {
+        if (std::string(e.what()) == "My Error") {
+          ++calledTimes;
+        }
+      }
+    });
+    FutureError err("My Error");
+    f3->markCompleted(std::move(err));
+    EXPECT_EQ(calledTimes, 1);
+  }
+}
+
 } // namespace jit
 } // namespace torch
