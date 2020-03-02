@@ -16,12 +16,16 @@ accGradParameters: state, input, gradOutput, [gradWeight], [gradBias], ...
 
 e.g.
 ```C
-void THNN_(HardShrink_updateGradInput)(
-          THNNState* state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          real lambda)
+void THNN_(ClassNLLCriterion_updateGradInput)(
+           THCState *state,
+           THCTensor *input,
+           THCIndexTensor *target,
+           THCTensor *gradOutput,
+           THCTensor *gradInput,
+           int64_t reduction,
+           THCTensor *weights,
+           THCTensor *total_weight,
+           int64_t ignore_index)
 ```
 
 ### Criterions
@@ -34,23 +38,24 @@ e.g.
 
 ```C
 void THNN_(ClassNLLCriterion_updateOutput)(
-          THNNState* state,
-          THTensor *input,
-          THLongTensor *target,
-          THTensor *output,
-          THTensor *weights,
-          THTensor *total_weight,
-          bool sizeAverage)
+           THCState *state,
+           THCTensor *input,
+           THCIndexTensor *target,
+           THCTensor *output,
+           int64_t reduction,
+           THCTensor *weights,
+           THCTensor *total_weight,
+           int64_t ignore_index)
 ```
 
 ## Code style guide
 
 ```C
-void THNN_Linear_updateOutput(
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias);
+void THNN_(GatedLinear_updateOutput)(
+           THCState *state,
+           THCTensor *input,
+           THCTensor *output,
+           int dim)
 //<- 10 ->
 ```
 
