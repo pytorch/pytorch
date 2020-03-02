@@ -256,42 +256,6 @@ void THTensor_(cmin)(THTensor *r, THTensor *t, THTensor *src) {
                    *r_data = *t_data < *src_data ? *t_data : *src_data;);
 }
 
-void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumsum = 0;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumsum += t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumsum;
-                       });
-}
-
-void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
-{
-  dimension = at::maybe_wrap_dim(dimension, t);
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimensionLegacyNoScalars)(t), 2, "dimension %d out of range",
-      dimension);
-
-  THTensor_(resizeAs)(r_, t);
-
-  TH_TENSOR_DIM_APPLY2(scalar_t, t, scalar_t, r_, dimension,
-                       accreal cumprod = 1;
-                       int64_t i;
-                       for(i = 0; i < t_size; i++)
-                       {
-                         cumprod *= t_data[i*t_stride];
-                         r__data[i*r__stride] = (scalar_t)cumprod;
-                       });
-}
-
 #if !defined(TH_REAL_IS_BOOL) /* non bool only part */
 
 void THTensor_(baddbmm)(THTensor *result, scalar_t beta, THTensor *t, scalar_t alpha, THTensor *batch1, THTensor *batch2)
@@ -1066,33 +1030,6 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimensi
 
   c10::raw::intrusive_ptr::decref(rowR);
   c10::raw::intrusive_ptr::decref(rowS);
-}
-
-accreal THTensor_(dist)(THTensor *tensor, THTensor *src, scalar_t value)
-{
-  scalar_t sum;
-  if (value == INFINITY) {
-    sum = -1.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum = THMax(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
-    return sum;
-  } else if (value == -INFINITY) {
-    sum = INFINITY;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum = THMin(sum, TH_MATH_NAME(fabs)(*tensor_data - *src_data)););
-    return sum;
-  } else if (value == 0.0) {
-    sum = 0.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum += (*tensor_data - *src_data != 0.0););
-    return sum;
-  } else {
-    sum = 0.0;
-    TH_TENSOR_APPLY2(scalar_t, tensor, scalar_t, src,
-                     sum += TH_MATH_NAME(pow)(
-                       TH_MATH_NAME(fabs)(*tensor_data - *src_data), value););
-    return TH_MATH_NAME(pow)(sum, 1.0/value);
-  }
 }
 
 accreal THTensor_(meanall)(THTensor *tensor)

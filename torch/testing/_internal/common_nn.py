@@ -1006,6 +1006,14 @@ new_module_tests = [
         desc='3d_input_not_affine',
     ),
     dict(
+        module_name='BatchNorm1d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 9),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
+    ),
+    dict(
         module_name='BatchNorm2d',
         constructor_args=(3,),
         input_size=(2, 3, 6, 6),
@@ -1045,6 +1053,14 @@ new_module_tests = [
         desc='not_tracking_stats',
     ),
     dict(
+        module_name='BatchNorm2d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 2, 2),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
+    ),
+    dict(
         module_name='BatchNorm3d',
         constructor_args=(3,),
         input_size=(2, 3, 4, 4, 4),
@@ -1082,6 +1098,14 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 2, 2, 2),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
     ),
     dict(
         module_name='InstanceNorm1d',

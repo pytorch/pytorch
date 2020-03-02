@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <pybind11/pybind11.h>
 
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <vector>
 #include <memory>

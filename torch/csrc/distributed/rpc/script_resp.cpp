@@ -1,8 +1,9 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 
 #include <c10/util/C++17.h>
-#include <torch/csrc/jit/pickle.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 
 namespace torch {
 namespace distributed {
@@ -32,8 +33,11 @@ Message ScriptResp::toMessage() && {
 std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   return std::make_unique<ScriptResp>(std::move(value));
 }
 
