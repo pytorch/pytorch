@@ -211,7 +211,8 @@ struct FractionalMaxPoolOptions {
 
   /// If one wants to have an output size as a ratio of the input size, this option can be given.
   /// This has to be a number or tuple in the range (0, 1)
-  TORCH_ARG(c10::optional<ExpandingArray<D>>, output_ratio) = c10::nullopt;
+  using ExpandingArrayDouble=torch::ExpandingArray<D,double>;
+  TORCH_ARG(c10::optional<ExpandingArrayDouble>, output_ratio) = c10::nullopt;
 
   TORCH_ARG(torch::Tensor, _random_samples) = Tensor();
 };

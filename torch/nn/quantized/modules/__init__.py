@@ -4,6 +4,7 @@ import torch
 from torch.nn.modules.pooling import MaxPool2d
 
 from .activation import ReLU, ReLU6
+from .batchnorm import BatchNorm2d
 from .conv import Conv2d, Conv3d
 from .linear import Linear
 from .rnn import LSTM
@@ -78,6 +79,7 @@ class DeQuantize(torch.nn.Module):
         return DeQuantize()
 
 __all__ = [
+    'BatchNorm2d',
     'Conv2d',
     'Conv3d',
     'DeQuantize',

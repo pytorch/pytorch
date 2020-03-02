@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -12,7 +12,7 @@ namespace jit {
 // - NumberType outputs are changed to DynamicType.
 // - prim::Constant nodes which are numbers get changed into 0-dim tensors of
 //   the corresponding type
-// - prim::TensorToNum, prim::ImplicitTensorToNum and prim::NumToTensor nodes
+// - prim::TensorToNum, aten::Float, aten::Int and prim::NumToTensor nodes
 //   are erased.
 //
 // The pass assumes that DCE will be called sometime after.

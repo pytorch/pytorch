@@ -13,7 +13,7 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
+inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
@@ -23,7 +23,11 @@ inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
     allocator->allocate(nelements * dtype.itemsize()),
     allocator,
     /*resizable=*/true);
-  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, dispatch_key);
+  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks);
+}
+
+inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
+  return dummyTensor(c10::DispatchKeySet(dispatch_key));
 }
 
 template<class... Args>
