@@ -12,8 +12,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
-  # TODO move this to docker
-  pip_install unittest-xml-reporting
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -47,10 +45,6 @@ if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
   pip_install --user ninja
   # ninja is installed in /var/lib/jenkins/.local/bin
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
-
-  # TODO: Please move this to Docker
-  # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  pip_install --user "hypothesis==4.53.2"
 
   # TODO: move this to Docker
   PYTHON_VERSION=$(python -c 'import platform; print(platform.python_version())'|cut -c1)
