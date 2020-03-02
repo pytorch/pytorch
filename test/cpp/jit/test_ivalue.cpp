@@ -143,7 +143,7 @@ void testIValueFuture() {
         }
       }
     });
-    FutureError err("My Error");
+    ivalue::Future::FutureError err("My Error");
     f3->markCompleted(std::move(err));
     EXPECT_EQ(calledTimes, 1);
   }
