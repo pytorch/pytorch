@@ -190,10 +190,9 @@ Tensor q_avg_pool2d(
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     auto output = at::_empty_affine_quantized(
         output_shape,
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
-        input.q_zero_point(),
-        input.suggest_memory_format());
+        input.q_zero_point());
     // fast path for channel last: qavg_pool_2d_nhwc_stub
     if (output_shape.size() == 3) {
       qavg_pool2d_nhwc_stub(
