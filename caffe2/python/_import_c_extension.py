@@ -38,8 +38,9 @@ with extension_loader.DlopenGuard():
             logging.info('Failed to import AMD hip module: {}'.format(hip_e))
 
             logging.warning(
-                'This caffe2 python run does not have GPU support. '
-                'Will run in CPU only mode.')
+                'This caffe2 python run failed to load cuda module:{},'
+                'and AMD hip module:{}.'
+                'Will run in CPU only mode.'.format(gpu_e, hip_e))
             try:
                 from caffe2.python.caffe2_pybind11_state import *  # noqa
             except ImportError as cpu_e:

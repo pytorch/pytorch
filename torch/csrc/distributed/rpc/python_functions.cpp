@@ -14,7 +14,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -57,22 +57,6 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
-}
-
-void finishCreatingOwnerRRef(
-    const Message& message,
-    const c10::optional<utils::FutureError>& futErr) {
-  RRefContext::handleException(futErr);
-  auto rr = RemoteRet::fromMessage(message);
-  TORCH_INTERNAL_ASSERT(
-      rr->rrefId() == rr->forkId(),
-      "Expecting an OwnerRRef as RemoteRet but got a fork.");
-  auto& ctx = RRefContext::getInstance();
-  auto deletedRRef = ctx.delForkOfOwner(rr->rrefId(), rr->rrefId());
-  if (deletedRRef && deletedRRef->isPyObj()) {
-    pybind11::gil_scoped_acquire ag;
-    deletedRRef.reset();
-  }
 }
 
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
@@ -139,6 +123,8 @@ std::shared_ptr<FutureMessage> pyRpcBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
   auto scriptCall = std::make_unique<ScriptCall>(op, std::move(stack));
   auto agent = RpcAgent::getCurrentRpcAgent();
   return sendMessageWithAutograd(
@@ -153,6 +139,8 @@ PyRRef pyRemoteBuiltin(
     const py::kwargs& kwargs) {
   Stack stack;
   auto op = matchBuiltinOp(opName, args, kwargs, stack);
+  // Release GIL since args and kwargs processing is done.
+  py::gil_scoped_release release;
   TypePtr returnType = op->schema().returns()[0].type();
 
   auto& ctx = RRefContext::getInstance();
@@ -223,7 +211,14 @@ PyRRef pyRemotePythonUdf(
         ownerRRef->rrefId().toIValue(),
         rf);
 
-    fm->addCallback(finishCreatingOwnerRRef);
+    fm->addCallback([](const Message& message,
+                       const c10::optional<utils::FutureError>& futErr) {
+      auto deletedRRef = callback::finishCreatingOwnerRRef(message, futErr);
+      if (deletedRRef && deletedRRef->isPyObj()) {
+        pybind11::gil_scoped_acquire ag;
+        deletedRRef.reset();
+      }
+    });
     return PyRRef(ownerRRef);
   }
 }

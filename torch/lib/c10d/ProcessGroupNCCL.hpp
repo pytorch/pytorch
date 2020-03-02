@@ -119,6 +119,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // exception_ptr.
     bool finishedGPUExecutionInternal() const;
 
+    // Reference to the store so that we can write aborted communicators
+    // to the store.
+    std::shared_ptr<Store> store_;
+
     friend class ProcessGroupNCCL;
   };
 
@@ -277,6 +281,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   // object might get destroyed before the WorkNCCL object.
   void ncclCommWatchdog();
 
+  void ncclCommWatchdogInternal();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
 
@@ -310,8 +316,12 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
-  // Mutex to guard devNCCLCommMap_.
-  std::mutex devNCCLCommMapLock_;
+  // Map from ncclUniqueId to appropriate communicator.
+  std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
+      ncclIdToCommMap_;
+
+  // Mutex to guard maps like devNCCLCommMap_ and ncclIdToCommMap_.
+  std::mutex mutex_;
 
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
@@ -361,6 +371,12 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
+
+  // Set of communicators that this process group has aborted and their
+  // ncclUniqueId has been written to the store. We don't need a lock
+  // for this map since only the watchdog thread accesses this set. The
+  // set contains the string representation of ncclUniqueId.
+  std::unordered_set<std::string> abortedComms_;
 };
 
 } // namespace c10d

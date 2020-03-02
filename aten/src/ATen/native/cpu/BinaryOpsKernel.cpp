@@ -431,7 +431,11 @@ void max_elementwise_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "max_elementwise_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::max(a, b);
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::max(a, b);
+          }
         },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::maximum(a, b); });
     });
@@ -454,7 +458,11 @@ void min_elementwise_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "min_elementwise_cpu", [&]() {
       cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
-          return std::min(a, b);
+          if (std::isnan(a) || std::isnan(b)) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return std::min(a, b);
+          }
         },
         [](Vec256<scalar_t> a, Vec256<scalar_t> b) { return at::vec256::minimum(a, b); });
     });
@@ -471,7 +479,7 @@ void smooth_l1_kernel(TensorIterator& iter) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -484,7 +492,7 @@ void sigmoid_backward_kernel(TensorIterator& iter) {
 }
 
 void tanh_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "tanh_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "tanh_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -497,6 +505,11 @@ void tanh_backward_kernel(TensorIterator& iter) {
 }
 
 void mse_kernel(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Half) {
+    TORCH_WARN_ONCE("Applying the CPU mse kernel on half-type tensors. "
+                    "This may be slower than using float or double-type tensors.");
+  }
+
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "mse_cpu", [&]() {
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -508,6 +521,52 @@ void mse_kernel(TensorIterator& iter) {
       return diff * diff;
       });
   });
+}
+
+void fmod_kernel(TensorIterator& iter) {
+  if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+      cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
+        return x % d;
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+      cpu_kernel_vec(
+        iter,
+        [](scalar_t x, scalar_t d) -> scalar_t {
+          return std::fmod(x, d);
+        },
+        [](Vec256<scalar_t> x, Vec256<scalar_t> d) {
+          return x.fmod(d);
+        });
+      });
+  }
+}
+
+void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
+  if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
+      const auto div = divisor.to<scalar_t>();
+      cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
+        return x % div;
+      });
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
+      const auto div = divisor.to<scalar_t>();
+      const auto div_vec = Vec256<scalar_t>(div);
+      cpu_kernel_vec(
+        iter,
+        [=](scalar_t x) -> scalar_t {
+          return std::fmod(x, div);
+        },
+        [=](Vec256<scalar_t> x) {
+          return x.fmod(div_vec);
+        });
+      });
+  }
+
 }
 
 } // anonymous namespace
@@ -538,5 +597,7 @@ REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
 REGISTER_DISPATCH(mse_stub, &mse_kernel);
+REGISTER_DISPATCH(fmod_stub, &fmod_kernel);
+REGISTER_DISPATCH(fmod_scalar_stub, &fmod_scalar_kernel);
 
 }} // namespace at::native

@@ -1,9 +1,9 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
-#include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/utils/memory.h"
 
 namespace torch {
@@ -496,7 +496,7 @@ void testWriteTracking() {
     script::parseIR(
         R"IR(
   graph(%x: Tensor):
-    %b : (Tensor) = aten::relu_(%x)
+    %b : Tensor = aten::relu_(%x)
     return (%b)
     )IR",
         &*graph);
@@ -510,7 +510,7 @@ void testWriteTracking() {
     script::parseIR(
         R"IR(
   graph(%x: Tensor, %y : Tensor):
-    %b : (Tensor) = aten::mul(%x, %y)
+    %b : Tensor = aten::mul(%x, %y)
     return (%b)
     )IR",
         &*graph);
@@ -526,7 +526,7 @@ void testWriteTracking() {
         R"IR(
   graph(%x: Tensor, %y : Tensor):
     %c1 : int = prim::Constant[value=1]()
-    %b : (Tensor) = aten::add_(%x, %y, %c1)
+    %b : Tensor = aten::add_(%x, %y, %c1)
     return (%b)
     )IR",
         &*graph,

@@ -131,6 +131,46 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 }
 
+auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::object ret;
+  for (auto &arg : r.signature.overloaded_args) {
+    py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), args, kwargs, NULL));
+    if (ret.ptr() != Py_NotImplemented) {
+      // Return the reference to the result. This also covers the case where ret
+      // is NULL and __torch_function__ raised an exception, which we throw below
+      break;
+    }
+  }
+  if (ret.ptr() == nullptr) {
+    // if an exception occurred in a user's implementation of
+    // __array_function__, throw it
+    throw python_error();
+  }
+  else if (ret.ptr() == Py_NotImplemented) {
+    // all __torch_function__ implementations in overloaded_args
+    // returned NotImplemented, so we raise a TypeError.
+    std::stringstream ss;
+    ss << "no implementation found for '" << module_name << "." << r.get_func_name()
+       << "' on types that implement __torch_function__: [";
+    for (auto &arg : r.signature.overloaded_args) {
+      ss << arg.ptr()->ob_type->tp_name;
+      if (!arg.is(r.signature.overloaded_args.back())) {
+        ss << ", ";
+      }
+      else {
+        ss << "]";
+      }
+    }
+    const std::string& tmp = ss.str();
+    PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    throw python_error();
+  }
+  return ret.release().ptr();
+}
+
 /*
  *  obj has a __torch_function__ implementation and may either be a
  *  subclass of Tensor or a Tensor-like duck type. We may need to
@@ -681,15 +721,35 @@ PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)
     });
 }
 
+void PythonArgParser::check_deprecated(const FunctionSignature & signature) {
+  if (signature.deprecated) {
+    auto msg = c10::str(
+      "This overload of ", signature.name, " is deprecated:\n\t",
+      signature.name, signature.toString());
+    auto signatures = get_signatures();
+    if (!signatures.empty()) {
+      msg += "\nConsider using one of the following signatures instead:";
+      for (const auto & sig : signatures) {
+        msg += "\n\t";
+        msg += signature.name;
+        msg += sig;
+      }
+    }
+    TORCH_WARN_ONCE(msg);
+  }
+}
+
 PythonArgs PythonArgParser::raw_parse(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   if (signatures_.size() == 1) {
     auto& signature = signatures_[0];
     signature.parse(args, kwargs, parsed_args, true);
+    check_deprecated(signature);
     return PythonArgs(traceable, signature, parsed_args);
   }
 
   for (auto& signature : signatures_) {
     if (signature.parse(args, kwargs, parsed_args, false)) {
+      check_deprecated(signature);
       return PythonArgs(traceable, signature, parsed_args);
     }
   }

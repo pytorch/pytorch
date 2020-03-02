@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -39,7 +39,9 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case aten::Bool:
       case aten::Float:
       case aten::Int:
-      case prim::ImplicitTensorToNum:
+      case aten::FloatImplicit:
+      case aten::IntImplicit:
+      case aten::ScalarImplicit:
       case prim::NumToTensor: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
         it.destroyCurrent();
