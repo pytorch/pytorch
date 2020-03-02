@@ -1050,25 +1050,60 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     if(bidirectional && !type_2) {
-        std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
-        for(auto param = 0; param < _params.size(); param++){
-          std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
-        }
+        // std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
+        // for(auto param = 0; param < _params.size(); param++){
+        //   std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
+        // }
+        // CUDNN does not support Type-1 RNNs on their API, thus we need to
+        // split and reverse the inputs and run two "independent" RNNs.
+        // See pytorch/pytorch#4930
+        auto h = hx[0];
+        auto c = hx[1];
+        auto h_slices = h.chunk(2, h.dim() - 1);
+        auto c_slices = c.chunk(2, c.dim() - 1);
+        auto h_fwd = h[0];
+        auto h_bwd = h[1];
+        auto c_fwd = c[0];
+        auto c_bwd = c[1];
+        TensorList _fwd_hx = {h_fwd, c_fwd};
+        TensorList _bwd_hx = {h_bwd, c_bwd};
+
+        // Reverse input to backward LSTM
+        auto input = batch_first ? _input.transpose(0, 1) : _input;
+        auto step_inputs = input.unbind(0);
+        auto step_ref = std::move(step_inputs);
+        auto rev_step_inputs = std::move(std::reverse(step_ref.begin(), step_ref.end()));
+        auto rev_input = at::cat(rev_step_inputs, 0);
+
+        // _fwd_params contains the forward parameters and _params the backward ones
         TensorList _fwd_params = _params.slice(_params.size() / 2);
-        std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
-        for(auto param = 0; param < _fwd_params.size(); param++){
-          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "\n";
-        }
-        TensorList _bwd_params = _params.slice(_params.size() / 2, _params.size());
-        std::cout << "_bwd_params size: " << std::to_string(_bwd_params.size()) << "\n";
-        for(auto param = 0; param < _bwd_params.size(); param++){
-          std::cout << "_bwd_params[" << param << "] size: " << _bwd_params[param].sizes() << "\n";
-        }
-        std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
-        for(auto param = 0; param < _params.size(); param++){
-          std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
-        }
+
+        // Forward LSTM
+        Tensor fwd_output, f_hy, f_cy;
+        lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
+                        _fwd_hx, _fwd_params, has_biases, num_layers, dropout_p,
+                        train, false, type_2, false);
+
+        // Backward LSTM
+        Tensor bwd_output, b_hy, b_cy;
+        lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
+                        _bwd_hx, _params, has_biases, num_layers, dropout_p,
+                        train, false, type_2, false);
+
+        // Cat forward and backward outputs
+        auto bwd_outputs = bwd_output.unbind(0);
+        auto bwd_outputs_ref = std::move(bwd_outputs);
+        auto rev_step_outputs = std::move(std::reverse(bwd_outputs_ref.begin(),
+                                                       bwd_outputs_ref.end()));
+        auto bwd_output = at::cat(rev_step_outputs, 0);
+        auto cat_outputs = at::cat({fwd_output, bwd_output}, 0);
+        auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
+
+        auto hy = at::cat({f_hy, b_hy}, -1);
+        auto cy = at::cat({f_cy, b_cy}, -1);
+        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
+      // Apply Type-2 RNN
       Tensor output, hy, cy;
       lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
                       num_layers, dropout_p, train, bidirectional, type_2, batch_first);
