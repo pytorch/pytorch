@@ -378,7 +378,7 @@ BLAS and LAPACK Operations
 .. autofunction:: solve
 .. autofunction:: svd
 .. autofunction:: svd_lowrank
-.. autofunction:: pca
+.. autofunction:: pca_lowrank
 .. autofunction:: symeig
 .. autofunction:: lobpcg
 .. autofunction:: trapz
