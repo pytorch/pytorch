@@ -283,6 +283,9 @@ struct func_wrapper_t {
   inline scalar_t project(acc_t a) {
     return (scalar_t)a;
   }
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
 };
 
 template <typename scalar_t, typename acc_t, typename func_t1, typename func_t2>
