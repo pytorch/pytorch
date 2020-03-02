@@ -1,6 +1,6 @@
 #include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/script/parser.h>
-#include <torch/csrc/jit/script/resolver.h>
+#include <torch/csrc/jit/frontend/parser.h>
+#include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {

@@ -1,9 +1,9 @@
 #include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/serialization/import.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -188,6 +188,23 @@ void testLiteInterpreterLoadOrigJit() {
   std::stringstream ss;
   m.save(ss);
   ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+}
+
+void testLiteInterpreterWrongMethodName() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+  ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
 }
 
 } // namespace jit
