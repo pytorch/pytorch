@@ -1072,7 +1072,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto input = batch_first ? _input.transpose(0, 1) : _input;
         auto step_inputs = input.unbind(0);
         auto step_ref = std::move(step_inputs);
-        auto rev_step_inputs = std::move(std::reverse(step_ref.begin(), step_ref.end()));
+        std::reverse(step_ref.begin(), step_ref.end());
+        auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
 
         // _fwd_params contains the forward parameters and _params the backward ones
@@ -1093,8 +1094,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // Cat forward and backward outputs
         auto bwd_outputs = bwd_output.unbind(0);
         auto bwd_outputs_ref = std::move(bwd_outputs);
-        auto rev_step_outputs = std::move(std::reverse(bwd_outputs_ref.begin(),
-                                                       bwd_outputs_ref.end()));
+        std::reverse(bwd_outputs_ref.begin(), bwd_outputs_ref.end());
+        auto rev_step_outputs = std::move();
         auto bwd_output = at::cat(rev_step_outputs, 0);
         auto cat_outputs = at::cat({fwd_output, bwd_output}, 0);
         auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
