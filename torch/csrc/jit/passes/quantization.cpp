@@ -5,13 +5,13 @@
 #include <torch/csrc/jit/passes/quantization_patterns.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/irparser.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/script/schema_matching.h>
-#include <torch/csrc/jit/subgraph_matcher.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 
 #include <c10/core/QScheme.h>
 
@@ -106,22 +106,19 @@ std::string getFuncName(Value* func_value) {
   }
 }
 
-bool nodeQuantizable(Node* n) {
-  static std::vector<std::string> call_funcs = {
-      "conv2d",
-      "linear",
-      "relu",
-  };
-  std::vector<Symbol> aten_funcs = {
-      Symbol::aten("addmm"), Symbol::aten("matmul"), Symbol::aten("add_")};
+bool isFunctionNode(Node* n,
+                    const std::vector<std::string>& call_funcs,
+                    const std::vector<std::string>& aten_funcs) {
+  std::vector<Symbol> aten_func_symbols;
   std::transform(
-      call_funcs.begin(),
-      call_funcs.end(),
-      std::back_inserter(aten_funcs),
+      aten_funcs.begin(),
+      aten_funcs.end(),
+      std::back_inserter(aten_func_symbols),
       [](const std::string& s) { return Symbol::aten(s); });
+
   bool is_quantizable =
-      std::find(aten_funcs.begin(), aten_funcs.end(), n->kind()) !=
-      aten_funcs.end();
+      std::find(aten_func_symbols.begin(), aten_func_symbols.end(), n->kind()) !=
+      aten_func_symbols.end();
   if (n->kind() == prim::CallFunction) {
     auto func_name = getFuncName(n->inputs()[0]);
     is_quantizable |=
@@ -131,21 +128,65 @@ bool nodeQuantizable(Node* n) {
   return is_quantizable;
 }
 
-bool valueNeedsToBeQuantized(Value* v) {
-  if (!v->type()->isSubtypeOf(TensorType::get())) {
-    return false;
+// If the op doesn't require observation, return
+// the the list of input indexes that we should check to see
+// if they are observed/quantized, if so, we can say the output
+// of this op is observed/quantized as well, since for these ops we can derive
+// the quantization parameters for output given inputs
+std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
+  std::vector<std::string> single_input_aten_funcs = {
+    "adaptive_avg_pool2d",
+    "max_pool2d",
+    "avg_pool2d",
+    "flatten",
+    "max",
+    "min",
+    "mean",
+    // TODO: sort returns a tuple of Tensors, we have
+    // to extend the API to support that
+    // "sort",
+    "__interpolate",
+    "__upsample",
+    "__upsample_bilinear",
+    "__upsample_nearest",
+  };
+  std::vector<std::string> single_input_call_funcs = {
+    "adaptive_avg_pool2d",
+    "_max_pool2d",
+  };
+  if (isFunctionNode(
+          n,
+      // We don't have call functions
+      // after inline
+      /* call_funcs = */ single_input_call_funcs,
+      /* aten_funcs = */ {})) {
+    return {1};
+  } else if (isFunctionNode(
+                 n,
+                 // We don't have call functions
+                 // after inline
+                 /* call_funcs = */ {},
+                 /* aten_funcs = */ single_input_aten_funcs)) {
+    return {0};
   }
-  // Check whether producer is quantizable
-  if (nodeQuantizable(v->node())) {
-    return true;
-  }
-  // Check whether user is quantizable
-  for (const auto& use : v->uses()) {
-    if (nodeQuantizable(use.user)) {
-      return true;
-    }
-  }
-  return false;
+  return {};
+}
+
+bool nodeQuantizable(Node* n) {
+  return isFunctionNode(
+      n,
+      /* call_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+    }, /* aten_funcs = */ {
+      "conv2d",
+      "linear",
+      "relu",
+      "addmm",
+      "matmul",
+      "add_"
+    });
 }
 
 script::Module findChildModule(
@@ -191,12 +232,19 @@ std::vector<std::string> getModuleAccessPath(Value* instance, Value* self) {
   return path;
 }
 
+script::Module getInvokedModule(
+    script::Module& module, Node* n, Value* self) {
+  auto* instance = n->inputs()[0];
+  auto path = getModuleAccessPath(instance, self);
+  return findChildModule(module, path);
+}
+
 class ModuleCloneHelper {
  public:
   /** Clone according to module qconfig map, this is for handling the case
    *  where we have two module instances sharing the same ClassType
    *  but configured with different QConfig
-   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/script/module.cpp
+   *  code is copied and modified from https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/api/module.cpp
    */
   script::Module clone(
       const script::Module& module,
@@ -377,11 +425,12 @@ class InsertObserversHelper {
       script::Module& module,
       const std::string& method_name);
 
+  bool valueNeedsToBeQuantized(Value* v);
+
   void insertObserverFor(
       Value* v,
-      Graph* g,
       script::Module& module,
-      const c10::optional<QConfig>& qconfig_opt);
+      const script::Module& observer_module);
 
   void findIntermediateValuesInPattern(
       Graph& graph,
@@ -491,17 +540,36 @@ bool matchArgPattern(
 }
 
 bool isBiasOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 2}, {"linear", 2}}),
       CallFuncArgs({{"linear", 3}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear bias being used by"
+        " one node.");
+  }
+  return result;
 }
 
 bool isWeightOfConvOrLinear(Value* v) {
-  return matchArgPattern(
+  bool result = matchArgPattern(
       v,
       AtenFuncArgs({{"conv2d", 1}, {"linear", 1}}),
       CallFuncArgs({{"linear", 2}}));
+  if (result) {
+    TORCH_CHECK(
+        v->uses().size() == 1,
+        "Graph mode quantization only supports conv/linear weight being used by"
+        " one node.");
+  }
+  return result;
+}
+
+script::Module getObserverModuleFor(Value* v, const QConfig& qconfig) {
+  return
+    isWeightOfConvOrLinear(v) ? std::get<1>(qconfig) : std::get<0>(qconfig);
 }
 
 void replaceConvolutionWithConv2d(std::shared_ptr<Graph>& graph) {
@@ -561,21 +629,7 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        // Record all method calls in the graph
-        auto module_instance = n->inputs()[0];
-        auto module_method_name = n->s(attr::name);
-        script::Module callee_module;
-        if (module_instance->node()->kind() == prim::GetAttr) {
-          auto child_module_name = module_instance->node()->s(attr::name);
-          callee_module = module.attr(child_module_name).toModule();
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              module_instance == graph->inputs()[0],
-              "We only support call method either on %self"
-              "or child instance in insert_observers_pass right now");
-          callee_module = module;
-        }
-        invoked_methods.push_back({callee_module, module_method_name});
+        invoked_methods.push_back(std::make_pair(getInvokedModule(module, n, graph->inputs()[0]), n->s(attr::name)));
       }
 
       for (Block* subblock : n->blocks()) {
@@ -590,36 +644,15 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 // and insert a call to observer forward function
 void InsertObserversHelper::insertObserverFor(
     Value* v,
-    Graph* g,
     script::Module& module,
-    const c10::optional<QConfig>& qconfig_opt) {
-  if (!qconfig_opt) {
-    return;
-  }
-  // Skip observing bias
-  if (isBiasOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1, "We only support bias being used by one node.");
-    return;
-  }
-
-  const auto& qconfig = *qconfig_opt;
-  script::Module observer_module;
-  if (isWeightOfConvOrLinear(v)) {
-    TORCH_CHECK(
-        v->uses().size() == 1,
-        "We only support weight being used by one node.");
-    observer_module = std::get<1>(qconfig);
-  } else {
-    observer_module = std::get<0>(qconfig);
-  }
-
+    const script::Module& observer_module) {
   script::Module observer = observer_module.clone_instance();
   std::string observer_name = "_observer_" + c10::to_string(uid_++);
   while (module.hasattr(observer_name)) {
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
+  auto* g = v->owningGraph();
   graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
 
   // Get handle of observer module
@@ -698,6 +731,24 @@ void InsertObserversHelper::preprocess(
   }
 }
 
+bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+  if (!v->type()->isSubtypeOf(TensorType::get()) ||
+      values_to_skip_.count(v) || isBiasOfConvOrLinear(v)) {
+    return false;
+  }
+  // Check whether producer is quantizable
+  if (nodeQuantizable(v->node())) {
+    return true;
+  }
+  // Check whether user is quantizable
+  for (const auto& use : v->uses()) {
+    if (nodeQuantizable(use.user)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void InsertObserversHelper::insertObservers(
     script::Module& module,
     const std::string& method_name) {
@@ -726,6 +777,10 @@ void InsertObserversHelper::insertObservers(
   // For traversing all blocks in the graph including subblocks.
   std::stack<Block*> blocks_to_visit;
   auto qconfig_opt = module_qconfig_map_.at(module._ivalue());
+  if (!qconfig_opt) {
+    return;
+  }
+  auto qconfig = *qconfig_opt;
 
   // Add observer for external input nodes excluding parameters
   // These are treated as activation as they vary across batches
@@ -736,8 +791,8 @@ void InsertObserversHelper::insertObservers(
   // observing a potentially mutated value due to some in-place operation
   for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
     auto& v = graph->inputs()[idx];
-    if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
-      insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
+    if (valueNeedsToBeQuantized(v)) {
+      insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
     }
   }
 
@@ -753,7 +808,7 @@ void InsertObserversHelper::insertObservers(
       // Record all outputs in the values_to_observe - we'll later add observers
       // for all values from it.
       for (Value* v : n->outputs()) {
-        if (!values_to_skip_.count(v) && valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v)) {
           values_to_observe.push_back(v);
         }
       }
@@ -766,7 +821,21 @@ void InsertObserversHelper::insertObservers(
 
   // Actually add observer nodes.
   for (Value* v : values_to_observe) {
-    insertObserverFor(v, v->owningGraph(), module, qconfig_opt);
+    insertObserverFor(v, module, getObserverModuleFor(v, qconfig));
+  }
+}
+
+void insertDeQuantCall(Graph* graph,
+                       Value* quantized_val,
+                       Value* original_val,
+                       const std::vector<Use>& uses) {
+  for (size_t i = 0; i < uses.size(); ++i) {
+    Node* dequant =
+      graph->create(Symbol::aten("dequantize"), {quantized_val});
+    dequant->output()->setDebugName(
+        original_val->debugName() + ".dequant." + c10::guts::to_string(i));
+    uses[i].user->replaceInputWith(original_val, dequant->output());
+    graph->insertNode(dequant);
   }
 }
 
@@ -803,26 +872,18 @@ void insertQuantDeQuantCall(Value* self, Node* observer, bool is_per_channel) {
 
   // two passes to insert the dequant for every usage
   // in first pass, identify all the nodes using "v"
-  std::vector<Node*> use_nodes;
+  std::vector<Use> uses;
   for (const auto& use : v->uses()) {
-    auto cur = use.user;
     // Skip quant node and observer node (we need to keep
     // observer nodes around since we need them to
     // find the quantization parameters)
-    if (cur != quant && cur != observer) {
-      use_nodes.push_back(cur);
+    if (use.user != quant && use.user != observer) {
+      uses.push_back(use);
     }
   }
 
   // in second pass, replace the input "v" with dequant output
-  for (size_t i = 0; i < use_nodes.size(); ++i) {
-    Node* dequant =
-        g->create(at::Symbol::aten("dequantize"), {quant->output()});
-    dequant->output()->setDebugName(
-        v->debugName() + ".dequant." + c10::guts::to_string(i));
-    use_nodes[i]->replaceInputWith(v, dequant->output());
-    g->insertNode(dequant);
-  }
+  insertDeQuantCall(g, quant->output(), v, uses);
 }
 
 // find the observer for Value `v` and return the name of the observer
@@ -1650,6 +1711,88 @@ script::Module InsertQuantDeQuant(
 
 void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
+}
+
+void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  std::vector<Node*> dequant_nodes_to_rewrite;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      if (n->kind() == Symbol::aten("dequantize") &&
+          n->output()->uses().size() > 1) {
+        dequant_nodes_to_rewrite.push_back(n);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  for (Node* n : dequant_nodes_to_rewrite) {
+    WithInsertPoint ins(n->next());
+    auto* quantized_val = n->inputs()[0];
+    auto* dequantized_val = n->output();
+    // copy uses to vector since value->uses() is a reference
+    // and changing the graph will also change the uses() list
+    std::vector<Use> uses = dequantized_val->uses();
+    insertDeQuantCall(graph.get(), quantized_val, dequantized_val, uses);
+  }
+
+  for (Node* n : dequant_nodes_to_rewrite) {
+    n->removeAllInputs();
+  }
+  for (Node* n : dequant_nodes_to_rewrite) {
+    n->destroy();
+  }
+}
+
+// This is the pass to handle ops that does not require observation
+// for example: flatten, average_pool, upsample
+// This is called after inline and before graph execution
+void SwapDeQuant(std::shared_ptr<Graph>& graph) {
+  std::stack<Block*> blocks_to_visit;
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      auto input_indexes = getGeneralOpTensorInputIndexes(n);
+      if (input_indexes.size() > 0) {
+        bool is_dequantized = true;
+        for (auto i : input_indexes) {
+          is_dequantized &= n->inputs()[i]->node()->kind() == Symbol::aten("dequantize");
+        }
+        if (!is_dequantized) {
+          continue;
+        }
+        // Delete dequantize node, we have one dequantize
+        // for each use of the value
+        for (auto i : input_indexes) {
+          auto* dequantized_val = n->inputs()[i];
+          auto* dequantize_node = dequantized_val->node();
+          TORCH_INTERNAL_ASSERT(dequantized_val->uses().size() == 1,
+                                "Expect to have one dequantize node for each use");
+          // Replace useses of dequantized_val with the input of
+          // dequantize node
+          dequantized_val->replaceAllUsesWith(dequantize_node->inputs()[0]);
+          dequantize_node->removeAllInputs();
+          dequantize_node->destroy();
+        }
+        TORCH_CHECK(n->outputs().size() == 1, "We only support dequantize swapping for ops"
+                    " with one output right now");
+        auto* output = n->output();
+        WithInsertPoint ins(n->next());
+        std::vector<Use> uses = output->uses();
+        // Insert new dequantize node for each use of the output
+        insertDeQuantCall(graph.get(), output, output, uses);
+      }
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
 }
 
 void QuantFusion(std::shared_ptr<Graph>& graph) {

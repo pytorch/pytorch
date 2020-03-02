@@ -2,7 +2,7 @@
 
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
-#include <torch/csrc/jit/pickler.h>
+#include <torch/csrc/jit/serialization/pickler.h>
 
 namespace torch {
 namespace distributed {
