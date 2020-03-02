@@ -1,7 +1,8 @@
+from collections import namedtuple
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any, Dict
+from typing import NamedTuple, List, Optional, Any, Dict, Tuple
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import unittest
 import sys
@@ -137,6 +138,44 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
 
+    def test_types_as_values(self):
+        def fn(m: torch.Tensor) -> torch.device:
+            return m.device
+
+        self.checkScript(fn, [torch.randn(2, 2)])
+
+        GG = namedtuple('GG', ['f', 'g'])
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.ignore
+            def foo(self, x, z):
+                # type: (Tensor, Tensor) -> Tuple[GG, GG]
+                return GG(x, z), GG(x, z)
+
+            def forward(self, x, z):
+                return self.foo(x, z)
+
+        foo = torch.jit.script(Foo())
+        y = foo(torch.randn(2, 2), torch.randn(2, 2))
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.ignore
+            def foo(self, x, z) -> Tuple[GG, GG]:
+                return GG(x, z)
+
+            def forward(self, x, z):
+                return self.foo(x, z)
+
+        foo = torch.jit.script(Foo())
+        y = foo(torch.randn(2, 2), torch.randn(2, 2))
+
+
     def test_ignore_with_types(self):
         @torch.jit.ignore
         def fn(x: Dict[str, Optional[torch.Tensor]]):
@@ -182,7 +221,6 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def other_fn(x):
                 return fn('2')
-
 
     def test_named_tuple_slice_unpack(self):
         class MyCoolNamedTuple(NamedTuple):
