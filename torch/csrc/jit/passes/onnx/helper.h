@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
 
 #include <memory>
 

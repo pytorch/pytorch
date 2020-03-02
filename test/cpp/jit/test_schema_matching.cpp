@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
 #include "test/cpp/jit/test_base.h"
-#include "torch/csrc/jit/custom_operator.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
 
 #include <sstream>
 #include <string>

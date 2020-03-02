@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <cub/block/block_reduce.cuh>
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
@@ -203,7 +205,7 @@ bool RowWiseSparseAdagradOp<float, CUDAContext>::DoRunWithType() {
 
   // each thread block will handle multiple rows of the input and output
   RowWiseSparseAdagradKernel<<<
-      min(GRAD_M, CAFFE_MAXIMUM_NUM_BLOCKS),
+      std::min(GRAD_M, CAFFE_MAXIMUM_NUM_BLOCKS),
       num_threads,
       0,
       context_.cuda_stream()>>>(
