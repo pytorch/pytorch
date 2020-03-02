@@ -12,10 +12,15 @@ namespace native {
 // change to use quantizer
 Tensor empty_affine_quantized_cpu(
     IntArrayRef size,
-    const TensorOptions& options,
+    const TensorOptions& options_,
     double scale,
     int64_t zero_point,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
@@ -23,8 +28,7 @@ Tensor empty_affine_quantized_cpu(
       size,
       options,
       make_per_tensor_affine_quantizer(
-          scale, zero_point, typeMetaToScalarType(options.dtype())),
-      optional_memory_format.value_or(MemoryFormat::Contiguous));
+          scale, zero_point, typeMetaToScalarType(options.dtype())));
 }
 
 Tensor empty_per_channel_affine_quantized_cpu(
@@ -32,8 +36,13 @@ Tensor empty_per_channel_affine_quantized_cpu(
     const Tensor& scales,
     const Tensor& zero_points,
     int64_t axis,
-    const TensorOptions& options,
+    const TensorOptions& options_,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
@@ -47,8 +56,7 @@ Tensor empty_per_channel_affine_quantized_cpu(
           scales,
           zero_points,
           axis,
-          typeMetaToScalarType(options.dtype())),
-      optional_memory_format.value_or(MemoryFormat::Contiguous));
+          typeMetaToScalarType(options.dtype())));
 }
 
 // Provide better error message if dtype is wrong
