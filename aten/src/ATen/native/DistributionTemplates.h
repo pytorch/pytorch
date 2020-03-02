@@ -112,4 +112,12 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
   return self;
 }
 
+template<template<typename> class normal_kernel, typename RNG>
+at::Tensor& normal_impl(at::Tensor& self, double mean, double std, at::Generator* generator) {
+  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);
+  auto gen = (RNG*)generator;
+  normal_kernel<RNG>()(self, mean, std, gen);
+  return self;
+}
+
 }}}
