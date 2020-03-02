@@ -156,6 +156,12 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
   fi
 fi
 
+# TODO: Related to a memory leak found in CUDA 10.2, remove this after that is resolved
+#       For context https://github.com/pytorch/pytorch/pull/33471#issuecomment-591777657
+if [[ "$BUILD_ENVIRONMENT" == *cuda10.2* ]]; then
+  export VALGRIND="OFF"
+fi
+
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
