@@ -4561,7 +4561,8 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hessian must"):
             res = autogradF.hessian(bar, inp)
 
-        with self.assertRaisesRegex(RuntimeError, "The Tensor returned by the function given to hessian should contain a single element"):
+        err_msg_out ="The Tensor returned by the function given to hessian should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.hessian(bar2, inp)
 
         res = autogradF.hessian(foo, inp)
@@ -4690,7 +4691,8 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to vhp must"):
             res = autogradF.vhp(bar, inp, v)
 
-        with self.assertRaisesRegex(RuntimeError, "The Tensor returned by the function given to vhp should contain a single element"):
+        err_msg_out = "The Tensor returned by the function given to vhp should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.vhp(bar2, inp, v)
 
         with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size:"):
@@ -4832,7 +4834,8 @@ class TestAutogradFunctional(TestCase):
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hvp must"):
             res = autogradF.hvp(bar, inp, v)
 
-        with self.assertRaisesRegex(RuntimeError, "The Tensor returned by the function given to hvp should contain a single element"):
+        err_msg_out = "The Tensor returned by the function given to hvp should contain a single element"
+        with self.assertRaisesRegex(RuntimeError, err_msg_out):
             res = autogradF.hvp(bar2, inp, v)
 
         with self.assertRaisesRegex(RuntimeError, "Entry 0 in v has invalid size:"):

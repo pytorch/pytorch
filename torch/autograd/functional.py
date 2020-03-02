@@ -76,7 +76,7 @@ def _check_requires_grad(inputs, input_type, strict):
     if not strict:
         return
 
-    if not input_type in ["outputs", "grad_inputs", "jacobian", "hessian"]:
+    if input_type not in ["outputs", "grad_inputs", "jacobian", "hessian"]:
         raise RuntimeError("Invalid input_type to _check_requires_grad")
     for i, inp in enumerate(inputs):
         if inp is None:
@@ -123,7 +123,8 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, create_graph=False, retai
         # No differentiable output, we don't need to call the autograd engine
         return (None,) * len(inputs)
     else:
-        return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True, create_graph=create_graph, retain_graph=retain_graph)
+        return torch.autograd.grad(new_outputs, inputs, new_grad_outputs, allow_unused=True,
+                                   create_graph=create_graph, retain_graph=retain_graph)
 
 # Public API
 
@@ -394,7 +395,8 @@ def jacobian(func, inputs, create_graph=False, strict=False):
                                            "input {}. This is not allowed in strict mode.".format(i, el_idx))
                     jac_i_el.append(torch.zeros_like(inp_el))
 
-        jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size() + inputs[el_idx].size()) for el_idx, jac_i_el in enumerate(jac_i)),)
+        jacobian += (tuple(torch.stack(jac_i_el, dim=0).view(out.size() + inputs[el_idx].size())
+                      for el_idx, jac_i_el in enumerate(jac_i)),)
 
     jacobian = _grad_postprocess(jacobian, create_graph)
 
