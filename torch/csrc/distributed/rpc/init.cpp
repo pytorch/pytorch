@@ -54,7 +54,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "init_method",
               &RpcBackendOptions::initMethod_,
               R"(URL specifying how to initialize the process group.
-                Default is `env://``)");
+                Default is ``env://``)");
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -210,15 +210,17 @@ If the future completes with an error, an exception is thrown.
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
       module, "ProcessGroupRpcBackendOptions", rpcBackendOptions,
       R"(
-          The backend options class for ProcessGroupAgent. This is derived
-          from RpcBackendOptions by introducing an additional argument
-          `num_send_recv_threads`.
+          The backend options class for ``ProcessGroupAgent``. This is derived
+          from ``RpcBackendOptions`` by introducing an additional argument
+          ``num_send_recv_threads``.
 
           Arguments:
-              num_send_recv_threads (int): The number of threads in the
-                  thread-pool used by ProcessGroupAgent (default: 4).
-              rpc_timeout (datetime.timedelta): Timeout for RPC requests.
-              init_method (str): The URL to initialize `ProcessGroupGloo`.
+              num_send_recv_threads (int, optional): The number of threads in
+                  the thread-pool used by ``ProcessGroupAgent`` (default: 4).
+              rpc_timeout (datetime.timedelta, optional): The timeout for RPC
+                  requests (default: ``timedelta(seconds=60)``).
+              init_method (str, optional): The URL to initialize
+                  ``ProcessGroupGloo`` (default: ``env://```).
 
 
           Example::
@@ -234,8 +236,10 @@ If the future completes with an error, an exception is thrown.
               >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
               >>>         num_send_recv_threads=16,
               >>>         datetime.timedelta(seconds=20)
-              >>      )
+              >>>     )
               >>> )
+              >>>
+              >>> # omitting init_rpc invocation on worker2
       )")
       .def(
           py::init<
