@@ -121,8 +121,6 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Each function object is meant to be used only once (in the forward pass).
-
     Examples::
 
         >>> class Exp(Function):
@@ -137,6 +135,9 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>     def backward(ctx, grad_output):
         >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
+        >>>
+        >>> #Use it by calling the apply method:
+        >>> output = Exp.apply(input)
     """
 
     def __call__(self, *args, **kwargs):

@@ -75,10 +75,10 @@ class class_ {
                                                // torch::jit::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
-      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(classObj);
-      auto capsule = IValue(genericPtr);
-      auto object = self.ivalue.toObject();
-      object->setSlot(0, capsule);
+      auto genericPtr = c10::static_intrusive_pointer_cast<torch::jit::CustomClassHolder>(std::move(classObj));
+      auto capsule = IValue(std::move(genericPtr));
+      auto object = std::move(self.ivalue).toObject();
+      object->setSlot(0, std::move(capsule));
     };
 
     defineMethod("__init__", std::move(func));
