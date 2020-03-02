@@ -9,9 +9,9 @@ import numbers
 
 import torch
 from torch import Tensor  # noqa: F401
+from torch import _VF
 
 import torch.nn as nn
-from torch.nn import _VF
 from torch.nn.modules.rnn import apply_permutation
 from torch.nn.utils.rnn import PackedSequence
 
