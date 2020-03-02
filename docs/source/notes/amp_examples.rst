@@ -5,22 +5,25 @@ Automatic Mixed Precision examples
 
 .. currentmodule:: torch.cuda.amp
 
+When training with a mixture of ``torch.float32`` and ``torch.float16``,
+you should use :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` together.
+
+Autocasting automatically chooses the precision for GPU operations to improve performance
+while maintaining accuracy.  Instances of :class:`torch.cuda.amp.autocast`
+enable autocasting for chosen regions.
+
+Gradient scaling helps prevent gradient underflow, as explained :ref:`here<gradient-scaling>`.
+Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
+gradient scaling conveniently.
+
+:class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
+When combining them, there are no gotchas.  In the samples below, each is used as its
+individual documentation suggests.
+
 .. contents:: :local:
 
-.. _gradient-scaling-examples:
-
-Gradient Scaling
-^^^^^^^^^^^^^^^^
-
-Gradient scaling helps prevent gradient underflow when training with mixed precision,
-as explained :ref:`here<gradient-scaling>`.
-
-Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
-gradient scaling conveniently, as shown in the following code snippets.
-
-
-Typical Use
------------
+Typical Mixed Precision Training
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ::
 
@@ -30,8 +33,11 @@ Typical Use
     for epoch in epochs:
         for input, target in data:
             optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
+
+            # Runs the forward pass with autocasting.
+            with autocast():
+                output = model(input)
+                loss = loss_fn(output, target)
 
             # Scales the loss, and calls backward() on the scaled loss to create scaled gradients.
             scaler.scale(loss).backward()
@@ -47,7 +53,7 @@ Typical Use
 .. _working-with-unscaled-gradients:
 
 Working with Unscaled Gradients
--------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All gradients produced by ``scaler.scale(loss).backward()`` are scaled.  If you wish to modify or inspect
 the parameters' ``.grad`` attributes between ``backward()`` and ``scaler.step(optimizer)``,  you should
@@ -63,7 +69,7 @@ If your model or models contain other parameters that were assigned to another o
 parameters' gradients as well.
 
 Gradient clipping
-"""""""""""""""""
+-----------------
 
 Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unscaled gradients as usual::
 
@@ -72,8 +78,9 @@ Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unsca
     for epoch in epochs:
         for input, target in data:
             optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
+            with autocast():
+                output = model(input)
+                loss = loss_fn(output, target)
             scaler.scale(loss).backward()
 
             # Unscales the gradients of optimizer's assigned params in-place
@@ -99,19 +106,19 @@ this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale g
     Calling :meth:`unscale_` twice for a given optimizer between each :meth:`step` triggers a RuntimeError.
 
 Working with Scaled Gradients
------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For some operations, you may need to work with scaled gradients in a setting where
 ``scaler.unscale_`` is unsuitable.
 
 Gradient penalty
-""""""""""""""""
+----------------
 
 A gradient penalty implementation typically creates gradients out-of-place using
 :func:`torch.autograd.grad`, combines them to create the penalty value,
 and adds the penalty value to the loss.
 
-Here's an ordinary example of an L2 penalty without gradient scaling::
+Here's an ordinary example of an L2 penalty without gradient scaling or autocasting::
 
     for epoch in epochs:
         for input, target in data:
@@ -137,6 +144,9 @@ To implement a gradient penalty *with* gradient scaling, the loss passed to
 will therefore be scaled, and should be unscaled before being combined to create the
 penalty value.
 
+Also, the penalty term computation is part of the forward pass, and therefore should
+receive autocasting.
+
 Here's how that looks for the same L2 penalty::
 
     scaler = GradScaler()
@@ -144,8 +154,9 @@ Here's how that looks for the same L2 penalty::
     for epoch in epochs:
         for input, target in data:
             optimizer.zero_grad()
-            output = model(input)
-            loss = loss_fn(output, target)
+            with autocast():
+                output = model(input)
+                loss = loss_fn(output, target)
 
             # Scales the loss for the out-of-place backward pass, resulting in scaled grad_params
             scaled_grad_params = torch.autograd.grad(scaler.scale(loss), model.parameters(), create_graph=True)
@@ -156,11 +167,12 @@ Here's how that looks for the same L2 penalty::
             grad_params = [p*inv_scale for p in scaled_grad_params]
 
             # Computes the penalty term and adds it to the loss
-            grad_norm = 0
-            for grad in grad_params:
-                grad_norm += grad.pow(2).sum()
-            grad_norm = grad_norm.sqrt()
-            loss = loss + grad_norm
+            with autocast():
+                grad_norm = 0
+                for grad in grad_params:
+                    grad_norm += grad.pow(2).sum()
+                grad_norm = grad_norm.sqrt()
+                loss = loss + grad_norm
 
             # Applies scaling to the backward call as usual.  Accumulates leaf gradients that are correctly scaled.
             scaler.scale(loss).backward()
@@ -171,7 +183,7 @@ Here's how that looks for the same L2 penalty::
 
 
 Working with Multiple Losses and Optimizers
--------------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your network has multiple losses, you must call ``scaler.scale`` on each of them individually.
 If your network has multiple optimizers, you may call ``scaler.unscale_`` on any of them individually,
@@ -186,10 +198,11 @@ after all optimizers used this iteration have been stepped::
         for input, target in data:
             optimizer0.zero_grad()
             optimizer1.zero_grad()
-            output0 = model0(input)
-            output1 = model1(input)
-            loss0 = loss_fn(2 * output0 + 3 * output1, target)
-            loss1 = loss_fn(3 * output0 - 5 * output1, target)
+            with autocast():
+                output0 = model0(input)
+                output1 = model1(input)
+                loss0 = loss_fn(2 * output0 + 3 * output1, target)
+                loss1 = loss_fn(3 * output0 - 5 * output1, target)
 
             scaler.scale(loss0).backward(retain_graph=True)
             scaler.scale(loss1).backward()
@@ -203,8 +216,76 @@ after all optimizers used this iteration have been stepped::
 
             scaler.update()
 
-Each optimizer independently checks its gradients for infs/NaNs, and therefore makes an independent decision
+Each optimizer independently checks its gradients for infs/NaNs, and makes an independent decision
 whether or not to skip the step.  This may result in one optimizer skipping the step
 while the other one does not.  Since step skipping occurs rarely (every several hundred iterations)
 this should not impede convergence.  If you observe poor convergence after adding gradient scaling
 to a multiple-optimizer model, please file an issue.
+
+Working with Multiple GPUs
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following only affect :class:`autocast`.  Use :class:`GradScaler` normally.
+
+.. _amp-dataparallel:
+
+DataParallel within a single process
+------------------------------------
+
+:class:`torch.nn.parallel.DataParallel` spawns side threads to run the forward pass on each device.
+The autocast state is thread local, so the following will not work::
+
+    model = MyModel()
+    dp_model = nn.DataParallel(model)
+
+    # Sets autocast in the main thread
+    with autocast():
+        # dp_model's internal side threads won't autocast.  The main thread's autocast state has no effect.
+        output = dp_model(input)
+        # This still autocasts, but it's too late...
+        loss = loss_fn(output)
+
+The fix is simple.  Enable autocast as part of ``MyModel.forward``::
+
+    MyModel(nn.Module):
+        ...
+        @autocast()
+        def forward(self, input):
+           ...
+
+    # alternatively
+    MyModel(nn.Module):
+        ...
+        def forward(self, input):
+            with autocast():
+                ...
+
+The following now autocasts in ``dp_model``'s side threads and the main thread::
+
+    model = MyModel()
+    dp_model = nn.DataParallel(model)
+
+    with autocast():
+        output = dp_model(input)
+        loss = loss_fn(output)
+
+DistributedDataParallel, one GPU per process
+--------------------------------------------
+
+:class:`torch.nn.parallel.DistributedDataParallel`'s documentation recommends one GPU per process for best
+performance.  In this case, use :class:`autocast` and :class:`GradScaler` normally.
+No gotchas (side-thread-related or otherwise) apply.
+
+DistributedDataParallel, multiple GPUs per process
+--------------------------------------------------
+
+Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread to run the forward pass on each
+device.  As with :ref:`DataParallel example<amp-dataparallel>`, apply autocast as part of
+your model's ``forward`` method to ensure it's enabled in side threads.
+
+Working with Custom Autograd Functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If your network uses custom autograd functions, :class:`autocast` may "just work."
+
+However, you may want more explicit control.  For example, if you have....
