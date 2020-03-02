@@ -1096,8 +1096,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto bwd_outputs_ref = std::move(bwd_outputs);
         std::reverse(bwd_outputs_ref.begin(), bwd_outputs_ref.end());
         auto rev_step_outputs = std::move();
-        auto bwd_output = at::cat(rev_step_outputs, 0);
-        auto cat_outputs = at::cat({fwd_output, bwd_output}, 0);
+        auto bwd_rev_output = at::cat(rev_step_outputs, 0);
+        auto cat_outputs = at::cat({fwd_output, bwd_rev_output}, 0);
         auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
 
         auto hy = at::cat({f_hy, b_hy}, -1);
