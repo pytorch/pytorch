@@ -1194,8 +1194,6 @@ Tensor cudnn_convolution_backward_weight(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic)
 {
-  TensorArg input{ input_t, "input", 2};
-
   auto layout = cudnn_conv_use_channels_last(input_t, grad_output_t) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
 
@@ -1203,6 +1201,10 @@ Tensor cudnn_convolution_backward_weight(
   // Make sure that NC11 strides follow formula
   grad_output_contig_t.resize_(grad_output_contig_t.sizes(), layout);
   TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
+ 
+  Tensor input_contig_t = input_t.contiguous(layout);
+  input_contig_t.resize_(input_contig_t.sizes(), layout);
+  TensorArg input{ input_contig_t, "input", 2};
 
   checkAllSameType(c, {grad_output_contig, input});
   checkAllSameGPU(c, {grad_output_contig, input});

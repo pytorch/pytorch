@@ -5,11 +5,11 @@
 namespace torch {
 namespace jit {
 
-struct HashNode {
+struct TORCH_API HashNode {
   size_t operator()(const Node* k) const;
 };
 
-struct EqualNode {
+struct TORCH_API EqualNode {
   bool operator()(const Node* lhs, const Node* rhs) const;
 };
 
