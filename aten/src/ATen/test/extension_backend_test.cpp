@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/runtime/operator.h>
 
 using namespace at;
 
@@ -29,8 +29,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry1 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPUTensorId)
-      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+      .impl_unboxedOnlyKernel<decltype(empty_override), &empty_override>(DispatchKey::MSNPUTensorId));
   Tensor a = empty({5, 5}, at::kMSNPU);
   ASSERT_EQ(a.device().type(), at::kMSNPU);
   ASSERT_EQ(a.device().index(), 1);
@@ -46,8 +45,7 @@ TEST(BackendExtensionTest, TestRegisterOp) {
   auto registry2 = torch::RegisterOperators()
     .op(torch::RegisterOperators::options()
       .schema("aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")
-      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(DispatchKey::MSNPUTensorId)
-      .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+      .impl_unboxedOnlyKernel<decltype(add_override), &add_override>(DispatchKey::MSNPUTensorId));
   add(a, b);
   ASSERT_EQ(test_int, 2);
 
