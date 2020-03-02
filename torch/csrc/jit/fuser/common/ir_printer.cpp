@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-void IROperExprPrinter::print(const Fusion* const fusion) {
+void IRMathPrinter::print(const Fusion* const fusion) {
   irstream_ << "\nPrinting TensorViews...\n";
   for(auto &val : fusion->vals()) {
     if(val->getValType().value() == ValType::TensorView)
@@ -28,22 +28,22 @@ void IROperExprPrinter::print(const Fusion* const fusion) {
 }
 
 // Just printing the expressions as of now. 
-void IROperExprPrinter::handle(Statement* s) { 
+void IRMathPrinter::handle(Statement* s) { 
   if(s->isExpr()) Statement::dispatch(this, s); 
 }
 
-void IROperExprPrinter::handle(Expr* e) {
+void IRMathPrinter::handle(Expr* e) {
   irstream_ << "\t" << cnt_++ << " ";
   Expr::dispatch(this, e); 
   irstream_ << "\n"; 
 }
 
-void IROperExprPrinter::handle(Tensor* t) {
+void IRMathPrinter::handle(Tensor* t) {
   irstream_ << "%T" << t->name(); 
   Val::dispatch(this, t->domain());
 }
 
-void IROperExprPrinter::handle(TensorView* tv) {
+void IRMathPrinter::handle(TensorView* tv) {
   irstream_ << "%TV" << tv->name();
 
   const TensorDomain* td = dynamic_cast<TensorDomain*>(tv->domain());
@@ -65,7 +65,7 @@ void IROperExprPrinter::handle(TensorView* tv) {
   irstream_ << "]";
 }
 
-void IROperExprPrinter::handle(TensorDomain* tdom) {
+void IRMathPrinter::handle(TensorDomain* tdom) {
   irstream_ << "[";
   for(std::vector<const IterDomain*>::size_type i = 0; i < tdom->size(); i++){
     if(i > 0) irstream_ << ", ";
@@ -74,7 +74,7 @@ void IROperExprPrinter::handle(TensorDomain* tdom) {
   irstream_ << "]";
 }
   
-void IROperExprPrinter::handle(IterDomain* idom) {
+void IRMathPrinter::handle(IterDomain* idom) {
   const Val* val_id_size = idom->size();
   TORCH_CHECK(val_id_size->getValType().value() == ValType::Scalar);
   TORCH_CHECK(val_id_size->getDataType().value() == DataType::Int);
@@ -92,7 +92,7 @@ void IROperExprPrinter::handle(IterDomain* idom) {
   if(idom->isReduction()) irstream_ << "<";
 }
 
-void IROperExprPrinter::handle(Int* val) { 
+void IRMathPrinter::handle(Int* val) { 
   if (val->isSymbolic()) {
     irstream_ << "%i" << val->name();
   } else {
@@ -100,7 +100,7 @@ void IROperExprPrinter::handle(Int* val) {
   }
 }
   
-void IROperExprPrinter::handle(Float* val) { 
+void IRMathPrinter::handle(Float* val) { 
   if (val->isSymbolic()) {
     irstream_ << "%f" << val->name();
   } else {
@@ -108,7 +108,7 @@ void IROperExprPrinter::handle(Float* val) {
   }
 }
 
-void IROperExprPrinter::handle(BinaryOp* bop) {
+void IRMathPrinter::handle(BinaryOp* bop) {
   Val::dispatch(this, bop->out());
   irstream_ << " = ";
   if(auto inline_bop = inline_op_str(bop->type())) {
@@ -124,7 +124,7 @@ void IROperExprPrinter::handle(BinaryOp* bop) {
   }
 }
 
-void IROperExprPrinter::handle(UnaryOp* uop) {
+void IRMathPrinter::handle(UnaryOp* uop) {
   Val::dispatch(this, uop->out());
   irstream_ << " = ";
   if(auto inline_uop = inline_op_str(uop->type())) {

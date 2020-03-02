@@ -21,9 +21,9 @@ protected:
   int cnt_;
 };
 
-class TORCH_API IROperExprPrinter : public IRPrinter {
+class TORCH_API IRMathPrinter : public IRPrinter {
 public:
-  IROperExprPrinter(std::ostream& os) :
+  IRMathPrinter(std::ostream& os) :
     IRPrinter(os)
   { } 
   
@@ -48,9 +48,9 @@ public:
   void handle(BinaryOp*) override;
 };             
 
-class TORCH_API IRTensorExprPrinter : public IRPrinter {
+class TORCH_API IRTransformPrinter : public IRPrinter {
 public:
-  IRTensorExprPrinter(std::ostream& os) :
+  IRTransformPrinter(std::ostream& os) :
 	IRPrinter(os) 
   { } 
   
