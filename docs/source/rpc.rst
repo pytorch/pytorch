@@ -105,6 +105,7 @@ to appropriate devices if necessary.
     :members:
 .. autoclass:: ProcessGroupRpcBackendOptions
     :members:
+    :inherited-members:
 
 .. _rref:
 

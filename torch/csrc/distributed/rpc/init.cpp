@@ -208,7 +208,35 @@ If the future completes with an error, an exception is thrown.
               )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
+      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions,
+      R"(
+          The backend options class for ProcessGroupAgent. This is derived
+          from RpcBackendOptions by introducing an additional argument
+          `num_send_recv_threads`.
+
+          Arguments:
+              num_send_recv_threads (int): The number of threads in the
+                  thread-pool used by ProcessGroupAgent (default: 4).
+              rpc_timeout (datetime.timedelta): Timeout for RPC requests.
+              init_method (str): The URL to initialize `ProcessGroupGloo`.
+
+
+          Example::
+              >>> import datetime, os
+              >>> import torch.distributed.rpc as rpc
+              >>> os.environ['MASTER_ADDR'] = 'localhost'
+              >>> os.environ['MASTER_PORT'] = '29500'
+              >>>
+              >>> rpc.init_rpc(
+              >>>     "worker1",
+              >>>     rank=0,
+              >>>     world_size=2,
+              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+              >>>         num_send_recv_threads=16,
+              >>>         datetime.timedelta(seconds=20)
+              >>      )
+              >>> )
+      )")
       .def(
           py::init<
               int,
@@ -216,35 +244,7 @@ If the future completes with an error, an exception is thrown.
               std::string>(),
           py::arg("num_send_recv_threads") = 4,
           py::arg("rpc_timeout") = std::chrono::seconds(60),
-          py::arg("init_method") = "env://",
-          R"(
-              Construct backend options for ProcessGroupAgent. This is derived
-              from RpcBackendOptions by introducing an additional argument
-              `num_send_recv_threads`.
-
-              Arguments:
-                  num_send_recv_threads (int): The number of threads in the
-                      thread-pool used by ProcessGroupAgent (default: 4).
-                  rpc_timeout (datetime.timedelta): Timeout for RPC requests.
-                  init_method (str): The URL to initialize `ProcessGroupGloo`.
-
-
-              Example::
-                  >>> import datetime, os
-                  >>> import torch.distributed.rpc as rpc
-                  >>> os.environ['MASTER_ADDR'] = 'localhost'
-                  >>> os.environ['MASTER_PORT'] = '29500'
-                  >>>
-                  >>> rpc.init_rpc(
-                  >>>     "worker1",
-                  >>>     rank=0,
-                  >>>     world_size=2,
-                  >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
-                  >>>         num_send_recv_threads=16,
-                  >>>         datetime.timedelta(seconds=20)
-                  >>      )
-                  >>> )
-          )")
+          py::arg("init_method") = "env://")
       .def_readwrite(
           "num_send_recv_threads",
           &ProcessGroupRpcBackendOptions::numSendRecvThreads_,

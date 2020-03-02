@@ -1547,8 +1547,8 @@ class RpcTest(RpcAgentTestFixture):
     def test_set_and_get_num_send_recv_threads(self):
         NUM_THREADS = 27
         rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
-            init_method = self.rpc_backend_options.init_method,
-            num_send_recv_threads = NUM_THREADS
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=NUM_THREADS
         )
         rpc.init_rpc(
             name="worker{}".format(self.rank),
