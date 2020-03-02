@@ -62,41 +62,26 @@ Tensor FF_op(const Tensor& self) {
 
 namespace {
 
-auto registerer = torch::RegisterOperators()
-  .op(torch::RegisterOperators::options()
-    .schema("aten::AA(Tensor self) -> Tensor")
-    .kernel<decltype(AA_op), &AA_op>(DispatchKey::CPUTensorId)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::BB(Tensor self) -> Tensor")
-    .catchAllKernel<decltype(BB_op), &BB_op>()
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::CC(Tensor self) -> Tensor")
-    .kernel(DispatchKey::CPUTensorId, &CC_op)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::DD(Tensor self) -> Tensor")
-    .catchAllKernel(&DD_op)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::EE(Tensor self) -> Tensor")
-    .impl_unboxedOnlyKernel<decltype(EE_op), &EE_op>(DispatchKey::CPUTensorId)
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::FF(Tensor self) -> Tensor")
-    .impl_unboxedOnlyCatchAllKernel<decltype(FF_op), &FF_op>()
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::GG(Tensor self) -> Tensor")
-    .kernel(DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {
+auto registerer = torch::import()
+  .def("aten::AA(Tensor self) -> Tensor",
+    torch::dispatch(DispatchKey::CPUTensorId, &AA_op))
+  .def("aten::BB(Tensor self) -> Tensor", &BB_op)
+  .impl("aten::CC(Tensor self) -> Tensor",
+    torch::dispatch(DispatchKey::CPUTensorId, &CC_op))
+  .impl("aten::DD(Tensor self) -> Tensor", &DD_op)
+  .def("aten::EE(Tensor self) -> Tensor", torch::dispatch(
+    DispatchKey::CPUTensorId,
+    CppFunction::makeUnboxedOnly(EE_op)))
+  .def("aten::FF(Tensor self) -> Tensor",
+    CppFunction::makeUnboxedOnly(FF_op))
+  .impl("aten::GG(Tensor self) -> Tensor", torch::dispatch(
+    DispatchKey::CPUTensorId, [] (Tensor a) -> Tensor {
       return call_FF_op(a);
     }))
-  .op(torch::RegisterOperators::options()
-    .schema("aten::HH(Tensor self) -> Tensor")
-    .catchAllKernel([] (Tensor a) -> Tensor {
+  .impl("aten::HH(Tensor self) -> Tensor",
+    [] (Tensor a) -> Tensor {
       return a;
-    }));
+    });
 
 } // namespace
 

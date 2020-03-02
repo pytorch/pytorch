@@ -1,7 +1,7 @@
 #include <memory>
-#include <torch/csrc/jit/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -272,7 +272,8 @@ private:
     case aten::lgamma:
     case aten::reciprocal:
     case aten::addcmul:
-      return checkInputs(n, no_exceptions);
+    case aten::where:
+     return checkInputs(n, no_exceptions);
     case aten::slice:
       return !n->input(0)->type()->expect<TensorType>()->isSummarized() &&
              // check that the dimension argument is constant
