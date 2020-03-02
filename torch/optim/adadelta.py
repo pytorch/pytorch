@@ -79,4 +79,3 @@ class Adadelta(Optimizer):
                 acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
         return loss
-
