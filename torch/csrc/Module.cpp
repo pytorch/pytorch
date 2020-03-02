@@ -40,9 +40,9 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 #include <torch/csrc/utils/tensor_numpy.h>
-#include <torch/csrc/jit/python_tracer.h>
-#include <torch/csrc/jit/init.h>
-#include <torch/csrc/jit/python_ir.h>
+#include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/python/init.h>
+#include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/api/include/torch/python/init.h>
@@ -450,6 +450,12 @@ PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
           "but got %s", THPUtils_typename(arg));
+#ifdef __HIP_PLATFORM_HCC__
+  if (arg == Py_False) {
+    TORCH_WARN_ONCE("Disabling benchmark mode for MIOpen is NOT supported. Overriding value to True");
+    arg = Py_True;
+  }
+#endif
   at::globalContext().setBenchmarkCuDNN(arg == Py_True);
   Py_RETURN_NONE;
 }
@@ -731,7 +737,7 @@ PyObject* initModule() {
     return PyModule_AddObject(module, name, v) == 0;
   };
 
-#ifdef USE_CUDNN
+#if defined(USE_CUDNN) || defined(__HIP_PLATFORM_HCC__)
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;

@@ -151,7 +151,6 @@ else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
 
-
 if (NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_MT 0)
@@ -180,7 +179,87 @@ if (NOT INTERN_BUILD_MOBILE)
   endif()
 endif()
 
-# Directory where NNPACK and cpuinfo will download and build all dependencies
+# ---[ Dependencies
+# NNPACK and family (QNNPACK, PYTORCH_QNNPACK, and XNNPACK) can download and
+# compile their dependencies in isolation as part of their build.  These dependencies
+# are then linked statically with PyTorch.  To avoid the possibility of a version
+# mismatch between these shared dependencies, explicitly declare our intent to these
+# libraries that we are interested in using the exact same source dependencies for all.
+
+if (USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+  set(DISABLE_NNPACK_AND_FAMILY OFF)
+
+  # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
+  # Disable them and warn the user if not.
+
+  if (IOS)
+    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
+    if (IOS_ARCH_COUNT GREATER 1)
+      message(WARNING
+        "Multi-architecture (${IOS_ARCH}) builds are not supported in {Q/X}NNPACK. "
+        "Specify a single architecture in IOS_ARCH and re-configure, or "
+        "turn this warning off by USE_{Q/X}NNPACK=OFF.")
+      set(DISABLE_NNPACK_AND_FAMILY ON)
+    endif()
+    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
+      message(WARNING
+        "Target architecture \"${IOS_ARCH}\" is not supported in {Q/X}NNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_{Q/X}NNPACK=OFF.")
+      set(DISABLE_NNPACK_AND_FAMILY ON)
+    endif()
+  else()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
+      message(WARNING
+        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in {Q/X}NNPACK. "
+        "Supported platforms are Android, iOS, Linux, and macOS. "
+        "Turn this warning off by USE_{Q/X}NNPACK=OFF.")
+      set(DISABLE_NNPACK_AND_FAMILY ON)
+    endif()
+    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+      message(WARNING
+        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in {Q/X}NNPACK. "
+        "Supported architectures are x86, x86-64, ARM, and ARM64. "
+        "Turn this warning off by USE_{Q/X}NNPACK=OFF.")
+      set(DISABLE_NNPACK_AND_FAMILY ON)
+    endif()
+  endif()
+
+  if (DISABLE_NNPACK_AND_FAMILY)
+    set(USE_NNPACK OFF)
+    set(USE_QNNPACK OFF)
+    set(USE_PYTORCH_QNNPACK OFF)
+    set(USE_XNNPACK OFF)
+  else()
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+    if (NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+    if (NOT DEFINED FP16_SOURCE_DIR)
+      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+    endif()
+    if (NOT DEFINED FXDIV_SOURCE_DIR)
+      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
+    endif()
+    if (NOT DEFINED PSIMD_SOURCE_DIR)
+      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+    endif()
+    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+    endif()
+    if (NOT DEFINED CLOG_SOURCE_DIR)
+      # XNNPACK gets clog from inside the cpuinfo repository,
+      # so lets just do the same for now.
+      set(CLOG_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo/deps/clog" CACHE STRING "cpuinfo source directory")
+    endif()
+
+    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+    set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+  endif()
+endif()
+
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
@@ -199,7 +278,27 @@ endif()
 # instead of the default implementation. To avoid confusion, add pthreadpool
 # subdirectory explicitly with EXCLUDE_FROM_ALL property prior to QNNPACK/NNPACK
 # does so, which will prevent it from installing the default pthreadpool library.
-if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK))
+if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE AND (USE_QNNPACK OR USE_NNPACK OR USE_XNNPACK))
+  if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+    set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  endif()
+
+  IF(NOT TARGET pthreadpool)
+    SET(PTHREADPOOL_BUILD_TESTS OFF CACHE BOOL "")
+    SET(PTHREADPOOL_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    ADD_SUBDIRECTORY(
+      "${PTHREADPOOL_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/pthreadpool"
+      EXCLUDE_FROM_ALL)
+  ENDIF()
+endif()
+
+# XNNPACK has not option of like QNNPACK_CUSTOM_THREADPOOL
+# that allows us to hijack pthreadpool interface.
+# Thus not doing this ends up building pthreadpool as well as
+# the internal implemenation of pthreadpool which results in symbol conflicts.
+if (USE_XNNPACK)
   if(NOT DEFINED PTHREADPOOL_SOURCE_DIR)
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
     set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
@@ -217,81 +316,28 @@ endif()
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
-  if (IOS)
-    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
-    if (IOS_ARCH_COUNT GREATER 1)
-      message(WARNING
-        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
-        "Specify a single architecture in IOS_ARCH and re-configure, or "
-        "turn this warning off by USE_QNNPACK=OFF.")
-      set(USE_QNNPACK OFF)
-    endif()
-    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
-      message(WARNING
-        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
-        "Supported architectures are x86, x86-64, ARM, and ARM64. "
-        "Turn this warning off by USE_QNNPACK=OFF.")
-      set(USE_QNNPACK OFF)
-    endif()
-  else()
-    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
-      message(WARNING
-        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
-        "Supported platforms are Android, iOS, Linux, and macOS. "
-        "Turn this warning off by USE_QNNPACK=OFF.")
-      set(USE_QNNPACK OFF)
-    endif()
-    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
-      message(WARNING
-        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
-        "Supported architectures are x86, x86-64, ARM, and ARM64. "
-        "Turn this warning off by USE_QNNPACK=OFF.")
-      set(USE_QNNPACK OFF)
-    endif()
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+
+  if (NOT DEFINED QNNPACK_SOURCE_DIR)
+    set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
   endif()
-  if (USE_QNNPACK)
-    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 
-    # Directories for QNNPACK dependencies submoduled in Caffe2
-    if (NOT DEFINED CPUINFO_SOURCE_DIR)
-      set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
-    endif()
-    if (NOT DEFINED QNNPACK_SOURCE_DIR)
-      set(QNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/QNNPACK" CACHE STRING "QNNPACK source directory")
-    endif()
-    if (NOT DEFINED FP16_SOURCE_DIR)
-      set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
-    endif()
-    if (NOT DEFINED FXDIV_SOURCE_DIR)
-      set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
-    endif()
-    if (NOT DEFINED PSIMD_SOURCE_DIR)
-      set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
-    endif()
-    if (NOT DEFINED PTHREADPOOL_SOURCE_DIR)
-      set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
-    endif()
-
-    if(NOT TARGET qnnpack)
-      set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-      set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-      set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-      set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-      set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
-      set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-      set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-      add_subdirectory(
-        "${QNNPACK_SOURCE_DIR}"
-        "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
-      # We build static versions of QNNPACK and pthreadpool but link
-      # them into a shared library for Caffe2, so they need PIC.
-      set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
-      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-    endif()
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
+  if(NOT TARGET qnnpack)
+    set(QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+    set(QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    set(QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+    add_subdirectory(
+      "${QNNPACK_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/QNNPACK")
+    # We build static versions of QNNPACK and pthreadpool but link
+    # them into a shared library for Caffe2, so they need PIC.
+    set_property(TARGET qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS qnnpack)
 endif()
 
 # ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
@@ -303,63 +349,26 @@ endif()
 
 # ---[ PYTORCH_QNNPACK
 if(USE_PYTORCH_QNNPACK)
-  if (IOS)
-    list(LENGTH IOS_ARCH IOS_ARCH_COUNT)
-    if (IOS_ARCH_COUNT GREATER 1)
-      message(WARNING
-        "Multi-architecture (${IOS_ARCH}) builds are not supported in QNNPACK. "
-        "Specify a single architecture in IOS_ARCH and re-configure, or "
-        "turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
-      set(USE_PYTORCH_QNNPACK OFF)
+    if (NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
+      set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
     endif()
-    if (NOT IOS_ARCH MATCHES "^(i386|x86_64|armv7.*|arm64.*)$")
-      message(WARNING
-        "Target architecture \"${IOS_ARCH}\" is not supported in QNNPACK. "
-        "Supported architectures are x86, x86-64, ARM, and ARM64. "
-        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
-      set(USE_PYTORCH_QNNPACK OFF)
-    endif()
-  else()
-    if (NOT IOS AND NOT (CMAKE_SYSTEM_NAME MATCHES "^(Android|Linux|Darwin)$"))
-      message(WARNING
-        "Target platform \"${CMAKE_SYSTEM_NAME}\" is not supported in QNNPACK. "
-        "Supported platforms are Android, iOS, Linux, and macOS. "
-        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
-      set(USE_PYTORCH_QNNPACK OFF)
-    endif()
-    if (NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
-      message(WARNING
-        "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in QNNPACK. "
-        "Supported architectures are x86, x86-64, ARM, and ARM64. "
-        "Turn this warning off by USE_PYTORCH_QNNPACK=OFF.")
-      set(USE_PYTORCH_QNNPACK OFF)
-    endif()
-  endif()
-  if (USE_PYTORCH_QNNPACK)
-      if (NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
-        set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
-      endif()
 
-      if(NOT TARGET pytorch_qnnpack)
-        set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
-        set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
-        set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
-        set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
-        set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
-        set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-        set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-        add_subdirectory(
-          "${PYTORCH_QNNPACK_SOURCE_DIR}"
-          "${CONFU_DEPENDENCIES_BINARY_DIR}/pytorch_qnnpack")
-        # We build static versions of QNNPACK and pthreadpool but link
-        # them into a shared library for Caffe2, so they need PIC.
-        set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
-        set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
-        set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-      endif()
+    if(NOT TARGET pytorch_qnnpack)
+      set(PYTORCH_QNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+      set(PYTORCH_QNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+      set(PYTORCH_QNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+      set(PYTORCH_QNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+      add_subdirectory(
+        "${PYTORCH_QNNPACK_SOURCE_DIR}"
+        "${CONFU_DEPENDENCIES_BINARY_DIR}/pytorch_qnnpack")
+      # We build static versions of QNNPACK and pthreadpool but link
+      # them into a shared library for Caffe2, so they need PIC.
+      set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+      set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    endif()
 
-      list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
-  endif()
+    list(APPEND Caffe2_DEPENDENCY_LIBS pytorch_qnnpack)
 endif()
 
 # ---[ NNPACK
@@ -377,6 +386,33 @@ if(USE_NNPACK)
     message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
     caffe2_update_option(USE_NNPACK OFF)
   endif()
+endif()
+
+# ---[ XNNPACK
+if(USE_XNNPACK)
+  if (NOT DEFINED XNNPACK_SOURCE_DIR)
+    set(XNNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/XNNPACK" CACHE STRING "XNNPACK source directory")
+  endif()
+
+  if (NOT DEFINED XNNPACK_INCLUDE_DIR)
+    set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
+  endif()
+
+  if(NOT TARGET XNNPACK)
+    set(XNNPACK_CUSTOM_THREADPOOL ON CACHE BOOL "")
+    set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
+    set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
+
+    add_subdirectory(
+      "${XNNPACK_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
+
+    set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
 endif()
 
 # ---[ Caffe2 uses cpuinfo library in the thread pool
@@ -1142,12 +1178,6 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   if (CAFFE2_LINK_LOCAL_PROTOBUF)
     set(ONNX_PROTO_POST_BUILD_SCRIPT ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake)
   endif()
-  # Set the ONNX_ML flag for ONNX submodule
-  if (DEFINED ENV{ONNX_ML})
-    set(ONNX_ML $ENV{ONNX_ML})
-  else()
-    set(ONNX_ML ON)
-  endif()
   if (ONNX_ML)
     add_definitions(-DONNX_ML=1)
   endif()
@@ -1252,16 +1282,21 @@ if (NOT INTERN_BUILD_MOBILE)
     MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
   ENDIF()
 
-  OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
-  IF (NOT NDEBUG)
-    MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
-    STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+  STRING(APPEND CMAKE_C_FLAGS_RELEASE " -DNDEBUG")
+  STRING(APPEND CMAKE_CXX_FLAGS_RELEASE " -DNDEBUG")
+  IF (NOT GENERATOR_IS_MULTI_CONFIG)
+    IF (${CMAKE_BUILD_TYPE} STREQUAL "Release")
+      MESSAGE(STATUS "Adding -DNDEBUG to compile flags")
+      STRING(APPEND CMAKE_C_FLAGS " -DNDEBUG")
+      STRING(APPEND CMAKE_CXX_FLAGS " -DNDEBUG")
+    ELSE()
+      MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
+      STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+      STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+    ENDIF()
   ENDIF()
+  STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+  STRING(REGEX REPLACE "[-/]DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
 
   SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 

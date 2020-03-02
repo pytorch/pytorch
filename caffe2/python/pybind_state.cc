@@ -34,7 +34,7 @@
 #include "caffe2/utils/proto_convert.h"
 #include "caffe2/utils/string_utils.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/script/module_python.h"
+#include "torch/csrc/jit/python/module_python.h"
 
 // Because of CMake setup, we can't depend on script module here just yet -
 // it pulls in generated files from a different directory and it

@@ -1,10 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/utils/Allocator.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
@@ -125,10 +127,18 @@ Tensor quantize_tensor(Tensor rtensor, Tensor qtensor, double scale, int64_t zer
   qparams.scale = scale;
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
-  fbgemm::Quantize<typename T::underlying>(/*src=*/rd,
-                             /*dst=*/qd,
-                             /*len=*/rtensor.numel(),
-                             /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Quantize<typename T::underlying>(
+          rd, /*src=*/
+          qd, /*dst=*/
+          rtensor.numel(), /*len*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return qtensor;
 }
 
@@ -152,10 +162,18 @@ Tensor dequantize_tensor(Tensor qtensor, Tensor rtensor, double scale, int64_t z
   qparams.zero_point = zero_point;
   qparams.precision = CHAR_BIT * sizeof(typename T::underlying);
   float* rd = rtensor.data_ptr<float>();
-  fbgemm::Dequantize<typename T::underlying>(/*src=*/qd,
-                              /*dst=*/rd,
-                              /*len=*/qtensor.numel(),
-                              /*qparams=*/qparams);
+  int num_tasks = at::get_num_threads();
+  at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
+    for (int task_id = begin; task_id < end; ++task_id) {
+      fbgemm::Dequantize<typename T::underlying>(
+          qd, /*src=*/
+          rd, /*dst=*/
+          qtensor.numel(), /*len=*/
+          qparams, /*qparams=*/
+          task_id, /*thread_id*/
+          num_tasks /*num_threads*/);
+    }
+  });
   return rtensor;
 }
 #else  // USE_FBGEMM
@@ -478,46 +496,18 @@ QTensorImpl* get_qtensorimpl(const Tensor& self) {
 // on a different page out of the process's address space.
 // Here we define a custom allocator that allocates the extra storage required to keep
 // this behavior safe.  This same allocator can be used for FBGEMM as well.
-struct QAllocator final : at::Allocator {
-public:
-  virtual ~QAllocator() override = default;
 
-  virtual at::DataPtr allocate(size_t nbytes) const override {
-    Cast memory{c10::alloc_cpu(kGuard + nbytes)};
-    memory.as_byte_ptr += kGuard;
-    return {
-      memory.as_void_ptr,
-      memory.as_void_ptr,
-      &deleter,
-      at::Device(at::DeviceType::CPU)};
-  }
-
-  virtual at::DeleterFnPtr raw_deleter() const override {
-    return deleter;
-  }
-
-  static void deleter(void * const pointer) {
-    const Cast memory{pointer};
-    c10::free_cpu(memory.as_byte_ptr - kGuard);
-  }
-
- private:
-  static constexpr uint32_t kGuard = 8u;
-
-  union Cast final {
-    void * const as_void_ptr;
-    uint8_t * as_byte_ptr;
-  };
-};
+using QAllocator = native::GuardingAllocator<8u, 0u>;
 
 #endif
 
 inline Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format=MemoryFormat::Contiguous) {
+    QuantizerPtr quantizer) {
   AT_ASSERT(options.device().is_cpu());
+
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
 
   at::Allocator* allocator = at::getCPUAllocator();
 

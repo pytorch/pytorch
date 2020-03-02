@@ -70,10 +70,12 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
@@ -171,11 +173,11 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
 # END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
 
 METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) ;
+${return_type} ${type_wrapper_name}(${type_method_formals}) ;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}) {
+${return_type} ${type_wrapper_name}(${type_method_formals}) {
   ${type_definition_body}
 }
 """)
@@ -183,15 +185,14 @@ ${return_type} ${api_name}(${type_method_formals}) {
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .impl_unboxedOnlyKernel<${return_type} (${formal_types}), &VariableType::${api_name}>(DispatchKey::VariableTensorId)
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .impl_unboxedOnlyKernel<decltype(VariableType::${type_wrapper_name}),
+      &VariableType::${type_wrapper_name}>(DispatchKey::VariableTensorId))
 """)
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
 .op(torch::RegisterOperators::options()
   .schema("${schema_string}")
-  .kernel<${return_type} (${formal_types})>(DispatchKey::VariableTensorId, &VariableType::${api_name})
-  .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
+  .kernel(DispatchKey::VariableTensorId, &VariableType::${type_wrapper_name}))
 """)
 
 UNPACK_TENSOR = CodeTemplate("""\
@@ -216,7 +217,7 @@ grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_DEFAULT = CodeTemplate("""\
-TypeDefault::${api_name}(${type_method_args})""")
+TypeDefault::${type_wrapper_name}(${type_method_args})""")
 
 CALL_DISPATCH_VIA_NAMESPACE = CodeTemplate("""\
 at::${api_name}(${unpacked_args})""")
@@ -308,7 +309,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 
@@ -504,10 +505,11 @@ def gen_variable_type(out, aten_declarations, template_path):
     REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
     registration_declarations = []
 
-    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
-            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+        if dispatch_strategy(declaration) == 'use_derived':
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
+        else:
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
 
     env = {
         'registration_declarations': registration_declarations,
