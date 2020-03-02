@@ -76,6 +76,10 @@ bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
     return false;
   }
 
+  if (t.numel() == 0) {
+    return max_elem > 0;
+  }
+
   int64_t offset = 0;
   int64_t linearId = elements - 1;
 
