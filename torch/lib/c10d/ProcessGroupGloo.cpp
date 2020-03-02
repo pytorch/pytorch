@@ -339,7 +339,8 @@ bool ProcessGroupGloo::SendWork::wait() {
   } catch (...) {
     exception = std::current_exception();
   }
-  // Lock to write completed_ and throw if there is an exception.
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
   std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
   exception_ = exception;
