@@ -24,6 +24,14 @@ static constexpr char* kEngineCPUQueueSize =
     "local_autograd_engine_cpu_queue_size";
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
+namespace {
+
+bool hasPostHook(const Node* func) {
+  return func && !func->post_hooks().empty();
+}
+
+}
+
 DistEngine::DistEngine()
     : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
 
@@ -172,6 +180,17 @@ void DistEngine::computeDependencies(
     // Mark all 'RecvRPCBackward' as needing execution.
     for (const auto& recvBackwardEdge : recvBackwardEdges) {
       graphTask->exec_info_[recvBackwardEdge.function.get()].needed_ = true;
+    }
+    // Mark all output nodes with any post hooks needed so that their post hooks
+    // can be executed.
+    for (const auto& outputEdge : outputEdges) {
+      // 'RecvRpcBackward' nodes have already been marked at needed.
+      const auto func = outputEdge.function.get();
+      // All nodes in 'outputEdges' should have an entry in
+      // 'graphTask->exec_info_' after call init_to_execute().
+      TORCH_INTERNAL_ASSERT(graphTask->exec_info_.count(func));
+      auto& execInfo = graphTask->exec_info_[func];
+      execInfo.needed_ = execInfo.needed_ || hasPostHook(func);
     }
   }
 
