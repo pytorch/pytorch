@@ -81,8 +81,18 @@ void THBlas_(scal)(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
   if(n == 1)
     incx = 1;
 
+  // [NOTE: cpu_zero]
+  // at least on the following version of BLAS this does not folllow the same semantics
+  // when a == 0 and there exists a NaN in the input.  Namely, the non-BLAS code below results
+  // in a value of 0, whereas this results in a value of NaN.  This is problematic because a
+  // NaN in an output tensor needs to be zero'ed explicitly through a separate mechanism.
+  // At the ATen/TH binding layer, this was via "cpu_zero", which would zero out the output
+  // tensor.
+  // BLAS version:
+  // [conda] blas                      1.0                         mkl
+  // [conda] mkl                       2019.4                      243
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (n <= INT_MAX) && (incx <= INT_MAX) )
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (a != 0))
   {
     int i_n = (int)n;
     int i_incx = (int)incx;

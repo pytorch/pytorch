@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import concurrent.futures
 import sys
 import time
@@ -11,8 +9,7 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-import torch.testing._internal.dist_utils
-from torch._jit_internal import _qualified_name
+import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
@@ -36,9 +33,7 @@ def foo_add():
 def requires_process_group_agent(message=""):
     def decorator(old_func):
         return unittest.skipUnless(
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            == "PROCESS_GROUP",
-            message,
+            dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP", message
         )(old_func)
 
     return decorator
@@ -69,6 +64,7 @@ def _stub_init_rpc_backend_handler(store, name, rank, world_size, rpc_backend_op
 
 def set_value(value):
     VALUE_FUTURE.set_result(value)
+
 
 def wait_for_value_future():
     return VALUE_FUTURE.result()
@@ -237,6 +233,12 @@ def heavy_rpc(tensor):
         tensor /= i + 1
     return 0
 
+@torch.jit.script
+def heavy_rpc_torchscript(tensor):
+    for i in range(1, 100):
+        tensor *= i
+        tensor /= i + 1
+    return 0
 
 def raise_func():
     raise ValueError("Expected error")
@@ -255,26 +257,6 @@ def clear_global_rref():
     global_rref = None
 
 
-@torch.jit.script
-def one_arg(value):
-    return value + 1
-
-
-@torch.jit.script
-class MyScriptClass:
-    def __init__(self):
-        self.a = 10
-
-
-class MyScriptModule(torch.jit.ScriptModule):
-    def __init__(self):
-        super().__init__()
-        self.a = 10
-
-    @torch.jit.script_method
-    def my_method(self):
-        self.a = 11
-
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -282,8 +264,7 @@ load_tests = load_tests
 
 
 @unittest.skipIf(
-    sys.version_info < (3, 0),
-    "Pytorch distributed rpc package " "does not support python2",
+    not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
 class RpcTest(RpcAgentTestFixture):
     @dist_init
@@ -310,7 +291,7 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(worker_names, expected_worker_names)
 
         worker_ids = {worker_info.id for worker_info in worker_infos}
-        expected_worker_ids = {rank for rank in range(self.world_size)}
+        expected_worker_ids = set(range(self.world_size))
         self.assertEqual(worker_ids, expected_worker_ids)
 
     @dist_init
@@ -821,7 +802,7 @@ class RpcTest(RpcAgentTestFixture):
     def test_py_function_exception(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             ret = rpc.rpc_sync("worker{}".format(dst_rank), no_result, args=(10,))
 
     @dist_init
@@ -829,68 +810,8 @@ class RpcTest(RpcAgentTestFixture):
         n = self.rank + 1
         dst_rank = n % self.world_size
         fut = rpc.rpc_async("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             fut.wait()
-
-    @dist_init
-    def test_torchscript_function(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-        rref = rpc.remote(dst_worker_name, one_arg, args=(torch.ones(2, 2),))
-
-    @dist_init
-    def test_torchscript_function_exception(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
-
-        with self.assertRaisesRegex(Exception, r"one_arg\(\) expected at most"):
-            ret = rpc.rpc_sync(dst_worker_name, one_arg, args=(10, 20))
-
-        with self.assertRaisesRegex(
-            Exception, r"one_arg\(\) expected at most"
-        ):
-            rref = rpc.remote(dst_worker_name, one_arg, args=(10, 20))
-
-    @dist_init
-    def test_torchscript_functions_not_supported(self):
-        # Right now _rpc_sync_torchscript does not accept annotated torchscript
-        # class name or script module class name or their class method names.
-        # But rpc_sync still accepts script class name and run it in
-        # the same code path as python call.
-        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
-        # accept script module and script module method.
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptClass), args=()
-            )
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
-
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), _qualified_name(MyScriptModule), args=()
-            )
-
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank),
-                _qualified_name(MyScriptModule().my_method),
-                args=(),
-            )
-        # Python 3.5 and Python 3.6 throw different error message, the only
-        # common word can be greped is "pickle".
-        with self.assertRaisesRegex(Exception, "pickle"):
-            ret = rpc.rpc_sync(
-                "worker{}".format(dst_rank), MyScriptModule().my_method, args=()
-            )
 
     @dist_init
     def test_nested_rpc(self):
@@ -916,8 +837,8 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(fut.wait(), 0)
         tok = time.time()
         print(
-            "Rank {} finished testing {} {} times in {} seconds.".format(
-                self.rank, f.__name__, repeat, tok - tik
+            "Rank {} finished testing {} times in {} seconds.".format(
+                self.rank, repeat, tok - tik
             )
         )
 
@@ -928,6 +849,10 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_stress_heavy_rpc(self):
         self._stress_test_rpc(heavy_rpc, repeat=20, args=(torch.ones(100, 100),))
+
+    @dist_init
+    def test_stress_heavy_rpc_torchscript(self):
+        self._stress_test_rpc(heavy_rpc_torchscript, repeat=20, args=(torch.ones(100, 100),))
 
     @dist_init
     def test_builtin_remote_ret(self):
@@ -1102,11 +1027,11 @@ class RpcTest(RpcAgentTestFixture):
         dst_rank = n % self.world_size
         # check ref to other workers
         rref = rpc.remote("worker{}".format(dst_rank), raise_func)
-        with self.assertRaisesRegex(Exception, "ValueError"):
+        with self.assertRaises(ValueError):
             rref.to_here()
         # check ref to itself
         rref = rpc.remote("worker{}".format(self.rank), no_result, args=(10,))
-        with self.assertRaisesRegex(Exception, "TypeError"):
+        with self.assertRaises(TypeError):
             rref.to_here()
 
     @dist_init
@@ -1543,9 +1468,7 @@ class RpcTest(RpcAgentTestFixture):
         # exception instead of just crashing.
         rpc.init_rpc(
             name="worker%d" % self.rank,
-            backend=rpc.backend_registry.BackendType[
-                torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            ],
+            backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
@@ -1657,10 +1580,7 @@ class RpcTest(RpcAgentTestFixture):
         def test_func():
             return "expected result"
 
-        if (
-            torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-            == "PROCESS_GROUP"
-        ):
+        if dist_utils.TEST_CONFIG.rpc_backend_name == "PROCESS_GROUP":
             self.assertEqual(test_func(), "expected result")
 
     def test_dist_init_decorator(self):
@@ -1703,11 +1623,11 @@ class RpcTest(RpcAgentTestFixture):
 
         if self.rank == 0:
             # func exists on caller, but not callee.
-            # TODO: Need to enhance RemoteException to return the correct
-            # Exception subclass: https://github.com/pytorch/pytorch/issues/32732
             # wait for remote end to remove the binding of foo_add func.
             wait_for_value_future()
             # Ensure that we have the attribute on this module. Otherwise, the test could fail due to a caller-side pickling error.
             self.assertTrue(hasattr(this_module, "foo_add"))
-            with self.assertRaisesRegex(Exception, "AttributeError"):
+            with self.assertRaisesRegex(
+                AttributeError, "RPC pickler does not serialize"
+            ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())

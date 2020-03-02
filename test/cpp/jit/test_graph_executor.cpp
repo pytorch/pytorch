@@ -1,6 +1,6 @@
 #include "test/cpp/jit/test_base.h"
 #include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 
 namespace torch {
 namespace jit {

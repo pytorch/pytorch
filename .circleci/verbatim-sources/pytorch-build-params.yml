@@ -43,14 +43,32 @@ pytorch_windows_params: &pytorch_windows_params
     test_name:
       type: string
       default: ""
+    cuda_version:
+      type: string
+      default: "10"
+    python_version:
+      type: string
+      default: "3.6"
+    vc_version:
+      type: string
+      default: "14.11"
+    vc_year:
+      type: string
+      default: "2017"
+    vc_product:
+      type: string
+      default: "BuildTools"
+    use_cuda:
+      type: string
+      default: ""
   environment:
     BUILD_ENVIRONMENT: "pytorch-win-ws2019-cuda10-cudnn7-py3"
     SCCACHE_BUCKET: "ossci-compiler-cache"
-    CUDA_VERSION: "10"
-    PYTHON_VERSION: "3.6"
-    VC_VERSION: "14.11"
-    VC_YEAR: "2017"
-    VC_PRODUCT: "BuildTools"
-    USE_CUDA: "1"
+    CUDA_VERSION: <<parameters.cuda_version>>
+    PYTHON_VERSION: <<parameters.python_version>>
+    VC_VERSION: <<parameters.vc_version>>
+    VC_YEAR: <<parameters.vc_year>>
+    VC_PRODUCT: <<parameters.vc_product>>
+    USE_CUDA: <<parameters.use_cuda>>
     TORCH_CUDA_ARCH_LIST: "7.5"
     JOB_BASE_NAME: <<parameters.test_name>>

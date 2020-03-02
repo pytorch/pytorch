@@ -6,12 +6,6 @@ namespace at {
 
 namespace detail {
 
-// Ensures default_gen_cpu is initialized once.
-static std::once_flag cpu_gen_init_flag;
-
-// Default, global CPU generator.
-static std::shared_ptr<CPUGenerator> default_gen_cpu;
-
 /**
  * PyTorch maintains a collection of default generators that get
  * initialized once. The purpose of these default generators is to
@@ -21,10 +15,8 @@ static std::shared_ptr<CPUGenerator> default_gen_cpu;
  * device.
  */
 CPUGenerator* getDefaultCPUGenerator() {
-  std::call_once(cpu_gen_init_flag, [&] {
-    default_gen_cpu = std::make_shared<CPUGenerator>(getNonDeterministicRandom());
-  });
-  return default_gen_cpu.get();
+  static CPUGenerator default_gen_cpu(getNonDeterministicRandom());
+  return &default_gen_cpu;
 }
 
 /**
@@ -73,7 +65,7 @@ uint64_t CPUGenerator::current_seed() const {
 /**
  * Gets a nondeterministic random number from /dev/urandom or time,
  * seeds the CPUGenerator with it and then returns that number.
- * 
+ *
  * FIXME: You can move this function to Generator.cpp if the algorithm
  * in getNonDeterministicRandom is unified for both CPU and CUDA
  */
@@ -93,7 +85,7 @@ DeviceType CPUGenerator::device_type() {
 
 /**
  * Gets a random 32 bit unsigned integer from the engine
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 uint32_t CPUGenerator::random() {
@@ -102,7 +94,7 @@ uint32_t CPUGenerator::random() {
 
 /**
  * Gets a random 64 bit unsigned integer from the engine
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 uint64_t CPUGenerator::random64() {
@@ -127,7 +119,7 @@ c10::optional<double> CPUGenerator::next_double_normal_sample() {
 
 /**
  * Cache normal random in float
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
@@ -136,7 +128,7 @@ void CPUGenerator::set_next_float_normal_sample(c10::optional<float> randn) {
 
 /**
  * Cache normal random in double
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_next_double_normal_sample(c10::optional<double> randn) {
@@ -152,7 +144,7 @@ at::mt19937 CPUGenerator::engine() {
 
 /**
  * Set the engine of the CPUGenerator
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 void CPUGenerator::set_engine(at::mt19937 engine) {
@@ -161,7 +153,7 @@ void CPUGenerator::set_engine(at::mt19937 engine) {
 
 /**
  * Public clone method implementation
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 std::shared_ptr<CPUGenerator> CPUGenerator::clone() const {
@@ -170,7 +162,7 @@ std::shared_ptr<CPUGenerator> CPUGenerator::clone() const {
 
 /**
  * Private clone method implementation
- * 
+ *
  * See Note [Acquire lock when using random generators]
  */
 CPUGenerator* CPUGenerator::clone_impl() const {

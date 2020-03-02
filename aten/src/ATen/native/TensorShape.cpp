@@ -13,9 +13,15 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CatKernel.h>
+#include <ATen/native/Copy.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at {
 namespace native {
+
+DEFINE_DISPATCH(cat_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
@@ -36,6 +42,13 @@ Tensor& set_(Tensor& result, Storage source) {
   return result.set_(source, 0, static_cast<int64_t>(source.size()), {});
 }
 
+Tensor& set_tensor_(Tensor& result, const Tensor& source) {
+  if (result.unsafeGetTensorImpl() != source.unsafeGetTensorImpl()) {
+    return result.set_(source.storage(), source.storage_offset(), source.sizes(), source.strides());
+  }
+  return result;
+}
+
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
@@ -46,6 +59,150 @@ Tensor& set_cpu_(Tensor& result) {
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
+}
+
+// Check to see if the shape of tensors is compatible
+// for being concatenated along a given dimension.
+static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension) {
+  int64_t first_dims = first.dim();
+  int64_t second_dims = second.dim();
+  TORCH_CHECK(first_dims == second_dims, "Tensors must have same number of dimensions: got ",
+              first_dims, " and ", second_dims);
+  for (int64_t dim = 0; dim < first_dims; dim++) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = first.size(dim);
+    int64_t second_dim_size = second.size(dim);
+    TORCH_CHECK(first_dim_size == second_dim_size, "Sizes of tensors must match except in dimension ",
+                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim);
+  }
+}
+
+Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
+  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
+  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
+  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
+  // size (i.e. other empty sizes are not skipped).
+  // FIXME: warn if this is the case
+  bool allSkipped = true;
+  bool allContiguous = true;
+  Tensor notSkippedTensor;
+
+  // Inputs cannot alias the output tensor
+  for (int64_t i = 0; i < tensors.size(); i++) {
+    auto lap = at::get_overlap_status(result, tensors[i]);
+    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
+        lap != at::MemOverlapStatus::FULL, 0,
+        "unsupported operation: the input tensors cannot refer to any of the "
+        "output memory locations. Found overlap in input tensor ", i);
+  }
+
+  auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
+  for (auto const &tensor : tensors) {
+    if (should_skip(tensor)) {
+      continue;
+    }
+    // we've found a non-empty tensor
+    allSkipped = false;
+    notSkippedTensor = tensor;
+    break;
+  }
+  if (allSkipped) {
+    return result;
+  }
+
+  TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
+  TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
+
+  // when the input tensors are of the same size and strides,
+  // reuse the same iterator for all input tensors
+  bool reuse_iterator = true;
+
+  // compute size of the result in the cat dimension
+  int64_t cat_dim_size = 0;
+  for (auto const &tensor : tensors) {
+    if (should_skip(tensor)) {
+      // don't use fast path for empty tensor
+      allContiguous = false;
+      continue;
+    }
+    check_cat_shape_except_dim(notSkippedTensor, tensor, dim);
+    cat_dim_size += tensor.size(dim);
+
+    if (!tensor.is_contiguous()) {
+      allContiguous = false;
+    }
+
+    if (tensor.sizes() != notSkippedTensor.sizes() ||
+        tensor.strides() != notSkippedTensor.strides()) {
+      reuse_iterator = false;
+    }
+  }
+
+  // compute the size of the result
+  auto result_size = notSkippedTensor.sizes().vec();
+  result_size[dim] = cat_dim_size;
+  result.resize_(result_size);
+
+  // fast path for single thread when both inputs and result are contiguous and not empty
+  bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  allContiguous = allContiguous && result.is_contiguous();
+  ScalarType dtype = notSkippedTensor.scalar_type();
+  if (use_serial_kernel && allContiguous && (dtype == ScalarType::Double || dtype == ScalarType::Float)) {
+    cat_serial_stub(kCPU, result, tensors, dim);
+    return result;
+  }
+
+  int64_t offset = 0;
+  if (reuse_iterator && result.is_contiguous()) {
+    auto source_slice = notSkippedTensor;
+    auto slice_dim_size = source_slice.size(dim);
+    auto result_slice = result.narrow(dim, 0, slice_dim_size);
+    auto result_slice_data = result_slice.data_ptr();
+    auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+
+    auto iter = TensorIterator();
+    iter.dont_resize_outputs();
+    iter.add_output(result_slice);
+    iter.add_input(source_slice);
+    iter.build();
+
+    for (auto const &tensor : tensors) {
+      if (should_skip(tensor)) {
+        continue;
+      }
+      auto source_data = static_cast<char*>(tensor.data_ptr());
+      auto result_data = static_cast<char*>(result_slice_data) + offset * result_stride_bytes;
+      iter.unsafe_replace_operand(0, result_data);
+      iter.unsafe_replace_operand(1, source_data);
+      copy_stub(iter.device_type(), iter, false);
+      offset += slice_dim_size;
+    }
+  } else {
+    for (auto const &tensor: tensors) {
+      if (should_skip(tensor)) {
+        continue;
+      }
+      auto slice_dim_size = tensor.size(dim);
+      auto result_slice = result.narrow(dim, offset, slice_dim_size);
+
+      auto iter = TensorIterator();
+      iter.dont_resize_outputs();
+      iter.add_output(result_slice);
+      iter.add_input(tensor);
+      iter.build();
+      copy_stub(iter.device_type(), iter, false);
+      offset += slice_dim_size;
+    }
+  }
+
+  return result;
+}
+
+Tensor _cat_cpu(TensorList tensors, int64_t dim) {
+  Tensor result = at::empty({0}, tensors[0].options());
+  return _cat_out_cpu(result, tensors, dim);
 }
 
 static void check_cat_no_zero_dim(TensorList tensors) {
@@ -777,9 +934,15 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes
   return splits;
 }
 
+// Precondition: tensors is non-empty
 static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
   std::vector<Tensor> inputs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  inputs[0] = tensors[0].unsqueeze(dim);
+  for (size_t i = 1; i < tensors.size(); ++i) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
     inputs[i] = tensors[i].unsqueeze(dim);
   }
   return inputs;

@@ -2,6 +2,9 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
+#ifdef USE_FBGEMM
+#include "fbgemm/Fbgemm.h"
+#endif
 
 namespace caffe2 {
 
@@ -9,10 +12,10 @@ namespace caffe2 {
 template <
     typename T, // output type
     class InputTypes, // supported input types, such as TensorTypes<float>
-    bool USE_WEIGHT = 0, // Whether it is SparseLengthsWeightedSum
-    bool USE_MEAN = 0, // Whether this is SparseLengthsMean
-    bool USE_POSITIONAL_WEIGHT = 0
-    // USE_WEIGHT = 1 and USE_POSITIONAL_WEIGHT = 1
+    bool USE_WEIGHT = false, // Whether it is SparseLengthsWeightedSum
+    bool USE_MEAN = false, // Whether this is SparseLengthsMean
+    bool USE_POSITIONAL_WEIGHT = false
+    // USE_WEIGHT = true and USE_POSITIONAL_WEIGHT = true
     // -> SparseLengthsPositionalWeightedSum
     >
 class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
@@ -76,6 +79,133 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
       in_weight = weightInput.template data<T>();
     }
 
+#ifdef USE_FBGEMM
+    // If this is the first call or block size has changed (should never
+    // happen actually), generate a kernel.
+    if (D != last_block_size) {
+      last_block_size = D;
+      if (std::is_same<InputType, float>::value) {
+        if (std::is_same<IndexType, std::int32_t>::value) {
+          kernel_fp32_i32_ =
+              fbgemm::GenerateEmbeddingSpMDM<float, std::int32_t>(
+                  D,
+                  USE_WEIGHT,
+                  USE_MEAN,
+                  /*prefetch distance*/ 16,
+                  USE_POSITIONAL_WEIGHT);
+        } else {
+          CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
+          kernel_fp32_i64_ =
+              fbgemm::GenerateEmbeddingSpMDM<float, std::int64_t>(
+                  D,
+                  USE_WEIGHT,
+                  USE_MEAN,
+                  /*prefetch distance*/ 16,
+                  USE_POSITIONAL_WEIGHT);
+        }
+      } else {
+        CAFFE_ENFORCE((std::is_same<InputType, at::Half>::value));
+        if (std::is_same<IndexType, std::int32_t>::value) {
+          kernel_fp16_i32_ =
+              fbgemm::GenerateEmbeddingSpMDM<fbgemm::float16, std::int32_t>(
+                  D,
+                  USE_WEIGHT,
+                  USE_MEAN,
+                  /*prefetch distance*/ 16,
+                  USE_POSITIONAL_WEIGHT);
+        } else {
+          CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
+          kernel_fp16_i64_ =
+              fbgemm::GenerateEmbeddingSpMDM<fbgemm::float16, std::int64_t>(
+                  D,
+                  USE_WEIGHT,
+                  USE_MEAN,
+                  /*prefetch distance*/ 16,
+                  USE_POSITIONAL_WEIGHT);
+        }
+      }
+    }
+
+    bool success;
+    if (std::is_same<InputType, float>::value) {
+      if (std::is_same<IndexType, std::int32_t>::value) {
+        success = kernel_fp32_i32_(
+            M,
+            indices_size,
+            N,
+            reinterpret_cast<const float*>(in_data),
+            indicesInput.template data<std::int32_t>(),
+            lengths,
+            in_weight,
+            out_data);
+      } else {
+        success = kernel_fp32_i64_(
+            M,
+            indices_size,
+            N,
+            reinterpret_cast<const float*>(in_data),
+            indicesInput.template data<std::int64_t>(),
+            lengths,
+            in_weight,
+            out_data);
+      }
+    } else {
+      if (std::is_same<IndexType, std::int32_t>::value) {
+        success = kernel_fp16_i32_(
+            M,
+            indices_size,
+            N,
+            reinterpret_cast<const fbgemm::float16*>(in_data),
+            indicesInput.template data<std::int32_t>(),
+            lengths,
+            in_weight,
+            out_data);
+      } else {
+        success = kernel_fp16_i64_(
+            M,
+            indices_size,
+            N,
+            reinterpret_cast<const fbgemm::float16*>(in_data),
+            indicesInput.template data<std::int64_t>(),
+            lengths,
+            in_weight,
+            out_data);
+      }
+    }
+
+    if (success) {
+      return true;
+    }
+
+    int64_t current = 0;
+    for (int m = 0; m < M; ++m) {
+      for (int i = 0; i < lengths[m]; ++i) {
+        CAFFE_ENFORCE_LT(
+            current,
+            indices_size,
+            "Your input seems to be incorrect: the sum of lengths values "
+            "should be the size of the indices tensor, but it appears not.");
+        IndexType idx = indices[current];
+        CAFFE_ENFORCE(
+            0 <= idx && idx < N,
+            "Index ",
+            current,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            N);
+        ++current;
+      }
+    }
+    CAFFE_ENFORCE_EQ(
+        current,
+        indices_size,
+        "Your input seems to be incorrect: the sum of lengths values should be "
+        "the size of the indices tensor, but it appears not.");
+
+    return false;
+#endif
+
     // delegate work to perfkernel that branches based on architecture
     EmbeddingLookup<IndexType, InputType, T, USE_POSITIONAL_WEIGHT>(
         D,
@@ -100,6 +230,19 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     LENGTHS = 2 + USE_WEIGHT, // 2 in SparseLengths[Sum, Mean],
                               // 3 in SparseLengthsWeightedSum
   };
+
+#ifdef USE_FBGEMM
+ private:
+  std::int64_t last_block_size{-1};
+  fbgemm::EmbeddingSpMDMKernelSignature<float, std::int32_t>::Type
+      kernel_fp32_i32_;
+  fbgemm::EmbeddingSpMDMKernelSignature<float, std::int64_t>::Type
+      kernel_fp32_i64_;
+  fbgemm::EmbeddingSpMDMKernelSignature<fbgemm::float16, std::int32_t>::Type
+      kernel_fp16_i32_;
+  fbgemm::EmbeddingSpMDMKernelSignature<fbgemm::float16, std::int64_t>::Type
+      kernel_fp16_i64_;
+#endif
 };
 
 } // namespace caffe2
