@@ -194,7 +194,7 @@ void TupleIndex_kernel(const c10::OperatorHandle& op, Stack* stack) {
    pack(*stack, tuple->elements()[norm_index]);
 }
 
-void pop_kernal(const c10::OperatorHandle& op, Stack* stack) {
+void pop_kernel(const c10::OperatorHandle& op, Stack* stack) {
   pop(*stack);
 }
 
@@ -505,7 +505,7 @@ static auto registry = torch::RegisterOperators().op(
     .catchAllKernel<&TupleIndex_kernel>())
 .op(torch::RegisterOperators::options()
     .schema("_prim::RaiseException(str msg) -> ()")
-    .kernel<&pop_kernal>(c10::DispatchKey::CPUTensorId)
+    .kernel<&pop_kernel>(c10::DispatchKey::CPUTensorId)
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA))
     ;
 }

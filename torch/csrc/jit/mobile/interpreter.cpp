@@ -1,7 +1,7 @@
 #include "interpreter.h"
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/vararg_functions.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/autograd/record_function.h>

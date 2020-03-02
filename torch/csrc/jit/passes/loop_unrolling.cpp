@@ -3,7 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/jit/constants.h>
+#include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
