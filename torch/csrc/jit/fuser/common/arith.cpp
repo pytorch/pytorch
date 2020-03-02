@@ -73,8 +73,7 @@ TORCH_API Val* binary_op(BinaryOpType type, Val* v1, Val* v2){
   if(type >= BinaryOpType::Mod){
     if(out->getDataType().value() != DataType::Int)
       out = new_val_like(out, DataType::Int);
-  } else
-    out = promote_new(v1, v2);
+  }
   Statement* expr = new BinaryOp(type, out, v1, v2);
   return out;
 }
