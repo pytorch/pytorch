@@ -95,19 +95,19 @@ void testIValue() {
 void testIValueFuture() {
   // Basic set value
   {
-    IValue iv;
-    auto f1 = iv.toFuture();
+    auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
     EXPECT_FALSE(f1->completed());
 
     f1->markCompleted(IValue(42));
     EXPECT_TRUE(f1->completed());
     EXPECT_EQ(42, f1->value().toInt());
+    IValue iv(f1);
+    EXPECT_EQ(42, iv.toFuture()->value().toInt());
   }
 
   // Callbacks
   {
-    IValue iv;
-    auto f2 = iv.toFuture();
+    auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
     int calledTimesA = 0;
     int calledTimesB = 0;
     f2->addCallback([f2, &calledTimesA]() {
@@ -130,8 +130,7 @@ void testIValueFuture() {
 
   // Exceptions
   {
-    IValue iv;
-    auto f3 = iv.toFuture();
+    auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
     int calledTimes = 0;
     f3->addCallback([f3, &calledTimes]() {
       EXPECT_TRUE(f3->completed());
