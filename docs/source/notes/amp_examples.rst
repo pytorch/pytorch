@@ -5,16 +5,16 @@ Automatic Mixed Precision examples
 
 .. currentmodule:: torch.cuda.amp
 
-When training with a mixture of ``torch.float32`` and ``torch.float16``,
-you should use :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` together.
+Typically, "automatic mixed precision training" means training with
+:class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` together.
 
+Instances of :class:`torch.cuda.amp.autocast` enable autocasting for chosen regions.
 Autocasting automatically chooses the precision for GPU operations to improve performance
-while maintaining accuracy.  Instances of :class:`torch.cuda.amp.autocast`
-enable autocasting for chosen regions.
+while maintaining accuracy.
 
-Gradient scaling helps prevent gradient underflow, as explained :ref:`here<gradient-scaling>`.
 Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
-gradient scaling conveniently.
+gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16``
+gradients by minimizing gradient underflow, as explained :ref:`here<gradient-scaling>`.
 
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
 When combining them, there are no gotchas.  In the samples below, each is used as its
@@ -225,7 +225,7 @@ to a multiple-optimizer model, please file an issue.
 Working with Multiple GPUs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The following only affect :class:`autocast`.  Use :class:`GradScaler` normally.
+The gotchas described here only affect :class:`autocast`.  Use :class:`GradScaler` normally.
 
 .. _amp-dataparallel:
 
@@ -253,7 +253,7 @@ The fix is simple.  Enable autocast as part of ``MyModel.forward``::
         def forward(self, input):
            ...
 
-    # alternatively
+    # Alternatively
     MyModel(nn.Module):
         ...
         def forward(self, input):
@@ -280,12 +280,63 @@ DistributedDataParallel, multiple GPUs per process
 --------------------------------------------------
 
 Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread to run the forward pass on each
-device.  As with :ref:`DataParallel example<amp-dataparallel>`, apply autocast as part of
-your model's ``forward`` method to ensure it's enabled in side threads.
+device, like :class:`torch.nn.parallel.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
+apply autocast as part of your model's ``forward`` method to ensure it's enabled in side threads.
 
-Working with Custom Autograd Functions
+Autocast and Custom Autograd Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If your network uses custom autograd functions, :class:`autocast` may "just work."
+If your network uses :ref:`custom autograd functions<extending-autograd>`
+(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may just work.
+If you observe errors, see the appropriate case below.
 
-However, you may want more explicit control.  For example, if you have....
+Functions that should receive autocasting
+-----------------------------------------
+
+For robustness, enable autocast explicitly in ``forward`` and ``backward``::
+
+    class MyMM(torch.autograd.Function):
+        @staticmethod
+        @autocast()
+        def forward(ctx, a, b):
+            ctx.save_for_backward(a, b)
+            return a.mm(b)
+        @staticmethod
+        @autocast()
+        def backward(ctx, grad):
+            a, b = ctx.saved_tensors
+            return grad.mm(b.t()), a.t().mm(grad)
+
+Functions that need a particular datatype
+-----------------------------------------
+
+If your function has limited datatype support, you may not want it to receive autocasting.
+For example, if it wraps a `CUDA extension <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
+that was only compiled for ``float32``, force the function to run in ``float32`` as you would for any explicitly
+``float32`` subregion::
+
+    with autocast():
+        # autocasted ops
+        with autocast(enabled=False):
+            output = custom_float32_function(input.float())
+
+Alternatively, you can change the function definition to force the desired type::
+
+    class Float32Function(torch.autograd.Function):
+        @staticmethod
+        @autocast(enabled=False)
+        def forward(ctx, input):
+            input = input.float()
+            ctx.save_for_backward(input)
+            ...
+            return fwd_output
+        @staticmethod
+        @autocast(enabled=False)
+        def backward(ctx, grad):
+            grad = grad.float() # For safety.  Likely a no-op because autograd ensures grad.dtype == fwd_output.dtype.
+            ...
+
+Now ``Float32Function`` can be used anywhere, without needing to disable autocast at the point-of-use::
+
+    with autocast():
+        output =
