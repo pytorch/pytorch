@@ -17,25 +17,31 @@ from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
+from hypothesis import given
+from hypothesis import strategies as st
 
+dtype2prec = {torch.float: 1e-5, torch.bfloat16: 1e-2}
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnn(TestCase):
-    def test_conversion(self):
+    @given(stype=st.sampled_from((torch.float, torch.bfloat16)),
+           otype=st.sampled_from((torch.float, torch.bfloat16)))
+    def test_conversion(self, stype, otype):
         for cpu_tensor in [torch.randn((1, 2, 3, 4),
                                        dtype=torch.float, device=torch.device('cpu')),
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            mkldnn_tensor = cpu_tensor.to_mkldnn()
-            cpu_tensor_1 = mkldnn_tensor.to_dense()
-            self.assertEqual(cpu_tensor, cpu_tensor_1)
-            self.assertEqual(mkldnn_tensor.dtype, torch.float)
+            mkldnn_tensor = cpu_tensor.to_mkldnn(stype)
+            cpu_tensor_1 = mkldnn_tensor.to_dense(otype)
+            self.assertEqual(cpu_tensor, cpu_tensor_1,
+                dtype2prec[torch.bfloat16 if torch.bfloat16 in [stype, otype] else torch.float])
+            self.assertEqual(mkldnn_tensor.dtype, stype)
             self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
             self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
             self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-            self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.element_size())
+            self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor.to(stype).element_size())
             self.assertRaisesRegex(RuntimeError,
                                    "Cannot access data pointer of Tensor that doesn't have storage",
                                    lambda: mkldnn_tensor.data_ptr() != 0)
