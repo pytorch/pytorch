@@ -700,7 +700,7 @@ inline CppFunction dispatch(c10::DispatchKey k, Func&& raw_f) {
 
 // Convenience overload of dispatch which accepts DeviceType
 template <typename Func>
-inline CppFunction dispatch(DeviceType t, Func&& raw_f) {
+inline CppFunction dispatch(DeviceType type, Func&& raw_f) {
   auto deviceTypeToDispatchKey = [](DeviceType t){
     switch (t) {
       case DeviceType::CPU:
@@ -715,7 +715,7 @@ inline CppFunction dispatch(DeviceType t, Func&& raw_f) {
           "please file a bug report explaining what you were trying to do.");
     }
   };
-  return dispatch(deviceTypeToDispatchKey(t), std::forward<Func>(raw_f));
+  return dispatch(deviceTypeToDispatchKey(type), std::forward<Func>(raw_f));
 }
 
 // Represents a namespace in which we can define operators.  Conventionally

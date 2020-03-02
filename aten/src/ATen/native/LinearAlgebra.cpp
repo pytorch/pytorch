@@ -167,7 +167,7 @@ Tensor& ger_out(Tensor &result, const Tensor& self, const Tensor& vec2) {
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {
   Tensor result = at::empty({0}, self.options());
-  at::native::ger_out(result, self, vec2);
+  at::ger_out(result, self, vec2);
   return result;
 }
 
