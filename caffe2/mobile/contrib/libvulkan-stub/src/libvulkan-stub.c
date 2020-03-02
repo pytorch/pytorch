@@ -187,6 +187,7 @@ PFN_vkCmdDebugMarkerInsertEXT vulkanSymbolWrapper_vkCmdDebugMarkerInsertEXT;
 PFN_vkCmdDrawIndirectCountAMD vulkanSymbolWrapper_vkCmdDrawIndirectCountAMD;
 PFN_vkCmdDrawIndexedIndirectCountAMD vulkanSymbolWrapper_vkCmdDrawIndexedIndirectCountAMD;
 PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV vulkanSymbolWrapper_vkGetPhysicalDeviceExternalImageFormatPropertiesNV;
+PFN_vkGetPhysicalDeviceFeatures2KHR vulkanSymbolWrapper_vkGetPhysicalDeviceFeatures2KHR;
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -418,6 +419,11 @@ VkBool32 vulkanSymbolWrapperLoadCoreInstanceSymbols(VkInstance instance)
     if (!VULKAN_SYMBOL_WRAPPER_LOAD_INSTANCE_SYMBOL(instance, "vkEnumerateDeviceExtensionProperties", vkEnumerateDeviceExtensionProperties)) return VK_FALSE;
     if (!VULKAN_SYMBOL_WRAPPER_LOAD_INSTANCE_SYMBOL(instance, "vkEnumerateDeviceLayerProperties", vkEnumerateDeviceLayerProperties)) return VK_FALSE;
     if (!VULKAN_SYMBOL_WRAPPER_LOAD_INSTANCE_SYMBOL(instance, "vkGetPhysicalDeviceSparseImageFormatProperties", vkGetPhysicalDeviceSparseImageFormatProperties)) return VK_FALSE;
+    return VK_TRUE;
+}
+
+VkBool32 vulkanSymbolWrapperLoadGetPhysicalDeviceProperties2ExtensionSymbols(VkInstance instance) {
+    if (!VULKAN_SYMBOL_WRAPPER_LOAD_INSTANCE_SYMBOL(instance, "vkGetPhysicalDeviceFeatures2KHR", vkGetPhysicalDeviceFeatures2KHR)) return VK_FALSE;
     return VK_TRUE;
 }
 

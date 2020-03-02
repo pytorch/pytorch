@@ -8,19 +8,20 @@
 #include "test/cpp/jit/test_utils.h"
 
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/attributes.h"
-#include "torch/csrc/jit/autodiff.h"
-#include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/custom_operator.h"
-#include "torch/csrc/jit/fuser/interface.h"
-#include "torch/csrc/jit/import.h"
-#include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/irparser.h"
-#include "torch/csrc/jit/pass_manager.h"
-#include "torch/csrc/jit/passes/alias_analysis.h"
+#include "torch/csrc/jit/runtime/argument_spec.h"
+#include "torch/csrc/jit/ir/attributes.h"
+#include "torch/csrc/jit/runtime/autodiff.h"
+#include "torch/csrc/jit/frontend/code_template.h"
+#include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/codegen/fuser/interface.h"
+#include "torch/csrc/jit/serialization/import.h"
+#include "torch/csrc/jit/runtime/interpreter.h"
+#include "torch/csrc/jit/ir/irparser.h"
+#include "torch/csrc/jit/passes/pass_manager.h"
+#include "torch/csrc/jit/ir/alias_analysis.h"
 #include "torch/csrc/jit/passes/bailout_graph.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/constant_propagation.h"
@@ -36,19 +37,19 @@
 #include "torch/csrc/jit/passes/requires_grad_analysis.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/utils/subgraph_utils.h"
-#include "torch/csrc/jit/scope.h"
-#include "torch/csrc/jit/symbolic_script.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/ir/scope.h"
+#include "torch/csrc/jit/runtime/symbolic_script.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
-#include "torch/csrc/jit/profiling_record.h"
-#include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/module.h"
-#include "torch/jit.h"
 #include <torch/script.h>
+#include "torch/csrc/jit/runtime/profiling_record.h"
+#include "torch/csrc/jit/frontend/ir_emitter.h"
+#include "torch/csrc/jit/api/module.h"
+#include "torch/jit.h"
 
 #include "onnx/onnx_pb.h"
 
@@ -951,25 +952,21 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              push(stack, IValue());
-              return 0;
-            };
+          [](Stack& stack) {
+            push(stack, IValue());
+            return 0;
           },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](const Node* node) -> Operation {
-            return [](Stack& stack) {
-              IValue a = pop(stack);
-              if (a.isNone()) {
-                push(stack, true);
-              } else {
-                push(stack, false);
-              }
-              return 0;
-            };
+          [](Stack& stack) {
+            IValue a = pop(stack);
+            if (a.isNone()) {
+              push(stack, true);
+            } else {
+              push(stack, false);
+            }
+            return 0;
           },
           aliasAnalysisFromSchema()),
   });

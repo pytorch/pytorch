@@ -10,7 +10,7 @@
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
 #include "torch/csrc/autograd/utils/error_messages.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/frontend/tracer.h"
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/Event.h"
@@ -30,8 +30,6 @@
 
 #include <ATen/ATen.h>
 #include "c10/util/Optional.h"
-
-#include "python_variable_methods_dispatch.h"
 
 #include <stdexcept>
 

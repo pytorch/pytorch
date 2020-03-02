@@ -13,6 +13,11 @@ C10_DEFINE_bool(
     "Attach AdjustBatch ops at input/outputs of the Onnxifi ops");
 
 C10_DEFINE_bool(
+    onnxifi_loop_test_mode,
+    false,
+    "For test purpose only. Build a dummy net just to test the functionality");
+
+C10_DEFINE_bool(
     merge_fp32_inputs_into_fp16,
     false,
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
@@ -121,6 +126,7 @@ void onnxifi(
   opts.min_ops = FLAGS_onnxifi_min_ops;
   opts.load_model_by_blob = load_model_by_blob;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
+  opts.loop_test = FLAGS_onnxifi_loop_test_mode;
 
   auto more_shape_hints = shape_hints;
   if (!FLAGS_onnxifi_shape_hints.empty()) {

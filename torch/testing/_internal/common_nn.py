@@ -1006,6 +1006,14 @@ new_module_tests = [
         desc='3d_input_not_affine',
     ),
     dict(
+        module_name='BatchNorm1d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 9),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
+    ),
+    dict(
         module_name='BatchNorm2d',
         constructor_args=(3,),
         input_size=(2, 3, 6, 6),
@@ -1045,6 +1053,14 @@ new_module_tests = [
         desc='not_tracking_stats',
     ),
     dict(
+        module_name='BatchNorm2d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 2, 2),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
+    ),
+    dict(
         module_name='BatchNorm3d',
         constructor_args=(3,),
         input_size=(2, 3, 4, 4, 4),
@@ -1082,6 +1098,14 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(5, 1e-3, 0.3, False),
+        input_size=(0, 5, 2, 2, 2),
+        cudnn=True,
+        check_eval=True,
+        desc='zero_batch',
     ),
     dict(
         module_name='InstanceNorm1d',
@@ -1834,6 +1858,12 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+        input_size=(0, 2, 4),
+        fullname='interpolate_nearest_1d_zero_dim',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=(12, ), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3),
         fullname='interpolate_nearest_tuple_1d',
@@ -1861,6 +1891,12 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=None, scale_factor=4., mode='linear', align_corners=False),
         input_size=(1, 2, 4),
         fullname='interpolate_linear_scale_1d',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='linear', align_corners=False),
+        input_size=(0, 2, 4),
+        fullname='interpolate_linear_1d_zero_dim',
         pickle=False,
     ),
     dict(
@@ -1900,9 +1936,21 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+        input_size=(0, 2, 4, 4),
+        fullname='interpolate_nearest_2d_zero_dim',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
         input_size=(1, 2, 4, 4),
         fullname='interpolate_bilinear_2d',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bilinear', align_corners=False),
+        input_size=(0, 2, 4, 4),
+        fullname='interpolate_bilinear_2d_zero_dim',
         pickle=False,
     ),
     dict(
@@ -1953,6 +2001,12 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='bicubic', align_corners=False),
+        input_size=(0, 2, 4, 4),
+        fullname='interpolate_bicubic_2d_zero_dim',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=(4, 6), scale_factor=None,
                                     mode='bicubic', align_corners=False),
         input_size=(1, 2, 2, 3),
@@ -1999,6 +2053,12 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
+        input_size=(0, 2, 4, 4, 4),
+        fullname='interpolate_nearest_3d_zero_dim',
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=(12, 16, 16), scale_factor=None, mode='nearest'),
         input_size=(1, 2, 3, 4, 4),
         fullname='interpolate_nearest_tuple_3d',
@@ -2014,6 +2074,12 @@ new_module_tests = [
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
         input_size=(1, 2, 4, 4, 4),
         fullname='interpolate_trilinear_3d',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='trilinear', align_corners=False),
+        input_size=(0, 2, 4, 4, 4),
+        fullname='interpolate_trilinear_3d_zero_dim',
         pickle=False,
     ),
     dict(

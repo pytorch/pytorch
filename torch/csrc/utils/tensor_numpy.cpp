@@ -74,18 +74,15 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (tensor.is_cuda()) {
+  if (tensor.device().type() != DeviceType::CPU) {
     throw TypeError(
-        "can't convert CUDA tensor to numpy. Use Tensor.cpu() to "
-        "copy the tensor to host memory first.");
+      "can't convert non-cpu tensor to numpy. Use Tensor.cpu() to "
+      "copy the tensor to host memory first.");
   }
-  if (tensor.is_sparse()) {
-    throw TypeError(
-        "can't convert sparse tensor to numpy. Use Tensor.to_dense() to "
-        "convert to a dense tensor first.");
-  }
-  if (tensor.options().backend() != Backend::CPU) {
-    throw TypeError("NumPy conversion for %s is not supported", tensor.toString().c_str());
+  if (tensor.layout() != Layout::Strided) {
+      throw TypeError(
+        "can't convert non-strided tensor to numpy."
+        "convert the tensor to a strided layout first.");
   }
   if (tensor.requires_grad()) {
     throw std::runtime_error(
@@ -152,8 +149,10 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   for (int i = 0; i < ndim; i++) {
     if (strides[i] < 0) {
       throw ValueError(
-          "some of the strides of a given numpy array are negative. This is "
-          "currently not supported, but will be added in future releases.");
+          "At least one stride in the given numpy array is negative, "
+          "and tensors with negative strides are not currently supported. "
+          "(You can probably work around this by making a copy of your array "
+          " with array.copy().) ");
     }
     // XXX: this won't work for negative strides
     storage_size += (sizes[i] - 1) * strides[i];

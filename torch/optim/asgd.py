@@ -62,13 +62,13 @@ class ASGD(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    grad = grad.add(p.data, alpha=group['weight_decay'])
 
                 # decay term
                 p.data.mul_(1 - group['lambd'] * state['eta'])
 
                 # update parameter
-                p.data.add_(-state['eta'], grad)
+                p.data.add_(grad, alpha=-state['eta'])
 
                 # averaging
                 if state['mu'] != 1:

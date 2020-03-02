@@ -506,7 +506,7 @@ class TestConvolution(serial.SerializedTestCase):
         group=st.integers(1, 2),
         order=st.sampled_from(["NCHW", "NHWC"]),
         use_bias=st.booleans(),
-        engine=st.sampled_from([""]),  # TODO: add "CUDNN"
+        engine=st.sampled_from(["", "MIOPEN"]),  # TODO: add "CUDNN"
         force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
         force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
         force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),

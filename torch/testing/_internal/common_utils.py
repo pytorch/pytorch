@@ -11,7 +11,9 @@ import platform
 import re
 import gc
 import types
+from functools import partial
 import inspect
+import io
 import argparse
 import unittest
 import warnings
@@ -97,6 +99,7 @@ parser.add_argument('--subprocess', action='store_true',
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--ge_config', type=str)
+parser.add_argument('--test_bailouts', action='store_true')
 
 GRAPH_EXECUTOR = ProfilingMode.SIMPLE if IS_SANDCASTLE else ProfilingMode.PROFILING
 args, remaining = parser.parse_known_args()
@@ -105,6 +108,7 @@ if args.ge_config == 'legacy':
 elif args.ge_config == 'simple':
     GRAPH_EXECUTOR = ProfilingMode.SIMPLE
 
+TEST_BAILOUTS = args.test_bailouts
 TEST_IN_SUBPROCESS = args.subprocess
 SEED = args.seed
 if not expecttest.ACCEPT:
@@ -113,7 +117,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def shell(command, cwd=None):
+def shell(command, cwd=None, env=None):
     sys.stdout.flush()
     sys.stderr.flush()
     # The following cool snippet is copied from Py3 core library subprocess.call
@@ -124,7 +128,7 @@ def shell(command, cwd=None):
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
     assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
-    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd)
+    p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env)
     try:
         return p.wait()
     except KeyboardInterrupt:
@@ -813,7 +817,7 @@ class TestCase(expecttest.TestCase):
                             b = b.to(torch.int)
 
                         diff = a - b
-                        if a.is_floating_point():
+                        if a.dtype.is_complex or a.dtype.is_floating_point:
                             # check that NaNs are in the same locations
                             nan_mask = torch.isnan(a)
                             self.assertTrue(torch.equal(nan_mask, torch.isnan(b)), message)
@@ -825,8 +829,15 @@ class TestCase(expecttest.TestCase):
                                 self.assertTrue(torch.equal(inf_sign, torch.isinf(b).sign()), message)
                                 diff[inf_mask] = 0
                         # TODO: implement abs on CharTensor (int8)
+                        # TODO: modify abs to return float/double for ComplexFloat/ComplexDouble
                         if diff.is_signed() and diff.dtype != torch.int8:
                             diff = diff.abs()
+                            # if diff is complex, the imaginary component for diff will be 0
+                            # from the previous step, hence converting it to float and double is fine.
+                            if diff.dtype == torch.complex64:
+                                diff = diff.to(torch.float)
+                            elif diff.dtype == torch.complex128:
+                                diff = diff.to(torch.double)
                         max_err = diff.max()
                         self.assertLessEqual(max_err, prec, message)
             super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
@@ -1184,9 +1195,17 @@ def find_free_port():
     sock.close()
     return sockname[1]
 
+# Errors that we can get in c10d initialization for which we should retry tests for.
+ADDRESS_IN_USE = "Address already in use"
+CONNECT_TIMEOUT = "connect() timed out."
 
-def retry_on_address_already_in_use_error(func):
-    """Reruns a test if it sees "Address already in use" error."""
+def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
+    """Reruns a test if the test returns a RuntimeError and the exception
+    matches exactly with one of the strings in connect_errors."""
+    # This if block is executed when using this function as a decorator with arguments.
+    if func is None:
+        return partial(retry_on_connect_failures, connect_errors=connect_errors)
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         tries_remaining = 10
@@ -1194,7 +1213,7 @@ def retry_on_address_already_in_use_error(func):
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) == "Address already in use":
+                if str(error) in connect_errors:
                     tries_remaining -= 1
                     if tries_remaining == 0:
                         raise
@@ -1302,28 +1321,6 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
             # in LU factorization will be non-trivial
             s[0, 0] = 0
     return u.matmul(s.expand(batch_dims + (rows, columns)).matmul(v.transpose(-2, -1)))
-
-
-def brute_pdist(inp, p=2):
-    """Computes the same as torch.pdist using primitives"""
-    n = inp.shape[-2]
-    k = n * (n - 1) // 2
-    if k == 0:
-        # torch complains about empty indices
-        return torch.empty(inp.shape[:-2] + (0,), dtype=inp.dtype, device=inp.device)
-    square = torch.norm(inp[..., None, :] - inp[..., None, :, :], p=p, dim=-1)
-    unroll = square.view(square.shape[:-2] + (n * n,))
-    inds = torch.ones(k, dtype=torch.int)
-    inds[torch.arange(n - 1, 1, -1, dtype=torch.int).cumsum(0)] += torch.arange(2, n, dtype=torch.int)
-    return unroll[..., inds.cumsum(0)]
-
-
-def brute_cdist(x, y, p=2):
-    r1 = x.shape[-2]
-    r2 = y.shape[-2]
-    if r1 == 0 or r2 == 0:
-        return torch.empty(r1, r2, device=x.device)
-    return torch.norm(x[..., None, :] - y[..., None, :, :], p=p, dim=-1)
 
 
 def do_test_dtypes(self, dtypes, layout, device):
@@ -1447,6 +1444,13 @@ def load_tests(loader, tests, pattern):
     return test_suite
 
 
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
@@ -1454,7 +1458,9 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
-dtype2prec = {torch.float: 1e-5,
-              torch.double: 1e-5,
-              torch.half: 1e-2,
-              torch.bfloat16: 1e-1}
+# Using @precisionOverride specific to your test is the recommended way
+# of doing this. These are just some values that worked for test_nn.
+dtype2prec_DONTUSE = {torch.float: 1e-5,
+                      torch.double: 1e-5,
+                      torch.half: 1e-2,
+                      torch.bfloat16: 1e-1}

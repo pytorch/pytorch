@@ -87,17 +87,20 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to vector of TensorImpl*)
-static inline std::vector<TensorImpl*> checked_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
+// NB: This is ONLY used by legacy TH bindings, and ONLY used by cat.
+// Once cat is ported entirely to ATen this can be deleted!
+static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     const auto& expr = tensors[i];
-    // TODO: Stop using dispatchTypeId here, it's totally wrong way to do this
-    // type test
-    auto key = c10::impl::dispatchTypeId(expr.key_set(), c10::DispatchKeySet(c10::DispatchKeySet::FULL));
-    if (dispatchKeyToBackend(key) != backend) {
-      AT_ERROR("Expected object of backend ", backend, " but got backend ", dispatchKeyToBackend(key),
-               " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
+    if (expr.layout() != Layout::Strided) {
+      AT_ERROR("Expected dense tensor but got ", expr.layout(),
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
+    }
+    if (expr.device().type() != device_type) {
+      AT_ERROR("Expected object of device type ", device_type, " but got device type ", expr.device().type(),
+               " for sequence element ", i , " in sequence argument at position #", pos, " '", name, "'");
     }
     if (expr.scalar_type() != scalar_type) {
       AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr.scalar_type(),

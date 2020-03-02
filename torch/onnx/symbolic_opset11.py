@@ -249,7 +249,12 @@ def _len(g, self):
 
 
 def __getitem_(g, self, i):
-    return g.op("SequenceAt", self, i)
+    if self.type().isSubtypeOf(torch._C.ListType.ofTensors()):
+        # SequenceAt requires that the input be a List of Tensors
+        return g.op("SequenceAt", self, i)
+    else:
+        from torch.onnx.symbolic_opset9 import __getitem_ as getitem
+        return getitem(g, self, i)
 
 
 def append(g, self, tensor):
@@ -292,6 +297,8 @@ def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
+        if not stride:
+            stride = kernel_size
         if count_include_pad:
             input = g.op("Pad", input,
                          g.op("Constant", value_t=torch.tensor(((0,) * 2 + padding) * 2)), mode_s='constant')
@@ -328,6 +335,14 @@ def sort(g, self, dim, decending, out=None):
 
 def round(g, self):
     return g.op("Round", self)
+
+
+@parse_args('v', 'v', 'i')
+def split_with_sizes(g, self, split_sizes, dim):
+    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
+        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+    else:
+        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.

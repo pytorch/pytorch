@@ -145,6 +145,10 @@ static void upsample_nearest2d_out_cuda_template(
   Tensor input = input_.contiguous();
   output.resize_({nbatch, channels, output_height, output_width});
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   int nc = nbatch * channels;
 
   const int max_threads = std::min<int>(
@@ -247,6 +251,10 @@ static void upsample_nearest2d_backward_out_cuda_template(
 
   Tensor grad_output = grad_output_.contiguous();
   grad_input.resize_({nbatch, channels, input_height, input_width});
+
+  if (grad_input.numel() == 0) {
+    return;
+  }
 
   // upsample_2d_shape_check makes sure `nbatch != 0`
   unsigned int n = grad_input.numel() / nbatch;
