@@ -8854,7 +8854,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    def test_pca(self, device):
+    def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
@@ -8906,18 +8906,18 @@ class TestTorchDeviceType(TestCase):
                         actual_rank + 6,
                 ]:
                     if guess_rank <= min(*size):
-                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca)
-                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca_lowrank)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca_lowrank)
 
         # sparse input
         for guess_rank, size in [
                 (4, (17, 4)), (4, (4, 17)), (16, (17, 17)),
                 (21, (100, 40)), (20, (40, 100)), (600, (1000, 1000))]:
             for density in [0.005, 0.1]:
-                run_subtest(guess_rank, None, size, (), device, torch.pca, density=density)
+                run_subtest(guess_rank, None, size, (), device, torch.pca_lowrank, density=density)
 
         # jitting support
-        jitted = torch.jit.script(torch.pca)
+        jitted = torch.jit.script(torch.pca_lowrank)
         guess_rank, actual_rank, size, batches = 2, 2, (17, 4), ()
         run_subtest(guess_rank, actual_rank, size, batches, device, jitted)
 

@@ -1,7 +1,7 @@
 """Implement various linear algebra algorithms for low rank matrices.
 """
 
-__all__ = ['svd_lowrank', 'pca']
+__all__ = ['svd_lowrank', 'pca_lowrank']
 
 import torch
 from . import _linalg_utils as _utils 
@@ -164,7 +164,7 @@ def _svd_lowrank(A, q=6, niter=2, M=None):
     return U, S, V
 
 
-def pca(A, q=None, center=True, niter=2):
+def pca_lowrank(A, q=None, center=True, niter=2):
     # type: (Tensor, Optional[int], bool, int) -> Tuple[Tensor, Tensor, Tensor]
     r"""Performs linear Principal Component Analysis (PCA) on a low-rank
     matrix, batches of such matrices, or sparse matrix.
@@ -228,7 +228,7 @@ def pca(A, q=None, center=True, niter=2):
 
     if not torch.jit.is_scripting():
         if type(A) is not torch.Tensor and has_torch_function((A,)):
-            return handle_torch_function(pca, (A,), A, q=q, center=center, niter=niter)
+            return handle_torch_function(pca_lowrank, (A,), A, q=q, center=center, niter=niter)
 
     (m, n) = A.shape[-2:]
 
@@ -249,7 +249,7 @@ def pca(A, q=None, center=True, niter=2):
 
     if _utils.is_sparse(A):
         if len(A.shape) != 2:
-            raise ValueError('pca input is expected to be 2-dimensional tensor')
+            raise ValueError('pca_lowrank input is expected to be 2-dimensional tensor')
         c = torch.sparse.sum(A, dim=(-2,)) / m
         # reshape c
         column_indices = c.indices()[0]
