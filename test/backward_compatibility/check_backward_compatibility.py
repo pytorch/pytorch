@@ -57,6 +57,16 @@ white_list = [
     ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
     ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
     ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
 ]
 
 
@@ -118,10 +128,8 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line or "RRef" in line or "Any" in line:
+            if "torch.classes" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
-                # TODO Delete RRef special case after add the RRef type
-                # TODO: wait until nightly knows how to parse Any
                 continue
 
             s = parse_schema(line.strip())
