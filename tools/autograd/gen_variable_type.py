@@ -70,10 +70,12 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
