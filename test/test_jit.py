@@ -20,7 +20,7 @@ from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # no
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
 from jit.test_class_type import TestClassType  # noqa: F401
-from jit.test_builtins import TestBuiltins  # noqa: F401
+from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 
 # Torch
@@ -1135,20 +1135,23 @@ graph(%x : Tensor,
         }
         m = torch.jit.script(M())
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        # observer for input of conv
+        # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
             'Expected to have 1 observer submodule'
-        # observer for output of relu
-        assert len(attrs_with_prefix(m, '_observer_')) == 1, \
-            'Expected to have 1 observer submodule'
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
+            'Expected to have 2 observer submodule'
 
         m = torch.jit.script(M2())
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-        # observer for input of conv
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
+            'Expected to have 2 observer submodule'
+        # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
             'Expected to have 1 observer submodule'
         # observer for output of relu
-        assert len(attrs_with_prefix(m.relu, '_observer_')) == 1, \
+        assert len(attrs_with_prefix(m.relu, '_observer_')) == 0, \
             'Expected to have 0 observer submodule'
 
 
@@ -1172,7 +1175,6 @@ graph(%x : Tensor,
                 weight=weight_observer._c)
         }
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-        print()
         dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
                       if x.startswith('_observer_')])
         assert len(dtypes) == 2, 'Expected to have 2 different types of dtype'
@@ -1258,6 +1260,10 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         observer = torch.jit.script(default_observer())
+
+        # run the observer once to avoid warning on an empty observer
+        observer(torch.rand(2, 2))
+
         qconfig_dict = {
             '':
             QConfig(
@@ -2064,19 +2070,6 @@ graph(%Ra, %Rb):
 
         self.checkTrace(f, (x,), (torch.ones(2, 2, requires_grad=True),))
 
-    def test_legacy_fail(self):
-        class MyLegacyFn(Function):
-            def forward(self, x):
-                return x
-
-            def backward(self, grad_output):
-                return grad_output
-
-        x = torch.tensor([0.], requires_grad=True)
-        with warnings.catch_warnings(record=True):
-            with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-                torch.jit._get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
-
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
 
@@ -2230,6 +2223,9 @@ graph(%Ra, %Rb):
         self.assertEqual(ge(y).shape, y.shape)
         self.assertEqual(ge(x).shape, x.shape)
 
+    # Suppression: we are intentionally slicing a tensor, we don't care that it
+    # will be constantified
+    @suppress_warnings
     def do_trace_slice(self, requires_grad):
         def slice(x):
             results = []
@@ -4404,7 +4400,7 @@ class TestScript(JitTestCase):
             def forward(self, x):
                 return self.fn(x)
 
-        m = M(F.sigmoid)
+        m = M(torch.sigmoid)
         inp = torch.rand(2, 3)
         self.checkModule(m, (inp, ))
 
@@ -5012,12 +5008,12 @@ def foo(x):
             check_weight = torch.rand(1, 1, 3, 3)
             check_forward_input = torch.rand(1, 1, 3, 3)
             check_inputs.append({'forward' : check_forward_input, 'weighted_kernel_sum' : check_weight})
-        module = torch.jit.trace_module(n, inputs, True, True, check_inputs)
+        module = torch.jit.trace_module(n, inputs, check_trace=True, check_inputs=check_inputs)
         self.assertTrue(module._c._has_method("forward"))
         self.assertTrue(module._c._has_method("weighted_kernel_sum"))
 
         module = torch.jit.trace(n.forward, example_forward_input)
-        module = torch.jit.trace(n.forward, example_forward_input, True, [example_forward_input])
+        module = torch.jit.trace(n.forward, example_forward_input, check_trace=True, check_inputs=[example_forward_input])
         with self.assertRaisesRegex(AttributeError, "trace doesn't support compiling individual module's functions"):
             module = torch.jit.trace(n.weighted_kernel_sum, inputs)
 
@@ -7706,6 +7702,23 @@ a")
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(next(g.outputs()).type().str(), "int[]")
 
+    def test_alias_covariant_type_containers(self):
+        @torch.jit.script
+        def foo(x):
+            # type: (bool)
+            if x:
+                a = (None,)
+            else:
+                a = ([],)
+            return a
+
+        @torch.jit.script
+        def foo2(x, li):
+            # type: (bool, Tuple[Optional[List[Tensor]]])
+            if x:
+                li = (None,)
+            return li
+
     def test_while_write_outer_then_read(self):
         def func(a, b):
             while bool(a < 10):
@@ -8571,6 +8584,15 @@ a")
 
         inp = torch.randn(3, 4)
         self.checkScript(test_as_tensor_tensor_input, (inp,))
+
+    def test_empty_like_memory_format_bc(self):
+        def f(x):
+            # type: (Tensor) -> Tensor
+            return torch.zeros_like(x, memory_format=None)
+
+        scripted_f = torch.jit.script(f)
+        x = torch.rand(3, 4)
+        self.assertEqual(scripted_f(x), f(x))
 
     # adapted from test in test_torch
     def test_tensor_to(self):
@@ -11143,6 +11165,8 @@ a")
         # test copy
         m_c = m.copy()
 
+    # Suppression: ONNX warns when exporting RNNs because of potential batch size mismatch.
+    @suppress_warnings
     @skipIfCompiledWithoutNumpy
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -12118,6 +12142,7 @@ a")
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs)
 
+    @suppress_warnings
     def test_onnx_export_script_truediv(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):
@@ -12130,8 +12155,9 @@ a")
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
+
         torch.onnx.export_to_pretty_string(
-            mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            mte, (torch.zeros(1, 2, 3, dtype=torch.float),), None, verbose=False,
             example_outputs=outputs)
 
     def test_onnx_raw_export_script_truediv(self):
@@ -12148,6 +12174,7 @@ a")
         outputs = mte(torch.zeros(1, 2, 3))
         torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
+            add_node_names=False, do_constant_folding=False,
             example_outputs=outputs, export_raw_ir=True)
 
     def test_onnx_export_script_non_alpha_add_sub(self):
@@ -14729,6 +14756,8 @@ a")
         f = io.BytesIO()
         torch.onnx.export_to_pretty_string(
             FooMod(), (torch.rand(3, 4),), f,
+            add_node_names=False,
+            do_constant_folding=False,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     @suppress_warnings
@@ -14761,6 +14790,8 @@ a")
             traced = torch.jit.trace(foo, torch.rand(3, 4), check_inputs=[(torch.rand(3, 4),)])
 
     if 'fbgemm' in torch.backends.quantized.supported_engines:
+        # Suppression: using deprecated quant api
+        @suppress_warnings
         def test_quantization_modules(self):
             K1, N1 = 2, 2
 
