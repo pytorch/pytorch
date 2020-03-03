@@ -127,6 +127,7 @@ void cpu_upsample_nearest(
     at::parallel_for(0, numel, at::internal::GRAIN_SIZE, loop2d);
   } else {
     // upsample nearest 3d
+    TORCH_INTERNAL_ASSERT(ndim == 5);
     at::parallel_for(0, numel, at::internal::GRAIN_SIZE, loop3d);
   }
 
@@ -216,6 +217,7 @@ void cpu_upsample_nearest_backward(
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size , loop2d);
   } else {
     // upsample nearest 3d
+    TORCH_INTERNAL_ASSERT(ndim == 5);
     at::parallel_for(0, channels, at::internal::GRAIN_SIZE / output_slice_size, loop3d);
   }
 
