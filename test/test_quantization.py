@@ -1345,13 +1345,13 @@ class ObserverTest(QuantizationTestCase):
             obs(x)
             scripted(x)
 
-            self.assertEqual(obs.calculate_qparams(), scripted.calculate_qparams())
+            self.assertEqualIgnoreType(obs.calculate_qparams(), scripted.calculate_qparams())
 
             buf = io.BytesIO()
             torch.jit.save(scripted, buf)
             buf.seek(0)
             loaded = torch.jit.load(buf)
-            self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
+            self.assertEqualIgnoreType(obs.calculate_qparams(), loaded.calculate_qparams())
 
     def test_no_qconfig_propagation(self):
         model = ModelWithNoQconfigPropagation()
