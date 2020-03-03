@@ -1121,6 +1121,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto rev_step_outputs = std::move(bwd_outputs_ref);
         auto bwd_rev_output = at::cat(rev_step_outputs, 0);
 
+        if(rev_input.dim() != input.dim()) {
+          rev_input = rev_input.unsqueeze(1);
+        }
+
         std::vector<Tensor> outputs;
         outputs.push_back(fwd_output);
         outputs.push_back(bwd_rev_output);
