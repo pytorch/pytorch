@@ -994,7 +994,7 @@ std::tuple<Tensor, Tensor> NAME##_cudnn_type1(                                 \
   NAME##_cudnn_stub(_input.device().type(), bwd_output, b_hy, input, _bwd_hx,  \
                 bwd_params, has_biases, num_layers, dropout_p, train,          \
                 bidirectional, type_2, false);                                 \
-  bwd_rev_output = reverse(bwd_output);                                        \
+  auto bwd_rev_output = reverse(bwd_output);                                   \
   std::vector<Tensor> outputs;                                                 \
   outputs.push_back(fwd_output);                                               \
   outputs.push_back(bwd_rev_output);                                           \
@@ -1031,7 +1031,7 @@ std::tuple<Tensor, Tensor> NAME##_miopen_type1(                                \
   NAME##_miopen_stub(_input.device().type(), bwd_output, b_hy, input, _bwd_hx,      \
                 bwd_params, has_biases, num_layers, dropout_p, train,          \
                 bidirectional, type_2, false);                                 \
-  bwd_rev_output = reverse(bwd_output);                                        \
+  auto bwd_rev_output = reverse(bwd_output);                                   \
   std::vector<Tensor> outputs;                                                 \
   outputs.push_back(fwd_output);                                               \
   outputs.push_back(bwd_rev_output);                                           \
@@ -1065,7 +1065,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   }                                                                            \
   if (use_miopen(_input, dropout_p)) {                                         \
     if(bidirectional && !type_2) {                                             \
-      return NAME##_miopen_type1(input, hx, _params, has_biases, num_layers,   \
+      return NAME##_miopen_type1(_input, hx, _params, has_biases, num_layers,  \
         dropout_p, train, bidirectional, type_2, batch_first);                 \
     } else {                                                                   \
       Tensor output, hy;                                                       \
