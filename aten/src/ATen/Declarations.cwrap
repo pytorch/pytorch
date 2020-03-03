@@ -129,7 +129,6 @@
 [[
   name: _th_index_select
   cuda_bool: True
-  cpu_bfloat16: True
   cname: indexSelect
   variants:
     - function
@@ -189,7 +188,6 @@
 [[
   name: _th_index_add_
   cname: indexAdd
-  cpu_bfloat16: True
   variants: function
   backends:
     - CUDA

@@ -75,8 +75,6 @@ TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 #endif
 #endif
 
-TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
-
 #if !defined(TH_REAL_IS_BFLOAT16)
 
 TH_API accreal THTensor_(sumall)(THTensor *t);
