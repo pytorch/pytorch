@@ -59,7 +59,7 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findConstantSlot(name)) {
       return _ivalue()->type()->getConstant(*r);
     }
-    TORCH_CHECK(
+    TORCH_CHECK_WITH(AttributeError,
         false,
         _ivalue()->type()->python_str(),
         " does not have a field with name '",

@@ -120,6 +120,12 @@ class C10_API ValueError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for invalid attributes.  These turn into
+// AttributeError when they cross to Python.
+class C10_API AttributeError: public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {

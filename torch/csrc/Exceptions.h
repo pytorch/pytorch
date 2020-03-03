@@ -60,6 +60,11 @@
       PyErr_SetString(PyExc_ValueError, msg.c_str());                \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::AttributeError& e) {                           \
+      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
+      PyErr_SetString(PyExc_AttributeError, msg.c_str());            \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
       PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
@@ -262,6 +267,14 @@ struct ValueError : public PyTorchError {
   ValueError(const char *format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_ValueError;
+  }
+};
+
+// Translates to Python AttributeError
+struct AttributeError : public PyTorchError {
+  AttributeError(const char *format, ...);
+  PyObject* python_type() override {
+    return PyExc_AttributeError;
   }
 };
 
