@@ -34,13 +34,21 @@ struct TORCH_API CodeWrite : public Printer {
   TensorView* consumer = nullptr;
   int extra_indent = 0;
 
-  void print_indices(const std::vector<Int*>&);
-  bool print_predicate(const Expr* const expr);
+  bool isTVOp(const Expr* expr);
 
+  void print_indices(const std::vector<Int*>&);
+  bool print_predicate(const TensorView* const);
+
+  //Print lhs of uop/bop, returns if predicate was needed
+  bool print_lhs(TensorView*);
   void print(const TensorView* const);
   void print(const Val* const);
   void print(const UnaryOp* const);
   void print(const BinaryOp* const);
+
+  void print(const Split* const){}
+  void print(const Merge* const){}
+  void print(const Reorder* const){}
 
   void indent();
   void handle(Expr*);

@@ -843,20 +843,15 @@ void testGPU_FusionCodeGen2() {
   tv1->computeAt(tv3, 1);
   
 
-  //std::cout<<fusion<<std::endl;
+  // std::cout<<fusion<<std::endl;
   std::cout
   << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
   << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
   << "::::::::::::" << std::endl;
-    
+  
   CodeWrite cw(std::cout);
   cw.traverse(&fusion);
-  /*
-  std::vector<Int*> indices;
-  for(int i=0; i < tv2->domain()->size(); i++)
-    indices.push_back(new Int());
-  IndexCompute test(tv2, indices);
-  */
+  
  }
 
 void testGPU_Fusion() {}
