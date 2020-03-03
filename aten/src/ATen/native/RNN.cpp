@@ -1080,6 +1080,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
         std::cout << "rev_input size: " << rev_input.sizes() << "\n";
+        if(rev_input.dim() != input.dim()) {
+          rev_input = rev_input.unsqueeze(1);
+        }
+        std::cout << "rev_input size: " << rev_input.sizes() << "\n";
         TORCH_CHECK(rev_input.sizes() == input.sizes(),
                     "Reverse input and forward input sizes should be the same")
 
@@ -1098,7 +1102,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
-        lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
+        lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
                         _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
                         train, bidirectional, type_2, false);
         std::cout << "LSTM forward" << "\n";
