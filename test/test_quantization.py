@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from torch.testing._internal.common_utils import TEST_WITH_UBSAN, run_tests, IS_PPC, IS_MACOS
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -317,7 +317,7 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         Load the quantized state_dict for eval and compare results against original model
         """
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+            if IS_WINDOWS or TEST_WITH_UBSAN:
                 return
         with override_quantized_engine(qengine):
             model = TwoLayerLinearModel()
@@ -838,7 +838,7 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         and compare results against original model
         """
         if qengine == 'qnnpack':
-            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+            if IS_WINDOWS or TEST_WITH_UBSAN:
                 return
         with override_quantized_engine(qengine):
             model = TwoLayerLinearModel()
