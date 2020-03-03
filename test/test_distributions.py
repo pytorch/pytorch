@@ -40,8 +40,8 @@ from torch.testing._internal.common_utils import TestCase, run_tests, set_rng_se
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
-                                 Cauchy, Chi2, Dirichlet, Distribution,
-                                 Exponential, ExponentialFamily,
+                                 Cauchy, Chi2, ContinuousBernoulli, Dirichlet,
+                                 Distribution, Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric, Gumbel,
                                  HalfCauchy, HalfNormal,
                                  Independent, Laplace, LogisticNormal,
@@ -452,7 +452,13 @@ EXAMPLES = [
         {
             'loc': torch.tensor([0.0, math.pi / 2], requires_grad=True),
             'concentration': torch.tensor([1.0, 10.0], requires_grad=True)
-        }
+        },
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([0.3], requires_grad=True)},
+        {'probs': 0.3},
+        {'logits': torch.tensor([0.], requires_grad=True)},
     ])
 ]
 
@@ -673,6 +679,11 @@ BAD_EXAMPLES = [
             'scale': torch.tensor([1.0], requires_grad=True),
             'concentration': torch.tensor([-1.0], requires_grad=True)
         }
+    ]),
+    Example(ContinuousBernoulli, [
+        {'probs': torch.tensor([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': torch.tensor([-0.5], requires_grad=True)},
+        {'probs': 1.00001},
     ])
 ]
 
@@ -2402,6 +2413,38 @@ class TestDistributions(TestCase):
         self.assertEqual(frac_zeros, 0.5, 0.12)
         self.assertEqual(frac_ones, 0.5, 0.12)
 
+    def test_continuous_bernoulli(self):
+        p = torch.tensor([0.7, 0.2, 0.4], requires_grad=True)
+        r = torch.tensor(0.3, requires_grad=True)
+        s = 0.3
+        self.assertEqual(ContinuousBernoulli(p).sample((8,)).size(), (8, 3))
+        self.assertFalse(ContinuousBernoulli(p).sample().requires_grad)
+        self.assertEqual(ContinuousBernoulli(r).sample((8,)).size(), (8,))
+        self.assertEqual(ContinuousBernoulli(r).sample().size(), ())
+        self.assertEqual(ContinuousBernoulli(r).sample((3, 2)).size(), (3, 2,))
+        self.assertEqual(ContinuousBernoulli(s).sample().size(), ())
+        self._gradcheck_log_prob(ContinuousBernoulli, (p,))
+
+        def ref_log_prob(idx, val, log_prob):
+            prob = p[idx]
+            self.assertEqual(log_prob, math.log(prob if val else 1 - prob))
+
+        self._check_log_prob(Bernoulli(p), ref_log_prob)
+        self._check_log_prob(Bernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
+        self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
+
+        # check entropy computation
+        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
+        self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
+        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), prec=1e-4)
+
+    def test_continuous_bernoulli_3d(self):
+        p = torch.full((2, 3, 5), 0.5).requires_grad_()
+        self.assertEqual(ContinuousBernoulli(p).sample().size(), (2, 3, 5))
+        self.assertEqual(ContinuousBernoulli(p).sample(sample_shape=(2, 5)).size(),
+                         (2, 5, 2, 3, 5))
+        self.assertEqual(ContinuousBernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
+
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -3271,6 +3314,26 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
         self.assertEqual(laplace.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
+    def test_continuous_bernoulli_shape_scalar_params(self):
+        continuous_bernoulli = ContinuousBernoulli(0.3)
+        self.assertEqual(continuous_bernoulli._batch_shape, torch.Size())
+        self.assertEqual(continuous_bernoulli._event_shape, torch.Size())
+        self.assertEqual(continuous_bernoulli.sample().size(), torch.Size())
+        self.assertEqual(continuous_bernoulli.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.scalar_sample)
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_continuous_bernoulli_shape_tensor_params(self):
+        continuous_bernoulli = ContinuousBernoulli(torch.tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(continuous_bernoulli._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli._event_shape, torch.Size(()))
+        self.assertEqual(continuous_bernoulli.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(continuous_bernoulli.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.tensor_sample_2)
+        self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
 
 class TestKL(TestCase):
 
@@ -3316,6 +3379,7 @@ class TestKL(TestCase):
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2., -1, 0, 2], [-1., 1, 1, 4])
         uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
+        continuous_bernoulli = pairwise(ContinuousBernoulli, [0.1, 0.2, 0.5, 0.9])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
         # Instead, we test with precision = 0.1 and only test with higher precision locally
@@ -3374,6 +3438,13 @@ class TestKL(TestCase):
             (uniform_real, gumbel),
             (uniform_real, normal),
             (uniform_pareto, pareto),
+            (continuous_bernoulli, continuous_bernoulli),
+            (continuous_bernoulli, beta),
+            (continuous_bernoulli, chi2),
+            (continuous_bernoulli, exponential),
+            (continuous_bernoulli, gamma),
+            (continuous_bernoulli, normal),
+            (beta, continuous_bernoulli)
         ]
 
         self.infinite_examples = [
@@ -3429,6 +3500,19 @@ class TestKL(TestCase):
             (Uniform(-1, 2), Exponential(3)),
             (Uniform(-1, 2), Gamma(3, 4)),
             (Uniform(-1, 2), Pareto(3, 4)),
+            (ContinuousBernoulli(0.25), Uniform(0.25, 1)),
+            (ContinuousBernoulli(0.25), Uniform(0, 0.75)),
+            (ContinuousBernoulli(0.25), Uniform(0.25, 0.75)),
+            (ContinuousBernoulli(0.25), Pareto(1, 2)),
+            (Chi2(1), ContinuousBernoulli(0.75)),
+            (Exponential(1), ContinuousBernoulli(0.75)),
+            (Gamma(1, 2), ContinuousBernoulli(0.75)),
+            (Gumbel(-1, 2), ContinuousBernoulli(0.75)),
+            (Laplace(-1, 2), ContinuousBernoulli(0.75)),
+            (Normal(-1, 2), ContinuousBernoulli(0.75)),
+            (Uniform(-1, 1), ContinuousBernoulli(0.75)),
+            (Uniform(0, 2), ContinuousBernoulli(0.75)),
+            (Uniform(-1, 2), ContinuousBernoulli(0.75))
         ]
 
     def test_kl_monte_carlo(self):
@@ -3787,12 +3871,68 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_0 = multinomial.log_prob(torch.tensor([10, 0], dtype=dtype))
             self.assertEqual(log_pdf_prob_0.item(), -inf, allow_inf=True)
 
+    def test_continuous_bernoulli_gradient(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([0]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([torch.finfo(tensor_type([]).dtype).eps]).log(),
+                                 expected_gradient=tensor_type([0]))
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([1e-4]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([10000]))
+
+            # Lower precision due to:
+            # >>> 1 / (1 - torch.FloatTensor([0.9999]))
+            # 9998.3408
+            # [torch.FloatTensor of size 1]
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 probs=tensor_type([1 - 1e-4]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([-10000]),
+                                 prec=2)
+
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([math.log(9999)]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([-1]),
+                                 prec=1e-3)
+
+    def test_continuous_bernoulli_with_logits_underflow(self):
+        for tensor_type, lim in ([(torch.FloatTensor, -1e38),
+                                  (torch.DoubleTensor, -1e308)]):
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
+    def test_continuous_bernoulli_with_logits_overflow(self):
+        for tensor_type, lim in ([(torch.FloatTensor, 1e38),
+                                  (torch.DoubleTensor, 1e308)]):
+            self._test_pdf_score(dist_class=ContinuousBernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
 
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
         super(TestLazyLogitsInitialization, self).setUp()
         self.examples = [e for e in EXAMPLES if e.Dist in
-                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
+                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial, ContinuousBernoulli)]
 
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
