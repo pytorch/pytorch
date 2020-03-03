@@ -143,11 +143,11 @@ class _ObserverBase(ObserverBase):
                                     Returning default scale and zero point "
             )
             return torch.tensor([1.0]), torch.tensor([0])
-
+        
         diff = min_vals <= max_vals
         for i in range(len(diff)):
-            assert(diff[i], "min should be less than max for index {}".format(i))
-
+            assert (diff[i]), "min should be less than max for index {}".format(i)
+        
         scales = torch.empty(min_vals.size(), dtype=torch.float32)
         zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
         
@@ -164,8 +164,8 @@ class _ObserverBase(ObserverBase):
 
         max_vals, min_vals = max_vals.to(dtype=torch.float), min_vals.to(dtype=torch.float)
 
-        min_vals = torch.min(min_vals, torch.tensor([0.], device=min_vals.device))
-        max_vals = torch.max(max_vals, torch.tensor([0.], device=max_vals.device))
+        min_vals = torch.min(min_vals, torch.tensor([0.], device=min_vals.device, dtype=torch.float))
+        max_vals = torch.max(max_vals, torch.tensor([0.], device=max_vals.device, dtype=torch.float))
         if torch.equal(max_vals, min_vals):
             scales.fill_(1.0)
             zero_points.fill_(0)
@@ -173,7 +173,7 @@ class _ObserverBase(ObserverBase):
             if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
                 max_vals = torch.max(-min_vals, max_vals)
                 scales = max_vals / ((qmax - qmin) / 2)
-                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device))
+                scales = torch.max(scales, torch.tensor([self.eps], device=scales.device, dtype=scales.dtype))
                 if self.dtype == torch.qint8:
                     zp = 0
                 else:
@@ -188,14 +188,6 @@ class _ObserverBase(ObserverBase):
                 zero_points = zero_points.to(dtype=torch.int64)
         scales.to(dtype=torch.float)
         
-        '''
-        for i in range(len(scales)):
-            qparam = self._calculate_qparams(
-                min_vals[i], max_vals[i]
-            )
-            scales[i] = float(qparam[0])
-            zero_points[i] = int(qparam[1])
-        '''
         return scales, zero_points
 
     @torch.jit.export

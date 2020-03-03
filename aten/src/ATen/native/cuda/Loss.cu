@@ -2,26 +2,14 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/Loops.cuh>
 
 constexpr float EPSILON = 1e-12;
 
 namespace {
 
 using namespace at;
-
-template<typename scalar_t>
-void kl_div_backward_kernel(const Tensor& grad_input, const Tensor& target, const Tensor& grad) {
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      grad_input,
-      target,
-      grad,
-      [] __device__(
-          scalar_t& grad_input_val, const scalar_t& target_val, const scalar_t& grad_val) {
-        if (target_val > 0) {
-          grad_input_val = -target_val * grad_val;
-        }
-      });
-}
 
 template<typename scalar_t>
 void binary_cross_entropy_out_kernel(Tensor& loss, const Tensor& input, const Tensor& target) {
@@ -82,14 +70,19 @@ void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& 
 namespace at { namespace native {
 
 Tensor kl_div_backward_cuda(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor grad_expand = grad.expand_as(input);
+  auto grad_input = at::empty_like(input);
+  TensorIterator iter;
+  iter.add_output(grad_input);
+  iter.add_input(target);
+  iter.add_input(grad);
+  iter.build();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "kl_div_backward_cuda", [&]() {
-    kl_div_backward_kernel<scalar_t>(grad_input, target, grad_expand);
+    scalar_t inv = (reduction == at::Reduction::Mean) ? scalar_t(1.0 / input.numel()) : scalar_t(1.0);
+    gpu_kernel(iter,
+      [inv] GPU_LAMBDA (scalar_t target_val, scalar_t grad_val) {
+        return (target_val > 0) ? scalar_t(-target_val * grad_val * inv) : scalar_t(0.0);
+      });
   });
-  if (reduction == at::Reduction::Mean) {
-    return grad_input / input.numel();
-  }
   return grad_input;
 }
 

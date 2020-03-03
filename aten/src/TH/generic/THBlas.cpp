@@ -370,14 +370,10 @@ void THBlas_(gemm)(
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
   if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
-      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) &&
+      (lda >= THMax(1, (transa_ ? k : m))) && (ldb >= THMax(1, (transb_ ? n : k))) &&
+      (ldc >= THMax(1, m)))
   {
-    THArgCheck(lda >= THMax(1, (transa_ ? k : m)), 8,
-      "lda should be at least max(1, %d), but have %d", (transa_ ? k : m), lda);
-    THArgCheck(ldb >= THMax(1, (transb_ ? n : k)), 10,
-      "ldb should be at least max(1, %d), but have %d", (transb_ ? n : k), ldb);
-    THArgCheck(ldc >= THMax(1, m), 13,
-      "ldc should be at least max(1, m=%d), but have %d", m, ldc);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_k = (int)k;
