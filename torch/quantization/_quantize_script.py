@@ -81,7 +81,7 @@ def convert_script(model, inplace=False):
     if not inplace:
         model = model.copy()
     model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
-    torch._C._jit_pass_quant_finalize(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_quant_finalize(model._c))
     return model
 
 # TODO: non-scriptable QConfig will be supported later
