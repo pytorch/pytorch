@@ -1,8 +1,8 @@
 #!/bin/bash
 ###############################################################################
-# This script shows/tests the flow to build libtorch locally with optimized
-# binary size for mobile devices and the flow to integrate it with a simple
-# predictor in c++.
+# This script tests the flow to build libtorch locally with optimized binary
+# size for mobile devices and the flow to integrate it with a simple predictor
+# in c++.
 #
 # There are three custom build types:
 #
@@ -36,9 +36,7 @@ prepare_model_and_dump_root_ops() {
   MODEL="${BUILD_ROOT}/MobileNetV2.pt"
   ROOT_OPS="${BUILD_ROOT}/MobileNetV2.yaml"
 
-  if [ ! -f "${MODEL}" ] || [ ! -f "${ROOT_OPS}" ]; then
-    python "${TEST_SRC_ROOT}/prepare_model.py"
-  fi
+  python "${TEST_SRC_ROOT}/prepare_model.py"
 }
 
 generate_op_dependency_graph() {
