@@ -1071,13 +1071,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         _bwd_hx.push_back(c_bwd.contiguous());
 
         // Reverse input to backward LSTM
+        std::cout << "_input size: " << _input.sizes() << "\n";
         auto input = batch_first ? _input.transpose(0, 1) : _input;
+        std::cout << "_input size: " << _input.sizes() << "\n";
         auto step_inputs = input.unbind(0);
         auto step_ref = std::move(step_inputs);
         std::reverse(step_ref.begin(), step_ref.end());
         auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
         std::cout << "rev_input size: " << rev_input.sizes() << "\n";
+        TORCH_CHECK(rev_input.sizes() == input.sizes(),
+                    "Reverse input and forward input sizes should be the same")
 
         // _fwd_params contains the forward parameters and _params the backward ones
         auto _fwd_params = _params.slice(_params.size() / 2);
