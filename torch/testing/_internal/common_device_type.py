@@ -1,11 +1,11 @@
 import inspect
 import threading
-from functools import wraps
+from functools import wraps, partial
 import unittest
 import os
 import torch
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
-    skipCUDANonDefaultStreamIf
+from torch.testing._internal.common_utils import TestCase, TEST_NUMPY, TEST_WITH_ROCM, \
+    TEST_MKL, skipCUDANonDefaultStreamIf
 
 # Note: Generic Device-Type Testing
 #
@@ -121,6 +121,8 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
 # you should check if it's available and (if it is) add it to this list.
 device_type_test_bases = []
 
+if TEST_NUMPY:
+    import numpy as np
 
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
@@ -192,11 +194,15 @@ class DeviceTypeTestBase(TestCase):
                     # Sets precision and runs test
                     # Note: precision is reset after the test is run
                     guard_precision = self.precision
+                    origin_allclose = np.allclose
                     try :
                         self.precision = self._get_precision_override(test, dtype)
+                        if TEST_NUMPY:
+                            np.allclose = partial(np.allclose, rtol=self.precision)
                         result = test(self, device_arg, dtype)
                     finally:
                         self.precision = guard_precision
+                        np.allclose = origin_allclose
 
                     return result
 
