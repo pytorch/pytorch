@@ -1,4 +1,5 @@
 #include <torch/custom_class.h>
+#include <torch/script.h>
 
 #include <iostream>
 #include <string>
