@@ -2617,6 +2617,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
 
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
         class CrossEntropyLossNone(torch.nn.Module):
             def forward(self, input, target):
@@ -2625,9 +2627,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5)
         y = torch.empty(3, dtype=torch.long).random_(5)
-        trace_cell = torch.jit.trace(CrossEntropyLossNone(), (x, y))
-        print(trace_cell.graph)
-        #self.run_test(CrossEntropyLossNone(), input=(x, y))
+        self.run_test(CrossEntropyLossNone(), input=(x, y))
 
         class CrossEntropyLossNoneWeight(torch.nn.Module):
             def forward(self, input, target):
