@@ -84,7 +84,7 @@ void gamma_cuda_kernel(
 
   at::native::gpu_kernel(iter,
     [seeds] GPU_LAMBDA (scalar_t alpha) {
-      #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+      #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
       curandStatePhilox4_32_10_t state;
       curand_init(
           seeds.first,
