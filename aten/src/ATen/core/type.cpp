@@ -705,6 +705,23 @@ torch::jit::Function* ClassType::getMethod(const std::string& name) const {
   return nullptr;
 }
 
+void ClassType::unsafeRemoveMethod(const std::string& name) {
+  size_t slot = 0;
+  for (auto method : methods_) {
+    if (method->name() == name) {
+      methods_.erase(methods_.begin() + slot);
+      return;
+    }
+    slot++;
+  }
+  TORCH_CHECK(
+      false,
+      "Can't delete undefined method ",
+      name,
+      " on class: ",
+      python_str());
+}
+
 ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
   auto ptr = ClassType::create(name(), compilation_unit_);
   AT_ASSERT(numAttributes() == refined_slots.size());
