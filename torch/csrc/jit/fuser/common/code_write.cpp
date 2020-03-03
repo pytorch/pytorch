@@ -75,7 +75,7 @@ bool CodeWrite::print_predicate(std::ostream& os, const Expr* const expr) {
   std::vector<Int*> indices =
     IndexCompute::computeIndices(pred_tv, getLoopIndices());
 
-  std::vector<Int*> preds = computePredicates(pred_tv, indices);
+  std::vector<Int*> preds = PredicateCompute::computePredicates(pred_tv, indices);
 
   if(preds.size() == 0)
     return false;
