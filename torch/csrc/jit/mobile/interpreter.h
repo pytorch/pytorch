@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 namespace torch{
