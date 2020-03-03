@@ -266,8 +266,11 @@ class MultiProcessTestCase(TestCase):
             # Check if we should time out the test. If so, we terminate each process.
             elapsed = time.time() - start_time
             if elapsed > timeout:
-                print("Timing out after {} seconds and killing subprocesses.".format(timeout))
-                # kill all active children
+                print(
+                    "Timing out after {} seconds and killing subprocesses.".format(
+                        timeout
+                    )
+                )
                 for p in self.processes:
                     p.terminate()
                 break
@@ -295,9 +298,16 @@ class MultiProcessTestCase(TestCase):
         # first, we check if there are errors in actual processes (via TEST_ERROR_EXIT CODE), and raise an exception for those.
         # the reason we do this is to attempt to raise a more helpful error message than "Process x terminated/timed out"
         # TODO: we should pipe the exception of the failed subprocess here. Currently, the actual exception is displayed as a log output.
-        errored_processes = [(i, p) for i, p in enumerate(self.processes) if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE]
+        errored_processes = [
+            (i, p)
+            for i, p in enumerate(self.processes)
+            if p.exitcode == MultiProcessTestCase.TEST_ERROR_EXIT_CODE
+        ]
         if errored_processes:
-            error = "Processes {} errored exited with error code {}".format(" ".join([str(i) for (i, _) in errored_processes]), MultiProcessTestCase.TEST_ERROR_EXIT_CODE)
+            error = "Processes {} errored exited with error code {}".format(
+                " ".join([str(i) for (i, _) in errored_processes]),
+                MultiProcessTestCase.TEST_ERROR_EXIT_CODE,
+            )
             raise RuntimeError(error)
         # If no process exited uncleanly, we check for timeouts, and then ensure each process exited cleanly.
         for i, p in enumerate(self.processes):
