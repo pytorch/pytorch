@@ -1269,6 +1269,20 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
+  if(bidirectional && !type_2) {
+    bidirectional = false;
+    torch::_cudnn_rnn_flatten_weight(
+        params,
+        /*weight_stride0=*/has_biases ? 4 : 2,
+        input.size(-1),
+        mode,
+        hidden_size,
+        num_layers,
+        /*batch_first=*/batch_first,
+        /*bidirectional=*/bidirectional,
+        /*type_2=*/type_2);
+  }
+
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
   if (!weight_buf.defined()) {

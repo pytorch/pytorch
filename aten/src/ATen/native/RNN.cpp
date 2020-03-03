@@ -1111,7 +1111,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "_input type: " << _input.device().type() << "\n";
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
                         _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
-                        train, false, type_2, false);
+                        train, bidirectional, type_2, false);
         std::cout << "LSTM forward" << "\n";
 
         // Backward LSTM
