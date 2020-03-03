@@ -42,6 +42,23 @@ Function* ClassType::getMethod(const std::string& name) const {
   return nullptr;
 }
 
+void ClassType::unsafeRemoveMethod(const std::string& name) {
+  size_t slot = 0;
+  for (auto method : methods_) {
+    if (method->name() == name) {
+      methods_.erase(methods_.begin() + slot);
+      return;
+    }
+    slot++;
+  }
+  TORCH_CHECK(
+      false,
+      "Can't delete undefined method ",
+      name,
+      " on class: ",
+      python_str());
+}
+
 #ifndef USE_MOBILE_CLASSTYPE
 
 // This file exists because we need to reference module.h, which we can't from

@@ -100,11 +100,11 @@ variable_list run_backward(
   variable_list grad_inputs = Engine::get_default_engine().execute(
       roots, grad_outputs, keep_graph, create_graph, output_edges);
   // check if grad_inputs contains None or not base on the allow_unused flag
-  if (inputs.empty()) {
+  if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
     for (size_t i = 0; i < num_inputs; ++i) {
       TORCH_CHECK(
-          allow_unused || grad_inputs[i].defined(),
+          grad_inputs[i].defined(),
           "One of the "
           "differentiated Tensors appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
