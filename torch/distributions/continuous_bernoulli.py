@@ -174,19 +174,16 @@ class ContinuousBernoulli(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.log(self.probs / (1 - self.probs)), )
+        return (self.logits, )
 
     def _log_normalizer(self, x):
         """computes the log normalizing constant as a function of the natural parameter"""
-        x = clamp_probs(x)
-        nat_params = torch.log(x) - torch.log1p(-x)
-        out_unst_reg = torch.max(torch.le(nat_params, self._lims[0] - 0.5),
-                                 torch.gt(nat_params, self._lims[1] - 0.5))
+        out_unst_reg = torch.max(torch.le(x, self._lims[0] - 0.5),
+                                 torch.gt(x, self._lims[1] - 0.5))
         cut_nat_params = torch.where(out_unst_reg,
-                                     nat_params,
-                                     (self._lims[0] - 0.5) * torch.ones_like(nat_params))
+                                     x,
+                                     (self._lims[0] - 0.5) * torch.ones_like(x))
         log_norm = torch.log(torch.abs(torch.exp(cut_nat_params) - 1.0))\
                    - torch.log(torch.abs(cut_nat_params))
-        taylor = 0.5 * nat_params + torch.pow(nat_params, 2) / 24.0\
-                 - torch.pow(nat_params, 4) / 2880.0
+        taylor = 0.5 * x + torch.pow(x, 2) / 24.0 - torch.pow(x, 4) / 2880.0
         return torch.where(out_unst_reg, log_norm, taylor)
