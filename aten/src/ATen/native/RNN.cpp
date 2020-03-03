@@ -985,8 +985,9 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     if(bidirectional && !type_2) {                                             \
+      rnn_fn stub_call{ NAME##_cudnn_stub };                                  \
       return rnn_nocpu_type1(_input, hx, _params, has_biases, num_layers,      \
-        dropout_p, train, bidirectional, type_2, batch_first, NAME##_cudnn_stub); \
+        dropout_p, train, bidirectional, type_2, batch_first, stub_call);      \
     } else {                                                                   \
       Tensor output, hy;                                                       \
       NAME##_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
