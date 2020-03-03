@@ -238,7 +238,8 @@ class BasePruningMethod(ABC):
         orig.data = weight.data
         del module._parameters[self._tensor_name + "_orig"]
         del module._buffers[self._tensor_name + "_mask"]
-        module.register_parameter(self._tensor_name, orig)
+        module._parameters[self._tensor_name] = None
+        setattr(module, self._tensor_name, orig)
 
 
 class PruningContainer(BasePruningMethod):

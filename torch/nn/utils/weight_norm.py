@@ -49,7 +49,8 @@ class WeightNorm(object):
         delattr(module, self.name)
         del module._parameters[self.name + '_g']
         del module._parameters[self.name + '_v']
-        module.register_parameter(self.name, Parameter(weight.data))
+        module._parameters[self.name] = None
+        setattr(module, self.name, Parameter(weight.data))
 
     def __call__(self, module, inputs):
         setattr(module, self.name, self.compute_weight(module))
