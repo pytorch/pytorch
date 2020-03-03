@@ -13,3 +13,7 @@ if "%REBUILD%"=="" (
   call conda install -y -q python=%PYTHON_VERSION% numpy cffi pyyaml boto3
   call conda install -y -q -c conda-forge cmake
 )
+set PYTHON_VERSION_NODOT=%PYTHON_VERSION:.=%
+if "%DEBUG%" == "1" (
+  copy /Y %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%.lib %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%d.lib
+)

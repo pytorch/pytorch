@@ -1,3 +1,5 @@
+set DEBUG=1
+
 if "%DEBUG%" == "1" (
   set BUILD_TYPE=debug
 ) ELSE (
