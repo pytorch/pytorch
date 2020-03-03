@@ -116,15 +116,21 @@ template<typename scalar_t>
 void dirichlet_scalar_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& gamma) {
-  auto gamma_sum = gamma.sum(-1, true).expand(ret.sizes());
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, gamma, gamma_sum,
-  [] __device__(scalar_t &ret_val, const scalar_t &gamma, const scalar_t &gamma_sum) {
-    ret_val = gamma / gamma_sum;
-    auto min_value = std::numeric_limits<scalar_t>::min();
-    auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
-    ret_val = (min_value > ret_val) ? min_value : ret_val;
-    ret_val = (max_value < ret_val) ? max_value : ret_val;
-  });
+  auto gamma_sum = gamma.sum(-1, true);
+  at::TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(gamma);
+  iter.add_input(gamma_sum);
+  iter.build();
+  at::native::gpu_kernel(iter,
+    [] GPU_LAMBDA (scalar_t gamma, scalar_t gamma_sum) {
+      auto ret_val = gamma / gamma_sum;
+      auto min_value = std::numeric_limits<scalar_t>::min();
+      auto max_value = 1 - std::numeric_limits<scalar_t>::epsilon();
+      ret_val = (min_value > ret_val) ? min_value : ret_val;
+      ret_val = (max_value < ret_val) ? max_value : ret_val;
+      return ret_val;
+    });
 }
 
 } // namespace
