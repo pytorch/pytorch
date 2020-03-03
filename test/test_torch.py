@@ -2126,12 +2126,18 @@ class _TestTorchMixin(object):
             self.assertTrue((res1 >= 0).all().item())
 
     def test_randn(self):
-        torch.manual_seed(123456)
-        res1 = torch.randn(SIZE, SIZE)
-        res2 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randn(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
+        def common_routine(dtype):
+            torch.manual_seed(123456)
+            res1 = torch.randn(SIZE, SIZE, dtype=dtype)
+            res2 = torch.tensor([], dtype=dtype)
+            torch.manual_seed(123456)
+            torch.randn(SIZE, SIZE, out=res2)
+            self.assertEqual(res1, res2)
+
+        common_routine(dtype=torch.float32)
+        common_routine(dtype=torch.float64)
+        common_routine(dtype=torch.complex64)
+        common_routine(dtype=torch.complex128)
 
     def test_slice(self):
         empty = torch.empty(0, 4)
