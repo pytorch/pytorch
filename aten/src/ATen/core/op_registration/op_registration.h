@@ -582,9 +582,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const Options& options);
   void registerOp_(Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config, OperatorOptions&& options);
-  void registerSchemaOnly_(FunctionSchema&& schema, OperatorOptions&& options);
-  static OperatorOptions makeOperatorOptions_(const Options& options);
+  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
+  void registerSchemaOnly_(FunctionSchema&& schema);
 
   class OperatorRegistrar;
 

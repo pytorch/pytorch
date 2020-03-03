@@ -66,26 +66,21 @@ struct TORCH_API Operator {
   Operator(c10::OperatorHandle opHandle, Operation operation)
       : schema_(std::make_shared<FunctionSchema>(opHandle.schema())),
         op_(std::make_shared<Operation>(std::move(operation))),
-        c10Handle_(opHandle),
-        options_(c10Handle_->options()) {}
+        c10Handle_(opHandle) {}
 
 
   Operator(
       const std::string& schema,
-      int(*op)(Stack&),
-      c10::OperatorOptions options = c10::OperatorOptions())
+      int(*op)(Stack&))
       : schema_string_(schema),
-        op_(std::make_shared<Operation>(std::move(op))),
-        options_(std::move(options)) {}
+        op_(std::make_shared<Operation>(std::move(op))) {}
 
 
   Operator(
       const std::string& schema,
-      OperationCreator op_creator,
-      c10::OperatorOptions options = c10::OperatorOptions())
+      OperationCreator op_creator)
       : schema_string_(schema),
-        op_creator_(std::move(op_creator)),
-        options_(std::move(options)) {}
+        op_creator_(std::move(op_creator)) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -93,11 +88,9 @@ struct TORCH_API Operator {
   // arguments.
   Operator(
       Symbol name,
-      OperationCreator op_creator,
-      c10::OperatorOptions options = c10::OperatorOptions())
+      OperationCreator op_creator)
       : schema_(std::make_shared<FunctionSchema>(varArgSchemaWithName(name))),
-        op_creator_(std::move(op_creator)),
-        options_(std::move(options)) {}
+        op_creator_(std::move(op_creator)) {}
 
   Operation getOperation(const Node* node = nullptr) const {
     if (op_) {
@@ -126,13 +119,13 @@ struct TORCH_API Operator {
     if (isC10Op()) {
       const FunctionSchema& schemaRef = schema();
       TORCH_CHECK(
-          options_.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
+          schemaRef.aliasAnalysis() == AliasAnalysisKind::FROM_SCHEMA ||
               !schemaRef.hasAnyAliasInfo(),
           "In operator registration: Tried to register operator ",
           schemaRef,
           " with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA.");
     }
-    return options_.aliasAnalysis();
+    return schema().aliasAnalysis();
   }
   bool hasOperation() const {
     return op_ != nullptr;
@@ -158,7 +151,6 @@ struct TORCH_API Operator {
   std::shared_ptr<Operation> op_;
   OperationCreator op_creator_;
   c10::optional<c10::OperatorHandle> c10Handle_;
-  c10::OperatorOptions options_;
 };
 
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
