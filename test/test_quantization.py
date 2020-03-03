@@ -1406,9 +1406,10 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
         qparams = myobs.calculate_qparams()
-        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
-        myobs(x)
+        out_x = myobs(x)
+        self.assertTrue(out_x.requires_grad)
         myobs(y)
         self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)

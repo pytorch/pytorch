@@ -13,13 +13,7 @@ elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
   export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
-  python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
-  # Prior to Python 3.8 paths were suffixed with an 'm'
-  if [[ -d  "\${python_path}/bin" ]]; then
-    export PATH="\${python_path}/bin:\$PATH"
-  elif [[ -d "\${python_path}m/bin" ]]; then
-    export PATH="\${python_path}m/bin:\$PATH"
-  fi
+  export PATH="/opt/python/cp\$python_nodot-cp\${python_nodot}m/bin:\$PATH"
 fi
 
 # Install the package
