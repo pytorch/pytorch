@@ -685,7 +685,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     const Tensor& fn_dropout_state
     ) {
 
-  std::cout << std::to_string(weight.size()) << "\n";
+  // std::cout << std::to_string(weight.size()) << "\n";
   check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;

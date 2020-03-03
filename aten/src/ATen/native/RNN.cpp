@@ -1050,10 +1050,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     if(bidirectional && !type_2) {
-        // std::cout << "_params size: " << std::to_string(_params.size()) << "\n";
-        // for(auto param = 0; param < _params.size(); param++){
-        //   std::cout << "_params[" << param << "] size: " << _params[param].sizes() << "\n";
-        // }
         // CUDNN does not support Type-1 RNNs on their API, thus we need to
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
@@ -1083,6 +1079,11 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // _fwd_params contains the forward parameters and _params the backward ones
         TensorList _fwd_params = _params.slice(_params.size() / 2);
         std::cout << "I don't fail?" << "\n";
+
+        std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
+        for(auto param = 0; param < _fwd_params.size(); param++){
+          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "\n";
+        }
 
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
