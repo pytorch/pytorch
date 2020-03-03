@@ -64,10 +64,12 @@ Tensor binary_cross_entropy_cuda(const Tensor& input, const Tensor& target, cons
 }
 
 Tensor& binary_cross_entropy_out_cuda(Tensor& loss, const Tensor& input, const Tensor& target, const Tensor& weight, int64_t reduction) {
+  Tensor loss_squeezed = at::squeeze(loss);
+
   TensorIterator iter;
-  iter.add_output(loss);
-  iter.add_input(input);
-  iter.add_input(target);
+  iter.add_output(loss_squeezed);
+  iter.add_input(at::squeeze(input));
+  iter.add_input(at::squeeze(target));
   iter.build();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "binary_cross_entropy_out_cuda", [&]() {
     gpu_kernel(iter,
