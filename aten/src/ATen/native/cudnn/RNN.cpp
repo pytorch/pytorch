@@ -1343,6 +1343,8 @@ void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool type_2, bool batch_first) {
+  std::cout << "hx[0]: " << hx[0].sizes() << "\n";
+  std::cout << "hx[1]: " << hx[0].sizes() << "\n";
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, type_2, batch_first);
   output = result.first;

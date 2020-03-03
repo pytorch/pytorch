@@ -1081,8 +1081,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         _bwd_hx.push_back(h_bwd.contiguous());
         _bwd_hx.push_back(c_bwd.contiguous());
 
-        std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
-        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
+        std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << " size: " << _fwd_hx[0].sizes() << "\n";
+        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << " size: " << _fwd_hx[0].sizes() << "\n";
 
         // Reverse input to backward LSTM
         auto input = batch_first ? _input.transpose(0, 1) : _input;
