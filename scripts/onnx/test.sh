@@ -64,5 +64,5 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    "$top_dirtest/test/onnx/test_utility_funs.py"
+    "$top_dir/test/onnx/test_utility_funs.py"
 fi
