@@ -1255,45 +1255,55 @@ graph(%x : Tensor,
             qconfig_dict = {
                 '': script_qconfig(qconfig)
             }
-            # TODO: Here we have a temporary workaround to use
-            # non-inplace insert_observers and insert_quant_dequant because
-            # interpreter instructions seem to be cached,
-            # we need to fix the caching before we can use inplace
-            # insert_observers and insert_quant_dequant
             m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
-            # Make sure we insert 3 observers instead of 6
-            for postfix in ['_0', '_1', '_2']:
-                obs = '_observer' + postfix
-                assert m.conv1._c.hasattr(obs)
-                assert m.conv2._c.hasattr(obs)
+            # observers for input, output and value between conv1/conv2
+            assert len(attrs_with_prefix(m, '_observer_')) == 3, \
+                'Expected to have 3 obervers'
+            # observer for weight
+            assert len(attrs_with_prefix(m.conv1, '_observer_')) == 1, \
+                'Expected to have 1 obervers'
+            # observer for weight
+            assert len(attrs_with_prefix(m.conv2, '_observer_')) == 1, \
+                'Expected to have 1 obervers'
 
             data = torch.randn(1, 3, 10, 10, dtype=torch.float)
             m(data)
             m = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(m._c, "forward", False))
             m(data)
             assert m.conv1._c._type() == m.conv2._c._type()
-            # Ideally we should check for the quantization parameter
-            # attributes as well, but since the attribute names are
-            # dependent on implementation of the compiler, we will
-            # skip that.
-            for postfix in ['_0', '_1', '_2']:
-                obs = '_observer' + postfix
-                assert not m.conv1._c.hasattr(obs)
-                assert not m.conv2._c.hasattr(obs)
+
+            # check all observers have been removed
+            assert len(attrs_with_prefix(m, '_observer_')) == 0, \
+                'Expected to have 0 obervers'
+            assert len(attrs_with_prefix(m.conv1, '_observer_')) == 0, \
+                'Expected to have 0 obervers'
+            assert len(attrs_with_prefix(m.conv2, '_observer_')) == 0, \
+                'Expected to have 0 obervers'
+
             quant_func = "aten::quantize_per_channel" if is_per_channel \
                 else "aten::quantize_per_tensor"
-            FileCheck().check_not(quant_func) \
+            # quantize for activations
+            FileCheck().check(quant_func) \
                        .check("prim::CallMethod[name=\"forward\"]") \
-                       .check_not(quant_func) \
+                       .check(quant_func) \
+                       .check("prim::CallMethod[name=\"forward\"]") \
+                       .check(quant_func) \
                        .check("return") \
                        .run(str(get_forward_graph(m._c)))
-            FileCheck().check(quant_func) \
-                       .check_next("aten::dequantize") \
-                       .check("aten::conv2d") \
-                       .check(quant_func) \
-                       .check_next("aten::dequantize") \
-                       .check("return") \
-                       .run(m.conv1._c._get_method('_conv_forward').graph)
+            for module in ['conv1', 'conv2']:
+                conv = m._c.getattr(module)
+                # quantize weight
+                FileCheck().check(quant_func) \
+                           .check_next("aten::dequantize") \
+                           .check("prim::CallMethod[name=\"_conv_forward\"]") \
+                           .check("return") \
+                           .run(get_forward_graph(conv))
+                # no quantize node in _conv_forward
+                FileCheck().check_not(quant_func) \
+                           .check("aten::conv2d") \
+                           .check_not(quant_func) \
+                           .check("return") \
+                           .run(conv._get_method('_conv_forward').graph)
 
     def test_insert_prepack_unpack(self):
         # Module with linear and per tensor/channel quantized weight
