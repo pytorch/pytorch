@@ -44,6 +44,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::FutureType) {
     auto elem = t.cast<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
+  } else if(t.kind() == TypeKind::RRefType) {
+    auto elem = t.cast<RRefType>()->getElementType();
+    out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
       out << "NamedTuple";
@@ -197,6 +200,16 @@ ListTypePtr ListType::ofBools() {
 }
 ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
+  return value;
+}
+
+AnyListTypePtr AnyListType::get() {
+  static auto value = AnyListType::create();
+  return value;
+}
+
+AnyTupleTypePtr AnyTupleType::get() {
+  static auto value = AnyTupleType::create();
   return value;
 }
 
@@ -375,6 +388,19 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->python_str();
+      return ss.str();
+    }
+  } else if (auto lt_formal = formal->cast<RRefType>()) {
+    if (auto lt_actual = actual->cast<RRefType>()) {
+      const auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match a rref to " << actual->python_str();
       return ss.str();
     }
   } else if (auto opt_formal = formal->cast<OptionalType>()) {
@@ -560,8 +586,12 @@ TupleType::TupleType(
 }
 
 bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
-  if (Type::isSubtypeOfExt(rhs_, why_not))
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
     return true;
+  }
+  if (rhs_->kind() == AnyTupleType::Kind) {
+    return true;
+  }
   auto rhs = rhs_->cast<TupleType>();
   if (!rhs)
     return false;
@@ -588,6 +618,16 @@ bool TupleType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const 
   return names_match && compare(*rhs, [&](const TypePtr a, const TypePtr b) {
     return a->isSubtypeOfExt(b, why_not);
   });
+}
+
+bool ListType::isSubtypeOfExt(const TypePtr rhs_, std::ostream* why_not) const {
+  if (Type::isSubtypeOfExt(rhs_, why_not)) {
+    return true;
+  }
+  if (rhs_->kind() == AnyListType::Kind) {
+    return true;
+  }
+  return false;
 }
 
 bool TupleType::operator==(const Type& rhs) const {

@@ -1,7 +1,7 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/operator.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 
 #include <vector>
@@ -58,7 +58,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
       "aten::ne(Tensor self, Scalar other) -> Tensor",
   };
 
-  if (comparison_ops.find(node)) {
+  if (node->isMemberOf(comparison_ops)) {
     return setRequiresGrad(node->output(), false);
   } else if (node->matches(
                  "aten::type_as(Tensor self, Tensor other) -> Tensor")) {

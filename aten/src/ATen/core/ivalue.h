@@ -23,6 +23,7 @@ template<class T> class List;
 struct IValue;
 struct ClassType;
 struct Type;
+class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
 namespace ivalue {
 struct Tuple;
@@ -56,7 +57,8 @@ struct PyObjectHolder;
   _(Object) \
   _(PyObject) \
   _(Uninitialized) \
-  _(Capsule)
+  _(Capsule) \
+  _(RRef) \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -243,6 +245,12 @@ struct CAFFE2_API IValue final {
   bool isFuture() const { return Tag::Future == tag; }
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const &;
+
+  // RRef
+  IValue(c10::intrusive_ptr<c10::RRefInterface> v);
+  bool isRRef() const { return Tag::RRef == tag; }
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
+  c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
 
   // Int
   IValue(int64_t i)
@@ -496,11 +504,44 @@ struct CAFFE2_API IValue final {
 
   /// @private [doxygen private]
   const void* internalToPointer() const {
-    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call internalToPointer() for pointer types");
+    TORCH_INTERNAL_ASSERT(
+        isPtrType(), "Can only call internalToPointer() for pointer types");
     return payload.as_intrusive_ptr;
   }
 
   TypePtr type() const;
+
+  size_t hash() const {
+    return payload.as_int;
+  }
+
+  // Detection Aliased tensors.
+  struct HashIValue {
+    size_t operator()(const IValue& val) const {
+      if (val.isTensor()) {
+        return 0;
+      }
+      return val.hash();
+    }
+  };
+
+  struct CompIValues {
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      if (lhs.isTensor() && rhs.isTensor()) {
+        return lhs.isAliasOf(rhs);
+      }
+      return lhs.hash() == rhs.hash();
+    }
+  };
+
+  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+
+  // Chechs if this and rhs has a subvalues in common.
+  // [t1,t2] and [t2, t3] returns true.
+  bool overlaps(const IValue& rhs) const;
+
+  // Inserts all subvalues of this in subValues.
+  void getSubValues(HashAliasedIValues& subValues) const;
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
@@ -642,19 +683,16 @@ private:
   bool is_intrusive_ptr;
 };
 
-// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
-// and its owning CU, so that the class type is guaranteed to stay alive as long
-// as we hold this object.
-struct StrongTypePtr {
+// An owning pointer to a type. When the type is class type, it requires a pair
+// of shared_ptrs to the class type and its owning CU, so that the class type is
+// guaranteed to stay alive as long as we hold this object.
+struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
+      std::shared_ptr<Type> type);
+
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+  std::shared_ptr<Type> type_;
 };
 
 TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();

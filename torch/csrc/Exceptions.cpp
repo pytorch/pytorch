@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 #include <cstdarg>
+#include <exception>
 
 #include <torch/csrc/THP.h>
 
@@ -144,7 +145,8 @@ void PyWarningHandler::process(
 };
 
 PyWarningHandler::PyWarningHandler() noexcept(true):
-      prev_handler_(c10::Warning::get_warning_handler()) {
+      prev_handler_(c10::Warning::get_warning_handler()),
+      in_exception_(false) {
   c10::Warning::set_warning_handler(this);
 }
 
@@ -154,13 +156,8 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   c10::Warning::set_warning_handler(prev_handler_);
 
   if(warning_buffer_.size() > 0) {
-    pybind11::gil_scoped_acquire gil;
-
-    PyObject *ptype, *pvalue, *ptraceback;
-    PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-
-    if(ptype) {
-      // A python error happened after the warning
+    if(in_exception_) {
+      // An error happened after the warning
       // Simply handle with the previous handler
       for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
@@ -168,11 +165,8 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
         c10::Warning::warn(source_location, msg);
       }
       warning_buffer_.clear();
-      // The parent function already returns an error
-      // We only restore the error and exit the
-      // destructor normally
-      PyErr_Restore(ptype, pvalue, ptraceback);
     } else {
+      pybind11::gil_scoped_acquire gil;
       auto result = 0;
       for(const auto& warning: warning_buffer_) {
         auto source_location = warning.first;
@@ -205,4 +199,3 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
 
 
 } // namespace torch
-
