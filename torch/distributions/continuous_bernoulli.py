@@ -4,7 +4,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -14,7 +14,7 @@ class ContinuousBernoulli(ExponentialFamily):
     or :attr:`logits` (but not both).
 
     The distribution is supported in [0, 1] and parameterized by 'probs' (in
-    (0,1)) or 'logits (real-valued). Note that, unlike the Bernoulli, 'probs'
+    (0,1)) or 'logits' (real-valued). Note that, unlike the Bernoulli, 'probs'
     does not correspond to a probability and 'logits' does not correspond to
     log-odds, but the same names are used due to the similarity with the
     Bernoulli. See [1] for more details.
@@ -33,7 +33,7 @@ class ContinuousBernoulli(ExponentialFamily):
     autoencoders, Loaiza-Ganem G and Cunningham JP, NeurIPS 2019.
     https://arxiv.org/abs/1907.06845
     """
-    arg_constraints = {'probs': constraints.open_unit_interval,
+    arg_constraints = {'probs': constraints.unit_interval,
                        'logits': constraints.real}
     support = constraints.unit_interval
     _mean_carrier_measure = 0
@@ -44,7 +44,7 @@ class ContinuousBernoulli(ExponentialFamily):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(probs)
+            self.probs, = broadcast_all(clamp_probs(probs))
         else:
             is_scalar = isinstance(logits, Number)
             self.logits, = broadcast_all(logits)
@@ -126,7 +126,7 @@ class ContinuousBernoulli(ExponentialFamily):
 
     @lazy_property
     def probs(self):
-        return logits_to_probs(self.logits, is_binary=True)
+        return clamp_probs(logits_to_probs(self.logits, is_binary=True))
 
     @property
     def param_shape(self):
@@ -172,19 +172,14 @@ class ContinuousBernoulli(ExponentialFamily):
              - torch.log1p(-cut_probs)) / (torch.log(cut_probs) - torch.log1p(-cut_probs)),
             value)
 
-    def entropy(self):
-        log_probs0 = torch.log1p(-self.probs)
-        log_probs1 = torch.log(self.probs)
-        return self.mean * (log_probs0 - log_probs1)\
-               - self._cont_bern_log_norm() - log_probs0
-
     @property
     def _natural_params(self):
         return (torch.log(self.probs / (1 - self.probs)), )
 
     def _log_normalizer(self, x):
         """computes the log normalizing constant as a function of the natural parameter"""
-        nat_params = torch.log(x / (1 - x))
+        x = clamp_probs(x)
+        nat_params = torch.log(x) - torch.log1p(-x)
         out_unst_reg = torch.max(torch.le(nat_params, self._lims[0] - 0.5),
                                  torch.gt(nat_params, self._lims[1] - 0.5))
         cut_nat_params = torch.where(out_unst_reg,
