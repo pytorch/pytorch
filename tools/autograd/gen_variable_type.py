@@ -70,10 +70,12 @@ RENAME_TRACE = {
 # arguments (inside of the `native_functions.yaml`)
 RENAME_TRACE_ADD_ARGS = {
     'fill': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
     'zero': '''\
+    jit::tracer::addInputs(node, "options", TensorOptions());
     c10::optional<MemoryFormat> memory_format = c10::MemoryFormat::Preserve;
     jit::tracer::addInputs(node, "memory_format", memory_format);
 ''',
@@ -307,7 +309,7 @@ ${statements}
 
 # Generate a file that lists all functions and their schema string. Used for XLA
 REGISTRATION_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${type_method_formals}); // ${schema_string}
+${return_type} ${api_name}(${type_method_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
 
 
@@ -503,10 +505,11 @@ def gen_variable_type(out, aten_declarations, template_path):
     REGISTRATION_DECLARATIONS_H = CodeTemplate.from_file(template_path + "/RegistrationDeclarations.h")
     registration_declarations = []
 
-    # TODO(Ailing): copy_ and einsum will be removed in followup PRs.
     for declaration in aten_declarations:
-        if dispatch_strategy(declaration) == 'use_derived' or declaration['name'] in ('copy_', 'resize_', 'einsum'):
-            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration))
+        if dispatch_strategy(declaration) == 'use_derived':
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='false'))
+        else:
+            registration_declarations.append(REGISTRATION_DECLARATION.substitute(declaration, compound='true'))
 
     env = {
         'registration_declarations': registration_declarations,
@@ -532,7 +535,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
             else:
-                assert declaration['use_c10_dispatcher'] in ['unboxed_only', 'with_codegenerated_unboxing_wrapper']
+                assert declaration['use_c10_dispatcher'] == 'unboxed_only'
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, formal_types=formal_types))
 

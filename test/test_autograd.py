@@ -484,6 +484,11 @@ class TestAutograd(TestCase):
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_z)
 
+        # allow_unused=False, but grads contains None inside, should throw
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Set allow_unused=True"):
+            grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=False)
+
     def test_hooks(self):
         x = torch.ones(5, 5, requires_grad=True)
         y = torch.ones(5, 5) * 4

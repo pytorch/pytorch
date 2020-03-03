@@ -9,11 +9,16 @@ static const std::unordered_map<NodeKind, NodeKind> inPlaceToOutOfPlace = {
     {aten::div_, aten::div},
     {aten::mul_, aten::mul},
     {aten::zero_, aten::zeros_like},
-    {aten::fill_, aten::full_like}};
+    {aten::fill_, aten::full_like}
+    };
 
+// This is a horrible no good awful hack to "fill in" the TensorOptions
+// arguments of zeros_like and full_like so that the defaults are filled
+// in.  Ugh.  Would be better to just run the frontend to get the correct
+// arity here.
 static const std::unordered_map<NodeKind, int> expectedInputCount = {
-    {aten::zero_, 2},
-    {aten::fill_, 3}};
+    {aten::zero_, 6},
+    {aten::fill_, 7}};
 
 bool isInplaceOp(const Node* node) {
   return inPlaceToOutOfPlace.count(node->kind()) != 0;
