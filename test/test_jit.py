@@ -5216,8 +5216,6 @@ def foo(x):
         for expected in ["deserialized", "was", "i"]:
             assert eic.f.pop() == expected
 
-        torch.jit.save(scripted, '/home/jamesreed/foo.pt')
-
     @skipIfRocm
     @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_torchbind_getstate(self):
