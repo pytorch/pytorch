@@ -1099,7 +1099,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
-          _fwd_params[param] = _fwd_params[param].contiguous();
+          // _fwd_params[param] = _fwd_params[param].contiguous();
           std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
