@@ -50,23 +50,37 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
 
       // scriptCall is only alive within this block, use reference to avoid copy
       auto& stack = scriptCall.stackRef();
+
       if (scriptCall.hasOp()) {
         scriptCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptCall.qualifiedName())
-            .run(stack);
+        TORCH_INTERNAL_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
+        return wrap(
+            std::move(ScriptResp(std::move(stack.front()))).toMessage());
       }
 
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      return wrap(std::move(ScriptResp(std::move(stack.front()))).toMessage());
+      auto future = PythonRpcHandler::getInstance()
+                        .jitCompilationUnit()
+                        ->get_function(scriptCall.qualifiedName())
+                        .runAsync(stack);
+      if (future->completed()) {
+        return wrap(std::move(ScriptResp(future->value())).toMessage());
+      }
+      auto responseFuture = std::make_shared<FutureMessage>();
+      future->addCallback([responseFuture, messageId, future]() {
+        try {
+          Message m = ScriptResp({future->value()}).toMessage();
+          m.setId(messageId);
+          responseFuture->markCompleted(std::move(m));
+        } catch (const std::exception& e) {
+          responseFuture->setError(e.what());
+        }
+      });
+      return responseFuture;
     }
     case MessageType::PYTHON_CALL: {
       auto& pyCall = static_cast<PythonCall&>(rpc);
@@ -98,28 +112,6 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
       }
 
       auto ownerRRef = ctx.getOrCreateOwnerRRef(rrefId, returnType);
-
-      // TODO: make this asynchronous
-      // scriptRemoteCall is only alive within this block, use reference to
-      // avoid copy
-      auto& stack = scriptRemoteCall.stackRef();
-      if (scriptRemoteCall.hasOp()) {
-        scriptRemoteCall.op()->getOperation()(stack);
-      } else {
-        PythonRpcHandler::getInstance()
-            .jitCompilationUnit()
-            ->get_function(scriptRemoteCall.qualifiedName())
-            .run(stack);
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          stack.size() == 1,
-          "Return value of a builtin operator or a "
-          "TorchScript function should be a single IValue, got a vector of "
-          "size ",
-          stack.size());
-
-      ownerRRef->setValue(std::move(stack.front()));
       if (rrefId != forkId) {
         // Caller is a user and callee is the owner, add fork
         //
@@ -129,9 +121,48 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         // addForkOfOwner as it is not a fork. To allow callee to distinguish
         // when this request is sent to self, the caller will set forkId using
         // rrefId (OwnerRRef does not have a forkId anyway).
-        ctx.addForkOfOwner(rrefId, forkId);
+        RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
       }
-      return wrap(RemoteRet(rrefId, forkId).toMessage());
+
+      auto onCompletion =
+          [ownerRRef, rrefId, forkId, messageId](IValue val) -> Message {
+        ownerRRef->setValue(std::move(val));
+        Message m = RemoteRet(rrefId, forkId).toMessage();
+        m.setId(messageId);
+        return m;
+      };
+
+      // scriptRemoteCall is only alive within this block, use reference to
+      // avoid copy
+      auto& stack = scriptRemoteCall.stackRef();
+      if (scriptRemoteCall.hasOp()) {
+        scriptRemoteCall.op()->getOperation()(stack);
+        TORCH_INTERNAL_ASSERT(
+            stack.size() == 1,
+            "Return value of a builtin operator or a "
+            "TorchScript function should be a single IValue, got a vector of "
+            "size ",
+            stack.size());
+        return std::make_shared<FutureMessage>(onCompletion(stack.front()));
+      }
+
+      auto future = PythonRpcHandler::getInstance()
+                        .jitCompilationUnit()
+                        ->get_function(scriptRemoteCall.qualifiedName())
+                        .runAsync(stack);
+
+      if (future->completed()) {
+        return std::make_shared<FutureMessage>(onCompletion(future->value()));
+      }
+      auto responseFuture = std::make_shared<FutureMessage>();
+      future->addCallback([responseFuture, future, onCompletion]() {
+        try {
+          responseFuture->markCompleted(onCompletion(future->value()));
+        } catch (const std::exception& e) {
+          responseFuture->setError(e.what());
+        }
+      });
+      return responseFuture;
     }
     case MessageType::PYTHON_REMOTE_CALL: {
       auto& prc = static_cast<PythonRemoteCall&>(rpc);
@@ -164,8 +195,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -190,8 +220,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         auto value = rref->getValue();
         py::object pyValue;

@@ -29,6 +29,8 @@ struct TORCH_API Function {
 
   void run(Stack&& stack);
 
+  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+
   IValue operator()(
       std::vector<IValue> stack,
       const Kwargs& kwargs = Kwargs());

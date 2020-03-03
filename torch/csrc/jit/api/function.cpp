@@ -36,6 +36,10 @@ void Function::run(Stack&& stack) {
   run(stack);
 }
 
+c10::intrusive_ptr<Future> Function::runAsync(Stack& stack) {
+  return get_executor().runAsync(stack);
+}
+
 IValue Function::operator()(
     std::vector<IValue> stack,
     const Kwargs& kwargs) {

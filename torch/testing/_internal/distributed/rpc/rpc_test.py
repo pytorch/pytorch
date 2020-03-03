@@ -7,6 +7,7 @@ from datetime import timedelta
 from unittest import mock
 
 import torch
+import torch.jit
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils as dist_utils
@@ -239,6 +240,17 @@ def heavy_rpc_torchscript(tensor):
         tensor *= i
         tensor /= i + 1
     return 0
+
+
+@torch.jit.script
+def script_sleep_and_add(x):
+    return torch.add(x, torch.ones(1))
+
+@torch.jit.script
+def script_fork_wait_udf(tensor):
+    fut = torch.jit._fork(script_sleep_and_add, tensor)
+    x = torch.jit._wait(fut)
+    return x
 
 def raise_func():
     raise ValueError("Expected error")
@@ -1631,3 +1643,19 @@ class RpcTest(RpcAgentTestFixture):
                 AttributeError, "RPC pickler does not serialize"
             ):
                 rpc.rpc_sync(callee_worker, foo_add, args=())
+
+    @dist_init
+    def test_async_script_udf(self):
+        for i in range(1, 3):
+            future = rpc.rpc_async(
+                "worker{}".format((self.rank + 1) % self.world_size),
+                script_fork_wait_udf,
+                args=(torch.ones(2),))
+            self.assertEqual(future.wait(), torch.ones(2) * 2)
+
+    @dist_init
+    def test_remote_script_udf(self):
+        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+                          script_fork_wait_udf,
+                          args=(torch.ones(2),))
+        self.assertEqual(rref.to_here(), torch.ones(2) * 2)
