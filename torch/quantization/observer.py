@@ -807,7 +807,7 @@ class HistogramObserver(_ObserverBase):
             self.histogram = combined_histogram
             self.min_val = combined_min
             self.max_val = combined_max
-        return x
+        return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
