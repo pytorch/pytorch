@@ -1483,28 +1483,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
             torch._C._jit_pass_quant_fusion(graph)
             FileCheck().run(input_str, graph)
 
-    def test_quantized_conv_relu_fusion(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.conv = torch.nn.Conv2d(1, 4, 2, 3).float()
-                self.relu = torch.nn.ReLU()
-
-            def forward(self, x):
-                return self.relu(self.conv(x))
-
-        m = torch.jit.script(M().eval())
-        m = prepare_script(m, {'': script_qconfig(default_qconfig)}, True)
-        data = torch.randn(1, 1, 10, 10, dtype=torch.float)
-        m(data)
-        m = convert_script(m, True)
-        print(m.graph_for(data))
-        FileCheck().check_not("aten::conv2d") \
-                   .check_not("aten::relu") \
-                   .check("quantized::conv2d_relu") \
-                   .run(m.graph_for(data))
-
-
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -4417,6 +4395,26 @@ class TestScript(JitTestCase):
         with self.assertRaises(RuntimeError):
             m.foo = 6
 
+    def test_script_packedsequence(self):
+        class ExperimentalLSTM(torch.nn.Module):
+            def __init__(self, input_dim, hidden_dim):
+                super().__init__()
+
+            def forward(self, input):
+                # type: (Tensor)
+                packed = torch.nn.utils.rnn.pack_padded_sequence(
+                    input=input, lengths=torch.tensor([1, 2]), enforce_sorted=False
+                )
+                output, lengths = torch.nn.utils.rnn.pad_packed_sequence(
+                    sequence=packed, total_length=2
+                )
+                # lengths is flipped, so is output
+                return output[0]
+
+        lstm = ExperimentalLSTM(input_dim=2, hidden_dim=2)
+
+        with torch.jit._disable_emit_hooks():
+            self.checkModule(lstm, [torch.ones(2, 2)])
 
     def test_class_attribute(self):
         class M(torch.jit.ScriptModule):
@@ -11132,7 +11130,8 @@ a")
                 x[seq_lens[b]:, b, :] = 0
 
         eager_seq, eager_lengths = pack_padded_pad_packed_script(x, seq_lens)
-        scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
+        with torch.jit._disable_emit_hooks():
+            scripted_pack_padded_seq = torch.jit.script(pack_padded_pad_packed_script)
         script_seq, script_lengths = scripted_pack_padded_seq(x, seq_lens)
         self.assertEqual(eager_seq, script_seq)
         self.assertEqual(eager_lengths, script_lengths)
