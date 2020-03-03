@@ -56,6 +56,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
               R"(URL specifying how to initialize the process group.
                 Default is ``env://``)");
 
+  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
+
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
           module,
@@ -222,7 +225,7 @@ If the future completes with an error, an exception is thrown.
               rpc_timeout (datetime.timedelta, optional): The timeout for RPC
                   requests (default: ``timedelta(seconds=60)``).
               init_method (str, optional): The URL to initialize
-                  ``ProcessGroupGloo`` (default: ``env://```).
+                  ``ProcessGroupGloo`` (default: ``env://``).
 
 
           Example::
@@ -245,15 +248,18 @@ If the future completes with an error, an exception is thrown.
       )")
       .def(
           py::init<int, std::chrono::milliseconds, std::string>(),
-          py::arg("num_send_recv_threads") = 4,
-          py::arg("rpc_timeout") = std::chrono::seconds(60),
-          py::arg("init_method") = "env://")
+          py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
+          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
           &ProcessGroupRpcBackendOptions::numSendRecvThreads_,
           R"(
               The number of threads in the thread-pool used by ProcessGroupAgent.
           )");
+
+  module.attr("_DEFAULT_NUM_SEND_RECV_THREADS") =
+      py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(

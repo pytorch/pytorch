@@ -11,6 +11,9 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kDefaultRpcTimeout = std::chrono::seconds(60);
+constexpr auto kDefaultInitMethod = "env://";
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 // Input is qualified name string, output is JIT StrongTypePtr
