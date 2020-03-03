@@ -71,16 +71,11 @@ std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_lstm_hidden(TensorLis
   return std::make_tuple(std::move(_fwd_hx), std::move(_bwd_hx));
 }
 
-std::tuple<Tensor> split_rnn_hidden(const Tensor& hx) {
+std::tuple<Tensor, Tensor> split_rnn_hidden(const Tensor& hx) {
   auto h_slices = hx.chunk(2, 0);
   auto h_fwd = h_slices[0];
   auto h_bwd = h_slices[1];
-
-  std::vector<Tensor> _fwd_hx;
-  std::vector<Tensor> _bwd_hx;
-  _fwd_hx.push_back(h_fwd.contiguous());
-  _bwd_hx.push_back(h_bwd.contiguous());
-  return std::make_tuple(std::move(_fwd_hx), std::move(_bwd_hx));
+  return std::make_tuple(std::move(h_fwd), std::move(h_bwd));
 }
 
 
@@ -990,7 +985,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
     if(bidirectional && !type_2) {                                             \
-      return rnn_nocpu_type1(input, hx, _params, has_biases, num_layers,       \
+      return rnn_nocpu_type1(_input, hx, _params, has_biases, num_layers,      \
         dropout_p, train, bidirectional, type_2, batch_first, NAME##_cudnn_stub); \
     } else {                                                                   \
       Tensor output, hy;                                                       \
