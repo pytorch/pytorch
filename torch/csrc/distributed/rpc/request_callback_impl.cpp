@@ -63,6 +63,10 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
             std::move(ScriptResp(std::move(stack.front()))).toMessage());
       }
 
+      // runAsync() starts in the calling thread, but may return an uncompleted
+      // future (though for non-async code, it will typically be completed).
+      // If it was async, our callback will typically be invoked by the
+      // continuation on an at::launch() thread.
       auto future = PythonRpcHandler::getInstance()
                         .jitCompilationUnit()
                         ->get_function(scriptCall.qualifiedName())
@@ -121,7 +125,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         // addForkOfOwner as it is not a fork. To allow callee to distinguish
         // when this request is sent to self, the caller will set forkId using
         // rrefId (OwnerRRef does not have a forkId anyway).
-        RRefContext::getInstance().addForkOfOwner(rrefId, forkId);
+        ctx.addForkOfOwner(rrefId, forkId);
       }
 
       auto onCompletion =
@@ -139,9 +143,8 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
         scriptRemoteCall.op()->getOperation()(stack);
         TORCH_INTERNAL_ASSERT(
             stack.size() == 1,
-            "Return value of a builtin operator or a "
-            "TorchScript function should be a single IValue, got a vector of "
-            "size ",
+            "Return value of a builtin operator or a TorchScript function "
+            "should be a single IValue, got a vector of size ",
             stack.size());
         return std::make_shared<FutureMessage>(onCompletion(stack.front()));
       }

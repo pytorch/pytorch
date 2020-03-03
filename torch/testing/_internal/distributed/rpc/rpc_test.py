@@ -243,12 +243,12 @@ def heavy_rpc_torchscript(tensor):
 
 
 @torch.jit.script
-def script_sleep_and_add(x):
+def script_add_ones(x):
     return torch.add(x, torch.ones(1))
 
 @torch.jit.script
 def script_fork_wait_udf(tensor):
-    fut = torch.jit._fork(script_sleep_and_add, tensor)
+    fut = torch.jit._fork(script_add_ones, tensor)
     x = torch.jit._wait(fut)
     return x
 
