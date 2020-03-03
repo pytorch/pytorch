@@ -46,13 +46,13 @@ PyObject* rpc_init(PyObject* /* unused */) {
             ``init_method`` to be used. )")
           .def_readwrite(
               "rpc_timeout",
-              &RpcBackendOptions::rpcTimeout_,
+              &RpcBackendOptions::rpcTimeout,
               R"(A ``datetime.timedelta`` indicating the timeout to use for all
                 RPCs. If an RPC does not complete in this timeframe, it will
                 complete with an exception indicating that it has timed out.)")
           .def_readwrite(
               "init_method",
-              &RpcBackendOptions::initMethod_,
+              &RpcBackendOptions::initMethod,
               R"(URL specifying how to initialize the process group.
                 Default is ``env://``)");
 
@@ -252,7 +252,7 @@ If the future completes with an error, an exception is thrown.
           py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
-          &ProcessGroupRpcBackendOptions::numSendRecvThreads_,
+          &ProcessGroupRpcBackendOptions::numSendRecvThreads,
           R"(
               The number of threads in the thread-pool used by ProcessGroupAgent.
           )");

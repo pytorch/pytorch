@@ -20,7 +20,7 @@ struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
       std::chrono::milliseconds rpc_timeout,
       std::string init_method)
       : RpcBackendOptions(rpc_timeout, init_method),
-        numSendRecvThreads_(num_send_recv_threads) {
+        numSendRecvThreads(num_send_recv_threads) {
     TORCH_CHECK(
         num_send_recv_threads > 0,
         "Cannot create ProcessGroup RPC backend with ",
@@ -28,7 +28,7 @@ struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
         " threads in the thread-pool.");
   }
 
-  int numSendRecvThreads_;
+  int numSendRecvThreads;
 };
 
 // SendWork and RecvWork will be put into a task queue, and later picked up by

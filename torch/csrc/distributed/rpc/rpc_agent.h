@@ -26,9 +26,9 @@ struct RpcBackendOptions {
   RpcBackendOptions(
       std::chrono::milliseconds rpcTimeout,
       std::string initMethod)
-      : rpcTimeout_(rpcTimeout), initMethod_(initMethod) {}
-  std::chrono::milliseconds rpcTimeout_;
-  std::string initMethod_;
+      : rpcTimeout(rpcTimeout), initMethod(initMethod) {}
+  std::chrono::milliseconds rpcTimeout;
+  std::string initMethod;
 };
 
 // A globally unique ID to identify an RpcAgent
