@@ -1104,6 +1104,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
           std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
+        std::vector<Tensor> bwd_params;
+        for(auto param = _params.size() / 2; param < _params.size(); param++){
+          bwd_params.push_back(_params[param].contiguous());
+          // std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
+        }
+
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
         std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
@@ -1117,7 +1123,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // Backward LSTM
         Tensor bwd_output, b_hy, b_cy;
         lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
-                        _bwd_hx, _params, has_biases, num_layers, dropout_p,
+                        _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
                         train, false, type_2, false);
         std::cout << "LSTM backward" << "\n";
 
