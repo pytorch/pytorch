@@ -41,7 +41,7 @@ void poisson_cuda_kernel(
   iter.build();
   at::native::gpu_kernel(iter,
     [seeds] GPU_LAMBDA (scalar_t lambda) -> scalar_t {
-      #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+      #if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
       curandStatePhilox4_32_10_t state;
       curand_init(
           seeds.first,
