@@ -76,12 +76,10 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
     rand.w = rand.w < p;
 
     // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
-    // -- the IndexToOffset call _could_ be replaced with just linearIndex, but this is
-    // hopefully low enough overhead to not matter
-    const IndexType aOffset =
-      cuda::detail::IndexToOffset<scalar_t, IndexType, ADims>::get(linearIndex, a);
+    // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
+    // ordering.
     // Single vectorized load
-    *value = *reinterpret_cast<LoadT*>(&a.data[aOffset]);
+    *value = *reinterpret_cast<LoadT*>(&a.data[linearIndex]);
 
     scalar_t r[VEC];
     uint8_t mask[VEC];
@@ -92,11 +90,9 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
       r[ii] = src[ii]*(&rand.x)[ii]*pinv;
       mask[ii] = (uint8_t)(&rand.x)[ii];
     }
-    const IndexType bOffset =
-      cuda::detail::IndexToOffset<scalar_t, IndexType, 1>::get(linearIndex, b);
     // Vectorized writes for both mask & result
-    *(reinterpret_cast<LoadT*>(&b.data[bOffset])) = *reinterpret_cast<LoadT*>(&r[0]);
-    *(reinterpret_cast<MaskLoadT*>(&c.data[bOffset])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
+    *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
+    *(reinterpret_cast<MaskLoadT*>(&c.data[linearIndex])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
 
     __syncthreads();
   }
@@ -183,7 +179,8 @@ template <typename scalar_t>
 int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
   int vec_size = 4;
   // get the vector size
-  if (!self.is_contiguous() || !ret.is_contiguous() || !mask.is_contiguous()) {
+  auto memory_format = self.suggest_memory_format();
+  if (!self.is_contiguous(memory_format) || !ret.is_contiguous(memory_format) || !mask.is_contiguous(memory_format)) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((char*)self.data_ptr());
@@ -204,7 +201,7 @@ std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   Tensor ret = at::empty_like(self, self.suggest_memory_format());
-  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte));
+  Tensor mask = at::empty(self.sizes(), self.options().dtype(kByte), self.suggest_memory_format());
   const int64_t nelem = self.numel();
 //empty tensors should not get here, but just in case, avoid FPE
   if (nelem==0) return std::tuple<Tensor,Tensor>(self, mask);
@@ -291,7 +288,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen_){
 }
 
 Tensor masked_scale_cuda(const Tensor& self, const Tensor& mask, double scale){
-   Tensor ret = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+   Tensor ret = at::empty_like(self, self.suggest_memory_format());
    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Byte, "mask should be torch.uint8 dtype");
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.scalar_type(), "masked_scale", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
