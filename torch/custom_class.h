@@ -11,16 +11,16 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/variadic.h>
 #include <torch/custom_class_detail.h>
 #include <iostream>
 #include <sstream>
 
 namespace torch {
 namespace jit {
+
+namespace script {
+struct CompilationUnit;
+}
 
 TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
@@ -50,7 +50,7 @@ class class_ {
 
   std::string className;
   std::string qualClassName;
-  ClassTypePtr classTypePtr;
+  at::ClassTypePtr classTypePtr;
 
   const std::string parentModule = "classes";
   const std::string topModule = "__torch__.torch";
@@ -61,10 +61,10 @@ class class_ {
 
     // We currently represent custom classes as torchscript classes with a
     // capsule attribute
-    classTypePtr = ClassType::create(
+    classTypePtr = at::ClassType::create(
         c10::QualifiedName(qualClassName),
         std::weak_ptr<script::CompilationUnit>());
-    classTypePtr->addAttribute("capsule", CapsuleType::get());
+    classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
         {typeid(c10::intrusive_ptr<CurClass>).name(),
