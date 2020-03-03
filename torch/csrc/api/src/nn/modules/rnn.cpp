@@ -368,9 +368,15 @@ RNNOutput LSTMImpl::forward(const Tensor& input, Tensor state) {
     // 2 for hidden state and cell state, then #layers, batch size, state size
     const auto batch_size = input.size(options.batch_first() ? 0 : 1);
     const auto num_directions = options.bidirectional() ? 2 : 1;
-    state = torch::zeros(
-        {2, options.layers() * num_directions, batch_size, options.hidden_size()},
+    if(options.bidirectional() && !options.cat_layer_fwd_bwd_states()) {
+      state = torch::zeros(
+        {2, num_directions, options.layers(), batch_size, options.hidden_size()},
         input.options());
+    } else {
+      state = torch::zeros(
+          {2, options.layers() * num_directions, batch_size, options.hidden_size()},
+          input.options());
+    }
   }
   Tensor output, hidden_state, cell_state;
   std::tie(output, hidden_state, cell_state) = torch::lstm(

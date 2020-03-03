@@ -1060,12 +1060,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "H type: " << h.device().type() << "\n";
         std::cout << "C type: " << c.device().type() << "\n";
 
-        auto h_slices = h.chunk(2, -1);
-        auto c_slices = c.chunk(2, -1);
-        auto h_fwd = h_slices[0];
-        auto h_bwd = h_slices[1];
-        auto c_fwd = c_slices[0];
-        auto c_bwd = c_slices[1];
+        // auto h_slices = h.chunk(2, -1);
+        // auto c_slices = c.chunk(2, -1);
+        auto h_fwd = h[0];
+        auto h_bwd = h[1];
+        auto c_fwd = c[0];
+        auto c_bwd = c[1];
         std::cout << "h_fwd type: " << h_fwd.device().type() << "\n";
         std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
         std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
