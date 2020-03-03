@@ -254,10 +254,10 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::hardtanh op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 8, 1, 8),
-                       elements=hu.floats(-1e6, 1e6, allow_nan=False),
+                       elements=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()),
-           min_val=hu.floats(-1e6, 1e6, allow_nan=False),
-           max_val=hu.floats(-1e6, 1e6, allow_nan=False))
+           min_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False),
+           max_val=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_hardtanh(self, X, min_val, max_val):
         X, (scale, zero_point, torch_type) = X
 

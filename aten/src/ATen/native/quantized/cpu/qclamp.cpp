@@ -47,9 +47,7 @@ Tensor quantized_hardtanh(
     Scalar min,
     Scalar max) {
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "hardtanh", [&]() {
-    qy = quantized_clamp_impl(qx, min, max);
-  });
+  qy = quantized_clamp_impl(qx, min, max);
   return qy;
 }
 
@@ -58,9 +56,7 @@ Tensor& quantized_hardtanh_out(
     const Tensor& qx,
     Scalar min,
     Scalar max) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "hardtanh", [&]() {
-    result = quantized_clamp_impl(qx, min, max);
-  });
+  result = quantized_clamp_impl(qx, min, max);
   return result;
 }
 
@@ -68,12 +64,10 @@ Tensor& quantized_hardtanh_(
     Tensor& self,
     Scalar min,
     Scalar max) {
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "hardtanh", [&]() {
-    Tensor qy;
-    qy = quantized_clamp_impl(self, min, max);
-    // This can be optimized in a future PR if it becomes a bottleneck.
-    self.copy_(qy);
-  });
+  Tensor qy;
+  qy = quantized_clamp_impl(self, min, max);
+  // This can be optimized in a future PR if it becomes a bottleneck.
+  self.copy_(qy);
   return self;
 }
 

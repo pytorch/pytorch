@@ -335,7 +335,7 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.hardtanh' must be quantized!")
     if inplace:
-      return torch._C._nn.hardtanh_(input, min_val, max_val)
+        return torch._C._nn.hardtanh_(input, min_val, max_val)
     return torch._C._nn.hardtanh(input, min_val, max_val)
 
 def clamp(input, min_, max_):
