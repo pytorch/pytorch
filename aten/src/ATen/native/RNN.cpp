@@ -1082,6 +1082,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "Here I fail!" << "\n";
         // _fwd_params contains the forward parameters and _params the backward ones
         TensorList _fwd_params = _params.slice(_params.size() / 2);
+        std::cout << "I don't fail?" << "\n";
 
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
