@@ -22,15 +22,15 @@ size_t getDefaultNumThreads() {
   int numThreads = cpuinfo_get_processors_count();
 
   bool applyCap = false;
-#if C10_ANDROID
+#if defined(C10_ANDROID)
   applyCap = FLAGS_caffe2_threadpool_android_cap;
-#elif C10_IOS
+#elif defined(C10_IOS)
   applyCap = FLAGS_caffe2_threadpool_ios_cap;
 #endif
 
   if (applyCap) {
     switch (numThreads) {
-#if C10_ANDROID && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
+#if defined(C10_ANDROID) && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
       case 4:
         switch (cpuinfo_get_core(0)->midr & UINT32_C(0xFF00FFF0)) {
           case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
