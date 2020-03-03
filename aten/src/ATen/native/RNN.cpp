@@ -1070,8 +1070,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
         std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
         std::cout << "c_bwd type: " << c_bwd.device().type() << "\n";
-        TensorList _fwd_hx = new TensorList({h_fwd, c_fwd});
-        TensorList _bwd_hx = new TensorList({h_bwd, c_bwd});
+        TensorList _fwd_hx = new TensorList(std::move({h_fwd, c_fwd}));
+        TensorList _bwd_hx = new TensorList(std::move({h_bwd, c_bwd}));
 
         // Reverse input to backward LSTM
         auto input = batch_first ? _input.transpose(0, 1) : _input;
