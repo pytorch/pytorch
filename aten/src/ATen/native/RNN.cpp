@@ -1119,14 +1119,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto bwd_outputs_ref = std::move(bwd_outputs);
         std::reverse(bwd_outputs_ref.begin(), bwd_outputs_ref.end());
         auto rev_step_outputs = std::move(bwd_outputs_ref);
-
         auto bwd_rev_output = at::cat(rev_step_outputs, 0);
-        TensorList outputs = {fwd_output, bwd_rev_output};
-        auto cat_outputs = at::cat(outputs, 0);
+
+        std::vector<Tensor> outputs;
+        outputs.push_back(fwd_output);
+        outputs.push_back(bwd_rev_output);
+        // TensorList outputs = {fwd_output, bwd_rev_output};
+        auto cat_outputs = at::cat(outputs, -1);
         auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
 
-        auto hy = at::cat({f_hy, b_hy}, -1);
-        auto cy = at::cat({f_cy, b_cy}, -1);
+        auto hy = at::cat({f_hy, b_hy}, 0);
+        auto cy = at::cat({f_cy, b_cy}, 0);
         return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
       // Apply Type-2 RNN
