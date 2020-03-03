@@ -855,9 +855,22 @@ class DistAutogradTest(RpcAgentTestFixture):
                 torch.add,
                 args=(t1, t2)).sum()
 
-            dist_autograd.backward(context_id, [loss])
+            dist_autograd.backward(context_id, [loss], retain_graph=True)
             self.assertIsNone(t1.grad)
             self.assertIsNone(t2.grad)
+
+            # Now populate .grad with local autograd engine and 
+            # verify dist autograd doesn't mess with it.
+            loss_local = torch.add(t1, t2).sum()
+            loss_local.backward()
+            self.assertIsNotNone(t1.grad)
+            self.assertIsNotNone(t2.grad)
+
+            t1_grad_before = t1.grad
+            t2_grad_before = t2.grad
+            dist_autograd.backward(context_id, [loss])
+            self.assertEqual(t1_grad_before, t1.grad)
+            self.assertEqual(t2_grad_before, t2.grad)
 
     @dist_init
     def test_backward_simple(self):
