@@ -121,9 +121,8 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   TORCH_CHECK(a->size(0) == b->size(0), "Expected A and b to have same size "
       "at dim 0, but A has ", a->size(0), " rows and B has ", b->size(0), " rows");
 
-  if (THTensor_nDimensionLegacyAll(b) == 1) {
-    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
-            b->stride(0), 1, 0);
+  if (b->dim() == 1) {
+    b = THTensor_wrap(b).unsqueeze(1).unsafeReleaseTensorImpl();
     free_b = 1;
   }
 
