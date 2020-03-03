@@ -178,9 +178,12 @@ void Printer::print(const UnaryOp* const uop) {
   if (!print_inline_)
     os << uop->out() << " = ";
   if (auto inline_uop = inline_op_str(uop->type())) {
-    os << inline_uop.value() << uop->in();
+    os << inline_uop.value();
+    print( uop->in() );
   } else {
-    os << uop->type() << "(" << uop->in() << ")";
+    os << uop->type() << "(";
+    print( uop->in() ); 
+    os << ")";
   }
   
   if(!print_inline_)
@@ -194,9 +197,15 @@ void Printer::print(const BinaryOp* const bop) {
   if (!print_inline_)
     os << bop->out() << " = ";
   if (auto inline_bop = inline_op_str(bop->type())) {
-    os << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
+    print( bop->lhs() );
+    os << " " << inline_bop.value() << " ";
+    print( bop->rhs() );
   } else {
-    os << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
+    os << bop->type() << "(";
+    print( bop->lhs() );
+    os  << ", ";
+    print( bop->rhs() );
+    os << ")";
   }
   
   if(!print_inline_)
@@ -204,17 +213,27 @@ void Printer::print(const BinaryOp* const bop) {
 }
 
 void Printer::print(const Split* const s) {
-  os << "Split: " << s->in() << " axis " << s->axis() << " by factor "
-     << s->factor() << " -> " << s->out() << "\n";
+  os << "Split: ";
+  print( s->in() );
+  os << " axis " << s->axis() << " by factor "
+     << s->factor() << " -> ";
+  print( s->out() );
+  os<< "\n";
 }
 
 void Printer::print(const Merge* const m) {
   os << "Merge: " << m->in() << " axis " << m->axis()
-     << " with the following -> " << m->out() << "\n";
+     << " with the following -> ";
+  print( m->out() );
+  os << "\n";
 }
 
 void Printer::print(const Reorder* const ro) {
-  os << "Reorder: " << ro->in() << " -> " << ro->out() << "\n";
+  os << "Reorder: ";
+  print( ro->in() );
+  os << " -> ";
+  print( ro->out() );
+  os << "\n";
 }
 
 std::ostream& operator<< (std::ostream& os, const Statement* const stmt){

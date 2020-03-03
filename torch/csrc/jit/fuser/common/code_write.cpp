@@ -63,10 +63,7 @@ void CodeWrite::print(const Val* const val) {
    Printer::print(val);
 }
 
-bool CodeWrite::print_predicate(const Expr* const expr) {
-  //TensorView to base the predicate on:
-  TensorView* pred_tv  = static_cast<TensorView*>(expr->output(0));
-  
+bool CodeWrite::print_predicate(const TensorView* const pred_tv) {  
   std::vector<Int*> indices =
     IndexCompute::computeIndices(pred_tv, getLoopIndices());
 
@@ -75,16 +72,20 @@ bool CodeWrite::print_predicate(const Expr* const expr) {
   if(preds.size() == 0)
     return false;
   
+  bool first_pred = true;
   os << "if( ";
   for(decltype(preds.size()) i{0}; i < preds.size(); i++){
     if(preds[i]->same_as(new Int(1.0)))
       continue;
-    if(i != 0)
+    if(!first_pred)
       os << " && ";
 
-    Printer(os).print_inline(preds[i]);
+    print_inline(preds[i]);
+
+    first_pred = false;
+    
   }
-  os  << ") {\n";
+  os  << " ) {\n";
   ++extra_indent;
   indent();
   return true;
@@ -93,18 +94,31 @@ bool CodeWrite::print_predicate(const Expr* const expr) {
 
 }
 
-//Already filtered so output is a TensorView
-void CodeWrite::print(const UnaryOp* const uop) {
-
-  consumer = static_cast<TensorView*>(uop->out());
+bool CodeWrite::print_lhs(TensorView* tv){
+  updateView(tv);
+  indent();
 
   //Print predicates, first need to find predicate.
-  bool predicated = print_predicate(uop);
+  bool predicated = print_predicate(tv);
 
-  print(consumer);
-  os << " = " ;
+  print(tv);
+  os << " = ";
 
+  consumer = tv;
   producer = true;
+
+  return predicated;
+}
+
+//Already filtered so output is a TensorView
+void CodeWrite::print(const UnaryOp* const uop) {
+  if(!isTVOp(uop)){
+    if(print_inline_)
+      Printer::print(uop);
+    return;
+  }
+
+  bool predicated = print_lhs(static_cast<TensorView*>(uop->out()));
 
   if (auto inline_uop = inline_op_str(uop->type())) {
     os << inline_uop.value();
@@ -130,14 +144,13 @@ void CodeWrite::print(const UnaryOp* const uop) {
 
 void CodeWrite::print(const BinaryOp* const bop) {
 
-  //Print predicates, first need to find predicate.
-  bool predicated = print_predicate(bop);
+  if(!isTVOp(bop)){
+    if(print_inline_)
+      Printer::print(bop);
+    return;
+  }
 
-  print(bop->out());
-  os << " = ";
-
-  consumer = static_cast<TensorView*>(bop->out());
-  producer = true;
+  bool predicated = print_lhs(static_cast<TensorView*>(bop->out()));
 
   if (auto inline_bop = inline_op_str(bop->type())) {
     print(bop->lhs());
@@ -166,22 +179,22 @@ void CodeWrite::print(const BinaryOp* const bop) {
 
 void CodeWrite::indent() {
   for (int i = 0; i < fors.size() + extra_indent; i++)
-    std::cout << "  ";
+    os << "  ";
 }
 
 void CodeWrite::closeScope() {
   fors.pop_back();
   indent();
-  std::cout << "}" << std::endl;
+  os << "}" << std::endl;
 }
 
 void CodeWrite::openFor(IterDomain* id) {
   indent();
   fors.push_back(std::pair<Int*, Int*>{new Int(), id->size()});
 
-  std::cout << "for( " << fors.back().first << " : ";
-  Printer(std::cout).print_inline(id);
-  std::cout << " ) {" << std::endl;
+  os << "for( " << fors.back().first << " : ";
+  print_inline(id);
+  os << " ) {" << std::endl;
 }
 
 void CodeWrite::clearActiveView() {
@@ -239,41 +252,12 @@ void CodeWrite::updateView(TensorView* tv) {
   }
 }
 
-void CodeWrite::handle(UnaryOp* uop) {
-  updateView(static_cast<TensorView*>(uop->out()));
-  indent();
-  print(uop);
-}
-
-void CodeWrite::handle(BinaryOp* bop) {
-  updateView(static_cast<TensorView*>(bop->out()));
-  indent();
-  print(bop);
-}
-
-//Grab BinaryOps and UnaryOps that have a TensorView output
-void CodeWrite::handle(Expr* expr){
-  if(expr->nOutputs() != 1){
-    for(auto out : expr->outputs())
-      if(out->getValType().value() == ValType::TensorView)
-        throw std::runtime_error(
-          "Cannot write code with multiple TensorView Outputs.");
-  }
-  if(expr->output(0)->getValType().value() == ValType::TensorView){
-    switch(expr->getExprType().value()){
-      case(ExprType::BinaryOp):
-        handle(static_cast<BinaryOp*>(expr));
-        break;
-      case(ExprType::UnaryOp):
-        handle(static_cast<UnaryOp*>(expr));
-        break;
-      default:
-        throw std::runtime_error(
-          "CodeWrite found an ExprType it could not dispatch.");
-    }
-    return;
-  }
-  return;
+bool CodeWrite::isTVOp(const Expr* expr){
+  if(expr->nOutputs() == 1 && expr->output(0)->getValType().value() == ValType::TensorView)
+    if(expr->getExprType().value() == ExprType::BinaryOp
+    || expr->getExprType().value() == ExprType::UnaryOp)
+      return true;
+  return false;
 }
 
 void CodeWrite::traverse(
@@ -284,7 +268,7 @@ void CodeWrite::traverse(
   //IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
   std::vector<Expr*> exprs = FusionGuard::getCurFusion()->exprs();
   for(auto* expr : exprs)
-    handle(expr);
+    Printer::print(expr);
   resetFors();
 }
 
