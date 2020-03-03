@@ -1057,6 +1057,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto c = hx[1];
         at::print(h, 32);
         at::print(c, 32);
+        std::cout << "H type: " << h.device().type() << "\n";
+        std::cout << "C type: " << c.device().type() << "\n";
 
         auto h_slices = h.chunk(2, -1);
         auto c_slices = c.chunk(2, -1);
@@ -1082,11 +1084,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
-          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "\n";
+          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
+        std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
+        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
+        std::cout << "_input type: " << _input.device().type() << "\n";
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
                         _fwd_hx, _fwd_params, has_biases, num_layers, dropout_p,
                         train, false, type_2, false);
