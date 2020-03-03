@@ -17,8 +17,7 @@ public:
   virtual void compileFusion(Node* fusion) override;
   virtual void callFusion(
       const Node* const fusion,
-      std::vector<at::Tensor>&,
-      at::ArrayRef<IValue>) override;
+      Stack& stack) override;
 };
 
 }}}} // namespace torch::jit::fuser::cuda

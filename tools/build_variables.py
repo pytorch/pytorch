@@ -202,6 +202,8 @@ libtorch_cuda_sources = [
     "torch/csrc/cuda/nccl.cpp",
     "torch/csrc/jit/fuser/cuda/interface.cpp",
     "torch/csrc/jit/fuser/cuda/parser.cpp",
+    "torch/csrc/jit/fuser/cuda/partition.cpp",
+    "torch/csrc/jit/fuser/cuda/manager.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/fuser/cuda/cs_ir/IR.cpp",

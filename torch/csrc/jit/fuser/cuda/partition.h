@@ -7,9 +7,9 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-bool isFusibleCudaFusionGroup(const Node* const node);
+TORCH_API bool isFusibleCudaFusionGroup(const Node* const node);
 
-bool isFusibleCudaFusionGroup(
+TORCH_API bool isFusibleCudaFusionGroup(
     const Node* const fusion,
     const Node* const node);
 

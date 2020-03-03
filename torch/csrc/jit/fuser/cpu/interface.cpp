@@ -76,10 +76,9 @@ void CPUFusionBackend::compileFusion(Node* fusion) {
 
 void CPUFusionBackend::callFusion(
   const Node* const fusion
-, std::vector<at::Tensor>& outputs
-, at::ArrayRef<IValue> inputs) {
-  auto* p = static_cast<std::function<void()>*>(fusion->v(attr::value));
-  (*p)();
+, Stack& stack) {
+  //auto* p = static_cast<std::function<void()>*>(fusion->v(attr::value));
+  //(*p)();
 }
 
 static CPUFusionBackend cpu_backend;

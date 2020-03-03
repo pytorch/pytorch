@@ -160,6 +160,10 @@ void compileFusion(Node* fusion) {
 // Acquires inputs, allocates outputs, and calls fusion
 // TODO: outputs should be preallocated in the graph (see fusion pass)
 void callFusion(const Node* const fusion, Stack& stack) {
+  const auto device_type = c10::kCUDA;
+  assert(getFusionBackendsEx().count(device_type) > 0);
+  return getFusionBackendsEx()[device_type]->callFusion(fusion, stack);
+  /*
   // Acquires inputs
   const Graph& graph = *fusion->g(attr::Subgraph);
   const auto nInputs = graph.inputs().size();
@@ -209,7 +213,9 @@ void callFusion(const Node* const fusion, Stack& stack) {
     default:
       TORCH_CHECK(false, "Acquired an unknown fusion device type!");
   }
+  // TODO: I probably messed up here, since I just pushed outputs to stack.
   drop(stack, nInputs);
+  */
 }
 
 } // namespace jit
