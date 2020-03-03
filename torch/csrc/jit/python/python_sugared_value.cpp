@@ -219,19 +219,33 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+void checkInterface(
+    const SourceRange& loc,
+    Function& m,
+    std::shared_ptr<ModuleValue> self,
+    const std::string& field) {
+  if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
+    throw ErrorReport(loc)
+        << "Could not compile " << field
+        << "() because module is an interface type. Please file issue.";
+  }
+}
+
 void recurseThroughNestedModules(
     const SourceRange& loc,
     Function& m,
     std::vector<SugaredValuePtr>& keys,
     std::vector<SugaredValuePtr>& values,
     std::shared_ptr<ModuleValue> self,
-    const std::string& prefix) {
+    const std::string& prefix,
+    const std::string& field) {
   auto prefix_value =
       std::make_shared<SimpleValue>(insertConstant(*m.graph(), prefix));
 
   keys.push_back(prefix_value);
   values.push_back(self);
 
+  checkInterface(loc, m, self, field);
   auto module_dict = self->getSugaredModuleDict(loc, m);
   auto keys_iter = module_dict->keys_;
   auto module_values_iter = module_dict->modules_;
@@ -249,7 +263,7 @@ void recurseThroughNestedModules(
     }
     submodule_prefix = submodule_prefix + key_string;
     recurseThroughNestedModules(
-        loc, m, keys, values, module_value, submodule_prefix);
+        loc, m, keys, values, module_value, submodule_prefix, field);
   };
 }
 
@@ -291,6 +305,7 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
   // Recursive compilation does not maintain module aliasing,
   // so we do not add uniqueness checks on
   // "children"/"named_children"/"modules"/"named_modules"
+  checkInterface(loc, m, self_, field);
   if (field == "keys") {
     return std::make_shared<ModuleDictMethod>(keys_, "keys");
   } else if (field == "values" || field == "children") {
@@ -303,7 +318,7 @@ std::shared_ptr<SugaredValue> SugaredModuleDict::attr(
   } else if (field == "named_modules" || field == "modules") {
     std::vector<SugaredValuePtr> keys;
     std::vector<SugaredValuePtr> values;
-    recurseThroughNestedModules(loc, m, keys, values, self_, "");
+    recurseThroughNestedModules(loc, m, keys, values, self_, "", field);
     if (field == "modules") {
       return std::make_shared<ModuleDictMethod>(
           std::make_shared<SugaredTupleValue>(values), field);

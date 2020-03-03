@@ -10108,6 +10108,39 @@ a")
         inps = tuple([torch.tensor(i) for i in range(1, 5)])
         self.assertEqual(mod.method(*inps), MyMod().method(*inps))
 
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+        class OrigModule(nn.Module):
+            def __init__(self):
+                super(OrigModule, self).__init__()
+
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                return inp1 + inp2 + 1
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                return input * 2
+
+            @torch.jit.export
+            def method(self, input):
+                for module in self.modules():
+                    input = module(input)
+                return input
+
+        with self.assertRaisesRegex(Exception, "Could not compile"):
+            scripted_mod = torch.jit.script(TestModule())
+
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
 
