@@ -338,9 +338,6 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             model = convert(model)
             new_state_dict = model.state_dict()
 
-            # Check to make sure the state dict keys match original model after convert.
-            self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
-
             model.load_state_dict(quant_state_dict)
 
             out = model(x)
