@@ -64,7 +64,7 @@ bool available(
          ((weight.size(Layout::Filter::output) % groups) == 0) &&
          // Output Min / Max
          (output_max > output_min) &&
-	 true;
+         true;
 }
 
 // TODO: Decouple and improve error handling and messages.
@@ -73,7 +73,7 @@ bool usable(const Tensor& input) {
   return (4 == input.ndimension()) &&
          (c10::DeviceType::CPU == input.device().type()) &&
          (kFloat == input.scalar_type()) &&
-         (input.size(Layout::Activation4D::batch) > 0) &&
+         (input.size(Layout::Activation4D::batch) >= 0) &&
          (input.size(Layout::Activation4D::channels) > 0) &&
          (input.size(Layout::Activation4D::height) > 0) &&
          (input.size(Layout::Activation4D::width) > 0) &&
@@ -81,7 +81,7 @@ bool usable(const Tensor& input) {
 }
 
 Tensor run(
-    const Context& context,
+    const ContextConv2D& context,
     const Tensor& input) {
   using namespace internal;
 
@@ -152,27 +152,27 @@ Tensor create_and_run(
 
 } // namespace
 
-Context create(
+ContextConv2D create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
-    const IntArrayRef padding_,
-    const IntArrayRef stride_,
-    const IntArrayRef dilation_,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
     const int64_t groups,
     const float output_min,
     const float output_max) {
-  const auto padding = expand_param_if_needed(padding_, "padding", 2);
-  const auto stride = expand_param_if_needed(stride_, "stride", 2);
-  const auto dilation = expand_param_if_needed(dilation_, "dilation", 2);
+  const auto padding_expanded = expand_param_if_needed(padding, "padding", 2);
+  const auto stride_expanded = expand_param_if_needed(stride, "stride", 2);
+  const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 2);
   const Tensor weight_nhwc = weight.contiguous(MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
       available(
           weight_nhwc,
           bias,
-          padding,
-          stride,
-          dilation,
+          padding_expanded,
+          stride_expanded,
+          dilation_expanded,
           groups,
           output_min,
           output_max),
@@ -183,16 +183,16 @@ Context create(
   xnn_operator_t convolution_op{};
 
   const xnn_status create_status = xnn_create_convolution2d_nhwc_f32(
-      padding[Layout::Parameter::height],                             // input_padding_top
-      padding[Layout::Parameter::width],                              // input_padding_right
-      padding[Layout::Parameter::height],                             // input_padding_bottom
-      padding[Layout::Parameter::width],                              // input_padding_left
+      padding_expanded[Layout::Parameter::height],                    // input_padding_top
+      padding_expanded[Layout::Parameter::width],                     // input_padding_right
+      padding_expanded[Layout::Parameter::height],                    // input_padding_bottom
+      padding_expanded[Layout::Parameter::width],                     // input_padding_left
       weight_nhwc.size(Layout::Filter::height),                       // kernel_height
       weight_nhwc.size(Layout::Filter::width),                        // kernel_width
-      stride[Layout::Parameter::height],                              // subsampling_height
-      stride[Layout::Parameter::width],                               // subsampling_width
-      dilation[Layout::Parameter::height],                            // dilation_height
-      dilation[Layout::Parameter::width],                             // dilation_width
+      stride_expanded[Layout::Parameter::height],                     // subsampling_height
+      stride_expanded[Layout::Parameter::width],                      // subsampling_width
+      dilation_expanded[Layout::Parameter::height],                   // dilation_height
+      dilation_expanded[Layout::Parameter::width],                    // dilation_width
       groups,                                                         // groups
       weight_nhwc.size(Layout::Filter::input),                        // group_input_channels
       weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
@@ -209,12 +209,12 @@ Context create(
       xnn_status_success == create_status,
       "xnn_create_convolution2d_nhwc_f32 failed!");
 
-  return Context(
+  return ContextConv2D(
       Operator(convolution_op),
       weight_nhwc.sizes().vec(),
-      padding,
-      stride,
-      dilation
+      padding_expanded,
+      stride_expanded,
+      dilation_expanded
   );
 }
 
@@ -263,8 +263,8 @@ bool use_convolution2d(
             stride,
             dilation,
             groups,
-            Context::kMin,
-            Context::kMax) &&
+            ContextConv2D::kMin,
+            ContextConv2D::kMax) &&
          internal::convolution2d::usable(input);
 }
 
@@ -284,8 +284,8 @@ Tensor convolution2d(
       stride,
       dilation,
       groups,
-      Context::kMin,
-      Context::kMax);
+      ContextConv2D::kMin,
+      ContextConv2D::kMax);
 }
 
 } // namespace xnnpack

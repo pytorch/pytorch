@@ -30,12 +30,12 @@ class Conv2dPacked final : public torch::OperatorKernel {
       const c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext>& op_context);
 };
 
-Context create(
+ContextConv2D create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
-    const IntArrayRef padding_,
-    const IntArrayRef stride_,
-    const IntArrayRef dilation_,
+    const IntArrayRef padding,
+    const IntArrayRef stride,
+    const IntArrayRef dilation,
     const int64_t groups,
     const float output_min,
     const float output_max);

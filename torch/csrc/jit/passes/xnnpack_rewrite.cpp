@@ -10,18 +10,6 @@ namespace torch {
 namespace jit {
 
 namespace {
-std::string getFuncName(Value* func_value) {
-  auto func_node = func_value->node();
-  auto func = func_node->output()->type()->expect<FunctionType>()->function();
-  const auto& qname = func->qualname();
-  const auto& name = qname.qualifiedName();
-  auto rdot_idx = name.rfind('.');
-  if (rdot_idx != std::string::npos) {
-    return name.substr(rdot_idx + 1, name.length());
-  } else {
-    return name;
-  }
-}
 
 void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
   std::string linear_before_inline = R"(
@@ -42,23 +30,12 @@ void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
         %packed_weight_bias = xnnpack::linear_prepack(%weight, %bias)
         %res = xnnpack::linear_packed(%input, %packed_weight_bias)
         return (%res))";
-  std::string linear_pattern_wo_bias = R"(
-    graph(%input, %weight):
-        %bias: Tensor? = prim::Constant()
-        %res = aten::linear(%input, %weight, %bias)
-        return (%res))";
-  std::string xnnpack_pattern_wo_bias = R"(
-    graph(%input, %weight):
-        %bias: Tensor? = prim::Constant()
-        %packed_weight_bias = xnnpack::linear_prepack(%weight, %bias)
-        %res = xnnpack::linear_packed(%input, %packed_weight_bias)
-        return (%res))";
 
   auto filter = [](const Match& match,
                    const std::unordered_map<std::string, Value*>& vmap) {
     const auto& match_vmap = match.values_map;
     auto linear_value = match_vmap.at(vmap.at("linear"));
-    auto func_name = getFuncName(linear_value);
+    auto func_name = graph_rewrite_helper::getFuncName(linear_value);
     if (func_name == "linear") {
       return true;
     }
@@ -72,10 +49,6 @@ void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter linear_rewriter;
   linear_rewriter.RegisterRewritePattern(linear_pattern, xnnpack_pattern);
   linear_rewriter.runOnGraph(graph);
-
-  SubgraphRewriter linear_rewriter_wo_bias;
-  linear_rewriter_wo_bias.RegisterRewritePattern(linear_pattern_wo_bias, xnnpack_pattern_wo_bias);
-  linear_rewriter_wo_bias.runOnGraph(graph);
 }
 
 void insertXNNPACKConv2dOp(std::shared_ptr<Graph>& graph) {

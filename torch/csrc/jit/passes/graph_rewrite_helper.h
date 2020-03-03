@@ -6,6 +6,7 @@ namespace torch {
 namespace jit {
 namespace graph_rewrite_helper {
 
+std::string getFuncName(Value* func_value);
 Value* getValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,

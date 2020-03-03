@@ -25,6 +25,7 @@ namespace {
 
 using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::getIValue;
+using graph_rewrite_helper::getFuncName;
 using graph_rewrite_helper::replaceConvolutionWithConv2d;
 
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
@@ -81,19 +82,6 @@ void fillQConfigMap(
       child_key = key + "." + s.name;
     }
     fillQConfigMap(s.value._ivalue(), qconfig_dict, map, child_key, qconfig);
-  }
-}
-
-std::string getFuncName(Value* func_value) {
-  auto func_node = func_value->node();
-  auto func = func_node->output()->type()->expect<FunctionType>()->function();
-  const auto& qname = func->qualname();
-  const auto& name = qname.qualifiedName();
-  auto rdot_idx = name.rfind('.');
-  if (rdot_idx != std::string::npos) {
-    return name.substr(rdot_idx + 1, name.length());
-  } else {
-    return name;
   }
 }
 
