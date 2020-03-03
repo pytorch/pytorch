@@ -1060,12 +1060,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "H type: " << h.device().type() << "\n";
         std::cout << "C type: " << c.device().type() << "\n";
 
-        // auto h_slices = h.chunk(2, -1);
-        // auto c_slices = c.chunk(2, -1);
-        auto h_fwd = h[0];
-        auto h_bwd = h[1];
-        auto c_fwd = c[0];
-        auto c_bwd = c[1];
+        auto h_slices = h.chunk(2, 0);
+        auto c_slices = c.chunk(2, 0);
+        auto h_fwd = h_slices[0];
+        auto h_bwd = h_slices[1];
+        auto c_fwd = c_slices[0];
+        auto c_bwd = c_slices[1];
         std::cout << "h_fwd type: " << h_fwd.device().type() << "\n";
         std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
         std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
@@ -1082,7 +1082,9 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         _bwd_hx.push_back(c_bwd.contiguous());
 
         std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << " size: " << _fwd_hx[0].sizes() << "\n";
-        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << " size: " << _fwd_hx[0].sizes() << "\n";
+        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << " size: " << _fwd_hx[1].sizes() << "\n";
+        std::cout << "_bwd_hx[0] type: " << _bwd_hx[0].device().type() << " size: " << _bwd_hx[0].sizes() << "\n";
+        std::cout << "_bwd_hx[1] type: " << _bwd_hx[1].device().type() << " size: " << _bwd_hx[1].sizes() << "\n";
 
         // Reverse input to backward LSTM
         auto input = batch_first ? _input.transpose(0, 1) : _input;
@@ -1124,7 +1126,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         Tensor bwd_output, b_hy, b_cy;
         lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
                         _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
-                        train, false, type_2, false);
+                        train, bidirectional, type_2, false);
         std::cout << "LSTM backward" << "\n";
 
         // Cat forward and backward outputs
