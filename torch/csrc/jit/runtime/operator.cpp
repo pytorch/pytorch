@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <torch/csrc/jit/alias_info.h>
+#include <ATen/core/alias_info.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
 
@@ -157,6 +157,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CallFunction,
       prim::isinstance,
       prim::unchecked_cast,
+      prim::tolist,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -239,6 +240,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       aten::wait,
       prim::isinstance,
       prim::unchecked_cast,
+      prim::tolist,
   };
 
   // Operators that should not be used by alias analysis

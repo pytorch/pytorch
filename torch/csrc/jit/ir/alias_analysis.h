@@ -1,7 +1,7 @@
 #pragma once
 
+#include <ATen/core/alias_info.h>
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/jit/alias_info.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
@@ -36,7 +36,9 @@ namespace jit {
  */
 class AliasDb {
  public:
-  TORCH_API explicit AliasDb(std::shared_ptr<Graph> graph);
+  TORCH_API explicit AliasDb(
+      std::shared_ptr<Graph> graphi,
+      bool isFrozen = false);
   TORCH_API ~AliasDb();
 
   // There are limitations to what effects the alias analysis can track. Two
@@ -187,6 +189,11 @@ class AliasDb {
   static bool isContainerType(const TypePtr& type);
 
   std::shared_ptr<Graph> graph_;
+
+  // If the Module is frozen then consider attributes as freshly created
+  // objects. Freezing API invokes alias analysis to check if they are mutated
+  // internally.
+  bool isFrozen_;
 
   // The points-to graph that stores aliasing relationships
   std::unique_ptr<MemoryDAG> memoryDAG_;

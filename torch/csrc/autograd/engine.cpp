@@ -35,6 +35,24 @@
 
 namespace torch { namespace autograd {
 
+namespace {
+static bool in_bad_autograd_fork =
+    false; // True for children forked after engine's thread pool init
+
+// Called in the forked child if engine's thread pool has already been
+// initialized
+static void forked_autograd_child() { in_bad_autograd_fork = true; }
+
+// Should be called before unsafe for forks (thread pool) calls
+static void track_bad_autograd_forks() {
+#ifndef WIN32
+  static std::once_flag flag;
+  std::call_once(
+      flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
+#endif
+}
+}
+
 // Threads spawned by the engine are assigned a constant 'worker_device'
 // specifying what device they process work for.  This variable is initialized
 // at thread creation time and is constant afterwards.  This is used when
@@ -750,8 +768,16 @@ auto Engine::execute(const edge_list& roots,
   return execute_with_graph_task(graph_task, graph_root);
 }
 
-void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+void Engine::initialize_device_threads_pool() {
+  track_bad_autograd_forks();
+  TORCH_CHECK(!in_bad_autograd_fork,
+              "Unable to handle autograd's threading in combination with fork-based multiprocessing. "
+              "See https://github.com/pytorch/pytorch/wiki/Autograd-and-Fork");
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
+}
+
+void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
+  initialize_device_threads_pool();
   std::shared_ptr<GraphTask> graph_task = task.base_.lock();
   // The graph_task must be alive at this point, because internal autograd machinary
   // who calls this API (Distributed Autograd Engine) increases outstanding_tasks_
@@ -764,7 +790,7 @@ void Engine::enqueue_blocked_task_on_cpu(NodeTask task) {
 variable_list Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
-  std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
+  initialize_device_threads_pool();
   // Lock mutex for GraphTask.
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 

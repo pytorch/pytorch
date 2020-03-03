@@ -146,7 +146,7 @@ typename std::enable_if<
     std::is_member_pointer<typename std::decay<Functor>::type>::value,
     typename std::result_of<Functor && (Args && ...)>::type>::type
 invoke(Functor&& f, Args&&... args) {
-  return std::mem_fn(f)(std::forward<Args>(args)...);
+  return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
 }
 
 template <typename Functor, typename... Args>
