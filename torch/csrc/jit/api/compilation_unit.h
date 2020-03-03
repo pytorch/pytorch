@@ -223,6 +223,19 @@ struct TORCH_API CompilationUnit {
     classDict_.clear();
   }
 
+  // [Internal Only] Remove method.
+  // Note Used for freezing.
+  void unsafeRemoveMethod(const c10::QualifiedName& method_name) {
+    auto it = dict_.find(method_name);
+    TORCH_CHECK(
+        it != dict_.end(),
+        "method '",
+        method_name.qualifiedName(),
+        "' does not exist.");
+    functions_[it->second] = nullptr;
+    dict_.erase(it);
+  }
+
   // [name mangling] All code objects must have a unique qualified name in a
   // CompilationUnit. In Python, sometimes functions won't have unique qualified
   // name (for example, nested functions). So we mangle Python functions to
