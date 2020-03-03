@@ -47,7 +47,7 @@ bool usable(const Tensor& input) {
 }
 
 Tensor run(
-    const Context& context,
+    const ContextLinear& context,
     const Tensor& input) {
   using namespace internal;
 
@@ -106,7 +106,7 @@ Tensor create_and_run(
 
 } // namespace
 
-Context create(
+ContextLinear create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const float output_min,
@@ -141,7 +141,7 @@ Context create(
       xnn_status_success == create_status,
       "xnn_create_fully_connected_nc_f32 failed!");
 
-  return Context(
+  return ContextLinear(
     Operator(linear_op),
     weight_contig.size(Layout::Filter::output)
   );
@@ -172,8 +172,8 @@ bool use_linear(
   return internal::linear::available(
             weight,
             bias,
-            Context::kMin,
-            Context::kMax) &&
+            ContextLinear::kMin,
+            ContextLinear::kMax) &&
          internal::linear::usable(input);
 }
 
@@ -185,8 +185,8 @@ Tensor linear(
       input,
       weight,
       bias,
-      Context::kMin,
-      Context::kMax);
+      ContextLinear::kMin,
+      ContextLinear::kMax);
 }
 
 } // namespace xnnpack

@@ -18,36 +18,42 @@ struct Deleter final {
 
 using Operator = std::unique_ptr<xnn_operator, Deleter>;
 
-struct Context final {
+struct ContextBase {
   Operator op;
 
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
+};
+
+struct ContextLinear final : public ContextBase {
   int64_t output_channels;
 
+  ContextLinear() = default;
+
+  ContextLinear(Operator&& o, int64_t o_channels) {
+    op = std::move(o);
+    output_channels = o_channels;
+  }
+};
+
+struct ContextConv2D final : public ContextBase {
   std::vector<int64_t> weight_size;
   std::vector<int64_t> padding;
   std::vector<int64_t> stride;
   std::vector<int64_t> dilation;
 
-  Context() = default;
+  ContextConv2D() = default;
 
-  Context(Operator&& o, int64_t o_channels) {
-    op = std::move(o);
-    output_channels = o_channels;
-  }
-
-  Context(Operator&& o, std::vector<int64_t> w_size,
-      std::vector<int64_t> pad,
-      std::vector<int64_t> strd,
-      std::vector<int64_t> dil) {
+  ContextConv2D(Operator&& o, std::vector<int64_t> w_size,
+      std::vector<int64_t> padding_,
+      std::vector<int64_t> stride_,
+      std::vector<int64_t> dilation_) {
     op = std::move(o);
     weight_size = std::move(w_size);
-    padding = std::move(pad);
-    stride = std::move(strd);
-    dilation = std::move(dil);
+    padding = std::move(padding_);
+    stride = std::move(stride_);
+    dilation = std::move(dilation_);
   }
-
-  static constexpr float kMin = -std::numeric_limits<float>::infinity();
-  static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
 namespace internal {
@@ -72,7 +78,7 @@ struct Layout final {
       }
 
       // Handle the case where batch size is zero.
-      int64_t batch = std::max<int64_t>(1, tensor[0]);
+      int64_t batch = tensor[0];
 
       for (size_t index = 1u; index < (tensor.size() - 1u); ++index) {
         batch *= tensor[index];

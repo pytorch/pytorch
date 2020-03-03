@@ -19,7 +19,7 @@ class XNNPackLinearOpContext : public torch::jit::CustomClassHolder {
   private:
     Tensor orig_weight_;
     c10::optional<Tensor> orig_bias_;
-    Context op_context_;
+    ContextLinear op_context_;
 
   public:
     XNNPackLinearOpContext(Tensor&& weight,
@@ -30,12 +30,12 @@ class XNNPackLinearOpContext : public torch::jit::CustomClassHolder {
     //XNNPackLinearOpContext(const XNNPackLinearOpContext&) = delete; // Copy constructor
     //XNNPackLinearContext& operator=(const XNNPackLinearOpContext&) = delete; // Assign
     //Move construct and move assign?
-    const Context& get_context() const {
+    const ContextLinear& get_context() const {
       return op_context_;
     }
 
     SerializationTypeLinearPrePack unpack() {
-      return {orig_weight_, orig_bias_};
+      return std::make_tuple(orig_weight_, orig_bias_);
     }
 
     static c10::intrusive_ptr<XNNPackLinearOpContext> create_context(Tensor&& weight,
@@ -52,7 +52,7 @@ class XNNPackConv2dOpContext : public torch::jit::CustomClassHolder {
     std::vector<int64_t> stride_;
     std::vector<int64_t> dilation_;
     int64_t groups_;
-    Context op_context_;
+    ContextConv2D op_context_;
 
   public:
     XNNPackConv2dOpContext(Tensor&& weight,
@@ -72,12 +72,13 @@ class XNNPackConv2dOpContext : public torch::jit::CustomClassHolder {
     //XNNPackLinearOpContext(const XNNPackLinearOpContext&) = delete; // Copy constructor
     //XNNPackLinearContext& operator=(const XNNPackLinearOpContext&) = delete; // Assign
     //Need to define Move construct and move assign?
-    const Context& get_context() const {
+    const ContextConv2D& get_context() const {
       return op_context_;
     }
 
     SerializationTypeConv2dPrePack unpack() {
-      return {orig_weight_, orig_bias_, padding_, stride_, dilation_, groups_};
+      return std::make_tuple(orig_weight_, orig_bias_, padding_,
+          stride_, dilation_, groups_);
     }
 
     static c10::intrusive_ptr<XNNPackConv2dOpContext> create_context(Tensor&& weight,

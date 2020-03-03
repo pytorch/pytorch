@@ -26,7 +26,7 @@ class LinearPacked final : public torch::OperatorKernel {
       const c10::intrusive_ptr<xnnpack::XNNPackLinearOpContext>& op_context);
 };
 
-Context create(
+ContextLinear create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const float output_min,
