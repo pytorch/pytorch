@@ -3917,7 +3917,7 @@ for shape in [(1,), ()]:
                 return grad, None
 
         base = torch.rand(10, requires_grad=True)
-        
+
         foo = MyFn.apply(base, False)
         self.assertEqual(foo.grad_fn.__class__.__name__, "MyFnBackward")
 
