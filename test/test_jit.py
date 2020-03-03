@@ -1025,11 +1025,9 @@ graph(%x : Tensor,
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
         # for input and output of conv
-        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
-            'Expected to have 2 observer submodules'
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
         # for weight
-        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
-            'Expected to have 1 observer submodules'
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
 
     def test_insert_observers_child_qconfig(self):
         class Sub(torch.nn.Module):
@@ -1059,17 +1057,13 @@ graph(%x : Tensor,
                                             qconfig_dict,
                                             True)
         # input and output of sub
-        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
-               'Expected to have 2 observers'
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
         # not quantized
-        assert len(attrs_with_prefix(m.conv, '_observer_')) == 0, \
-               'Expected to have 0 observers'
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 0
         # no observers since we observe in the outer most call site
-        assert len(attrs_with_prefix(m.sub, '_observer_')) == 0, \
-               'Expected to have 0 observers'
+        assert len(attrs_with_prefix(m.sub, '_observer_')) == 0
         # weight of linear
-        assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1, \
-               'Expected to have 1 observers'
+        assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
 
     @unittest.skip("we are changing this test in next PR")
     def test_insert_observers_skip_values(self):
