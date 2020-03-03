@@ -1089,12 +1089,14 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
                         _fwd_hx, _fwd_params, has_biases, num_layers, dropout_p,
                         train, false, type_2, false);
+        std::cout << "LSTM forward" << "\n";
 
         // Backward LSTM
         Tensor bwd_output, b_hy, b_cy;
         lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
                         _bwd_hx, _params, has_biases, num_layers, dropout_p,
                         train, false, type_2, false);
+        std::cout << "LSTM backward" << "\n";
 
         // Cat forward and backward outputs
         auto bwd_outputs = bwd_output.unbind(0);
