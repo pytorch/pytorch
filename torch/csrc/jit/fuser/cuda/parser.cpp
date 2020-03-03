@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/fuser/cuda/parser.h>
-#include <torch/csrc/jit/fuser/cuda/parser.h>
 
 #include <unordered_map>
 
@@ -16,8 +15,6 @@ namespace {
 
 typedef Val CgValue;
 typedef Expr CgOp;
-
-//static std::unordered_map<Symbol, OperationMap
 
 class IrParser {
 public:

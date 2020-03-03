@@ -526,21 +526,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if (NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-<<<<<<< HEAD
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
-=======
-      ${TORCH_SRC_DIR}/csrc/jit/export.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/export_module.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/import_legacy.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/netdef_converter.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/interface.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/fuser/cpu/asmjit_codegen.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/script/module_save.cpp
->>>>>>> Build non-LLVM compiler stuff with libtorch
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
     if (USE_DISTRIBUTED)
@@ -581,6 +571,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
@@ -614,7 +605,11 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 >>>>>>> Parser implemented that lowers JIT IR to codegen IR
 =======
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
+<<<<<<< HEAD
 >>>>>>> refactoring interface
+=======
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
+>>>>>>> kernel cache added.
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp

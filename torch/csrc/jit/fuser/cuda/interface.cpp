@@ -1,5 +1,8 @@
 #include <torch/csrc/jit/fuser/cuda/interface.h>
 #include <torch/csrc/jit/fuser/cuda/partition.h>
+#include <torch/csrc/jit/fuser/cuda/manager.h>
+
+
 #include <torch/csrc/jit/fuser/common/management.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
@@ -168,6 +171,8 @@ int CUDAFusionBackend::fuse(const Node* const node) {
 }
 
 void CUDAFusionBackend::compileFusion(Node* fusion) {
+  compileCudaFusionGroup(fusion);
+  /*
   auto graph = normalizeGraphForCache(fusion->g(attr::Subgraph));
   auto repr = graph->toString(false);
   if (kernel_cache_.kernel_map_.count(repr) == 0) {
@@ -254,12 +259,14 @@ void CUDAFusionBackend::compileFusion(Node* fusion) {
       kernel_entry->maxBlocks_ *= kernel_entry->prop_->multiProcessorCount;
     }
   }
+   */
 }
 
 void CUDAFusionBackend::callFusion(
     const Node* const fusion,
-    std::vector<at::Tensor>& outputs,
-    at::ArrayRef<IValue> inputs) {
+    Stack& stack) {
+  runCudaFusionGroup(fusion, stack);
+  /*
   auto graph = normalizeGraphForCache(fusion->g(attr::Subgraph));
   auto repr = graph->toString(false);
   TORCH_CHECK(kernel_cache_.kernel_map_.count(repr) != 0,
@@ -312,6 +319,7 @@ void CUDAFusionBackend::callFusion(
       nullptr));
   // Resets device (see at::DeviceGuard notes above)
   at::cuda::set_device(prior_device);
+  */
 }
 
 static CUDAFusionBackend cuda_backend;

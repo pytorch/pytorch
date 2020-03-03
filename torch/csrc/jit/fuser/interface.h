@@ -30,8 +30,7 @@ public:
   virtual void compileFusion(Node* fusion) = 0;
   virtual void callFusion(
       const Node* const fusion,
-      std::vector<at::Tensor>&,
-      at::ArrayRef<IValue>) = 0;
+      Stack& stack) = 0;
 
   virtual ~FusionBackend() = 0;
 };
