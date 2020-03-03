@@ -136,7 +136,6 @@ static inline  __device__ void gpuAtomicAdd(at::Half *address, at::Half val) {
 
 }
 
-#ifdef __HIP_PLATFORM_HCC__
 static inline __device__ void gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
     unsigned int * address_as_ui =
       (unsigned int *) ((char *)address - ((size_t)address & 2));
@@ -152,7 +151,6 @@ static inline __device__ void gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 v
       old = atomicCAS(address_as_ui, assumed, old);
     } while (assumed != old);
 }
-#endif
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 600 || CUDA_VERSION < 8000)
 // from CUDA C Programmic Guide
