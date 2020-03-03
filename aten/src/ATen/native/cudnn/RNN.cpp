@@ -661,6 +661,12 @@ Tensor _cudnn_rnn_flatten_weight(
   size_t params_stride0;
   std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
 
+  std::cout << "params_arr size: " << std::to_string(params_arr.size()) << "\n";
+  for(auto param = 0; param < params_arr.size(); param++){
+    // fwd_params.push_back(params_arr[param].contiguous());
+    std::cout << "params_arr[" << param << "] size: " << params_arr[param].sizes() << "type: " << params_arr[param].device().type() << "\n";
+  }
+
   MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                     params{params_arr, params_stride0};
 
