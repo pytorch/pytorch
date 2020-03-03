@@ -24,15 +24,15 @@ void prelu_cuda_kernel_share_weights(
   const Tensor& input,
   Tensor& result,
   const scalar_t* weight_data) {
+  at::TensorIterator iter;
+  iter.add_output(result);
+  iter.add_input(input);
+  iter.build();
 
-  at::cuda::CUDA_tensor_apply2<scalar_t, scalar_t>(
-    input,
-    result,
-    [=] __device__ (
-      const scalar_t& input_val,
-      scalar_t& result_val) {
-        result_val = (input_val > 0) ? input_val : *weight_data * input_val;
-  });
+  at::native::gpu_kernel(iter,
+    [weight_data] GPU_LAMBDA (scalar_t input_val) {
+        return (input_val > 0) ? input_val : *weight_data * input_val;
+    });
 }
 
 template <typename scalar_t>
