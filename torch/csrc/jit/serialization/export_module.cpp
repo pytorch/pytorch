@@ -38,8 +38,7 @@ static IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) 
   return Tup(std::move(ivalue_entries));
 }
 
-c10::IValue getMethodTuple(const script::Method& method) {
-  const auto& func = method.function();
+c10::IValue getFunctionTuple(const Function& func) {
   auto graph = func.graph()->copy();
   Inline(*graph);
   torch::jit::Code code(graph);
@@ -90,23 +89,33 @@ c10::IValue getMethodTuple(const script::Method& method) {
   return Tup({func.qualname().qualifiedName(), table});
 }
 
-void moduleMethodsTuple(const script::Module& module,
-    std::vector<c10::IValue>& elements,
-    bool recurse = false,
-    const std::string& method_name = "") {
-  auto methods = module.get_methods();
-  for (const auto& method : methods) {
-    if (method_name.empty() || method.name() == method_name) {
-      elements.push_back(getMethodTuple(method));
-    }
+void setstateTuple(const IValue& ivalue, std::vector<c10::IValue>& elements) {
+  if (!ivalue.isObject()) return;
+  auto obj = ivalue.toObject();
+  auto type = obj->type();
+  if (checkHasValidSetGetState(type)) {
+    Function *setstate = type->getMethod("__setstate__");
+    elements.push_back(getFunctionTuple(*setstate));
   }
-
-  if (recurse) {
-    for (const auto &sub_m : module.children()) {
-      moduleMethodsTuple(sub_m, elements, recurse,method_name);
+  else {
+    for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+      setstateTuple(obj->getSlot(i), elements);
     }
   }
 }
+
+void moduleMethodsTuple(const script::Module& module,
+    std::vector<c10::IValue>& elements) {
+  auto methods = module.get_methods();
+  // top level methods
+  for (const auto& method : methods) {
+    elements.push_back(getFunctionTuple(method.function()));
+  }
+
+  // __setstate__ of all components
+  setstateTuple(module._ivalue(), elements);
+}
+
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -229,10 +238,8 @@ class ScriptModuleSerializer {
   void writeByteCode(const script::Module& module) {
     std::vector<c10::IValue> elements;
 
-    // top-level methods
-    moduleMethodsTuple(module, elements, false, "");
-    // __setstate__ of all modules
-    moduleMethodsTuple(module, elements, true, "__setstate__");
+    moduleMethodsTuple(module, elements);
+
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
   }
