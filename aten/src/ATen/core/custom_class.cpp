@@ -1,5 +1,5 @@
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/custom_class.h>
+#include <torch/csrc/jit/api/custom_class.h>
 
 #include <atomic>
 

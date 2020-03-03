@@ -6,14 +6,103 @@
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <c10/util/Optional.h>
+#include <ATen/AccumulateType.h>
 
 namespace at { namespace native { namespace {
 
 using namespace vec256;
+
+template <typename scalar_t, typename func_t>
+static inline void cpu_cum_base_kernel(Tensor& result,
+    const Tensor& self,
+    int64_t dim,
+    const func_t& f,
+    scalar_t init_val) {
+  if (result.sizes() != self.sizes()) {
+    result.resize_as_(self);
+  }
+  if (self.numel() == 0) {
+    return;
+  }
+  const auto input_ndim = self.dim();
+  if (input_ndim == 0) {
+    result.fill_(self);
+    return;
+  }
+
+  auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
+  self_sizes[dim] = 1;
+
+  auto result_restrided = restride_dim(result, dim, self_sizes);
+  auto self_restrided = restride_dim(self, dim, self_sizes);
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(result_restrided);
+  iter.add_input(self_restrided);
+  iter.build();
+
+  auto result_dim_stride = ensure_nonempty_stride(result, dim);
+  auto self_dim_stride = ensure_nonempty_stride(self, dim);
+
+  auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+    auto* result_data_bytes = data[0];
+    const auto* self_data_bytes = data[1];
+
+    for (int64_t i = 0; i < n; ++i) {
+      f(
+        (scalar_t*)result_data_bytes, result_dim_stride,
+        (scalar_t*)self_data_bytes, self_dim_stride, init_val
+      );
+      result_data_bytes += strides[0];
+      self_data_bytes += strides[1];
+    }
+  };
+
+  iter.for_each(loop);
+}
+
+static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
+
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cumsum_out_cpu", [&] {
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+      scalar_t* result_data, auto result_dim_stride,
+      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          cum_number += self_data[i * self_dim_stride];
+          result_data[i * result_dim_stride] = (scalar_t)cum_number;
+        }
+      }, /*init_val=*/ 0
+    );
+  });
+}
+
+static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
+
+  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "cumprod_out_cpu", [&] {
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+      scalar_t* result_data, auto result_dim_stride,
+      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
+        for (int64_t i = 0; i < self_dim_size; ++i) {
+          cum_number *= self_data[i * self_dim_stride];
+          result_data[i * result_dim_stride] = (scalar_t)cum_number;
+        }
+      }, /*init_val=*/ 1
+    );
+  });
+}
 
 static void sum_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -220,5 +309,7 @@ REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
 
 }}  // namespace at::native

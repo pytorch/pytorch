@@ -28,7 +28,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
             t2 = torch.rand((3, 3), requires_grad=True)
             t3 = torch.add(t1, t2)
 
-            dist_autograd.backward([t3.sum()])
+            dist_autograd.backward(context_id, [t3.sum()])
             grads = dist_get_gradients(context_id)
 
             self.assertEqual(2, len(grads))
