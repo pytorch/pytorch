@@ -162,7 +162,7 @@ class ScriptModuleSerializer {
       const auto& func = method.function();
       auto graph = func.graph()->copy();
       Inline(*graph);
-      torch::jit::Code code(graph);
+      torch::jit::Code code(graph, "<mobile interpreter>");
 
       // operator names
       std::vector<c10::OperatorName> opnames;

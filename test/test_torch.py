@@ -783,6 +783,7 @@ class _TestTorchMixin(object):
                                [0, 1, 1],
                                [1, 1, 1]]))
 
+    @slowTest
     def test_mv(self):
         def _test_mv(m1, v1):
             res1 = torch.mv(m1, v1)
@@ -1349,6 +1350,7 @@ class _TestTorchMixin(object):
         def test_inference(default_dtype):
             saved_dtype = torch.get_default_dtype()
             torch.set_default_dtype(default_dtype)
+            default_complex_dtype = torch.complex64 if default_dtype == torch.float32 else torch.complex128
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
             self.assertIs(torch.int64, torch.tensor(5).dtype)
@@ -1357,7 +1359,7 @@ class _TestTorchMixin(object):
             self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
             self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
             self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
-            self.assertIs(torch.complex128, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
+            self.assertIs(default_complex_dtype, torch.tensor(((5, 3 + 2j), (3, 5 + 4j))).dtype)
 
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
@@ -1541,6 +1543,7 @@ class _TestTorchMixin(object):
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
+    @slowTest
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
@@ -2945,6 +2948,7 @@ class _TestTorchMixin(object):
             for wi in w:
                 self.assertEqual(str(wi.message)[0:52], str(warn))
 
+    @slowTest
     def test_abs(self):
         def _test_abs(tensors_dict):
             for _category, tensors in tensors_dict.items():
@@ -3716,6 +3720,7 @@ class _TestTorchMixin(object):
         # test that it works with bool tensors
         self._test_bernoulli(self, torch.bool, torch.float32, 'cpu')
 
+    @slowTest
     def test_bernoulli_edge_cases(self):
         # Need to draw a lot of samples to cover every random floating point number.
         a = torch.zeros(10000, 10000, dtype=torch.float32)  # probability of drawing "1" is 0
@@ -9148,6 +9153,7 @@ class TestTorchDeviceType(TestCase):
         for tensor_dims, some in product(tensor_dims_list, [True, False]):
             run_test(tensor_dims, some)
 
+    @slowTest
     def test_randperm(self, device):
         if device == 'cpu':
             rng_device = None
@@ -9787,6 +9793,7 @@ class TestTorchDeviceType(TestCase):
             expected = self._brute_cdist(x, y, p=2)
             self.assertTrue(torch.allclose(expected, actual))
 
+    @slowTest
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -10374,9 +10381,6 @@ class TestTorchDeviceType(TestCase):
             if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
                 # TODO: https://github.com/pytorch/pytorch/issues/33793
                 self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
-            elif dt == torch.half and device == 'cpu':
-                # fix once random is implemented for Half on CPU
-                self.assertRaises(RuntimeError, lambda: torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device))
             else:
                 x = torch.randint(5, (0, 1, 3, 0), dtype=dt, device=device)
                 self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
@@ -10466,9 +10470,6 @@ class TestTorchDeviceType(TestCase):
 
                 if dt == torch.bfloat16 and device.startswith('cuda') and IS_WINDOWS:
                     # TODO: https://github.com/pytorch/pytorch/issues/33793
-                    self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
-                elif dt == torch.half and device == "cpu":
-                    # update once random is implemented for half on CPU
                     self.assertRaises(RuntimeError, lambda: torch.randint(6, shape, device=device, dtype=dt).shape)
                 else:
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
@@ -11195,6 +11196,7 @@ class TestTorchDeviceType(TestCase):
             expected.backward(g0)
             self.assertTrue(torch.allclose(x.grad, y.grad))
 
+    @slowTest
     def test_pdist_norm_forward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
             for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
@@ -11207,6 +11209,7 @@ class TestTorchDeviceType(TestCase):
         for dtype in [torch.float32, torch.float64]:
             self._pdist_single((1000, 2), device, 2, dtype, trans=False, grad_check=False)
 
+    @slowTest
     @skipIfRocm
     def test_pdist_norm_backward(self, device):
         for shape in [(4, 5), (3, 2), (2, 1), (1500, 1)]:
@@ -13323,6 +13326,7 @@ class TestTorchDeviceType(TestCase):
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
         self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
 
+    @slowTest
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_ger(self, device, dtype):
@@ -13343,6 +13347,7 @@ class TestTorchDeviceType(TestCase):
         v1 = torch.randn(100, dtype=torch.float, device=device).to(dtype=dtype)
         run_test(v0, v1)
 
+    @slowTest
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float, torch.double)
     def test_addr(self, device, dtype):
@@ -13396,6 +13401,7 @@ class TestTorchDeviceType(TestCase):
 
         self.assertEqual(res1, res2)
 
+    @slowTest
     @onlyCPU
     def test_addmm(self, device):
         types = {
@@ -13429,6 +13435,23 @@ class TestTorchDeviceType(TestCase):
                     for k in range(50):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2, prec)
+
+    @dtypes(torch.float, torch.double)
+    def test_addmm_sizes(self, device, dtype):
+        for m in [0, 1, 25]:
+            for n in [0, 1, 10]:
+                for k in [0, 1, 8]:
+                    M = torch.randn(n, m, device=device, dtype=dtype)
+                    m1 = torch.randn(n, k, device=device, dtype=dtype)
+                    m2 = torch.randn(k, m, device=device, dtype=dtype)
+                    res1 = torch.addmm(M, m1, m2)
+                    res2 = torch.zeros(n, m, device=device, dtype=dtype)
+                    res2 += M
+                    for i in range(n):
+                        for j in range(m):
+                            for l in range(k):
+                                res2[i, j] += m1[i, l] * m2[l, j]
+                    self.assertEqual(res1, res2)
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -13664,6 +13687,7 @@ class TestTorchDeviceType(TestCase):
                 long_res1 = long_m1.clone()
                 long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    @slowTest
     @onlyCPU
     def test_mm(self, device):
         def _test_mm(n, m, p, dtype, genf):
@@ -13980,8 +14004,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
-            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_full_range(self, device, dtype):
@@ -14009,8 +14033,8 @@ class TestTorchDeviceType(TestCase):
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
         self.assertTrue((to_inc_ - alpha * range_) < t.to(torch.double).max() <= to_inc_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
-            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_from_to(self, device, dtype):
@@ -14049,8 +14073,8 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + alpha * range_))
                     self.assertTrue((to_ - alpha * range_) < t.to(torch.double).max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
-            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_to(self, device, dtype):
@@ -14076,8 +14100,8 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(0 <= t.to(torch.double).min() < alpha * to_)
             self.assertTrue((to_ - alpha * to_) < t.to(torch.double).max() < to_)
 
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32,
-            torch.int64, torch.float, torch.double, torch.bfloat16)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float, torch.double, torch.half, torch.bfloat16)
     @dtypesIfCUDA(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                   torch.float, torch.double, torch.half, torch.bfloat16)
     def test_random_default(self, device, dtype):

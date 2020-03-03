@@ -65,7 +65,11 @@ Tensor empty_cuda(IntArrayRef size, const TensorOptions& options, c10::optional<
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
-  auto memory_format = optional_memory_format.value_or(MemoryFormat::Contiguous);
+  TORCH_CHECK(
+    !(options.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto memory_format = options.memory_format_opt().value_or(optional_memory_format.value_or(MemoryFormat::Contiguous));
   tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   return tensor;
 }
