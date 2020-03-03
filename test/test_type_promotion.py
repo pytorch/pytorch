@@ -80,15 +80,26 @@ class TestTypePromotion(TestCase):
         self.assertEqual(c.dtype, torch.int64)
 
     @float_double_default_dtype
-    def test_float_promotion(self, device):
-        a = torch.ones([4, 4, 4], dtype=torch.float, device=device)
-        b = torch.ones([4, 4, 4], dtype=torch.double, device=device)
-        c = a + b
-        self.assertEqual(c, b + b)
-        self.assertEqual(c.dtype, torch.double)
-        c = b + a
-        self.assertEqual(c, b + b)
-        self.assertEqual(c.dtype, torch.double)
+    def test_complex_float_promotion(self, device):
+        def test_promotion(dtype_float, dtype_double):
+            a = torch.ones([4, 4, 4], dtype=dtype_float, device=device)
+            b = torch.ones([4, 4, 4], dtype=dtype_double, device=device)
+            c = a + b
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+            c = b + a
+            self.assertEqual(c, b + b)
+            self.assertEqual(c.dtype, dtype_double)
+        test_promotion(torch.float, torch.double)
+        test_promotion(torch.complex64, torch.complex128)
+
+    @float_double_default_dtype
+    def test_complex_scalar_mult_tensor_promotion(self, device):
+        a = 1j * torch.ones(2, device=device)
+        a = a + 1j
+        b = torch.tensor([2j, 2j])
+        self.assertEqual(a, b)
+        self.assertEqual(a.dtype, b.dtype)
 
     @float_double_default_dtype
     def test_add_wrapped(self, device):
