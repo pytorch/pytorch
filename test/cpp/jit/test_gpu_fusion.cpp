@@ -803,7 +803,7 @@ void testGPU_FusionCodeGen() {
   << "%TV2[ I0i{4} * I1, I0o, I2i{2}, I2o]              = %TV1 + 3f\n"
   << ":::::::" << std::endl;
   
-  CodeWrite cw;
+  CodeWrite cw(std::cout);
   cw.traverse(&fusion);
   /*
   std::vector<Int*> indices;
@@ -849,7 +849,7 @@ void testGPU_FusionCodeGen2() {
   << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
   << "::::::::::::" << std::endl;
     
-  CodeWrite cw;
+  CodeWrite cw(std::cout);
   cw.traverse(&fusion);
   /*
   std::vector<Int*> indices;

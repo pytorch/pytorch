@@ -28,20 +28,19 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
 }
 */
 
-struct TORCH_API CodeWrite : public IterVisitor {
+struct TORCH_API CodeWrite : public Printer {
  private:
-  bool parse_inline = false;
   bool producer = false;
   TensorView* consumer = nullptr;
   int extra_indent = 0;
 
-  std::ostream& print_indices(std::ostream& os, const std::vector<Int*>&);
-  bool print_predicate(std::ostream& os, const Expr* const expr);
+  void print_indices(const std::vector<Int*>&);
+  bool print_predicate(const Expr* const expr);
 
-  std::ostream& print(std::ostream& os, const TensorView* const);
-  std::ostream& print(std::ostream& os, const Val* const);
-  std::ostream& print(std::ostream& os, const UnaryOp* const);
-  std::ostream& print(std::ostream& os, const BinaryOp* const);
+  void print(const TensorView* const);
+  void print(const Val* const);
+  void print(const UnaryOp* const);
+  void print(const BinaryOp* const);
 
   void indent();
   void handle(Expr*);
@@ -63,6 +62,10 @@ struct TORCH_API CodeWrite : public IterVisitor {
   bool reset_fors = false;
 
  public:
+
+  CodeWrite(std::ostream& _os) : Printer(_os){}
+
+
   void traverse(
       const Fusion* const fusion,
       bool from_outputs_only = false,
