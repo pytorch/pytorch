@@ -1074,8 +1074,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // auto _bwd_hx_ref = std::move({h_bwd, c_bwd});
         // auto _fwd_hx = new TensorList(_fwd_hx_ref);
         // auto _bwd_hx = new TensorList(_bwd_hx_ref);
-        auto _fwd_hx = {h_fwd, c_fwd};
-        auto _bwd_hx_ref = {h_bwd, c_bwd};
+        std::vector<Tensor> _fwd_hx;
+        std::vector<Tensor> _bwd_hx;
+        _fwd_hx.push_back(h_fwd);
+        _fwd_hx.push_back(c_fwd);
+        _bwd_hx.push_back(h_bwd);
+        _bwd_hx.push_back(c_bwd);
+
         std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
         std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
 
