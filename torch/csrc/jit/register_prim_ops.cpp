@@ -3038,9 +3038,9 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::all(bool[] self) -> bool",
+        "aten::all(float[] self) -> bool",
         [](Stack& stack) {
-          c10::List<bool> l = pop(stack).toBoolList();
+          c10::List<double> l = pop(stack).toDoubleList();
           push(stack, std::move(l));
           for(int i = 0; i < l.size(); i++){
             if(l[i] == 0){
@@ -3055,17 +3055,17 @@ RegisterOperators reg2({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::any(bool[] self) -> bool",
+        "aten::all(bool[] self) -> bool",
         [](Stack& stack) {
           c10::List<bool> l = pop(stack).toBoolList();
           push(stack, std::move(l));
           for(int i = 0; i < l.size(); i++){
-            if(l[i] == 1){
-              push(stack, true);
+            if(l[i] == 0){
+              push(stack, false);
               break;
             }
             else{
-              push(stack, false);
+              push(stack, true);
             }
           }
           return 0;
