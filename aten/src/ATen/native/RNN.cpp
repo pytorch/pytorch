@@ -1079,6 +1079,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
 
+        std::cout << "Here I fail!" << "\n";
         // _fwd_params contains the forward parameters and _params the backward ones
         TensorList _fwd_params = _params.slice(_params.size() / 2);
 
