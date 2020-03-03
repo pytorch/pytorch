@@ -1131,6 +1131,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // TensorList outputs = {fwd_output, bwd_rev_output};
         auto cat_outputs = at::cat(outputs, -1);
         auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
+        std::cout << "output size: " << output.sizes() << "\n";
 
         auto hy = at::cat({f_hy, b_hy}, 0);
         auto cy = at::cat({f_cy, b_cy}, 0);
