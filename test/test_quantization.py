@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TEST_WITH_UBSAN, run_tests, IS_PPC, IS_MACOS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -316,6 +316,9 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
         r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
         Load the quantized state_dict for eval and compare results against original model
         """
+        if qengine == 'qnnpack':
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+                return
         with override_quantized_engine(qengine):
             model = TwoLayerLinearModel()
             model = torch.quantization.QuantWrapper(model)
@@ -337,6 +340,9 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             model = prepare(model)
             model = convert(model)
             new_state_dict = model.state_dict()
+
+            # Check to make sure the state dict keys match original model after convert.
+            self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
 
             model.load_state_dict(quant_state_dict)
 
@@ -831,6 +837,9 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         During eval, we first call prepare_qat and conver on the model and then load the state_dict
         and compare results against original model
         """
+        if qengine == 'qnnpack':
+            if IS_PPC or TEST_WITH_UBSAN or IS_MACOS:
+                return
         with override_quantized_engine(qengine):
             model = TwoLayerLinearModel()
             model = torch.quantization.QuantWrapper(model)
