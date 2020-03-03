@@ -23,7 +23,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/workspace.h"
 
-#if C10_ANDROID
+#ifdef C10_ANDROID
 #ifndef SYS_gettid
 #define SYS_gettid __NR_gettid
 #endif
