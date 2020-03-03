@@ -30,34 +30,49 @@ struct Float;
 struct Int;
 struct Add;
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion* const);
+struct TORCH_API Printer{
+std::ostream& os;
+bool print_inline_ = false;
+public:
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Statement* const);
+Printer(std::ostream& _os):os(_os){}
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Val* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const Expr* const);
+void print(const Fusion* const);
+void print(const Fusion& f){print(&f);}
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Tensor* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const);
+void print(const Statement* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const TensorContiguity* const);
+void print(const Val* const);
+void print(const Expr* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const);
+void print(const Tensor* const);
+void print(const TensorDomain* const);
+void print(const TensorView* const);
+void print(const IterDomain* const);
+void print(const TensorContiguity* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Float* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const Int* const);
+void print(const Float* const);
+void print(const Int* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const UnaryOp* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const BinaryOp* const);
+void print(const UnaryOp* const);
+void print(const BinaryOp* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const);
-TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const);
+void print(const Split* const);
+void print(const Merge* const);
+void print(const Reorder* const);
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Fusion& f);
+void print_inline(const Statement* const stmt){
+  bool prev = print_inline_;
+  print_inline_ = true;
+  print(stmt);
+  print_inline_ = prev;
+}
 
-TORCH_API std::ostream& print_inline(std::ostream& os, const Statement* const);
+};
+
+TORCH_API std::ostream& operator<< (std::ostream& os, const Statement* const stmt);
+TORCH_API std::ostream& operator<< (std::ostream& os, const Fusion* const f);
+TORCH_API std::ostream& operator<< (std::ostream& os, const Fusion& f);
 
 } // namespace fuser
 } // namespace jit

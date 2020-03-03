@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
-#include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
+#include <torch/csrc/jit/fuser/common/tensor.h>
 
 #include <iostream>
 
@@ -9,236 +9,229 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-namespace {
-
-static bool print_inline_ = false;
-
-template<typename T>
-std::ostream& operator<<(std::ostream& os, const std::vector<T>& data) {
-  os << "(";
-  for (auto i = data.begin(); i != data.end(); i++) {
-    os << (*i); 
-    os << " ";
+void Printer::print(const Fusion* const fusion) {
+  for (const Expr* expr : fusion->exprs()) {
+    print(expr);
   }
-  return os << ")";
 }
 
-}
-
-std::ostream& operator<<(std::ostream& os, const Fusion* const fusion) {
-  for (const Expr* expr : fusion->exprs()){
-    os << expr << std::endl;
+void Printer::print(const Statement* const stmt) {
+  if (stmt->isVal()){
+    print(static_cast<const Val*>(stmt));
+    return;
+  } else if (stmt->isExpr()) {
+    print(static_cast<const Expr*>(stmt));
+    return;
   }
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const Statement* const stmt) {
-  if (stmt->isVal())
-    return os << static_cast<const Val*>(stmt);
-  else if (stmt->isExpr())
-    return os << static_cast<const Expr*>(stmt);
   throw std::runtime_error("Unkown statment type found in os << Statement.");
 }
 
-std::ostream& operator<<(std::ostream& os, const Val* const val) {
+void Printer::print(const Val* const val) {
   switch (*(val->getValType())) {
-    case ValType::TensorDomain:
-      return os << static_cast<const TensorDomain* const>(val);
-    case ValType::TensorView:
-      return os << static_cast<const TensorView* const>(val);
-    case ValType::IterDomain:
-      return os << static_cast<const IterDomain* const>(val);      
     case ValType::Tensor:
-      return os << static_cast<const Tensor* const>(val);
+      print(static_cast<const Tensor* const>(val)); return;
+    case ValType::TensorDomain:
+      print(static_cast<const TensorDomain* const>(val)); return;
+    case ValType::TensorView:
+      print(static_cast<const TensorView* const>(val)); return;
+    case ValType::IterDomain:
+      print(static_cast<const IterDomain* const>(val)); return;
 
     case ValType::Scalar:
-      switch (*(val->getDataType())){
+      switch (*(val->getDataType())) {
         case DataType::Float:
-          return os << static_cast<const Float* const>(val);
+          print(static_cast<const Float* const>(val)); return;
         case DataType::Int:
-          return os << static_cast<const Int* const>(val);
+          print(static_cast<const Int* const>(val)); return;
         default:
           break;
       }
-
     default:
       break;
   }
   throw std::runtime_error("Unknown ValType in os << Val.");
 }
 
-std::ostream& operator<<(std::ostream& os, const Expr* const expr) {
+void Printer::print(const Expr* const expr) {
   switch (*(expr->getExprType())) {
     case ExprType::UnaryOp:
-      return os << static_cast<const UnaryOp* const>(expr);
+      print(static_cast<const UnaryOp* const>(expr)); return;
     case ExprType::BinaryOp:
-      return os << static_cast<const BinaryOp* const>(expr);
+      print(static_cast<const BinaryOp* const>(expr)); return;
     case ExprType::Split:
-      return os << static_cast<const Split* const>(expr);
+      print(static_cast<const Split* const>(expr)); return;
     case ExprType::Merge:
-      return os << static_cast<const Merge* const>(expr);
+      print(static_cast<const Merge* const>(expr)); return;
     case ExprType::Reorder:
-      return os << static_cast<const Reorder* const>(expr);
+      print(static_cast<const Reorder* const>(expr)); return;
   }
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const TensorDomain* const td){
+TORCH_API void Printer::print(const TensorDomain* const td) {
   os << "[ ";
-  for(std::vector<const IterDomain*>::size_type i = 0; i<td->size(); i++){
-    os<<td->axis(i);
-    if(i!=td->size()-1)
-      os<<", ";
+  for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
+    print(td->axis(i));
+    if (i != td->size() - 1)
+      os << ", ";
   }
-  return os<<" ]";
+  os << " ]";
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const TensorView* const tv){
-  if(tv->tensor()!=nullptr)
-    os << "%T" << tv->tensor()->name() << tv->domain();
-  else
-    os << "%TV" << tv->name() << tv->domain();
-  if(tv->getComputeAtView() != nullptr){
+TORCH_API void Printer::print(const TensorView* const tv) {
+  if (tv->tensor() != nullptr){
+    os << "T" << tv->tensor()->name();
+    print(tv->domain());
+  }else{
+    os << "TV" << tv->name();
+    print(tv->domain());
+  }
+  if (tv->getComputeAtView() != nullptr) {
     os << " compute_at( ";
-    if(tv->getComputeAtView()->tensor() == nullptr)
-      os << "%TV" << tv->getComputeAtView()->name();
+    if (tv->getComputeAtView()->tensor() == nullptr)
+      os << "TV" << tv->getComputeAtView()->name();
     else
-      os << "%T" << tv->getComputeAtView()->tensor()->name();
+      os << "T" << tv->getComputeAtView()->tensor()->name();
     os << ", " << tv->getComputeAtAxis() << " )";
   }
-  return os;
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const IterDomain* const id){
-  if(id->isReduction())
+TORCH_API void Printer::print(const IterDomain* const id) {
+  if (id->isReduction())
     os << "r";
   else
     os << "i";
-  switch(id->parallel_method()){
-    case(ParallelType::Vectorize):
-      os <<"V";
+  switch (id->parallel_method()) {
+    case (ParallelType::Vectorize):
+      os << "V";
       break;
-    case(ParallelType::Unroll):
+    case (ParallelType::Unroll):
       os << "U";
       break;
-    case(ParallelType::Serial):
+    case (ParallelType::Serial):
       os << "S";
       break;
     default:
       os << id->parallel_method();
   }
-  bool prev = print_inline_;
-  print_inline_ = true;
-  os << "{" << id->size() << "}";
-  print_inline_ = prev;
-  return os;
+  os << "{";
+  print_inline(id->size());
+  os << "}";
 }
 
-std::ostream& operator<<(std::ostream& os, const Tensor* const t) {
-  os << "%T" << t->name(); 
-  if(t->getDataType().has_value())
+void Printer::print(const Tensor* const t) {
+  os << "T" << t->name();
+  if (t->getDataType().has_value())
     os << " scalar_type: " << *(t->getDataType());
-  if(t->domain() != nullptr)
+  if (t->domain() != nullptr)
     os << " " << t->domain();
-  if(t->hasContiguityInfo())
+  if (t->hasContiguityInfo())
     os << " " << &t->getContiguityInfo().value();
-  return os;
 }
 
-std::ostream& operator<<(
-    std::ostream& os,
-    const TensorContiguity* const t) {
-  return os << "format_tag: " << t->getContiguityTag();
+void Printer::print(const TensorContiguity* const t) {
+  os << "format_tag: " << t->getContiguityTag();
 }
 
-std::ostream& operator<<(std::ostream& os, const Float* const f) {
-  if(print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr){
-    return os<<"( "<< FusionGuard::getCurFusion()->origin(f) << " )";
+void Printer::print(const Float* const f) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
+    os << "( ";
+    print(FusionGuard::getCurFusion()->origin(f));
+    os << " )";
+    return;
   }
-  
+
   if (f->isSymbolic()) {
-    return os << "%f" << f->name();
+    os << "f" << f->name();
   } else {
-    return os << *(f->value()) << "f";
+    os << *(f->value()) << "f";
   }
 }
 
-std::ostream& operator<<(std::ostream& os, const Int* const i) {
-  if(print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr){
-    return os<<"( "<< FusionGuard::getCurFusion()->origin(i) << " )";
+void Printer::print(const Int* const i) {
+  if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
+    os << "( ";
+    print(FusionGuard::getCurFusion()->origin(i));
+    os << " )";
+    return;
   }
-  
+
   if (i->isSymbolic()) {
-    return os << "%i" << i->name();
+    os << "i" << i->name();
   } else {
-    return os << *(i->value()) ;
+    os << *(i->value());
   }
 }
-
-void check_inlineable(const IRInputOutput* const irio){
-  for(auto inp : irio->inputs())
+namespace{
+void check_inlineable(const IRInputOutput* const irio) {
+  for (auto inp : irio->inputs())
     TORCH_CHECK(inp->getValType().value() == ValType::Scalar);
   TORCH_CHECK(irio->nOutputs() == 1)
   TORCH_CHECK(irio->output(0)->getValType().value() == ValType::Scalar);
 }
+}
 
-std::ostream& operator<<(std::ostream& os, const UnaryOp* const uop) {
-  if(print_inline_)
+void Printer::print(const UnaryOp* const uop) {
+  if (print_inline_)
     check_inlineable(uop);
 
-  if(!print_inline_)
+  if (!print_inline_)
     os << uop->out() << " = ";
-  if(auto inline_uop = inline_op_str(uop->type())) {
-    return os << inline_uop.value() << uop->in();
+  if (auto inline_uop = inline_op_str(uop->type())) {
+    os << inline_uop.value() << uop->in();
   } else {
-    return os << uop->type() << "(" << uop->in() << ")";
+    os << uop->type() << "(" << uop->in() << ")";
   }
+  
+  if(!print_inline_)
+    os<<"\n";
 }
 
-std::ostream& operator<<(std::ostream& os, const BinaryOp* const bop) {
-  if(print_inline_)
+void Printer::print(const BinaryOp* const bop) {
+  if (print_inline_)
     check_inlineable(bop);
 
-  if(!print_inline_)
+  if (!print_inline_)
     os << bop->out() << " = ";
-  if(auto inline_bop = inline_op_str(bop->type())) {
-    return os << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
+  if (auto inline_bop = inline_op_str(bop->type())) {
+    os << bop->lhs() << " " << inline_bop.value() << " " << bop->rhs();
   } else {
-    return os << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
+    os << bop->type() << "(" << bop->lhs() << ", " << bop->rhs() << ")";
   }
+  
+  if(!print_inline_)
+    os<<"\n";
 }
 
-std::ostream& operator<<(std::ostream& os, const Fusion& f) {
-  return os << &f;
+void Printer::print(const Split* const s) {
+  os << "Split: " << s->in() << " axis " << s->axis() << " by factor "
+     << s->factor() << " -> " << s->out() << "\n";
 }
 
-/*
- * Avoid using lowercase instances of expressions, as they will be used for
- * arith version of the expressions. For example
- * Split is an IR node
- * split is a function that generates an IR node and returns a const TensorView*.
- */
-
-TORCH_API std::ostream& operator<<(std::ostream& os, const Split* const s){
-  return os << "Split: " << s->in() << " axis " << s->axis() << " by factor " << s->factor() << " -> " << s->out();
+void Printer::print(const Merge* const m) {
+  os << "Merge: " << m->in() << " axis " << m->axis()
+     << " with the following -> " << m->out() << "\n";
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Merge* const m){
-  return os << "Merge: " << m->in() << " axis " << m->axis() << " with the following -> " << m->out();
+void Printer::print(const Reorder* const ro) {
+  os << "Reorder: " << ro->in() << " -> " << ro->out() << "\n";
 }
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const Reorder* const ro){
-  return os << "Reorder: " << ro->in() << " -> " << ro->out();
-}
-
-TORCH_API std::ostream& print_inline(std::ostream& os, const Statement* const stmt){
-  bool prev = print_inline_;
-  print_inline_ = true;
-  os << stmt;
-  print_inline_ = prev;
+std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
+  Printer p(os);
+  p.print(stmt);
   return os;
 }
 
+std::ostream& operator<< (std::ostream& os, const Fusion* const f){
+  Printer p(os);
+  p.print(f);
+  return os;
+}
+
+std::ostream& operator<< (std::ostream& os, const Fusion& f){
+  return os << &f;
+}
 
 } // namespace fuser
 } // namespace jit
