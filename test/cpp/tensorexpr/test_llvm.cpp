@@ -989,6 +989,19 @@ void testLLVMBroadcastAdd() {
   }
 }
 
+void testLLVMBitwiseOps() {
+  KernelScope kernel_scope;
+  auto a = IntImm::make(59);
+  auto b = IntImm::make(11);
+  auto c = IntImm::make(101);
+  auto d = IntImm::make(2);
+
+  ExprHandle f = (((a ^ (b << 1)) & c) >> 2) | d;
+  LLVMExprEval cg(f);
+
+  EXPECT_EQ(cg.value<int>(), 11);
+}
+
 void testLLVMDynamicShapeAdd() {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {

@@ -19,6 +19,7 @@ enum IRNodeType {
   kMax,
   kMin,
   kAnd,
+  kOr,
   kLshift,
   kRshift,
   kXor,
@@ -132,6 +133,15 @@ class And : public BinaryOpNode<And> {
  public:
   And(const Expr* lhs, const Expr* rhs)
       : BinaryOpNode(lhs, rhs, IRNodeType::kAnd) {
+    CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
+    CHECK_EQ(lhs->dtype(), rhs->dtype());
+  }
+};
+
+class Or : public BinaryOpNode<Or> {
+ public:
+  Or(const Expr* lhs, const Expr* rhs)
+      : BinaryOpNode(lhs, rhs, IRNodeType::kOr) {
     CHECK_EQ(lhs->dtype().scalar_type(), ScalarType::Int);
     CHECK_EQ(lhs->dtype(), rhs->dtype());
   }

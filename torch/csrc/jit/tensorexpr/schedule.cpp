@@ -463,7 +463,7 @@ class Vectorizer : public IRMutator {
     std::vector<const Expr*> inputs = { v->lhs(), v->rhs(), v->ret_val1(), v->ret_val2() };
     return try_vectorize(v, inputs,
       [&](){
-        return CompareSelect::make(ExprHandle(inputs[0]), ExprHandle(inputs[1]), 
+        return CompareSelect::make(ExprHandle(inputs[0]), ExprHandle(inputs[1]),
                                    ExprHandle(inputs[2]), ExprHandle(inputs[3]),
                                    v->compare_select_op());
       });

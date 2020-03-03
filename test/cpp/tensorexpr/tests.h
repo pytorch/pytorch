@@ -157,6 +157,7 @@ namespace jit {
   _(LLVMSimpleMath01)           \
   _(LLVMComputeMul)             \
   _(LLVMBroadcastAdd)           \
+  _(LLVMBitwiseOps)             \
   _(LLVMDynamicShapeAdd)        \
   _(LLVMBindDynamicShapeAdd)    \
   _(LLVMTensorDynamicShapeAdd)  \

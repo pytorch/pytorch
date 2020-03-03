@@ -14,6 +14,7 @@ class Mod;
 class Max;
 class Min;
 class And;
+class Or;
 class Xor;
 class Lshift;
 class Rshift;
@@ -53,6 +54,7 @@ class TORCH_API IRVisitor {
   virtual void visit(const Max* v);
   virtual void visit(const Min* v);
   virtual void visit(const And* v);
+  virtual void visit(const Or* v);
   virtual void visit(const Xor* v);
   virtual void visit(const Lshift* v);
   virtual void visit(const Rshift* v);

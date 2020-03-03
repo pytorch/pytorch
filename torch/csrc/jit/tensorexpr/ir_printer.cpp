@@ -51,6 +51,10 @@ void IRPrinter::visit(const And* v) {
   visitBinaryOp(v, "&", this);
 }
 
+void IRPrinter::visit(const Or* v) {
+  visitBinaryOp(v, "|", this);
+}
+
 void IRPrinter::visit(const Xor* v) {
   visitBinaryOp(v, "^", this);
 }
@@ -200,8 +204,8 @@ void IRPrinter::visit(const For* v) {
 }
 
 void IRPrinter::visit(const Block* v) {
-  for (int i = 0; i < v->nstmts(); ++i) {
-    os() << *v->stmt(i) << std::endl;
+  for (Stmt *s : v->stmts()) {
+    os() << *s << std::endl;
   }
 }
 

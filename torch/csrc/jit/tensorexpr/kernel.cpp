@@ -389,6 +389,13 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
           });
     } break;
 
+    case aten::__or__: {
+      return ComputeTwoOperand(
+          "aten_or", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
+            return lhs | rhs;
+          });
+    } break;
+
     case aten::__xor__: {
       return ComputeTwoOperand(
           "aten_xor", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {

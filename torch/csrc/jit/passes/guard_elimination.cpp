@@ -280,6 +280,7 @@ struct GuardElimination {
       case aten::_sigmoid_backward:
       case aten::_tanh_backward:
       case aten::__and__:
+      case aten::__or__:
       case aten::__xor__:
       case aten::__lshift__:
       case aten::__rshift__:

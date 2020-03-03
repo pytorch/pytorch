@@ -73,6 +73,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
   void visit(const Max* v) override;
   void visit(const Min* v) override;
   void visit(const And* v) override;
+  void visit(const Or* v) override;
   void visit(const Xor* v) override;
   void visit(const Lshift* v) override;
   void visit(const Rshift* v) override;

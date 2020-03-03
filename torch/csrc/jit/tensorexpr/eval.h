@@ -30,13 +30,13 @@ class Value {
   Value(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);      \
   }
-AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_CTOR);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
 #undef VALUE_CTOR
 
 #define VALUE_VEC_CTOR(Type, Name)  \
   Value(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
-AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_VEC_CTOR);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
 #undef VALUE_VEC_CTOR
 
   template <typename T>
@@ -54,7 +54,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_VEC_CTOR);
 
 #define VALUE_STORAGE(Type, Name) \
   std::vector<Type> Name##values;
-AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_STORAGE);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_STORAGE);
 #undef VALUE_STORAGE
   void* ptr;
 };
@@ -66,7 +66,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_STORAGE);
     CHECK_EQ(dtype_, k##Name) << "invalid dtype"; \
     return Name##values[0];\
 }
-AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_AS_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
 #define VALUE_AS_VEC_DISPATCH(Type, Name) \
@@ -75,7 +75,7 @@ inline const std::vector<Type>& Value::as_vec<Type>() const { \
   CHECK_EQ(dtype_.scalar_type(), ScalarType::Name) << "invalid dtype"; \
   return Name##values; \
 }
-AT_FORALL_SCALAR_TYPES_AND(Half, VALUE_AS_VEC_DISPATCH);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
 
 template <typename T>
@@ -128,7 +128,7 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
       case ScalarType::Name: \
         eval_context_[buf.var()] = data.Name##Data(); \
         break;
-AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "Unhandled dtype for argument " << buf.var()->name_hint()
@@ -165,6 +165,9 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
   }
 
   TORCH_API void visit(const And* v) override {
+    visit_binary_op(v);
+  }
+  TORCH_API void visit(const Or* v) override {
     visit_binary_op(v);
   }
   TORCH_API void visit(const Xor* v) override {
@@ -253,6 +256,9 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
         case IRNodeType::kAnd:
           result_v[i] = lhs_v[i] & rhs_v[i];
           break;
+        case IRNodeType::kOr:
+          result_v[i] = lhs_v[i] | rhs_v[i];
+          break;
         case IRNodeType::kXor:
           result_v[i] = lhs_v[i] ^ rhs_v[i];
           break;
@@ -318,8 +324,9 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
     Value rhs_v = value_;
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     IRNodeType expr_type = v->expr_type();
-    if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kXor ||
-        expr_type == IRNodeType::kLshift || expr_type == IRNodeType::kRshift) {
+    if (expr_type == IRNodeType::kAnd || expr_type == IRNodeType::kOr ||
+        expr_type == IRNodeType::kXor || expr_type == IRNodeType::kLshift ||
+        expr_type == IRNodeType::kRshift) {
       value_ = bitwise_binary_op(lhs_v, rhs_v, expr_type);
       return;
     }
@@ -331,6 +338,9 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
         break;
 AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
+      case ScalarType::Bool:
+        value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
+        break;
       default:
         LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
     }
@@ -357,7 +367,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
       value_ = compare_select_op<Type, int>(             \
           lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
       break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "invalid dtype: " << lhs_v.dtype();
@@ -368,7 +378,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
   TORCH_API void visit(const Name##Imm* v) override { \
     value_ = Value(v->value());                       \
   }
-AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
+AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
   TORCH_API void visit(const Let* v) override {
@@ -430,7 +440,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
     case ScalarType::Name:                                           \
       this->value_ = Value(castValues<SrcType, Type>(src_dtype, v)); \
       break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, DST_TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
         LOG(FATAL) << "Cast invalid dst type " << dst_dtype << "\n";
@@ -450,7 +460,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
     case ScalarType::Name:                               \
       doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
       break;
-        AT_FORALL_SCALAR_TYPES_AND(Half, SRC_TYPE_CASE);
+        AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
           LOG(FATAL) << "Cast invalid src type " << src_dtype << "\n";
@@ -501,7 +511,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
       std::vector<Type> v(lanes, value.as<Type>()); \
       value_ = Value(v);                            \
     } break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "invalid dtype: " << value.dtype();
@@ -541,7 +551,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
       }                                           \
       value_ = Value(v);                          \
     } break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "Invalid dtype: " << v_sdtype;
@@ -574,7 +584,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, IMM_VISIT);
         }                                                     \
       }                                                       \
     } break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "Invalid dtype: " << v_sdtype;
@@ -815,8 +825,14 @@ class ExprEval {
     } break;
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::Bool: {
+      std::vector<unsigned char> ret_val_arg(1);
+      call_args_extended.push_back(CallArg(ret_val_arg.data()));
+      codegen_->call(call_args_extended);
+      ret_value_ = Value((bool)ret_val_arg[0]);
+     } break;
       default:
-        throw std::runtime_error("Invalid dtype");
+        LOG(FATAL) << "Invalid Dtype " << dtype_ << "\n";
     }
   }
 

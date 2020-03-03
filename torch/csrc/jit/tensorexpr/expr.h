@@ -94,6 +94,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
   ExprHandle operator<(const ExprHandle& other) const;
   ExprHandle operator<=(const ExprHandle& other) const;
   ExprHandle operator&(const ExprHandle& other) const;
+  ExprHandle operator|(const ExprHandle& other) const;
   ExprHandle operator^(const ExprHandle& other) const;
   ExprHandle operator<<(const ExprHandle& other) const;
   ExprHandle operator>>(const ExprHandle& other) const;

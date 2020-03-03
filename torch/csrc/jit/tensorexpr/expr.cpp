@@ -54,6 +54,10 @@ ExprHandle ExprHandle::operator&(const ExprHandle& other) const {
   return And::make(*this, other);
 }
 
+ExprHandle ExprHandle::operator|(const ExprHandle& other) const {
+  return Or::make(*this, other);
+}
+
 ExprHandle ExprHandle::operator^(const ExprHandle& other) const {
   return Xor::make(*this, other);
 }

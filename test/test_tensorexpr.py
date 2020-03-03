@@ -1181,6 +1181,9 @@ class TestTensorExprFuser(BaseTestClass):
         def run_and(x, y):
             return x & (x & y)
 
+        def run_or(x, y):
+            return x & (x | y)
+
         def run_xor(x, y):
             return x ^ (x ^ y)
 
@@ -1190,7 +1193,7 @@ class TestTensorExprFuser(BaseTestClass):
         def run_rshift(x, y):
             return x & (x >> y)
 
-        fns = {run_and, run_xor, run_lshift, run_rshift}
+        fns = {run_and, run_or, run_xor, run_lshift, run_rshift}
 
         for device in devices:
             for fn in fns:

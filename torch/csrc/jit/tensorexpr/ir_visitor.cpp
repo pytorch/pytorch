@@ -45,6 +45,10 @@ void IRVisitor::visit(const And* v) {
   visit_binary_op(v, this);
 }
 
+void IRVisitor::visit(const Or* v) {
+  visit_binary_op(v, this);
+}
+
 void IRVisitor::visit(const Xor* v) {
   visit_binary_op(v, this);
 }
@@ -104,8 +108,8 @@ void IRVisitor::visit(const Store* v) {
 }
 
 void IRVisitor::visit(const Block* v) {
-  for (int i = 0; i < v->nstmts(); i++) {
-    v->stmt(i)->accept(this);
+  for (Stmt* s : v->stmts()) {
+    s->accept(this);
   }
 }
 

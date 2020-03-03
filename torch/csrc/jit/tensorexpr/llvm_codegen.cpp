@@ -322,6 +322,21 @@ void LLVMCodeGen::visit(const And* v) {
   }
 }
 
+void LLVMCodeGen::visit(const Or* v) {
+  v->lhs()->accept(this);
+  auto lhs = this->value_;
+  bool lfp = lhs->getType()->isFloatingPointTy();
+  v->rhs()->accept(this);
+  auto rhs = this->value_;
+  bool rfp = rhs->getType()->isFloatingPointTy();
+
+  if (!lfp && !rfp) {
+    value_ = irb_.CreateOr(lhs, rhs);
+  } else {
+    LOG(FATAL) << "Unhandled mismatch Or arg types";
+  }
+}
+
 void LLVMCodeGen::visit(const Xor* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
@@ -772,8 +787,8 @@ void LLVMCodeGen::visit(const For* v) {
 }
 
 void LLVMCodeGen::visit(const Block* v) {
-  for (int i = 0; i < v->nstmts(); i++) {
-    v->stmt(i)->accept(this);
+  for (Stmt* s : v->stmts()) {
+    s->accept(this);
   }
 }
 

@@ -15,6 +15,7 @@ class Mod;
 class Max;
 class Min;
 class And;
+class Or;
 class Xor;
 class Lshift;
 class Rshift;
@@ -57,6 +58,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const Max* v);
   virtual const Expr* mutate(const Min* v);
   virtual const Expr* mutate(const And* v);
+  virtual const Expr* mutate(const Or* v);
   virtual const Expr* mutate(const Xor* v);
   virtual const Expr* mutate(const Lshift* v);
   virtual const Expr* mutate(const Rshift* v);

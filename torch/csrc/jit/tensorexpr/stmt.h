@@ -1,5 +1,6 @@
 #pragma once
 
+#include <list>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,17 @@ class Stmt : public KernelScopedObject {
   Stmt() {}
   TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
+
+  Stmt* get_parent() const {
+    return parent_;
+  }
+
+ protected:
+  static void set_parent(Stmt* s, Stmt* new_parent) {
+    s->parent_ = new_parent;
+  }
+ private:
+  Stmt* parent_ = nullptr;
 };
 
 template <class Op>
@@ -78,16 +90,37 @@ class Block : public StmtNode<Block> {
     }
     return new Block(valid_stmts);
   }
+
   int nstmts() const {
     return stmts_.size();
   }
-  Stmt* stmt(int index) const {
-    return stmts_[index];
+
+  void append_stmt(Stmt *s) {
+    stmts_.push_back(s);
+    set_parent(s, this);
+  }
+  bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
+    auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
+    if (pos == stmts_.end()) {
+      return false;
+    }
+    stmts_.insert(pos, new_stmt);
+    stmts_.erase(pos);
+    set_parent(new_stmt, this);
+    return true;
+  }
+  std::list<Stmt*> stmts() const {
+    return stmts_;
   }
 
+  explicit Block(const std::vector<Stmt*>& stmts) {
+    for (Stmt* s : stmts) {
+      stmts_.push_back(s);
+      set_parent(s, this);
+    }
+  }
  private:
-  explicit Block(const std::vector<Stmt*>& stmts) : stmts_(stmts) {}
-  std::vector<Stmt*> stmts_;
+  std::list<Stmt*> stmts_;
 };
 
 class TORCH_API Store : public StmtNode<Store> {
@@ -231,12 +264,29 @@ class Cond : public StmtNode<Cond> {
   }
 
   Cond(const Expr* condition, Stmt* true_stmt, Stmt* false_stmt)
-      : condition_(condition), true_stmt_(true_stmt), false_stmt_(false_stmt) {}
+      : condition_(condition) {
+    if (true_stmt) {
+      Block* b = dynamic_cast<Block*>(true_stmt);
+      if (!b) {
+        b = new Block({true_stmt});
+      }
+      true_stmt_ = b;
+      set_parent(true_stmt_, this);
+    }
+    if (false_stmt) {
+      Block* b = dynamic_cast<Block*>(false_stmt);
+      if (!b) {
+        b = new Block({false_stmt});
+      }
+      false_stmt_ = b;
+      set_parent(false_stmt_, this);
+    }
+  }
 
  private:
   const Expr* condition_;
-  Stmt* true_stmt_;
-  Stmt* false_stmt_;
+  Block* true_stmt_ = nullptr;
+  Block* false_stmt_ = nullptr;
 };
 
 class LoopOptions {
@@ -358,28 +408,44 @@ class For : public StmtNode<For> {
   }
 
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
-      : var_(var), start_(start), stop_(stop), body_(body) {
-          CHECK(var && start && stop && body);
-      }
+      : var_(var), start_(start), stop_(stop) {
+    CHECK(var && start && stop && body);
+    Block* b = dynamic_cast<Block*>(body);
+    if (!b) {
+      b = new Block({body});
+    }
+    body_ = b;
+    set_parent(body_, this);
+  }
 
   For(const Var* var,
       const Expr* start,
       const Expr* stop,
       Stmt* body,
       const LoopOptions& loop_options)
-      : var_(var),
-        start_(start),
-        stop_(stop),
-        body_(body),
-        loop_options_(loop_options) {
-          CHECK(var && start && stop && body);
-        }
+      : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
+    CHECK(var && start && stop && body);
+    Block* b = dynamic_cast<Block*>(body);
+    if (!b) {
+      b = new Block({body});
+    }
+    body_ = b;
+    set_parent(body_, this);
+  }
+
+  void set_gpu_block_index(int block_index) {
+    loop_options_.set_gpu_block_index(block_index);
+  }
+
+  void set_gpu_thread_index(int thread_index) {
+    loop_options_.set_gpu_thread_index(thread_index);
+  }
 
  private:
   const Var* var_;
   const Expr* start_;
   const Expr* stop_;
-  Stmt* body_;
+  Block* body_;
   LoopOptions loop_options_;
 };
 } // namespace tensorexpr

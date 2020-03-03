@@ -37,6 +37,8 @@ static const Expr* mutate_binary_op(
       return new Min(lhs_new, rhs_new, option);
     case IRNodeType::kAnd:
       return new And(lhs_new, rhs_new);
+    case IRNodeType::kOr:
+      return new Or(lhs_new, rhs_new);
     case IRNodeType::kXor:
       return new Xor(lhs_new, rhs_new);
     case IRNodeType::kLshift:
@@ -70,6 +72,10 @@ const Expr* IRMutator::mutate(const Mod* v) {
 }
 
 const Expr* IRMutator::mutate(const And* v) {
+  return mutate_binary_op(v, this);
+}
+
+const Expr* IRMutator::mutate(const Or* v) {
   return mutate_binary_op(v, this);
 }
 
@@ -270,8 +276,7 @@ Stmt* IRMutator::mutate(const For* v) {
 Stmt* IRMutator::mutate(const Block* v) {
   bool any_change = false;
   std::vector<Stmt*> stmts;
-  for (int i = 0; i < v->nstmts(); i++) {
-    Stmt* stmt = v->stmt(i);
+  for (Stmt* stmt : v->stmts()) {
     Stmt* stmt_new = stmt->accept_mutator(this);
     if (stmt != stmt_new) {
       any_change = true;
