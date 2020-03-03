@@ -283,7 +283,7 @@ std::vector<Tensor> RNNImplBase<Derived>::merge_direction_weights(
   for(auto direction = 0; direction < directions.size(); direction++) {
     auto direction_layers = directions.at(direction);
     for(auto layer = 0; layer < direction_layers.size(); layer++) {
-      flat.push_back(direction_layers[layer]);
+      flat.push_back(direction_layers[layer].contiguous());
     }
   }
   return flat;
