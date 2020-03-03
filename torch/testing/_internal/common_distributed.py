@@ -260,8 +260,8 @@ class MultiProcessTestCase(TestCase):
                     subprocess_error = True
             if subprocess_error:
                 break
-            # All processes have joined cleanly if they all have an exitcode of 0.
-            if all([p.exitcode == 0 for p in self.processes]):
+            # All processes have joined cleanly if they all a valid exitcode
+            if all([p.exitcode is not None for p in self.processes]):
                 break
             # Check if we should time out the test. If so, we terminate each process.
             elapsed = time.time() - start_time
