@@ -143,14 +143,14 @@ class _ObserverBase(ObserverBase):
                                     Returning default scale and zero point "
             )
             return torch.tensor([1.0]), torch.tensor([0])
-        
+
         diff = min_vals <= max_vals
         for i in range(len(diff)):
             assert (diff[i]), "min should be less than max for index {}".format(i)
-        
+
         scales = torch.empty(min_vals.size(), dtype=torch.float32)
         zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
-        
+
         if self.dtype == torch.qint8:
             if self.reduce_range:
                 qmin, qmax = -64, 63
@@ -187,7 +187,7 @@ class _ObserverBase(ObserverBase):
                 zero_points = torch.min(zero_points, torch.tensor([qmax], dtype=zero_points.dtype, device=zero_points.device))
                 zero_points = zero_points.to(dtype=torch.int64)
         scales.to(dtype=torch.float)
-        
+
         return scales, zero_points
 
     @torch.jit.export
