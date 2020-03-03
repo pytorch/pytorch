@@ -1559,7 +1559,7 @@ class RpcTest(RpcAgentTestFixture):
         )
 
         info = rpc.api._get_current_rpc_agent().get_debug_info()
-        self.assertEqual(int(info["agent.num_idle_threads"]), NUM_THREADS)
+        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
         rpc.shutdown()
 
     @dist_init
