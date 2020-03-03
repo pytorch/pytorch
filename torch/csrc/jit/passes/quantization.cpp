@@ -25,6 +25,7 @@ namespace {
 
 using OptionalModuleVector = std::vector<c10::optional<script::Module>>;
 using ModuleMethodVector = std::vector<std::pair<script::Module, std::string>>;
+using NameModuleVector = std::vector<std::pair<std::string, script::Module>>;
 // Map of quantization parameter name and value
 // for example _scale, _zero_point,
 // _scalar_type and _axis(for per channel quantization)
@@ -475,7 +476,8 @@ class InsertObserversHelper {
   void insertObserverFor(
       Value* v,
       script::Module& module,
-      const script::Module& observer_module);
+      const script::Module& observer_module,
+      NameModuleVector& observer_name_and_modules);
 
   c10::optional<script::Module> getObserverFor(Value* v);
 
@@ -516,10 +518,7 @@ class InsertObserversHelper {
   std::unordered_set<Node*> observer_nodes_;
   // Map from graph to a vector of observer name and observer modules we
   // want to add to the module instance that has the graph
-  std::unordered_map<
-      Graph*,
-      std::vector<std::tuple<std::string, script::Module>>>
-      graph_observer_map_;
+  std::unordered_map<Graph*, NameModuleVector> graph_observer_map_;
 
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
@@ -725,7 +724,8 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
 void InsertObserversHelper::insertObserverFor(
     Value* v,
     script::Module& module,
-    const script::Module& observer_module) {
+    const script::Module& observer_module,
+    NameModuleVector& observer_name_and_modules) {
   if (observed_values_.count(v)) {
     return;
   }
@@ -735,9 +735,9 @@ void InsertObserversHelper::insertObserverFor(
     observer_name = "_observer_" + c10::to_string(uid_++);
   }
   module.register_module(observer_name, observer);
-  auto* g = v->owningGraph();
-  graph_observer_map_[g].push_back(std::make_tuple(observer_name, observer));
+  observer_name_and_modules.push_back(std::make_pair(observer_name, observer));
 
+  auto* g = v->owningGraph();
   // Get handle of observer module
   Node* observer_instance =
       g->createGetAttr(g->inputs()[0], observer_name)->insertAfter(v->node());
@@ -1002,6 +1002,13 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
     }
   }
+  // NB: Why do we process the graph even if it's visited?
+  // Reason is `graph_observed_values` can
+  // change depending on where the method is called, and
+  // outputs that's been observed(third item of the returned result)
+  // can change depending on that, so for each graph we'll need to go through
+  // the whole process of inserting observers, instead of just setting up
+  // the observer module instances for visited graph
   GRAPH_DUMP("inserting observer for:", graph);
 
   std::stack<Block*> blocks_to_visit;
@@ -1081,13 +1088,15 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
     }
   }
   if (!visited) {
+    NameModuleVector observer_name_and_modules;
     for (const auto& item : values_to_observe) {
       auto* v = item.first;
       auto observer = item.second;
       if (!values_to_skip_.count(v)) {
-        insertObserverFor(v, module, observer);
+        insertObserverFor(v, module, observer, observer_name_and_modules);
       }
     }
+    graph_observer_map_[graph.get()] = observer_name_and_modules;
   }
   return std::make_tuple(graph_input_observers, graph_output_observers, output_idxs);
 }
