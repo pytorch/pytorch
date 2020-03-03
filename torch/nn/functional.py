@@ -1820,7 +1820,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
         if offsets.dim() != 1:
-            raise ValueError("offsets has to be a 1D Tensor")        
+            raise ValueError("offsets has to be a 1D Tensor")
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(input.dim()))

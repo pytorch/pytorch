@@ -656,6 +656,28 @@ struct TORCH_API ExceptionMessageValue : public SimpleValue {
     return "exception message";
   }
 };
+
+
+struct TORCH_API ExceptionValue : public SugaredValue {
+  ExceptionValue() : message_("ExceptionValue") {}
+
+  std::string kind() const override {
+    return "exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) {
+    return std::make_shared<ExceptionMessageValue>(
+        insertConstant(*m.graph(), message_, loc));
+  }
+
+  std::string message_;
+};
+
 } // namespace script
 } // namespace jit
 } // namespace torch

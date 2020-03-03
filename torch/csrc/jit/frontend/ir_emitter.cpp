@@ -473,6 +473,7 @@ struct Environment {
           {"ord", std::make_shared<BuiltinFunction>(aten::ord, at::nullopt)},
           {"chr", std::make_shared<BuiltinFunction>(aten::chr, at::nullopt)},
           {"bin", std::make_shared<BuiltinFunction>(aten::bin, at::nullopt)},
+          {"AssertionError", std::make_shared<ExceptionValue>()},
           {"range", SpecialFormValue::create(prim::range)},
           {"zip", SpecialFormValue::create(prim::zip)},
           {"enumerate", SpecialFormValue::create(prim::enumerate)},
@@ -1746,8 +1747,14 @@ struct to_ir {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
     auto message = StringLiteral::create(stmt.range(), "AssertionError");
-    List<Stmt> false_branch =
-        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range(), message)});
+    auto callee = Var::create(stmt.range(), Ident::create(stmt.range(), "AssertionError"));
+    auto apply = Apply::create(
+        stmt.range(),
+        callee,
+        List<Expr>::create(stmt.range(), {message}),
+        List<Attribute>::create(stmt.range(), {}));
+    List<Stmt> false_branch = List<Stmt>::create(
+        stmt.range(), {Raise::create(stmt.range(), apply)});
     emitIfElseBlocks(stmt.range(), cond_value, true_branch, false_branch);
   }
 

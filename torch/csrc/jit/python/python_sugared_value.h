@@ -253,7 +253,7 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
-struct VISIBILITY_HIDDEN PythonExceptionValue : public SugaredValue {
+struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
   PythonExceptionValue(const py::object exception_class)
       : exception_class_(exception_class) {}
 
