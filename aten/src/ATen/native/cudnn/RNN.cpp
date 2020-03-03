@@ -1194,6 +1194,7 @@ Tensor try_get_weight_buf(
   x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_params = get_num_weights(handle, rnn_desc, x_desc, datatype);
+  std::cout << "Total number of params: " << num_params;
 
   // Try to get parameter storage
   auto & any_param = parameters.at(0);

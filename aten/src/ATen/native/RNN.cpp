@@ -1094,12 +1094,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         std::cout << "Here I fail!" << "\n";
         // _fwd_params contains the forward parameters and _params the backward ones
-        TensorList _fwd_params = _params.slice(_params.size() / 2);
+        auto _fwd_params = _params.slice(_params.size() / 2);
         std::cout << "I don't fail?" << "\n";
 
+        std::vector<Tensor> fwd_params;
         std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
-          // _fwd_params[param] = _fwd_params[param].contiguous();
+          fwd_params.push_back(_fwd_params[param].contiguous());
           std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
@@ -1109,7 +1110,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
         std::cout << "_input type: " << _input.device().type() << "\n";
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
-                        _fwd_hx, _fwd_params, has_biases, num_layers, dropout_p,
+                        _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
                         train, false, type_2, false);
         std::cout << "LSTM forward" << "\n";
 
