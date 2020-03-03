@@ -1186,11 +1186,11 @@ REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
-std::tuple<Tensor, Tensor, Tensor> lstm_nocpu_type1(
+std::tuple<Tensor, Tensor, Tensor> lstm_cudnn_type1(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
-      bool type_2, bool batch_first, lstm_fn lstm_stub_call) {
+      bool type_2, bool batch_first) {
 
   std::vector<Tensor> _fwd_hx;
   std::vector<Tensor> _bwd_hx;
@@ -1207,18 +1207,64 @@ std::tuple<Tensor, Tensor, Tensor> lstm_nocpu_type1(
 
   // Forward LSTM
   Tensor fwd_output, f_hy, f_cy;
-  lstm_stub_call(_input.device().type(), fwd_output, f_hy, f_cy, input,
+  lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
                  _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
                  train, bidirectional, type_2, false);
 
   // Backward LSTM
   Tensor bwd_output, b_hy, b_cy;
-  lstm_stub_call(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
-                 _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
-                 train, bidirectional, type_2, false);
+  lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
+                  _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
+                  train, bidirectional, type_2, false);
 
   // Cat forward and backward outputs
-  bwd_rev_output = reverse(bwd_output);
+  auto bwd_rev_output = reverse(bwd_output);
+
+  std::vector<Tensor> outputs;
+  outputs.push_back(fwd_output);
+  outputs.push_back(bwd_rev_output);
+
+  auto cat_outputs = at::cat(outputs, -1);
+  auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
+
+  auto hy = at::cat({f_hy, b_hy}, 0);
+  auto cy = at::cat({f_cy, b_cy}, 0);
+  return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+}
+
+std::tuple<Tensor, Tensor, Tensor> lstm_miopen_type1(
+      const Tensor& _input, TensorList hx,
+      TensorList _params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool type_2, bool batch_first) {
+
+  std::vector<Tensor> _fwd_hx;
+  std::vector<Tensor> _bwd_hx;
+  std::tie(_fwd_hx, _bwd_hx) = split_lstm_hidden(hx);
+
+  // Reverse input to backward LSTM
+  auto input = batch_first ? _input.transpose(0, 1) : _input;
+  auto rev_input = reverse(_input);
+
+  // _fwd_params contains the forward parameters and _params the backward ones
+  std::vector<Tensor> fwd_params;
+  std::vector<Tensor> bwd_params;
+  std::tie(fwd_params, bwd_params) = split_params(_params);
+
+  // Forward LSTM
+  Tensor fwd_output, f_hy, f_cy;
+  lstm_miopen_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
+                   _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
+                   train, bidirectional, type_2, false);
+
+  // Backward LSTM
+  Tensor bwd_output, b_hy, b_cy;
+  lstm_miopen_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
+                   _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
+                   train, bidirectional, type_2, false);
+
+  // Cat forward and backward outputs
+  auto bwd_rev_output = reverse(bwd_output);
 
   std::vector<Tensor> outputs;
   outputs.push_back(fwd_output);
@@ -1243,9 +1289,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // CUDNN does not support Type-1 RNNs on their API, thus we need to
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
-        return lstm_nocpu_type1(_input, hx, _params, has_biases, num_layers,
-                                dropout_p, train, bidirectional, type_2, batch_first,
-                                lstm_cudnn_stub);
+        return lstm_cudnn_type1(_input, hx, _params, has_biases, num_layers,
+                                dropout_p, train, bidirectional, type_2, batch_first);
     } else {
       // Apply Type-2 RNN
       Tensor output, hy, cy;
@@ -1260,9 +1305,8 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // MIOpen does not support Type-1 RNNs on their API, thus we need to
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
-        return lstm_nocpu_type1(_input, hx, _params, has_biases, num_layers,
-                                dropout_p, train, bidirectional, type_2, batch_first,
-                                lstm_miopen_stub);
+        return lstm_miopen_type1(_input, hx, _params, has_biases, num_layers,
+                                 dropout_p, train, bidirectional, type_2, batch_first);
     } else {
       // Apply Type-2 RNN
       Tensor output, hy, cy;
