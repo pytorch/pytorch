@@ -8092,14 +8092,14 @@ a")
             return a.t()
         s = Variable(torch.rand(5, 5, 5))
         # XXX: this should stay quiet in stay propagation and only fail in the interpreter
-        with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
+        with self.assertRaisesRegex(RuntimeError, "failed in the TorchScript interpreter"):
             foo(s)
 
         @torch.jit.script
         def bar(c, b):
             return c + b
 
-        with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
+        with self.assertRaisesRegex(RuntimeError, "failed in the TorchScript interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
 
     def test_error_stacktrace(self):
@@ -8117,8 +8117,8 @@ a")
 
         with self.assertRaises(RuntimeError) as cm:
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter") \
-                   .check("Traceback (most recent call last)") \
+        FileCheck().check("The following operation failed in the TorchScript interpreter") \
+                   .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
@@ -8156,8 +8156,8 @@ a")
         with self.assertRaises(RuntimeError) as cm:
             x = f.one(torch.rand(10), torch.rand(9))
             bar(torch.rand(10), torch.rand(9))
-        FileCheck().check("The above operation failed in interpreter") \
-                   .check("Traceback (most recent call last)") \
+        FileCheck().check("The following operation failed in the TorchScript interpreter") \
+                   .check("Traceback") \
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_binop_unsupported_error(self):
@@ -15044,7 +15044,7 @@ a")
         def fn(x):
             return python_op(x)
 
-        with self.assertRaisesRegex(RuntimeError, "operation failed in interpreter"):
+        with self.assertRaisesRegex(RuntimeError, "operation failed in the TorchScript interpreter"):
             fn(torch.tensor(4))
 
     def test_trace_contiguous(self):
