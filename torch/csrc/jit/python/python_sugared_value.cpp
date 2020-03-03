@@ -448,6 +448,18 @@ SugaredValuePtr ModuleValue::iter(const SourceRange& loc, Function& m) {
   }
 }
 
+std::shared_ptr<SugaredValue> TypeValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  TORCH_CHECK(inputs.size() == 1, "type() must be called with 1 argument");
+  auto type_str = inputs.at(0).value(*caller.graph())->type()->python_str();
+  return std::make_shared<SimpleValue>(
+      insertConstant(*caller.graph(), type_str, loc));
+}
+
 std::shared_ptr<SugaredValue> PythonClassValue::attr(
       const SourceRange& loc,
       Function& m,
@@ -611,6 +623,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto script_class = py::cast<ScriptClass>(obj);
     return std::make_shared<PythonClassValue>(
         script_class.class_type_.type_->expect<ClassType>(), obj);
+  }
+
+  if (py::module::import("torch.jit").attr("_is_type")(obj)) {
+    return std::make_shared<TypeValue>(obj);
   }
 
   py::bool_ isClass = py::module::import("inspect").attr("isclass")(obj);

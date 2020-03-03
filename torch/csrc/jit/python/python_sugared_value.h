@@ -236,6 +236,25 @@ struct VISIBILITY_HIDDEN BooleanDispatchValue : public SugaredValue {
   py::dict dispatched_fn_;
 };
 
+struct VISIBILITY_HIDDEN TypeValue : public SugaredValue {
+  TypeValue(py::object obj)
+      : obj_(std::move(obj)) {}
+
+  std::string kind() const override {
+    return "type builtin";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+
+ private:
+  py::object obj_;
+};
+
 struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   PythonClassValue(ClassTypePtr type, py::object py_type)
       : ClassValue(std::move(type)), py_type_(std::move(py_type)) {}
