@@ -1066,6 +1066,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto h_bwd = h[1];
         auto c_fwd = c[0];
         auto c_bwd = c[1];
+        std::cout << "h_fwd type: " << h_fwd.device().type() << "\n";
+        std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
+        std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
+        std::cout << "c_bwd type: " << c_bwd.device().type() << "\n";
         TensorList _fwd_hx = {h_fwd, c_fwd};
         TensorList _bwd_hx = {h_bwd, c_bwd};
 
