@@ -5,8 +5,7 @@ import yaml
 # Download and trace the model.
 model = torchvision.models.mobilenet_v2(pretrained=True)
 model.eval()
-example = torch.rand(1, 3, 224, 224)
-traced_script_module = torch.jit.trace(model, example)
+traced_script_module = torch.jit.script(model)
 
 # Save traced TorchScript model.
 traced_script_module.save("MobileNetV2.pt")

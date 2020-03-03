@@ -1,3 +1,7 @@
+// This is a simple predictor binary that loads a TorchScript CV model and runs
+// a forward pass with fixed input `torch::ones({1, 3, 224, 224})`.
+// It's used for end-to-end integration test for custom mobile build.
+
 #include <iostream>
 #include <string>
 #include <torch/script.h>
@@ -21,11 +25,7 @@ struct MobileCallGuard {
 };
 
 void init() {
-  auto qengines = at::globalContext().supportedQEngines();
-  if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-      qengines.end()) {
-    at::globalContext().setQEngine(at::QEngine::QNNPACK);
-  }
+  at::globalContext().setQEngine(at::QEngine::QNNPACK);
 }
 
 torch::jit::script::Module loadModel(const std::string& path) {
