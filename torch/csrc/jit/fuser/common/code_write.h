@@ -12,7 +12,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
+/*
 std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
   os << "<";
   for (int i = 0; i < vec.size(); i++) {
@@ -175,7 +175,7 @@ struct TORCH_API CodeWrite : public IterVisitor {
       bool breadth_first = false,
       std::unordered_set<ValType> val_types = {});
 };
-
+*/
 } // namespace fuser
 } // namespace jit
 } // namespace torch

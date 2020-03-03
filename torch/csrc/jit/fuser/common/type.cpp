@@ -69,7 +69,6 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_st
   , {BinaryOpType::Div,     "/"  }
   , {BinaryOpType::Mod,     "%"  }
   , {BinaryOpType::LT,      "<"  }
-  , {BinaryOpType::CeilDiv, "⌈/⌉"}
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
