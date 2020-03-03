@@ -23,10 +23,14 @@ using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 struct RpcBackendOptions {
+  RpcBackendOptions()
+      : RpcBackendOptions(kDefaultRpcTimeout, kDefaultInitMethod) {}
+
   RpcBackendOptions(
       std::chrono::milliseconds rpcTimeout,
       std::string initMethod)
       : rpcTimeout(rpcTimeout), initMethod(initMethod) {}
+
   std::chrono::milliseconds rpcTimeout;
   std::string initMethod;
 };
