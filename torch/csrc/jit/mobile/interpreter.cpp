@@ -2,7 +2,6 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <ATen/core/operator_name.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <string>
 
 #if defined(PYTORCH_MOBILE_OPERATOR_OBSERVER)
 #include <torch/csrc/autograd/record_function.h>
@@ -97,7 +96,9 @@ bool InterpreterState::run(Stack& stack) {
         // Mobile only: since the number of slots is not known, resize the numAttributes
         // before setSlot.
         while (userObj->type()->numAttributes() <= inst.X) {
-          userObj->type()->addAttribute(std::to_string(userObj->type()->numAttributes()), v.type());
+          std::stringstream ss;
+          ss << userObj->type()->numAttributes();
+          userObj->type()->addAttribute(ss.str(), c10::NoneType::create());
         }
         userObj->setSlot(inst.X, std::move(v));
         ++pc;
