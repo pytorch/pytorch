@@ -514,12 +514,25 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
 
+std::shared_ptr<SugaredValue> PythonExceptionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t n_binders) {
+  if (inputs.size() != 1) {
+    std::cout << "exceptions in TorchScript only support"
+                 " construction with 1 message argument\n";
+  }
+  auto message = inputs.at(0).value(*caller.graph());
+  return std::make_shared<ExceptionMessageValue>(message);
+}
+
 std::shared_ptr<SugaredValue> toSugaredValue(
     py::object obj,
     Function& m,
     SourceRange loc,
     bool is_constant) {
-
   // directly create SimpleValues when possible, because they are first-class
   // and can be re-assigned. Otherwise, this would be invalid:
   // f = python_constant
@@ -599,6 +612,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       throw ErrorReport(loc) << "Python builtin " << py::str(obj)
                              << " is currently not supported in Torchscript";
     }
+  }
+
+  if (py::module::import("torch.jit").attr("_is_exception")) {
+    return std::make_shared<PythonExceptionValue>(obj);
   }
 
   py::object dispatched_fn =

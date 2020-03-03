@@ -1094,6 +1094,10 @@ def _is_new_style_class(cls):
         return ('__dict__' in dir(cls) or hasattr(cls, '__slots__'))
 
 
+def _is_exception(obj):
+    return issubclass(obj, Exception)
+
+
 def whichmodule(obj):
     """Find the module an object belong to."""
     module_name = getattr(obj, '__module__', None)

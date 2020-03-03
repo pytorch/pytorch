@@ -7729,7 +7729,7 @@ a")
         @torch.jit.script
         def foo(x):
             # type: (bool)
-            if x: 
+            if x:
                 a = (None,)
             else:
                 a = ([],)

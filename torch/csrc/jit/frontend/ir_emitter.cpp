@@ -994,7 +994,7 @@ struct to_ir {
           emitSugaredExpr(expr, 0);
         } break;
         case TK_RAISE:
-          emitRaise(Raise(stmt).range());
+          emitRaise(Raise(stmt));
           break;
         case TK_ASSERT:
           emitAssert(Assert(stmt));
@@ -1723,10 +1723,21 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  void emitRaise(const SourceRange& loc) {
-    const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
-    graph->insert(prim::RaiseException, {string_input}, {}, loc);
+  void emitRaise(const Raise& raise) {
+    // const std::string exception = "AssertionError";
+    // if (!raise.expr().present()) {
+    //   throw ErrorReport(raise.range()) << "Exceptect message";
+    // }
+    auto sv = emitSugaredExpr(raise.expr(), 1);
+    auto exception_sv = std::dynamic_pointer_cast<ExceptionMessageValue>(sv);
+    if (exception_sv == nullptr) {
+      // The raise was not followed by an exception (i.e. it was something like
+      // `raise "error"` instead of `raise RuntimeError("error")`)
+      throw ErrorReport(raise.range())
+          << "exceptions  must derive from BaseException";
+    }
+    auto value = sv->asValue(raise.range(), method);
+    graph->insert(prim::RaiseException, {value}, {}, raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -1734,8 +1745,9 @@ struct to_ir {
   void emitAssert(const Assert& stmt) {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    auto message = StringLiteral::create(stmt.range(), "AssertionError");
     List<Stmt> false_branch =
-        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range(), message)});
     emitIfElseBlocks(stmt.range(), cond_value, true_branch, false_branch);
   }
 

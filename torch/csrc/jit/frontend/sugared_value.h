@@ -648,6 +648,14 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
+
+struct TORCH_API ExceptionMessageValue : public SimpleValue {
+  ExceptionMessageValue(Value* value) : SimpleValue(value) {}
+
+  std::string kind() const override {
+    return "exception message";
+  }
+};
 } // namespace script
 } // namespace jit
 } // namespace torch
