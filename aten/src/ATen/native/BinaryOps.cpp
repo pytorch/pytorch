@@ -242,15 +242,18 @@ Tensor& div_(Tensor& self, Scalar other) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  return native::remainder(self, wrapped_scalar_tensor(other));
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  return native::remainder(self, other_tensor.toType(self.scalar_type()));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  return native::remainder_(self, wrapped_scalar_tensor(other));
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
+  Tensor other_tensor = wrapped_scalar_tensor(other);
+  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
 }
 
 Tensor mul(const Tensor& self, Scalar other) {
