@@ -1076,10 +1076,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // auto _bwd_hx = new TensorList(_bwd_hx_ref);
         std::vector<Tensor> _fwd_hx;
         std::vector<Tensor> _bwd_hx;
-        _fwd_hx.push_back(h_fwd);
-        _fwd_hx.push_back(c_fwd);
-        _bwd_hx.push_back(h_bwd);
-        _bwd_hx.push_back(c_bwd);
+        _fwd_hx.push_back(h_fwd.contiguous());
+        _fwd_hx.push_back(c_fwd.contiguous());
+        _bwd_hx.push_back(h_bwd.contiguous());
+        _bwd_hx.push_back(c_bwd.contiguous());
 
         std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
         std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
@@ -1099,6 +1099,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
+          _fwd_params[param] = _fwd_params[param].contiguous();
           std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
