@@ -10,7 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-/*
+
 std::vector<Int*> CodeWrite::getLoopIndices() {
   std::vector<Int*> inds;
   for (auto pair : fors)
@@ -23,7 +23,7 @@ std::ostream& CodeWrite::print_indices(
     const std::vector<Int*>& indices) {
   os << "[";
   for (const auto& ind : indices) {
-    print_inline(ind);
+    Printer(os).print_inline(ind);
     if (ind != *(indices.end() - 1))
       os << ", ";
   }
@@ -47,9 +47,9 @@ std::ostream& CodeWrite::print(std::ostream& os, const TensorView* const tv) {
   }
 
   if (tv2->tensor() != nullptr) {
-    os << "%T" << tv2->tensor()->name();
+    os << "T" << tv2->tensor()->name();
   } else {
-    os << "%TV" << tv2->name();
+    os << "TV" << tv2->name();
   }
 
   std::vector<Int*> indices =
@@ -87,7 +87,7 @@ bool CodeWrite::print_predicate(std::ostream& os, const Expr* const expr) {
     if(i != 0)
       os << " && ";
 
-    print_inline(preds[i]);
+    Printer(os).print_inline(preds[i]);
   }
   os  << ") {\n";
   ++extra_indent;
@@ -186,7 +186,7 @@ void CodeWrite::openFor(IterDomain* id) {
   fors.push_back(std::pair<Int*, Int*>{new Int(), id->size()});
 
   std::cout << "for( " << fors.back().first << " : ";
-  print_inline(id);
+  Printer(std::cout).print_inline(id);
   std::cout << " ) {" << std::endl;
 }
 
@@ -290,7 +290,7 @@ void CodeWrite::traverse(
   IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
   resetFors();
 }
-*/
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch
