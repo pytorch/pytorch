@@ -6,8 +6,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-static std::unordered_map<UnaryOpType, std::string> unary_op_type_inline_op_string_map; //Defined in type.cpp
-
 struct Fusion;
 
 struct Statement;
@@ -30,7 +28,8 @@ struct Float;
 struct Int;
 struct Add;
 
-struct TORCH_API Printer{
+struct TORCH_API Printer {
+
 std::ostream& os;
 bool print_inline_ = false;
 public:
