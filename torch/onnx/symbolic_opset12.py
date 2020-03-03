@@ -41,15 +41,72 @@ def crossentropyloss(g, input, target, weight, reduction, ignore_index):
         ones = ones_like(g, target)
         nb_elem = where(g, ignored_mask, zeros, ones)
         if not sym_help._is_none(weight):
-            weight = index_select(g, weight_flattened, 0, target)
-            weight = reshape_as(g, weight, target)
-
+            weight = index_select(g, weight, 0, target)
             nb_elem = g.op("Mul", nb_elem, weight)
 
         nb_elem = g.op("ReduceSum", nb_elem)
-        loss = g.op("ReduceSum", nllloss)
+        loss = g.op("ReduceSum", loss)
 
         if reduction == 'mean':
-            loss = g.op("Div", nllloss, nb_elem)
+            loss = g.op("Div", loss, nb_elem)
 
     return loss
+
+def nll_loss(g, self, target, weight, reduction, ignore_index):
+    # none reduction : onnx::Constant[value={0}]
+    # mean reduction : onnx::Constant[value={1}]
+    # sum reduction : onnx::Constant[value={2}]
+    reduction = sym_help._maybe_get_const(reduction, 'i')
+    reduction_vals = ['none', 'mean', 'sum']
+    reduction = reduction_vals[reduction]
+
+    # when ignore_index is not specified, ignore_index == onnx::Constant[value={-100}]
+    if sym_help._maybe_get_const(ignore_index, 'i') == -100:
+        if weight.node().mustBeNone():
+            return g.op("NegativeLogLikelihoodLoss", self, target, reduction_s=reduction)
+        else:
+            return g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s=reduction)
+
+    # if ignore_index is specified, compute nllloss with no reduction and apply the reduction afterwards
+    if weight.node().mustBeNone():
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, reduction_s='none')
+    else:
+        nllloss = g.op("NegativeLogLikelihoodLoss", self, target, weight, reduction_s='none')
+
+    from torch.onnx.symbolic_opset9 import zeros_like, ones_like, eq, where, index_select
+    zeros = zeros_like(g, nllloss)
+    ignored_mask = eq(g, target, ignore_index)
+    nllloss = where(g, ignored_mask, zeros, nllloss)
+
+    if reduction == 'none':
+        return nllloss
+
+    nllloss = g.op("ReduceSum", nllloss)
+
+    if reduction == 'sum':
+        return nllloss
+
+    # reduction == 'mean'
+    # if reduction = mean, we want to divide the reduced sum of nllloss
+    # by the sum of the non ignored weights (if weights are available),
+    # or by the number of non ignored targets (if weights are not available);
+    # denominator acts like a mask of which indices to ignore and is then
+    # multiplied by weight to set the ignored ones to 0, before summing
+    # the values in it
+    zeros = zeros_like(g, target)
+    ones = ones_like(g, target)
+    denominator = where(g, ignored_mask, zeros, ones)
+    if not sym_help._is_none(weight):
+        # take(weight, target) on 1D tensor weight
+        weight = index_select(g, weight, 0, target)
+        denominator = g.op("Mul", denominator, weight)
+
+    # denominator is the number of elements if weights are not provided,
+    # otherwise it is the sum of the non ignored weights
+    denominator = g.op("ReduceSum", denominator)
+    nllloss = g.op("Div", nllloss, denominator)
+    return nllloss
+
+def nll_loss2d(g, self, target, weight, reduction, ignore_index):
+    return nll_loss(g, self, target, weight, reduction, ignore_index)
+
