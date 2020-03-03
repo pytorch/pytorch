@@ -388,7 +388,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 
 // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
-  bool blacklist = std::is_same<decltype(perfResults[best_algo_idx].algo), cudnnConvolutionBwdDataAlgo_t>::value;
+  bool blacklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
   int stride_dim = args.input.dim() - 2;
   blacklist &&= std::any_of(std::begin(args.params.stride),
                             std::begin(args.params.stride) + stride_dim,
@@ -403,13 +403,13 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
     // TODO: Shouldn't all returned results be successful?
     // Double check documentation for cudnnFindConvolutionForwardAlgorithmEx
     if (perf.status == CUDNN_STATUS_SUCCESS) {
-      if (!args.params.deterministic || perf.determinism == CUDNN_DETERMINISTIC) {
+      if (!args.params.deterministic || (perf.determinism == CUDNN_DETERMINISTIC && perf.algo == algorithm_search<perf_t>::DEFAULT_ALGO)) {
 
         // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
         bool skip = blacklist;
-        skip &&= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
-                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[best_algo_idx].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)
+        skip &&= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
+                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)
         if (skip) {
           continue;
         }
