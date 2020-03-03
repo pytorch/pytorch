@@ -3,7 +3,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -56,11 +56,22 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
 
 PyRRef::PyRRef(const py::object& value)
     : PyRRef([&value]() {
+        jit::InferredType type_inferred = jit::tryToInferType(value);
+        TypePtr elem_type = nullptr;
+        if (type_inferred.success()) {
+          // If we could infer the type from the pyobject, we create
+          // the RRef with the IValue of that type.
+          elem_type = type_inferred.type();
+        } else {
+          // Otherwise it's a pure pyobject, create the RRef
+          // that holds an IValue of an pyobject
+          elem_type = PyObjectType::get();
+        }
         auto rref =
-            RRefContext::getInstance().createOwnerRRef(PyObjectType::get());
+            RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
-        IValue py_ivalue = jit::toIValue(std::move(copy), PyObjectType::get());
-        rref->setValue(std::move(py_ivalue));
+        IValue ivalue = jit::toIValue(std::move(copy), elem_type);
+        rref->setValue(std::move(ivalue));
         return rref;
       }()) {}
 
