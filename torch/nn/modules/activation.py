@@ -59,7 +59,7 @@ class Threshold(Module):
 class ReLU(Module):
     r"""Applies the rectified linear unit function element-wise:
 
-    :math:`\text{ReLU}(x)= \max(0, x)`
+    :math:`\text{ReLU}(x) = (x)^+ = \max(0, x)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -250,7 +250,7 @@ class Sigmoid(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}
+        \text{Sigmoid}(x) = \sigma(x) = \frac{1}{1 + \exp(-x)}
 
 
     Shape:
@@ -275,7 +275,7 @@ class Tanh(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}
+        \text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -913,7 +913,7 @@ class Tanhshrink(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{Tanhshrink}(x) = x - \text{Tanh}(x)
+        \text{Tanhshrink}(x) = x - \tanh(x)
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
