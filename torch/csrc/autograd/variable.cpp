@@ -164,6 +164,13 @@ namespace impl {
     auto* meta = materialize_autograd_meta(self);
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
+    // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
+    // This logic is only relevant for differentiable views created in no_grad mode
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+      diff_view_meta->attr_version = self._version();
+    }
   }
 
   Node* grad_fn_unsafe(const Variable& self) {
