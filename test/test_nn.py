@@ -10758,8 +10758,8 @@ class TestNNDeviceType(NNTestCase):
             out2 = pool_func(input2)
             out2.backward(grad_input2)
 
-            self.assertEqual(out1, out2, prec=2*1e-2)
-            self.assertEqual(input1.grad.data, input2.grad.data, prec=2*1e-2)
+            self.assertEqual(out1, out2, prec=0.05)
+            self.assertEqual(input1.grad.data, input2.grad.data, prec=0.05)
 
         test(torch.nn.AvgPool1d(3, stride=2), inp_dims=(8, 4, 16))
         test(torch.nn.AvgPool2d(3, stride=2), inp_dims=(8, 4, 16, 16))
