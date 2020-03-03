@@ -2733,7 +2733,7 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitRpcAsyncExpr(const Apply& apply) {
     // TODO: This is a temporary apporoach to enable calling user fucntion
     // through RPC in TorchScript,
-    // Ideadlly, function value in JIT IR is first-class citizen and
+    // Ideally, function value in JIT IR is first-class citizen and
     // The RPC C++ entry API can take c10::Function directly.
     if (apply.inputs().size() < 2 || apply.inputs().size() > 4) {
       throw ErrorReport(apply)
