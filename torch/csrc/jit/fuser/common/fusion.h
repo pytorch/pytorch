@@ -234,8 +234,12 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   void print() const {
+    std::cout << "%kernel {\n";
     IRMathPrinter op_exprs(std::cout); 
     op_exprs.print(this); 
+    IRTransformPrinter t_exprs(std::cout); 
+    t_exprs.print(this); 
+    std::cout << "}\n";
   }
 
   /*
