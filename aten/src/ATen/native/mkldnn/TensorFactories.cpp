@@ -6,6 +6,9 @@ namespace at { namespace native {
 
 Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
+     !options.has_memory_format(),
+     "'memory_format' argument is incompatible with mkldnn tensor");
+  TORCH_CHECK(
      !optional_memory_format.has_value(),
      "'memory_format' argument is incompatible with mkldnn tensor");
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
