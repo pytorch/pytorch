@@ -122,7 +122,7 @@ static auto testPickle =
         });
 
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
-  return at::zeros({instance->vals.back(), 4});
+  return torch::zeros({instance->vals.back(), 4});
 }
 
 torch::RegisterOperators& register_take_instance() {
