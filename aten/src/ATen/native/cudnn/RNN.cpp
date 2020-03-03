@@ -633,6 +633,12 @@ Tensor _cudnn_rnn_flatten_weight(
   auto any_param = weight_arr[0];
   auto datatype = getCudnnDataType(any_param);
 
+  std::cout << "weight_arr size: " << std::to_string(weight_arr.size()) << "\n";
+  for(auto param = 0; param < weight_arr.size(); param++){
+    // fwd_params.push_back(weight_arr[param].contiguous());
+    std::cout << "weight_arr[" << param << "] size: " << weight_arr[param].sizes() << "type: " << weight_arr[param].device().type() << "\n";
+  }
+
   RNNDescriptorParams rnn;
   rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, fn_type_2, promote_rnn_math_type(datatype), datatype);
 
