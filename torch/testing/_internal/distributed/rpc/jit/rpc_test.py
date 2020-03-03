@@ -16,6 +16,15 @@ def rpc_return_rref(dst):
 def one_arg(value):
     return value + 1
 
+@torch.jit.script
+def script_add_ones(x):
+    return torch.add(x, torch.ones(1))
+
+@torch.jit.script
+def script_fork_wait_udf(tensor):
+    fut = torch.jit._fork(script_add_ones, tensor)
+    x = torch.jit._wait(fut)
+    return x
 
 class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
     def __init__(self, dst_worker):
@@ -267,3 +276,19 @@ class JitRpcTest(RpcAgentTestFixture):
         # create a local RRef that holds a ScriptModule
         rref_local_script_mod = rpc.RRef(MyScriptModule(3)._c)
         self.assertEqual(rref_local_script_mod.to_here().forward(), torch.ones(3))
+
+    @dist_init
+    def test_remote_script_udf(self):
+        rref = rpc.remote("worker{}".format((self.rank + 1) % self.world_size),
+                          script_fork_wait_udf,
+                          args=(torch.ones(2),))
+        self.assertEqual(rref.to_here(), torch.ones(2) * 2)
+
+    @dist_init
+    def test_async_script_udf(self):
+        for i in range(1, 3):
+            future = rpc.rpc_async(
+                "worker{}".format((self.rank + 1) % self.world_size),
+                script_fork_wait_udf,
+                args=(torch.ones(2),))
+            self.assertEqual(future.wait(), torch.ones(2) * 2)
