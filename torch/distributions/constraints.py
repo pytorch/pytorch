@@ -38,8 +38,6 @@ __all__ = [
     'lower_cholesky',
     'lower_triangular',
     'nonnegative_integer',
-    'open_interval',
-    'open_unit_interval',
     'positive',
     'positive_definite',
     'positive_integer',
@@ -230,23 +228,6 @@ class _Interval(Constraint):
         return fmt_string
 
 
-class _OpenInterval(Constraint):
-    """
-    Constrain to a real interval `(lower_bound, upper_bound)`.
-    """
-    def __init__(self, lower_bound, upper_bound):
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-
-    def check(self, value):
-        return (self.lower_bound < value) & (value < self.upper_bound)
-
-    def __repr__(self):
-        fmt_string = self.__class__.__name__[1:]
-        fmt_string += '(lower_bound={}, upper_bound={})'.format(self.lower_bound, self.upper_bound)
-        return fmt_string
-
-
 class _HalfOpenInterval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound)`.
@@ -374,9 +355,7 @@ greater_than = _GreaterThan
 greater_than_eq = _GreaterThanEq
 less_than = _LessThan
 unit_interval = _Interval(0., 1.)
-open_unit_interval = _OpenInterval(0., 1.)
 interval = _Interval
-open_interval = _OpenInterval
 half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
