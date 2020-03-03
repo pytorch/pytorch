@@ -21,7 +21,7 @@ void testSchemaMatching() {
                 pop(stack, list, a);
                 push(stack, a);
                 return 0;
-            }),
+            }, c10::AliasAnalysisKind::FROM_SCHEMA),
     });
     script::Module m("m");
     m.define(R"(
