@@ -1875,6 +1875,10 @@ int listSlice(Stack& stack) {
   int64_t start = pop(stack).to<int64_t>();
   c10::List<T> list = pop(stack).to<c10::List<T>>();
 
+  TORCH_CHECK(step != 0, "slice step cannot be zero");
+  // TODO: Remove once this is implemented!
+  TORCH_CHECK(step > 0, "slicing with negative step sizes is not supported");
+
   const int64_t list_size = list.size();
 
   // clamp start and end to the bounds of the list
