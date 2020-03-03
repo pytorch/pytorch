@@ -101,12 +101,12 @@ TEST(BlobTest, Blob) {
   EXPECT_FALSE(blob.IsType<int>());
 }
 
-TEST(BlobTest, BlobUninitialized) {
+TEST(BlobTest, DISABLED_BlobUninitialized) {
   Blob blob;
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
 }
 
-TEST(BlobTest, BlobWrongType) {
+TEST(BlobTest, DISABLED_BlobWrongType) {
   Blob blob;
   BlobTestFoo* foo_unused CAFFE2_UNUSED = blob.GetMutable<BlobTestFoo>();
   EXPECT_TRUE(blob.IsType<BlobTestFoo>());
@@ -124,7 +124,7 @@ TEST(BlobTest, BlobReset) {
   blob.Reset();
 }
 
-TEST(BlobTest, BlobMove) {
+TEST(BlobTest, DISABLED_BlobMove) {
   Blob blob1;
   std::unique_ptr<BlobTestFoo> foo(new BlobTestFoo());
   auto* fooPtr = foo.get();
@@ -137,7 +137,7 @@ TEST(BlobTest, BlobMove) {
   EXPECT_EQ(&blob3.Get<BlobTestFoo>(), fooPtr);
 }
 
-TEST(BlobTest, BlobNonConstructible) {
+TEST(BlobTest, DISABLED_BlobNonConstructible) {
   Blob blob;
   ASSERT_THROW(blob.Get<BlobTestNonDefaultConstructible>(), EnforceNotMet);
   // won't work because it's not default constructible
@@ -1073,7 +1073,7 @@ TEST(QTensor, QTensorSizingTest) {
   EXPECT_EQ(qtensor.size(), 30);
 }
 
-TEST(BlobTest, CastingMessage) {
+TEST(BlobTest, DISABLED_CastingMessage) {
   Blob b;
   b.GetMutable<BlobTestFoo>();
   b.Get<BlobTestFoo>();
