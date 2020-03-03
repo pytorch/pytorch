@@ -45,9 +45,6 @@ from torch.nn.quantized.modules.linear import LinearPackedParams
 from torch.quantization import QConfig
 from torch.quantization._quantize_script import ConvPackedParams
 from torch.quantization._quantize_script import script_qconfig
-from torch.quantization._quantize_script import prepare_script
-from torch.quantization._quantize_script import convert_script
-from torch.quantization._quantize_script import quantize_script
 from torch.quantization import default_observer
 from torch.quantization import default_weight_observer
 from torch.quantization import default_per_channel_weight_observer
@@ -1963,6 +1960,7 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
+
             def forward(self, x):
                 return self.fc(x)
 
