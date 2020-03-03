@@ -1062,18 +1062,20 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 
         auto h_slices = h.chunk(2, -1);
         auto c_slices = c.chunk(2, -1);
-        auto h_fwd = h[0];
-        auto h_bwd = h[1];
-        auto c_fwd = c[0];
-        auto c_bwd = c[1];
+        auto h_fwd = h_slices[0];
+        auto h_bwd = h_slices[1];
+        auto c_fwd = c_slices[0];
+        auto c_bwd = c_slices[1];
         std::cout << "h_fwd type: " << h_fwd.device().type() << "\n";
         std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
         std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
         std::cout << "c_bwd type: " << c_bwd.device().type() << "\n";
-        auto _fwd_hx_ref = std::move({h_fwd, c_fwd});
-        auto _bwd_hx_ref = std::move({h_bwd, c_bwd});
-        auto _fwd_hx = new TensorList(_fwd_hx_ref);
-        auto _bwd_hx = new TensorList(_bwd_hx_ref);
+        // auto _fwd_hx_ref = at::cat({h_fwd, c_fwd}, -1);
+        // auto _bwd_hx_ref = std::move({h_bwd, c_bwd});
+        // auto _fwd_hx = new TensorList(_fwd_hx_ref);
+        // auto _bwd_hx = new TensorList(_bwd_hx_ref);
+        auto _fwd_hx = {h_fwd, c_fwd};
+        auto _bwd_hx_ref = {h_bwd, c_bwd};
         std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
         std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
 
