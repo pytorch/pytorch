@@ -21,6 +21,68 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
     return is_miopen_acceptable;
 }
 
+Tensor reverse(const Tensor& input) {
+  auto step_inputs = input.unbind(0);
+  auto step_ref = std::move(step_inputs);
+  std::reverse(step_ref.begin(), step_ref.end());
+  auto rev_step_inputs = std::move(step_ref);
+  auto rev_input = at::cat(rev_step_inputs, 0);
+
+  if(rev_input.dim() != input.dim()) {
+    rev_input = rev_input.unsqueeze(1);
+  }
+
+  TORCH_CHECK(rev_input.sizes() == input.sizes(),
+              "Reverse input and forward input sizes should be the same")
+  return rev_input;
+}
+
+std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_params(TensorList _params) {
+  auto _fwd_params = _params.slice(_params.size() / 2);
+  std::vector<Tensor> fwd_params;
+  for(auto param = 0; param < _fwd_params.size(); param++){
+    fwd_params.push_back(_fwd_params[param].contiguous());
+  }
+
+  std::vector<Tensor> bwd_params;
+  for(auto param = _params.size() / 2; param < _params.size(); param++){
+    bwd_params.push_back(_params[param].contiguous());
+  }
+  return std::make_tuple(fwd_params, bwd_params);
+}
+
+std::tuple<std::vector<Tensor>, std::vector<Tensor>> split_lstm_hidden(TensorList hx) {
+  auto h = hx[0];
+  auto c = hx[1];
+
+  auto h_slices = h.chunk(2, 0);
+  auto c_slices = c.chunk(2, 0);
+  auto h_fwd = h_slices[0];
+  auto h_bwd = h_slices[1];
+  auto c_fwd = c_slices[0];
+  auto c_bwd = c_slices[1];
+
+  std::vector<Tensor> _fwd_hx;
+  std::vector<Tensor> _bwd_hx;
+  _fwd_hx.push_back(h_fwd.contiguous());
+  _fwd_hx.push_back(c_fwd.contiguous());
+  _bwd_hx.push_back(h_bwd.contiguous());
+  _bwd_hx.push_back(c_bwd.contiguous());
+  return std::make_tuple(_fwd_hx, _bwd_hx);
+}
+
+std::tuple<Tensor> split_rnn_hidden(const Tensor& hx) {
+  auto h_slices = h.chunk(2, 0);
+  auto h_fwd = h_slices[0];
+  auto h_bwd = h_slices[1];
+
+  std::vector<Tensor> _fwd_hx;
+  std::vector<Tensor> _bwd_hx;
+  _fwd_hx.push_back(h_fwd.contiguous());
+  _bwd_hx.push_back(h_bwd.contiguous());
+  return std::make_tuple(_fwd_hx, _bwd_hx)
+}
+
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -579,16 +641,17 @@ struct FullBidirectionalLayer
       const bool& type_2,
       const int64_t& layer_num) const override {
     std::vector<Tensor> step_inputs;
+    auto input_fwd = input;
+    auto input_bwd = input;
+    if(!type_2 && layer_num > 0) {
+      // Split the input {fwd, bwd} in order to apply RNN as Type-1.
+      // See pytorch/pytorch#4930
+      auto split_input = input.chunk(2, input.dim() - 1);
+      input_fwd = split_input[0];
+      input_bwd = split_input[1];
+    }
+
     if (input.device().is_cpu()) {
-      auto input_fwd = input;
-      auto input_bwd = input;
-      if(!type_2 && layer_num > 0) {
-        // Split the input {fwd, bwd} in order to apply RNN as Type-1.
-        // See pytorch/pytorch#4930
-        auto split_input = input.chunk(2, input.dim() - 1);
-        input_fwd = split_input[0];
-        input_bwd = split_input[1];
-      }
       auto input_w = params.first.linear_ih(input_fwd);
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
@@ -605,9 +668,10 @@ struct FullBidirectionalLayer
               std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
     }
 
-    step_inputs = input.unbind(0);
+    step_inputs = input_fwd.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
     auto fw_output = at::stack(fw_result.outputs, 0);
+    step_inputs = input_bwd.unbind(0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
         layer_(rev_step_inputs, input_hidden.second, params.second);
@@ -919,16 +983,26 @@ std::tuple<Tensor, Tensor> NAME(                                               \
     bool type_2, \
     bool batch_first) { \
   if (at::cudnn_is_acceptable(_input)) {                                       \
-    Tensor output, hy;                                                         \
-    NAME##_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
-    return std::make_tuple(std::move(output), std::move(hy));                  \
+    if(bidirectional && !type_2) {                                             \
+      return rnn_nocpu_type1(input, hx, _params, has_biases, num_layers,       \
+        dropout_p, train, bidirectional, type_2, batch_first, NAME##_cudnn_stub); \
+    } else {                                                                   \
+      Tensor output, hy;                                                       \
+      NAME##_cudnn_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
+              num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
+      return std::make_tuple(std::move(output), std::move(hy));                \
+    }                                                                          \
   }                                                                            \
   if (use_miopen(_input, dropout_p)) {                                         \
-    Tensor output, hy;                                                         \
-    NAME##_miopen_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
-            num_layers, dropout_p, train, bidirectional, type_2, batch_first);         \
-    return std::make_tuple(std::move(output), std::move(hy));                  \
+    if(bidirectional && !type_2) {                                             \
+      return rnn_nocpu_type1(input, hx, _params, has_biases, num_layers,       \
+        dropout_p, train, bidirectional, type_2, batch_first, NAME##_miopen_stub); \
+    } else {                                                                   \
+      Tensor output, hy;                                                       \
+      NAME##_miopen_stub(_input.device().type(), output, hy, _input, hx, _params, has_biases, \
+              num_layers, dropout_p, train, bidirectional, type_2, batch_first);       \
+      return std::make_tuple(std::move(output), std::move(hy));                \
+    }                                                                          \
   }                                                                            \
   check_device(_input, _params, hx);                                           \
   auto input = batch_first ? _input.transpose(0, 1) : _input;                  \
@@ -1042,6 +1116,94 @@ REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub, lstm_packed_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub, lstm_fn);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub, lstm_packed_fn);
 
+std::tuple<Tensor, Tensor> rnn_nocpu_type1(
+      const Tensor& _input, const Tensor& hx, TensorList _params,
+      bool has_biases, int64_t num_layers, double dropout_p, bool train,
+      bool bidirectional, bool type_2, bool batch_first, rnn_fn rnn_stub_call) {
+  Tensor _fwd_hx;
+  Tensor _bwd_hx;
+  std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);
+
+  // Reverse input to backward RNN
+  auto input = batch_first ? _input.transpose(0, 1) : _input;
+  auto rev_input = reverse(_input);
+
+  // _fwd_params contains the forward parameters and _params the backward ones
+  std::vector<Tensor> fwd_params;
+  std::vector<Tensor> bwd_params;
+  std::tie(fwd_params, bwd_params) = split_params(_params);
+
+  // Call forward RNN
+  Tensor fwd_output, f_hy;
+  rnn_stub_call(_input.device().type(), fwd_output, f_hy, input, _fwd_hx,
+                fwd_params, has_biases, num_layers, dropout_p, train,
+                bidirectional, type_2, false);
+
+  // Call backward RNN
+  Tensor bwd_output, b_hy;
+  rnn_stub_call(_input.device().type(), bwd_output, b_hy, input, _bwd_hx,
+                bwd_params, has_biases, num_layers, dropout_p, train,
+                bidirectional, type_2, false);
+
+  // Cat forward and backward outputs
+  bwd_rev_output = reverse(bwd_output);
+
+  std::vector<Tensor> outputs;
+  outputs.push_back(fwd_output);
+  outputs.push_back(bwd_rev_output);
+
+  auto cat_outputs = at::cat(outputs, -1);
+  auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
+  auto hy = at::cat({f_hy, b_hy}, 0);
+  return std::make_tuple(std::move(output), std::move(hy));
+}
+
+std::tuple<Tensor, Tensor, Tensor> lstm_nocpu_type1(
+      const Tensor& _input, TensorList hx,
+      TensorList _params, bool has_biases,
+      int64_t num_layers, double dropout_p, bool train, bool bidirectional,
+      bool type_2, bool batch_first, lstm_fn lstm_stub_call) {
+
+  std::vector<Tensor> _fwd_hx;
+  std::vector<Tensor> _bwd_hx;
+  std::tie(_fwd_hx, _bwd_hx) = split_lstm_hidden(hx);
+
+  // Reverse input to backward LSTM
+  auto input = batch_first ? _input.transpose(0, 1) : _input;
+  auto rev_input = reverse(_input);
+
+  // _fwd_params contains the forward parameters and _params the backward ones
+  std::vector<Tensor> fwd_params;
+  std::vector<Tensor> bwd_params;
+  std::tie(fwd_params, bwd_params) = split_params(_params);
+
+  // Forward LSTM
+  Tensor fwd_output, f_hy, f_cy;
+  lstm_stub_call(_input.device().type(), fwd_output, f_hy, f_cy, input,
+                 _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
+                 train, bidirectional, type_2, false);
+
+  // Backward LSTM
+  Tensor bwd_output, b_hy, b_cy;
+  lstm_stub_call(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
+                 _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
+                 train, bidirectional, type_2, false);
+
+  // Cat forward and backward outputs
+  bwd_rev_output = reverse(bwd_output);
+
+  std::vector<Tensor> outputs;
+  outputs.push_back(fwd_output);
+  outputs.push_back(bwd_rev_output);
+
+  auto cat_outputs = at::cat(outputs, -1);
+  auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
+
+  auto hy = at::cat({f_hy, b_hy}, 0);
+  auto cy = at::cat({f_cy, b_cy}, 0);
+  return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+}
+
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
       TensorList _params, bool has_biases,
@@ -1053,84 +1215,9 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // CUDNN does not support Type-1 RNNs on their API, thus we need to
         // split and reverse the inputs and run two "independent" RNNs.
         // See pytorch/pytorch#4930
-        auto h = hx[0];
-        auto c = hx[1];
-
-        auto h_slices = h.chunk(2, 0);
-        auto c_slices = c.chunk(2, 0);
-        auto h_fwd = h_slices[0];
-        auto h_bwd = h_slices[1];
-        auto c_fwd = c_slices[0];
-        auto c_bwd = c_slices[1];
-
-        std::vector<Tensor> _fwd_hx;
-        std::vector<Tensor> _bwd_hx;
-        _fwd_hx.push_back(h_fwd.contiguous());
-        _fwd_hx.push_back(c_fwd.contiguous());
-        _bwd_hx.push_back(h_bwd.contiguous());
-        _bwd_hx.push_back(c_bwd.contiguous());
-
-        // Reverse input to backward LSTM
-        auto input = batch_first ? _input.transpose(0, 1) : _input;
-        auto step_inputs = input.unbind(0);
-        auto step_ref = std::move(step_inputs);
-        std::reverse(step_ref.begin(), step_ref.end());
-        auto rev_step_inputs = std::move(step_ref);
-        auto rev_input = at::cat(rev_step_inputs, 0);
-
-        if(rev_input.dim() != input.dim()) {
-          rev_input = rev_input.unsqueeze(1);
-        }
-
-        TORCH_CHECK(rev_input.sizes() == input.sizes(),
-                    "Reverse input and forward input sizes should be the same")
-
-        // _fwd_params contains the forward parameters and _params the backward ones
-        auto _fwd_params = _params.slice(_params.size() / 2);
-
-        std::vector<Tensor> fwd_params;
-        for(auto param = 0; param < _fwd_params.size(); param++){
-          fwd_params.push_back(_fwd_params[param].contiguous());
-        }
-
-        std::vector<Tensor> bwd_params;
-        for(auto param = _params.size() / 2; param < _params.size(); param++){
-          bwd_params.push_back(_params[param].contiguous());
-        }
-
-        // Forward LSTM
-        Tensor fwd_output, f_hy, f_cy;
-        lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
-                        _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
-                        train, bidirectional, type_2, false);
-
-        // Backward LSTM
-        Tensor bwd_output, b_hy, b_cy;
-        lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
-                        _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
-                        train, bidirectional, type_2, false);
-
-        // Cat forward and backward outputs
-        auto bwd_outputs = bwd_output.unbind(0);
-        auto bwd_outputs_ref = std::move(bwd_outputs);
-        std::reverse(bwd_outputs_ref.begin(), bwd_outputs_ref.end());
-        auto rev_step_outputs = std::move(bwd_outputs_ref);
-        auto bwd_rev_output = at::cat(rev_step_outputs, 0);
-
-        if(bwd_rev_output.dim() != input.dim()) {
-          bwd_rev_output = bwd_rev_output.unsqueeze(1);
-        }
-
-        std::vector<Tensor> outputs;
-        outputs.push_back(fwd_output);
-        outputs.push_back(bwd_rev_output);
-        // TensorList outputs = {fwd_output, bwd_rev_output};
-        auto cat_outputs = at::cat(outputs, -1);
-        auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
-
-        auto hy = at::cat({f_hy, b_hy}, 0);
-        auto cy = at::cat({f_cy, b_cy}, 0);
-        return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+        return lstm_nocpu_type1(_input, hx, _params, has_biases, num_layers,
+                                dropout_p, train, bidirectional, type_2, batch_first,
+                                lstm_cudnn_stub);
     } else {
       // Apply Type-2 RNN
       Tensor output, hy, cy;
@@ -1141,10 +1228,20 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   }
 
   if (use_miopen(_input, dropout_p)) {
-    Tensor output, hy, cy;
-    lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-              num_layers, dropout_p, train, bidirectional, type_2, batch_first);
-    return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    if(bidirectional && !type_2) {
+        // MIOpen does not support Type-1 RNNs on their API, thus we need to
+        // split and reverse the inputs and run two "independent" RNNs.
+        // See pytorch/pytorch#4930
+        return lstm_nocpu_type1(_input, hx, _params, has_biases, num_layers,
+                                dropout_p, train, bidirectional, type_2, batch_first,
+                                lstm_miopen_stub);
+    } else {
+      // Apply Type-2 RNN
+      Tensor output, hy, cy;
+      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
+                num_layers, dropout_p, train, bidirectional, type_2, batch_first);
+      return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
+    }
   }
   check_device(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;

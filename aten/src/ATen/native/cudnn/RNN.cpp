@@ -1267,7 +1267,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
     at::_cudnn_rnn_flatten_weight(
         params,
         /*weight_stride0=*/has_biases ? 4 : 2,
-        input.size(-1),
+        /*input_size=*/input.size(-1),
         static_cast<int>(mode),
         hidden_size,
         num_layers,
