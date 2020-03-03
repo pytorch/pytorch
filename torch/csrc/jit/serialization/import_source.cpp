@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/custom_class.h>
 
+#include <regex>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -259,6 +261,37 @@ struct SourceImporterImpl : public Resolver,
     }
   }
 
+  c10::optional<Assign> attributeAssignmentSpecialHandlingHack(
+      const QualifiedName& qualified_classname,
+      const Assign& assign) {
+    std::regex mangle_re("\\.___torch_mangle_\\d+");
+    auto replaced_string =
+        std::regex_replace(qualified_classname.qualifiedName(), mangle_re, "");
+    if (replaced_string ==
+            "__torch__.torch.nn.quantized.modules.linear.LinearPackedParams" ||
+        replaced_string ==
+            "__torch__.torch.nn.quantized.modules.linear.Linear") {
+      auto lhs = Var(assign.lhs());
+      if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
+        ;
+        return c10::nullopt;
+      }
+      auto type = Var(assign.type().get());
+      if (lhs.name().name() == "_packed_params" &&
+          type.name().name() == "Tensor") {
+        std::string packed_params_typename =
+            "__torch__.torch.classes.LinearPackedParamsBase";
+        Parser p(std::make_shared<Source>(std::move(packed_params_typename)));
+        auto typename_expr = p.parseExp();
+        auto maybe_typename =
+            Maybe<Expr>::create(typename_expr.range(), typename_expr);
+        return Assign::create(
+            assign.range(), assign.lhs_list(), assign.rhs(), maybe_typename);
+      }
+    }
+    return c10::nullopt;
+  }
+
   void importClass(
       const QualifiedName& qualified_classname,
       const ClassDef& class_def,
@@ -300,7 +333,10 @@ struct SourceImporterImpl : public Resolver,
                 // This is to initialize the annotations dict, just ignore.
                 continue;
               } else {
-                if (assign.rhs().present()) {
+                if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
+                        qualified_classname, assign)) {
+                  attributes.push_back(std::move(*fixed_up));
+                } else if (assign.rhs().present()) {
                   // This is a constant assignment, of the form:
                   // foo : Final[int] = 3
                   constants.push_back(assign);
