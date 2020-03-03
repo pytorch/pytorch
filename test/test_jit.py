@@ -1541,7 +1541,6 @@ graph(%packed_params_module, %a, %a_scale, %a_zero_point, %a_dtype, %r_scale, %r
                    .check("quantized::conv2d_relu") \
                    .run(m.graph_for(data))
 
-
     def test_foldbn_trivial(self):
         # Test trivial case
         class TestModule(torch.nn.Module):
@@ -1985,6 +1984,7 @@ graph(%input, %weight):
             def __init__(self):
                 super(M, self).__init__()
                 self.fc = torch.nn.Linear(5, 5).float()
+
             def forward(self, x):
                 return self.fc(x)
 
