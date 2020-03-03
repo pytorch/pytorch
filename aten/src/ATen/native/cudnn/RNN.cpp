@@ -1271,11 +1271,11 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
 
   if(bidirectional && !type_2) {
     bidirectional = false;
-    torch::_cudnn_rnn_flatten_weight(
+    at::_cudnn_rnn_flatten_weight(
         params,
         /*weight_stride0=*/has_biases ? 4 : 2,
         input.size(-1),
-        mode,
+        static_cast<int>(mode),
         hidden_size,
         num_layers,
         /*batch_first=*/batch_first,
