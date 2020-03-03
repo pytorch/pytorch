@@ -78,7 +78,7 @@ void remainder_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "remainder_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cuda", [&]() {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(thrust_t a, thrust_t b) __ubsan_ignore_float_divide_by_zero__ -> thrust_t {
