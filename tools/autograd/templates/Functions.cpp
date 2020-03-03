@@ -508,6 +508,13 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
+  if (grad.is_mkldnn()) {
+    std::vector<int64_t> split_sizes;
+    for (size_t i = 0;  i< sizes.size(); i++) {
+      split_sizes.push_back(sizes[i][dim]);
+    }
+    return at::mkldnn_split_with_sizes(grad, split_sizes, dim);
+  }
   int64_t accumulate = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {
     auto& shape = sizes[i];
@@ -568,6 +575,25 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
   }
+}
+
+std::tuple<Tensor, Tensor, Tensor> addmm_backward(const Tensor& grad_output, const Tensor& mat1, const Tensor& mat2,
+    const Scalar& beta, const Scalar& alpha, std::array<bool, 3> output_mask) {
+  Tensor grad1, grad2, grad3;
+  if (grad_output.is_mkldnn()) {
+    if (output_mask[1]) {
+      grad2 = at::mkldnn_linear_backward_input(mat1.sizes(), grad_output, mat2.t());
+    }
+    if (output_mask[0] || output_mask[2]) {
+      std::tie(grad3, grad1) = at::mkldnn_linear_backward_weights(grad_output, mat1, mat2.t(), output_mask[0]);
+      grad3 = grad3.t();
+    }
+  } else {
+    grad1 = maybe_multiply(grad_output, beta);
+    grad2 = mm_mat1_backward(grad_output, mat2, mat1, alpha);
+    grad3 = mm_mat2_backward(grad_output, mat1, mat2.sizes(), mat2.strides(), alpha);
+  }
+  return std::tuple<Tensor, Tensor, Tensor>{grad1, grad2, grad3};
 }
 
 Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, const Tensor& dense, const Scalar& alpha) {

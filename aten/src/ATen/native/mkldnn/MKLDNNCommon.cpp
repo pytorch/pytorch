@@ -40,6 +40,24 @@ using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
 
+ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
+  switch (type) {
+    case ScalarType::Float:
+      return ideep::tensor::data_type::f32;
+    case ScalarType::QInt32:
+      return ideep::tensor::data_type::s32;
+    case ScalarType::QInt8:
+      return ideep::tensor::data_type::s8;
+    case ScalarType::QUInt8:
+    case ScalarType::Byte:
+      return ideep::tensor::data_type::u8;
+    case ScalarType::BFloat16:
+      return ideep::tensor::data_type::bf16;
+    default:
+      AT_ASSERTM(false, "get_mkldnn_dtype: unsupported data type");
+  }
+}
+
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, const TensorOptions& options) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
@@ -66,13 +84,36 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
   AT_ASSERTM(
       tensor.layout() == Layout::Strided,
       "itensor_view_from_dense expects dense tensor input");
-  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float,
-             "itensor_view_from_dense expects float tensor input");
+  AT_ASSERTM(tensor.scalar_type() == ScalarType::Float ||
+             tensor.scalar_type() == ScalarType::BFloat16,
+             "itensor_view_from_dense expects bfloat16 or float tensor input");
+  AT_ASSERTM(
+      !tensor.is_variable(),
+      "itensor_view_from_dense: should not be a variable");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  return {{{tensor.sizes().cbegin(), tensor.sizes().cend()},
-           ideep::tensor::data_type::f32},
-          tensor.template data_ptr<float>()};
+  if (tensor.scalar_type() == ScalarType::Float) {
+    return {tensor.sizes().vec(),
+            get_mkldnn_dtype(tensor.scalar_type()),
+            tensor.template data_ptr<float>()};
+  } else {
+    return {tensor.sizes().vec(),
+            get_mkldnn_dtype(tensor.scalar_type()),
+            tensor.template data_ptr<BFloat16>()};
+  }
 }
+
+// Note in case the aten Tensor is a dense tensor, the retured ideep
+// tensor is just a view of the storage of the aten dense tensor, so
+// caller needs to make sure the aten dense tensor's lifetime is
+// longer than the ideep tensor.
+ideep::tensor itensor_from_tensor(const at::Tensor& tensor) {
+  if (tensor.is_mkldnn()) {
+    return at::native::itensor_from_mkldnn(tensor);
+  } else {
+    return at::native::itensor_view_from_dense(tensor);
+  }
+}
+
 }}
 
 #endif // AT_MKLDNN_ENABLED()

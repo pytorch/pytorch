@@ -15,6 +15,10 @@ Tensor& mkldnn_relu_(Tensor& input) {
   AT_ERROR("mkldnn_relu_: ATen not compiled with MKLDNN support");
 }
 
+Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, Scalar threshold) {
+  AT_ERROR("mkldnn_relu_backward: ATen not compiled with MKLDNN support");
+}
+
 }}
 
 #else // AT_MKLDNN_EBABLED
@@ -36,6 +40,16 @@ Tensor& mkldnn_relu_(Tensor& input) {
   ideep::eltwise_forward::compute(
       x, x, ideep::algorithm::eltwise_relu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
   return input;
+}
+
+Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, Scalar threshold) {
+  // TODO: support bounded relu. `threshold` is ignored for now
+  ideep::tensor& x = itensor_from_mkldnn(input);
+  ideep::tensor grady = itensor_from_mkldnn(grad_output);
+  ideep::tensor gradx;
+  ideep::eltwise_backward::compute(x, grady, gradx,
+      ideep::algorithm::eltwise_relu, /*alpha*/ 0.0);
+  return new_with_itensor_mkldnn(std::move(gradx), grad_output.options());
 }
 
 }}

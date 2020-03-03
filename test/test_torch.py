@@ -13206,6 +13206,21 @@ class TestTorchDeviceType(TestCase):
         torch.sum(x, (2, 1), out=res2)
         self.assertEqual(res1, res2)
 
+    @onlyCPU
+    def test_sum_bfloat16(self, device):
+        x1 = torch.rand(100, 100)
+        res1 = torch.sum(x1, 1)
+        x2 = x1.bfloat16()
+        res2 = torch.sum(x2, 1)
+        self.assertEqual(res1, res2, 2e-1)
+
+        x1 = torch.rand(100, 100, 100)
+        res1 = x1.sum(2).sum(1)
+        x2 = x1.bfloat16()
+        res2 = x2.sum(2).sum(1)
+        max_err = torch.abs((res1 - res2.float()) / res1).max()
+        self.assertLessEqual(max_err, 1e-2)
+
     def test_memory_format_factory_like_functions_preserve(self, device):
         def input_generator_fn(device):
             return torch.randn((4, 3, 8, 8), device=device, dtype=torch.float32) \

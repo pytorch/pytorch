@@ -195,6 +195,9 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 }
 
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+  if (tensors.size() > 0 && tensors[0].is_mkldnn()) {
+    return at::mkldnn_cat_out(result, tensors, dim);
+  }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
@@ -340,6 +343,9 @@ Tensor cat(TensorList tensors, int64_t dim) {
   if (tensors.size() > 0 &&
         tensors[0].is_sparse()) {
     return cat_sparse(tensors, dim);
+  }
+  if (tensors.size() > 0 && tensors[0].is_mkldnn()) {
+    return at::mkldnn_cat(tensors, dim);
   }
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);
@@ -876,6 +882,9 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   TORCH_CHECK(split_size > 0 || self.size(dim) == 0,
            "split_size can only be 0 if dimension size is 0, "
            "but got dimension size of ", dim_size);
+  if (self.is_mkldnn()) {
+    return at::mkldnn_split(self, split_size, dim);
+  }
   // if split_size is 0 and dimension size is 0, there is 1 split.
   int64_t num_splits = 1;
   if (split_size != 0) {
@@ -895,6 +904,9 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
+  if (self.is_mkldnn()) {
+    return at::mkldnn_split_with_sizes(self, split_sizes, dim);
+  }
   int64_t dim_size = self.size(dim);
   int64_t num_splits = split_sizes.size();
   std::vector<Tensor> splits(num_splits);

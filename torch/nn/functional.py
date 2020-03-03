@@ -1582,6 +1582,7 @@ def linear(input, weight, bias=None):
         - Bias: :math:`(out\_features)`
         - Output: :math:`(N, *, out\_features)`
     """
+
     tens_ops = (input, weight)
     if not torch.jit.is_scripting():
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):

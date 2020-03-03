@@ -11,6 +11,18 @@
 
 namespace at { namespace native {
 
+// in order to dispatch mkldnn linear to addmm
+Tensor& mkldnn_linear_wraper_out(Tensor& result, const Tensor& bias,
+    const Tensor& input, const Tensor& weight, Scalar beta, Scalar alpha) {
+ result = at::mkldnn_linear(input, weight.t(), bias);
+ return result;
+}
+
+Tensor mkldnn_linear_wraper(const Tensor& bias, const Tensor& input,
+    const Tensor& weight, Scalar beta, Scalar alpha) {
+ return at::mkldnn_linear(input, weight.t(), bias);
+}
+
 Tensor linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, bias);

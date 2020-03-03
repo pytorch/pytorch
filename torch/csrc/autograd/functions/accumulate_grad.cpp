@@ -43,6 +43,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
     // under following condition, we can avoid clone()
     if (!GradMode::is_enabled()
         && !new_grad.is_sparse()
+        && !new_grad.is_mkldnn()
         && new_grad.is_contiguous()
         && new_grad.use_count() <= 1 + !post_hooks().empty()) {
       // first check it is in first-order grad only mode
@@ -54,7 +55,7 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
       // addition of !post_hooks().empty().
       variable.grad() = new_grad.detach();
     } else {
-      if (new_grad.is_sparse()) {
+      if (new_grad.is_sparse() || new_grad.is_mkldnn()) {
         variable.grad() = new_grad.clone();
       } else {
         variable.grad() = new_grad.clone(at::MemoryFormat::Contiguous);
