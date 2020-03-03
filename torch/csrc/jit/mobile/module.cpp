@@ -22,7 +22,7 @@ void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
 
-Function* CompilationUnit::find_method_by_qn(const c10::QualifiedName& qn) {
+Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
   for (auto& fn : methods_) {
     if (fn->qualname() == qn) {
       return fn.get();

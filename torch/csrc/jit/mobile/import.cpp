@@ -161,7 +161,7 @@ c10::IValue BytecodeDeserializer::readArchive(const std::string& archive_name,
     auto cls = type.type_->expect<at::ClassType>();
     auto qn = cls->name();
     c10::QualifiedName method_name(qn.value(), "__setstate__");
-    auto setstate = mcu->find_method_by_qn(method_name);
+    auto setstate = mcu->find_function(method_name);
     if (setstate) {
       auto obj = c10::ivalue::Object::create(type, 0);
       Stack stack({obj, input});
