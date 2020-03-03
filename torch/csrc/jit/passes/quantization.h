@@ -187,5 +187,7 @@ TORCH_API void FoldPrepackedWeightIntoModule(
  */
 TORCH_API void DedupModuleUses(script::Module& module);
 
+TORCH_API void Finalize(script::Module& module);
+
 } // namespace jit
 } // namespace torch
