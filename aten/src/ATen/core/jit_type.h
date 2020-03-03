@@ -1740,6 +1740,15 @@ struct CAFFE2_API ClassType : public NamedType {
   void addMethod(Function* method);
   Function* getMethod(const std::string& name) const;
 
+  // [Internal Only] Remove method from the ClassType
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  // Note this method is intended for freezing only.
+  void unsafeRemoveMethod(const std::string& name);
+
   std::shared_ptr<CompilationUnit> compilation_unit();
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
