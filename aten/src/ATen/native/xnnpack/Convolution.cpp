@@ -227,14 +227,14 @@ c10::intrusive_ptr<xnnpack::XNNPackConv2dOpContext> Conv2dPrePack::operator()(
   int64_t groups
   ) {
     return xnnpack::XNNPackConv2dOpContext::create_context(
-	std::move(weight),
-	std::move(bias),
-	std::move(padding),
-	std::move(stride),
-	std::move(dilation),
-	groups,
-	{},
-	{});
+        std::move(weight),
+        std::move(bias),
+        std::move(padding),
+        std::move(stride),
+        std::move(dilation),
+        groups,
+        {},
+        {});
 }
 
 Tensor Conv2dPacked::operator()(
