@@ -42,7 +42,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<scalar_t, IndexType> a,
                            ) {
 
   // make sure we don't break assumption that we can't have > 4 elements / thread
-  static_assert(VEC <= 4);
+  static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
 
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<uint8_t, VEC>;
