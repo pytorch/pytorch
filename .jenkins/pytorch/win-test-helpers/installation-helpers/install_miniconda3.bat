@@ -15,5 +15,5 @@ if "%REBUILD%"=="" (
 )
 set PYTHON_VERSION_NODOT=%PYTHON_VERSION:.=%
 if "%DEBUG%" == "1" (
-  copy /Y %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%.lib %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%d.lib
+  copy /Y %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%.lib %CONDA_PARENT_DIR%\Miniconda3\libs\python%PYTHON_VERSION_NODOT%_d.lib
 )
