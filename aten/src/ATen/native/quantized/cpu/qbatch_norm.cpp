@@ -98,6 +98,9 @@ Tensor q_batch_norm_impl(
       alpha_data,
       beta_data);
 
+#if defined(__clang__) && defined(_WIN32)
+  TORCH_INTERNAL_ASSERT(false, "qbatch_norm_stub not linking correctly on windows clang. Requires investigation.");
+#else
   qbatch_norm_stub(
       qx.device().type(),
       N,
@@ -109,6 +112,8 @@ Tensor q_batch_norm_impl(
       alpha,
       beta,
       qy);
+#endif
+
   return qy;
 }
 
