@@ -71,15 +71,19 @@ struct TORCH_API Operator {
 
   Operator(
       const std::string& schema,
-      int(*op)(Stack&))
+      int(*op)(Stack&),
+      c10::AliasAnalysisKind alias_analysis)
       : schema_string_(schema),
+        alias_analysis_(alias_analysis),
         op_(std::make_shared<Operation>(std::move(op))) {}
 
 
   Operator(
       const std::string& schema,
-      OperationCreator op_creator)
+      OperationCreator op_creator,
+      c10::AliasAnalysisKind alias_analysis)
       : schema_string_(schema),
+        alias_analysis_(alias_analysis),
         op_creator_(std::move(op_creator)) {}
 
   // Helper constructor to register `op` to run
@@ -88,9 +92,12 @@ struct TORCH_API Operator {
   // arguments.
   Operator(
       Symbol name,
-      OperationCreator op_creator)
+      OperationCreator op_creator,
+      c10::AliasAnalysisKind alias_analysis)
       : schema_(std::make_shared<FunctionSchema>(varArgSchemaWithName(name))),
-        op_creator_(std::move(op_creator)) {}
+        op_creator_(std::move(op_creator)) {
+    schema_->setAliasAnalysis(alias_analysis);
+  }
 
   Operation getOperation(const Node* node = nullptr) const {
     if (op_) {
@@ -106,7 +113,11 @@ struct TORCH_API Operator {
     if (!schema_) {
       schema_ =
           std::make_shared<FunctionSchema>(parseSchema(schema_string_.value()));
+      if (alias_analysis_.has_value()) {
+        schema_->setAliasAnalysis(*alias_analysis_);
+      }
       schema_string_ = c10::nullopt;
+      alias_analysis_ = c10::nullopt;
     }
     return *schema_;
   }
@@ -145,6 +156,7 @@ struct TORCH_API Operator {
   // assignment operator to be generated cannot use std::unique_ptr because
   // initializer lists of Operators end up copying the Operator
   mutable std::shared_ptr<FunctionSchema> schema_;
+  mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
 
   // Essentially a variant<Operation, OperationCreator>.
   // NB: std::function has a default state (where it == nullptr).

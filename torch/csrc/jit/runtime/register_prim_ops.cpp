@@ -65,22 +65,16 @@ int noop(Stack& n) {
   return 0;
 }
 
-c10::OperatorOptions aliasAnalysisFromSchema() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-c10::OperatorOptions aliasAnalysisConservative() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::CONSERVATIVE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisConservative() {
+  return c10::AliasAnalysisKind::CONSERVATIVE;
 }
 
-c10::OperatorOptions aliasAnalysisSpecialCase() {
-  c10::OperatorOptions result;
-  result.setAliasAnalysis(c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE);
-  return result;
+c10::AliasAnalysisKind aliasAnalysisSpecialCase() {
+  return c10::AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
 }
 
 // using the rules from python_arg_parser FunctionParameter::check
