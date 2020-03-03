@@ -650,6 +650,7 @@ Tensor _cudnn_rnn_flatten_weight(
   x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
+  std::cout << "(" << input_size << "," << fn_hidden_size << ")\n";
   std::cout << "Total number of weights:" << std::to_string(num_weights) << "\n";
   auto weight_buf = at::zeros(num_weights, any_param.options());
 
