@@ -4,6 +4,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>
@@ -170,13 +171,20 @@ class class_ {
  private:
   template <typename Func>
   void defineMethod(std::string name, Func func) {
-    auto qualFuncName = className + "::" + name;
-    registeredOps().push_back(
-        torch::RegisterOperators().op(qualFuncName, std::move(func)));
-    auto func_symbol = c10::Symbol::fromQualString(qualFuncName);
-
+    auto qualMethodName = qualClassName + "." + name;
+    auto schema = c10::inferFunctionSchema<Func>(std::move(name), "");
+    auto wrapped_func = [func = std::move(func)](Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<Func>::return_type;
+      detail::BoxedProxy<RetType, Func>()(stack, func);
+    };
     auto method = std::make_shared<BuiltinOpFunction>(
-        qualClassName + "." + name, func_symbol);
+        qualMethodName, std::move(schema), std::move(wrapped_func));
+
+    // Register the method here to keep the Method alive.
+    // ClassTypes do not hold ownership of their methods (normally it
+    // those are held by the CompilationUnit), so we need a proxy for
+    // that behavior here.
     registerCustomClassMethod(method);
     classTypePtr->addMethod(method.get());
   }

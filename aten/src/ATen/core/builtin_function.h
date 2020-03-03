@@ -7,36 +7,30 @@ namespace torch {
 namespace jit {
 
 struct BuiltinOpFunction : public Function {
-  BuiltinOpFunction(c10::QualifiedName qualname, c10::Symbol op_symbol)
-      : name_(std::move(qualname)), symbol_(std::move(op_symbol)) {}
+  BuiltinOpFunction(
+      c10::QualifiedName qualname,
+      c10::FunctionSchema schema,
+      std::function<void(Stack&)> callable)
+      : name_(std::move(qualname)),
+        callable_(std::move(callable)),
+        schema_(std::move(schema)) {}
 
   bool isGraphFunction() const override {
     return false;
   }
 
   void run(Stack& stack) override {
-    auto handle = c10::Dispatcher::singleton().findSchemaOrThrow(
-        symbol_.toQualString(), "");
-    handle.callBoxed(&stack);
-    if (handle.schema().returns().size() == 0) {
-      stack.push_back(IValue());
-    } else if (handle.schema().returns().size() > 1) {
-      auto ivalue_tup = c10::ivalue::Tuple::create(stack);
-      stack.clear();
-      stack.emplace_back(std::move(ivalue_tup));
-    }
+    callable_(stack);
   }
 
   void run(Stack&& stack) override {
-    auto handle = c10::Dispatcher::singleton().findSchemaOrThrow(
-        symbol_.toQualString(), "");
-    handle.callBoxed(&stack);
+    callable_(stack);
   }
 
   at::IValue operator()(std::vector<at::IValue> stack, const Kwargs& kwargs)
       override {
     getSchema().checkAndNormalizeInputs(stack, kwargs);
-    run(stack);
+    callable_(stack);
     return stack.front();
   }
 
@@ -66,24 +60,23 @@ struct BuiltinOpFunction : public Function {
   }
 
   const c10::FunctionSchema& getSchema() const override {
-    if (!cached_schema_) {
-      std::unique_lock<std::mutex> lk(schema_mutex_);
-      auto handle = c10::Dispatcher::singleton().findSchemaOrThrow(
-          symbol_.toQualString(), "");
-      cached_schema_ = handle.schema();
-      if (cached_schema_->returns().size() == 0) {
-        cached_schema_ = cached_schema_->cloneWithReturns(
+    if (!adapted_schema_) {
+      std::unique_lock<std::mutex> lk(adapted_schema_mutex_);
+      if (schema_.returns().size() == 0) {
+        adapted_schema_ = schema_.cloneWithReturns(
             {c10::Argument("", c10::NoneType::get())});
-      } else if (cached_schema_->returns().size() > 1) {
+      } else if (schema_.returns().size() > 1) {
         std::vector<c10::TypePtr> return_types;
-        for (const auto& arg : cached_schema_->returns()) {
+        for (const auto& arg : schema_.returns()) {
           return_types.emplace_back(arg.type());
         }
-        cached_schema_ = cached_schema_->cloneWithReturns({c10::Argument(
+        adapted_schema_ = schema_.cloneWithReturns({c10::Argument(
             "", c10::TupleType::create(std::move(return_types)))});
+      } else {
+        adapted_schema_ = schema_;
       }
     }
-    return *cached_schema_;
+    return *adapted_schema_;
   }
 
   size_t num_inputs() const override {
@@ -102,11 +95,10 @@ struct BuiltinOpFunction : public Function {
   }
 
   Function& setSchema(c10::FunctionSchema schema) override {
-    TORCH_INTERNAL_ASSERT(false);
-  }
-
-  c10::Symbol op_symbol() const {
-    return symbol_;
+    schema_ = std::move(schema);
+    std::unique_lock<std::mutex> lk(adapted_schema_mutex_);
+    adapted_schema_ = c10::nullopt;
+    return *this;
   }
 
   ~BuiltinOpFunction() {}
@@ -114,10 +106,15 @@ struct BuiltinOpFunction : public Function {
  private:
   c10::QualifiedName name_;
 
-  c10::Symbol symbol_;
+  std::function<void(Stack&)> callable_;
 
-  mutable std::mutex schema_mutex_;
-  mutable c10::optional<c10::FunctionSchema> cached_schema_;
+  c10::FunctionSchema schema_;
+
+  // We maintain a separate schema with the return values adapted to
+  // the Method calling convention (single return value with None, single
+  // value, or Tuple for 0, 1, or 2+ returns, respectively)
+  mutable std::mutex adapted_schema_mutex_;
+  mutable c10::optional<c10::FunctionSchema> adapted_schema_;
 };
 
 } // namespace jit

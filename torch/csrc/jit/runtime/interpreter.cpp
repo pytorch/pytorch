@@ -1057,6 +1057,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
           } break;
           case CALL: {
+            Function* fn = af.functions[inst.X];
+            if (!fn->isGraphFunction()) {
+              // BuiltinOpFunction directly invokes a void(Stack&) to implement
+              // custom C++ classes. Call run() here with the stack, and we will
+              // get the results from that C++ method back in the stack. Advance
+              // the PC by 1 without adding any new frame.
+              fn->run(stack);
+              ++af.pc;
+              break;
+            }
             const Code& code =
                 // consider passing
                 // `frames.back().function->remaining_bailout_depth_` into
@@ -1065,8 +1075,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 // potential to reduce the number of compilations for too
                 // dynamic callers we might miss opportunities where a caller is
                 // dynamic but a callee gets stable arguments
-                af.functions[inst.X]
-                    ->get_executor()
+                fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
                     .code;
             frames.back().pc = af.pc + 1;
