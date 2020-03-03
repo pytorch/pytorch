@@ -67,6 +67,15 @@ white_list = [
     ('aten::ones_like', datetime.date(2020, 3, 15)),
     ('aten::randint_like', datetime.date(2020, 3, 15)),
     ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('quantized::linear_unpack_fp16', datetime.date(2020, 3, 17)),
+    ('quantized::linear_unpack', datetime.date(2020, 3, 17)),
+    ('quantized::linear_prepack_fp16', datetime.date(2020, 3, 17)),
+    ('quantized::linear_prepack', datetime.date(2020, 3, 17)),
+    ('quantized::linear_dynamic_fp16', datetime.date(2020, 3, 17)),
+    ('quantized::linear_relu_dynamic', datetime.date(2020, 3, 17)),
+    ('quantized::linear_dynamic', datetime.date(2020, 3, 17)),
+    ('quantized::linear_relu', datetime.date(2020, 3, 17)),
+    ('quantized::linear', datetime.date(2020, 3, 17)),
 ]
 
 
