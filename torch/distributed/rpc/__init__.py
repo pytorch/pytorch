@@ -7,8 +7,6 @@ import torch
 import torch.distributed as dist
 
 
-
-
 def is_available():
     return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
 
