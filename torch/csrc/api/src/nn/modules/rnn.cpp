@@ -91,21 +91,18 @@ void RNNImplBase<Derived>::to(
     torch::Dtype dtype,
     bool non_blocking) {
   nn::Module::to(device, dtype, non_blocking);
-  std::cout << "to() number 1\n";
   flatten_parameters();
 }
 
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Dtype dtype, bool non_blocking) {
   nn::Module::to(dtype, non_blocking);
-  std::cout << "to() number 2\n";
   flatten_parameters();
 }
 
 template <typename Derived>
 void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
-  std::cout << "to() number 3\n";
   const auto num_directions = options.bidirectional() ? 2 : 1;
   for (int64_t layer = 0; layer < options.layers(); layer++) {
     for (auto direction = 0; direction < num_directions; direction++) {
@@ -135,26 +132,6 @@ template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters() {
   // Cache the flattened weight and bias vector.
   flat_weights_ = flat_weights();
-
-  for(auto param = 0; param < w_ih.size(); param++){
-    std::cout << "w_ih[" << param << "] size: " << w_ih[param].sizes() << "\n";
-  }
-
-  for(auto param = 0; param < w_hh.size(); param++){
-    std::cout << "w_hh[" << param << "] size: " << w_hh[param].sizes() << "\n";
-  }
-
-  for(auto param = 0; param < b_ih.size(); param++){
-    std::cout << "b_ih[" << param << "] size: " << b_ih[param].sizes() << "\n";
-  }
-
-  for(auto param = 0; param < b_hh.size(); param++){
-    std::cout << "b_hh[" << param << "] size: " << b_hh[param].sizes() << "\n";
-  }
-
-  for(auto param = 0; param < flat_weights_.size(); param++){
-    std::cout << "flat_weights_[" << param << "] size: " << flat_weights_[param].sizes() << "\n";
-  }
 
   if (!cudnn_mode_ || !torch::cudnn_is_acceptable(w_ih.at(0))) {
     return;
@@ -191,7 +168,6 @@ void RNNImplBase<Derived>::flatten_parameters() {
     flat_weights_ = merge_direction_weights({flat_weights_fwd, flat_weights_bwd});
   }
   else {
-    std::cout << "Should fail here?\n";
     torch::_cudnn_rnn_flatten_weight(
         flat_weights_,
         /*weight_stride0=*/options.with_bias() ? 4 : 2,

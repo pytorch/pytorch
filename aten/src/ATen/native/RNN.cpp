@@ -1055,10 +1055,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // See pytorch/pytorch#4930
         auto h = hx[0];
         auto c = hx[1];
-        at::print(h, 32);
-        at::print(c, 32);
-        std::cout << "H type: " << h.device().type() << "\n";
-        std::cout << "C type: " << c.device().type() << "\n";
 
         auto h_slices = h.chunk(2, 0);
         auto c_slices = c.chunk(2, 0);
@@ -1066,25 +1062,13 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         auto h_bwd = h_slices[1];
         auto c_fwd = c_slices[0];
         auto c_bwd = c_slices[1];
-        std::cout << "h_fwd type: " << h_fwd.device().type() << "\n";
-        std::cout << "c_fwd type: " << c_fwd.device().type() << "\n";
-        std::cout << "h_bwd type: " << h_bwd.device().type() << "\n";
-        std::cout << "c_bwd type: " << c_bwd.device().type() << "\n";
-        // auto _fwd_hx_ref = at::cat({h_fwd, c_fwd}, -1);
-        // auto _bwd_hx_ref = std::move({h_bwd, c_bwd});
-        // auto _fwd_hx = new TensorList(_fwd_hx_ref);
-        // auto _bwd_hx = new TensorList(_bwd_hx_ref);
+
         std::vector<Tensor> _fwd_hx;
         std::vector<Tensor> _bwd_hx;
         _fwd_hx.push_back(h_fwd.contiguous());
         _fwd_hx.push_back(c_fwd.contiguous());
         _bwd_hx.push_back(h_bwd.contiguous());
         _bwd_hx.push_back(c_bwd.contiguous());
-
-        std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << " size: " << _fwd_hx[0].sizes() << "\n";
-        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << " size: " << _fwd_hx[1].sizes() << "\n";
-        std::cout << "_bwd_hx[0] type: " << _bwd_hx[0].device().type() << " size: " << _bwd_hx[0].sizes() << "\n";
-        std::cout << "_bwd_hx[1] type: " << _bwd_hx[1].device().type() << " size: " << _bwd_hx[1].sizes() << "\n";
 
         // Reverse input to backward LSTM
         auto input = batch_first ? _input.transpose(0, 1) : _input;
@@ -1093,30 +1077,23 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         std::reverse(step_ref.begin(), step_ref.end());
         auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
+        std::cout << "rev_input size: " << rev_input.sizes() << "\n";
 
-        std::cout << "Here I fail!" << "\n";
         // _fwd_params contains the forward parameters and _params the backward ones
         auto _fwd_params = _params.slice(_params.size() / 2);
-        std::cout << "I don't fail?" << "\n";
 
         std::vector<Tensor> fwd_params;
-        std::cout << "_fwd_params size: " << std::to_string(_fwd_params.size()) << "\n";
         for(auto param = 0; param < _fwd_params.size(); param++){
           fwd_params.push_back(_fwd_params[param].contiguous());
-          std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
         std::vector<Tensor> bwd_params;
         for(auto param = _params.size() / 2; param < _params.size(); param++){
           bwd_params.push_back(_params[param].contiguous());
-          // std::cout << "_fwd_params[" << param << "] size: " << _fwd_params[param].sizes() << "type: " << _fwd_params[param].device().type() << "\n";
         }
 
         // Forward LSTM
         Tensor fwd_output, f_hy, f_cy;
-        std::cout << "_fwd_hx[0] type: " << _fwd_hx[0].device().type() << "\n";
-        std::cout << "_fwd_hx[1] type: " << _fwd_hx[1].device().type() << "\n";
-        std::cout << "_input type: " << _input.device().type() << "\n";
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, _input,
                         _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
                         train, bidirectional, type_2, false);
