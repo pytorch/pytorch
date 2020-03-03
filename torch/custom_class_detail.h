@@ -122,7 +122,6 @@ struct BoxedProxy<void, Func> {
 
 } // namespace detail
 
-TORCH_API std::vector<c10::RegisterOperators>& registeredOps();
 TORCH_API void registerCustomClass(at::ClassTypePtr class_type);
 TORCH_API void registerCustomClassMethod(std::shared_ptr<Function> method);
 

@@ -8,11 +8,6 @@
 namespace torch {
 namespace jit {
 
-std::vector<c10::RegisterOperators>& registeredOps() {
-  static std::vector<c10::RegisterOperators> ops;
-  return ops;
-}
-
 std::unordered_map<std::string, at::ClassTypePtr>& customClasses() {
   static std::unordered_map<std::string, at::ClassTypePtr> customClasses;
   return customClasses;
