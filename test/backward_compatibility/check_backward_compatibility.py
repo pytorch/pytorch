@@ -128,10 +128,8 @@ if __name__ == '__main__':
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line or "RRef" in line or "Any" in line:
+            if "torch.classes" in line:
                 # TODO Fix type __torch__.torch.classes.xxx
-                # TODO Delete RRef special case after add the RRef type
-                # TODO: wait until nightly knows how to parse Any
                 continue
 
             s = parse_schema(line.strip())
