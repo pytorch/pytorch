@@ -13992,27 +13992,30 @@ class TestTorchDeviceType(TestCase):
         min_val = 0
         max_val = 1
 
-        froms = [int64_min_val, -42, min_val, max_val, max_val + 1, 42]
-        tos = [-42, min_val, max_val, max_val + 1, 42, int64_max_val]
+        froms = [int64_min_val, -42, min_val - 1, min_val, max_val, max_val + 1, 42]
+        tos = [-42, min_val - 1, min_val, max_val, max_val + 1, 42, int64_max_val]
 
         for from_ in froms:
             for to_ in tos:
                 t = torch.empty(size, dtype=torch.bool, device=device)
                 if to_ > from_:
-                    if not (min_val <= from_ <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "from is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    elif not (min_val <= (to_ - 1) <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "to - 1 is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
+                    if not (min_val <= from_ <= max_val) or not (min_val <= (to_ - 1) <= max_val):
+                        if not (min_val <= from_ <= max_val):
+                            self.assertWarnsRegex(
+                                lambda: t.random_(from_, to_),
+                                "from is out of bounds"
+                            )
+                        if not (min_val <= (to_ - 1) <= max_val):
+                            self.assertWarnsRegex(
+                                lambda: t.random_(from_, to_),
+                                "to - 1 is out of bounds"
+                            )
                     else:
                         t.random_(from_, to_)
+                        range_ = to_ - from_
+                        delta = 1
+                        self.assertTrue(from_ <= t.to(torch.int).min() < (from_ + delta))
+                        self.assertTrue((to_ - delta) <= t.to(torch.int).max() < to_)
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
@@ -14098,18 +14101,17 @@ class TestTorchDeviceType(TestCase):
             for to_ in tos:
                 t = torch.empty(size, dtype=dtype, device=device)
                 if to_ > from_:
-                    if not (min_val <= from_ <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "from is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
-                    elif not (min_val <= (to_ - 1) <= max_val):
-                        self.assertRaisesRegex(
-                            RuntimeError,
-                            "to - 1 is out of bounds",
-                            lambda: t.random_(from_, to_)
-                        )
+                    if not (min_val <= from_ <= max_val) or not (min_val <= (to_ - 1) <= max_val):
+                        if not (min_val <= from_ <= max_val):
+                            self.assertWarnsRegex(
+                                lambda: t.random_(from_, to_),
+                                "from is out of bounds"
+                            )
+                        if not (min_val <= (to_ - 1) <= max_val):
+                            self.assertWarnsRegex(
+                                lambda: t.random_(from_, to_),
+                                "to - 1 is out of bounds"
+                            )
                     else:
                         t.random_(from_, to_)
                         range_ = to_ - from_
@@ -14170,10 +14172,9 @@ class TestTorchDeviceType(TestCase):
             t = torch.empty(size, dtype=dtype, device=device)
             if to_ > from_:
                 if not (min_val <= (to_ - 1) <= max_val):
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "to - 1 is out of bounds",
-                        lambda: t.random_(from_, to_)
+                    self.assertWarnsRegex(
+                        lambda: t.random_(to_),
+                        "to - 1 is out of bounds"
                     )
                 else:
                     t.random_(to_)

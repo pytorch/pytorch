@@ -64,26 +64,39 @@ at::Tensor& random_impl(at::Tensor& self, at::Generator* generator) {
   return self;
 }
 
+#define show_out_of_bounds_warning(name) \
+  TORCH_WARN(name, " is out of bounds for ", dtype, ". This warning will become an error in version 1.6 release, please fix the code in advance")
+
 static void check_from_to(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
   const auto scalar_type = typeMetaToScalarType(dtype);
   if (isFloatingType(scalar_type)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "check_random_fp_bounds", [&] {
       const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-      TORCH_CHECK(min <= from && from <= max, "from is out of bounds for ", dtype);
-      TORCH_CHECK(min <= to_inc && to_inc <= max, "to - 1 is out of bounds for ", dtype);
+      if (from < min || from > max) {
+        show_out_of_bounds_warning("from");
+      }
+      if (to_inc < min || to_inc > max) {
+        show_out_of_bounds_warning("to - 1");
+      }
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
-      TORCH_CHECK(min <= from && from <= max, "from is out of bounds for ", dtype);
-      TORCH_CHECK(min <= to_inc && to_inc <= max, "to - 1 is out of bounds for ", dtype);
+      if (from < min || from > max) {
+        show_out_of_bounds_warning("from");
+      }
+      if (to_inc < min || to_inc > max) {
+        show_out_of_bounds_warning("to - 1");
+      }
     });
   } else {
     TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
   }
 }
+
+#undef show_out_of_bounds_warning
 
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator* generator) {
