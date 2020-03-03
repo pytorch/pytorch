@@ -687,6 +687,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
 
   // std::cout << std::to_string(weight.size()) << "\n";
   std::cout << "Do I fail here?" << "\n";
+  std::cout << "Bidirectional: " << fn_bidirectional << "\n";
   check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;
