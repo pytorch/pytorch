@@ -633,12 +633,6 @@ Tensor _cudnn_rnn_flatten_weight(
   auto any_param = weight_arr[0];
   auto datatype = getCudnnDataType(any_param);
 
-  std::cout << "weight_arr size: " << std::to_string(weight_arr.size()) << "\n";
-  for(auto param = 0; param < weight_arr.size(); param++){
-    // fwd_params.push_back(weight_arr[param].contiguous());
-    std::cout << "weight_arr[" << param << "] size: " << weight_arr[param].sizes() << "type: " << weight_arr[param].device().type() << "\n";
-  }
-
   RNNDescriptorParams rnn;
   rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, fn_type_2, promote_rnn_math_type(datatype), datatype);
 
@@ -650,8 +644,6 @@ Tensor _cudnn_rnn_flatten_weight(
   x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_weights = get_num_weights(handle, rnn_desc, x_desc, datatype);
-  std::cout << "(" << input_size << "," << fn_hidden_size << ")\n";
-  std::cout << "Total number of weights:" << std::to_string(num_weights) << "\n";
   auto weight_buf = at::zeros(num_weights, any_param.options());
 
   FilterDescriptor w_desc;
@@ -661,12 +653,6 @@ Tensor _cudnn_rnn_flatten_weight(
   std::vector<Tensor> params_arr;
   size_t params_stride0;
   std::tie(params_arr, params_stride0) = get_parameters(handle, rnn, rnn_desc, x_desc, w_desc, weight_buf);
-
-  std::cout << "params_arr size: " << std::to_string(params_arr.size()) << "\n";
-  for(auto param = 0; param < params_arr.size(); param++){
-    // fwd_params.push_back(params_arr[param].contiguous());
-    std::cout << "params_arr[" << param << "] size: " << params_arr[param].sizes() << "type: " << params_arr[param].device().type() << "\n";
-  }
 
   MatrixRef<Tensor> weight{weight_arr, static_cast<size_t>(weight_stride0)},
                     params{params_arr, params_stride0};
@@ -697,10 +683,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_train, bool fn_bidirectional, bool type_2, IntArrayRef fn_batch_sizes,
     const Tensor& fn_dropout_state
     ) {
-
-  // std::cout << std::to_string(weight.size()) << "\n";
-  std::cout << "Do I fail here?" << "\n";
-  std::cout << "Bidirectional: " << fn_bidirectional << "\n";
   check_device(input_r, weight, {hx, cx});
   auto input = input_r;
   auto weight_buf = weight_buf_r;
@@ -1207,7 +1189,6 @@ Tensor try_get_weight_buf(
   x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_params = get_num_weights(handle, rnn_desc, x_desc, datatype);
-  std::cout << "Total number of params: " << num_params;
 
   // Try to get parameter storage
   auto & any_param = parameters.at(0);
@@ -1225,8 +1206,6 @@ Tensor try_get_weight_buf(
 
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
-  std::cout << "num_ptrs: " << num_ptrs << "\n";
-  std::cout << "num_parameters: " << num_parameters << "\n";
   AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
   AT_ASSERT(num_ptrs % (has_biases ? 4 : 2) == 0);
   for (int64_t param_i = 0, ptr_i = 0;
@@ -1252,7 +1231,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
   Tensor hx, cx;
   std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
-  std::cout << "CUDNN implementation is called\n";
 
   auto weight_buf = try_get_weight_buf(
       input, params, has_biases, mode, hidden_size, num_layers, bidirectional, type_2);
@@ -1345,8 +1323,6 @@ void lstm_cudnn(Tensor& output, Tensor& hy, Tensor& cy,
       TensorList params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional,
       bool type_2, bool batch_first) {
-  std::cout << "hx[0]: " << hx[0].sizes() << "\n";
-  std::cout << "hx[1]: " << hx[0].sizes() << "\n";
   auto result = _cudnn_impl(input, std::make_tuple(hx[0], hx[1]), params, has_biases,
       CUDNN_LSTM, num_layers, dropout_p, train, bidirectional, type_2, batch_first);
   output = result.first;

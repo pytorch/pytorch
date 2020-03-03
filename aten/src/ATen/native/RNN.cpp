@@ -1071,19 +1071,17 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         _bwd_hx.push_back(c_bwd.contiguous());
 
         // Reverse input to backward LSTM
-        std::cout << "_input size: " << _input.sizes() << "\n";
         auto input = batch_first ? _input.transpose(0, 1) : _input;
-        std::cout << "_input size: " << _input.sizes() << "\n";
         auto step_inputs = input.unbind(0);
         auto step_ref = std::move(step_inputs);
         std::reverse(step_ref.begin(), step_ref.end());
         auto rev_step_inputs = std::move(step_ref);
         auto rev_input = at::cat(rev_step_inputs, 0);
-        std::cout << "rev_input size: " << rev_input.sizes() << "\n";
+
         if(rev_input.dim() != input.dim()) {
           rev_input = rev_input.unsqueeze(1);
         }
-        std::cout << "rev_input size: " << rev_input.sizes() << "\n";
+
         TORCH_CHECK(rev_input.sizes() == input.sizes(),
                     "Reverse input and forward input sizes should be the same")
 
@@ -1105,14 +1103,12 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         lstm_cudnn_stub(_input.device().type(), fwd_output, f_hy, f_cy, input,
                         _fwd_hx, fwd_params, has_biases, num_layers, dropout_p,
                         train, bidirectional, type_2, false);
-        std::cout << "LSTM forward" << "\n";
 
         // Backward LSTM
         Tensor bwd_output, b_hy, b_cy;
         lstm_cudnn_stub(_input.device().type(), bwd_output, b_hy, b_cy, rev_input,
                         _bwd_hx, bwd_params, has_biases, num_layers, dropout_p,
                         train, bidirectional, type_2, false);
-        std::cout << "LSTM backward" << "\n";
 
         // Cat forward and backward outputs
         auto bwd_outputs = bwd_output.unbind(0);
@@ -1131,7 +1127,6 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
         // TensorList outputs = {fwd_output, bwd_rev_output};
         auto cat_outputs = at::cat(outputs, -1);
         auto output = batch_first ? cat_outputs.transpose(0, 1) : cat_outputs;
-        std::cout << "output size: " << output.sizes() << "\n";
 
         auto hy = at::cat({f_hy, b_hy}, 0);
         auto cy = at::cat({f_cy, b_cy}, 0);
