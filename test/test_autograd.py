@@ -164,39 +164,20 @@ class TestAutograd(TestCase):
             MyFunction.apply(v.clone()).backward()
             self.assertEqual(v.grad, torch.full(shape, 2))
 
-    def test_legacy_function_none_grad(self):
+    def test_legacy_function_deprecation_exception(self):
+        # Trigger exception
         class MyFunction(Function):
             def forward(self, x):
-                return torch.zeros(2, 2, 2)
+                return x
 
             def backward(self, grad_output):
-                return None
+                return grad_output
 
-        shape = (2, 3)
-        v = torch.ones(shape, requires_grad=True)
-        y = v[0, 0].expand(3, 5).t().sum()
-        MyFunction()(y).sum().backward()
-        self.assertEqual(v.grad, torch.zeros(shape))
-
-    def test_legacy_function_deprecation_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            # Ensure warnings are being shown
-            warnings.simplefilter("always")
-
-            # Trigger Warning
-            class MyFunction(Function):
-                def forward(self, x):
-                    return x
-
-                def backward(self, grad_output):
-                    return grad_output
-
+        # Check exception occurs
+        with self.assertRaisesRegex(
+                RuntimeError,
+                'Legacy autograd function with non-static forward method is deprecated'):
             MyFunction()(torch.randn(3, 4))
-
-            # Check warning occurs
-            self.assertIn(
-                'Legacy autograd function with non-static forward method is deprecated',
-                str(w[0]))
 
     def test_invalid_gradients(self):
         class MyFunction(Function):
@@ -1621,31 +1602,7 @@ class TestAutograd(TestCase):
                 gc.collect()
 
         for _ in range(10):
-            CollectOnDelete()(torch.randn(1, requires_grad=True)).backward()
-
-    def test_call_legacy_twice(self):
-        class Id(Function):
-            def forward(self, x):
-                self.save_for_backward(x)
-                return x
-
-            def backward(self, grad_x):
-                x = self.saved_tensors
-                return x
-
-        f = Id()
-        x1 = torch.zeros(1, requires_grad=True)
-        x2 = torch.ones(1, requires_grad=True)
-        y = f(x1)
-        with warnings.catch_warnings(record=True) as w:
-            z = f(x2)
-        self.assertIn('extending-torch-autograd', str(w[1].message))
-        # I don't really care about the functional correctness of this
-        # part of the test: if you make a change that causes this test
-        # to fail, it's probably OK to just fix this test case to follow
-        # it.  I'm mostly making sure we don't segfault here.
-        y.backward()
-        self.assertEqual(x2.grad, x2)
+            CollectOnDelete().forward(torch.randn(1, requires_grad=True)).backward()
 
     # Delete this test when legacy custom autograd functions are deleted.
     def test_naughty_legacy_variable_grad_fn(self):
