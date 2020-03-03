@@ -960,6 +960,14 @@ std::tuple<OptionalModuleVector, OptionalModuleVector> InsertObserversHelper::in
   // "intermediate values" that is not the input/output of the
   // graph
   std::unordered_map<Value*, script::Module> values_to_observe;
+
+  for (auto* v : graph->inputs()) {
+    if (!graph_inputs_outputs.count(v) && !values_to_observe.count(v)) {
+      if (auto observer_opt = getObserverFor(v)) {
+        values_to_observe[v] = *observer_opt;
+      }
+    }
+  }
   while (!blocks_to_visit.empty()) {
     Block* b = blocks_to_visit.top();
     blocks_to_visit.pop();
