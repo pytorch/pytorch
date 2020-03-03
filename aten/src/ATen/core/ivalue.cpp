@@ -24,7 +24,7 @@ TupleTypePtr Tuple::type() const {
 } // namespace ivalue
 
 TypePtr IValue::type() const {
-  switch(tag) {
+  switch (tag) {
     case Tag::None:
       return NoneType::get();
     case Tag::Tensor:
@@ -65,6 +65,60 @@ TypePtr IValue::type() const {
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
+
+void IValue::getSubValues(HashAliasedIValues& subValues) const {
+  switch (this->tag) {
+    case Tag::Tensor:
+      subValues.insert(*this);
+      return;
+    case Tag::Tuple:
+    case Tag::GenericList: {
+      subValues.insert(*this);
+      c10::ArrayRef<IValue> elems;
+      if (isTuple()) {
+        elems = this->toTuple()->elements();
+      } else {
+        elems = this->toListRef();
+      }
+      for (auto& elem : elems) {
+        elem.getSubValues(subValues);
+      }
+      break;
+    }
+    case Tag::GenericDict:
+      subValues.insert(*this);
+      for (const auto& pair : this->toGenericDict()) {
+        pair.value().getSubValues(subValues);
+        pair.key().getSubValues(subValues);
+      }
+      break;
+    case Tag::Future:
+    case Tag::Device:
+    case Tag::Object:
+    case Tag::PyObject:
+    case Tag::Uninitialized:
+    case Tag::Capsule:
+      TORCH_INTERNAL_ASSERT(
+          false, "sub ivalue is nat enabled for: ", this->tagKind());
+      // Fall through
+    default:
+      // don't record scalars.
+      break;
+  }
+}
+
+bool IValue::overlaps(const IValue& rhs) const {
+  HashAliasedIValues rhsSubValues, thisSubValues;
+  rhs.getSubValues(rhsSubValues);
+  getSubValues(thisSubValues);
+  for (auto& sub : thisSubValues) {
+    if (rhsSubValues.count(sub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 namespace {
 
 using IValueFormatter = std::function<void(std::ostream&, const IValue&)>;
@@ -78,7 +132,7 @@ std::ostream& printList(
     IValueFormatter formatter) {
   out << start;
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0){
+    if (i > 0) {
       out << ", ";
     }
     formatter(out, IValue(list[i]));
