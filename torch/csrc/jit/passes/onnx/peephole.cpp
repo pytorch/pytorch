@@ -823,7 +823,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
     if (it->kind() == onnx::NegativeLogLikelihoodLoss &&
         it->input(0)->node()->kind() == onnx::LogSoftmax) {
       auto origLogSoftmaxNode= it->input(0)->node();
-      auto origNllLossNode = it->next();
+      auto origNllLossNode = *it;
 
       Node* softmaxCrossEntropyNode = b->owningGraph()->create(onnx::SoftmaxCrossEntropyLoss, it->outputs().size());
       for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
@@ -835,7 +835,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       it->replaceAllUsesWith(softmaxCrossEntropyNode);
       it->removeAllInputs();
       origLogSoftmaxNode->destroy();
-      origNllLossNode->destroy();
+      //origNllLossNode->destroy();
       continue;
     }
   }
