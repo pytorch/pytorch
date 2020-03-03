@@ -96,7 +96,7 @@ call_torchbind_method_from_stack(Functor& functor, Stack& stack) {
 }
 
 template <class RetType, class Func>
-class BoxedProxy;
+struct BoxedProxy;
 
 template <class RetType, class Func>
 struct BoxedProxy {
