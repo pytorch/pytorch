@@ -136,8 +136,8 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
 }
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
-    const std::shared_ptr<Graph>& graph)
-    : GraphExecutorImplBase(graph) {}
+    const std::shared_ptr<Graph>& graph, std::string function_name)
+    : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
 ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
@@ -154,7 +154,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
-    optimized_plan_ = ExecutionPlan(copy);
+    optimized_plan_ = ExecutionPlan(copy, function_name_);
     return *optimized_plan_;
   }
 
@@ -165,7 +165,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);
-    profiling_plan_ = ExecutionPlan(pr_copy);
+    profiling_plan_ = ExecutionPlan(pr_copy, function_name_);
     // fall-through
   }
 
@@ -177,7 +177,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   runProfilingOptimizations(copy);
   // cache
-  optimized_plan_ = ExecutionPlan(copy, remaining_bailout_depth);
+  optimized_plan_ = ExecutionPlan(copy, function_name_, remaining_bailout_depth);
   return *optimized_plan_;
 }
 

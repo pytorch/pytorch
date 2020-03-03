@@ -121,11 +121,11 @@ class Node : public StorageType<T>, public Notifier<Node<T, U...>> {
   }
 
   void setInEdges(std::vector<EdgeRef> edges) {
-    inEdges_ = edges;
+    inEdges_ = std::move(edges);
   }
 
   void setOutEdges(std::vector<EdgeRef> edges) {
-    outEdges_ = edges;
+    outEdges_ = std::move(edges);
   }
 
  private:
