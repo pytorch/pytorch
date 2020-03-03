@@ -23,6 +23,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -10107,39 +10108,6 @@ a")
         mod = torch.jit.script(MyMod())
         inps = tuple([torch.tensor(i) for i in range(1, 5)])
         self.assertEqual(mod.method(*inps), MyMod().method(*inps))
-
-        @torch.jit.interface
-        class ModuleInterface(nn.Module):
-            def one(self, inp1, inp2):
-                # type: (Tensor, Tensor) -> Tensor
-                pass
-
-        class OrigModule(nn.Module):
-            def __init__(self):
-                super(OrigModule, self).__init__()
-
-            def one(self, inp1, inp2):
-                # type: (Tensor, Tensor) -> Tensor
-                return inp1 + inp2 + 1
-
-        class TestModule(nn.Module):
-            proxy_mod : ModuleInterface
-
-            def __init__(self):
-                super(TestModule, self).__init__()
-                self.proxy_mod = OrigModule()
-
-            def forward(self, input):
-                return input * 2
-
-            @torch.jit.export
-            def method(self, input):
-                for module in self.modules():
-                    input = module(input)
-                return input
-
-        with self.assertRaisesRegex(Exception, "Could not compile"):
-            scripted_mod = torch.jit.script(TestModule())
 
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
