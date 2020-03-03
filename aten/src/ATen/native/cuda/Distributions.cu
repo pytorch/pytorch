@@ -99,19 +99,6 @@ void gamma_cuda_kernel(
 }
 
 template <typename scalar_t>
-void gamma_grad_cuda_kernel(
-    at::Tensor& ret,
-    const at::Tensor& self,
-    const at::Tensor& output) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  at::cuda::CUDA_tensor_apply3<scalar_t, scalar_t, scalar_t>(
-      ret, self, output,
-      [] __device__ (scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
-        ret_val = standard_gamma_grad_one<scalar_t, accscalar_t>(self_val, output_val);
-      });
-}
-
-template <typename scalar_t>
 void dirichlet_grad_cuda_kernel(
     at::Tensor& ret,
     const at::Tensor& x,
@@ -193,9 +180,18 @@ Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen_) {
 
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = at::empty(self.sizes(), self.options());
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "_standard_gamma_grad_cuda", [&] {
-     gamma_grad_cuda_kernel<scalar_t>(ret, self, output);
-   });
+  TensorIterator iter;
+  iter.add_output(ret);
+  iter.add_input(self);
+  iter.add_input(output);
+  iter.build();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "_standard_gamma_grad_cuda", [&] {
+    using accscalar_t = at::acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+      [] GPU_LAMBDA (scalar_t self_val, scalar_t output_val) {
+        return standard_gamma_grad_one<scalar_t, accscalar_t>(self_val, output_val);
+      });
+  });
   return ret;
 }
 
