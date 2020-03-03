@@ -1225,6 +1225,8 @@ Tensor try_get_weight_buf(
 
   int64_t num_parameters = parameters.size();
   int64_t num_ptrs = expected_data_ptrs.size();
+  std::cout << "num_ptrs: " << num_ptrs << "\n";
+  std::cout << "num_parameters: " << num_parameters << "\n";
   AT_ASSERT(num_ptrs == (num_parameters * (has_biases ? 1 : 2)));
   AT_ASSERT(num_ptrs % (has_biases ? 4 : 2) == 0);
   for (int64_t param_i = 0, ptr_i = 0;
