@@ -484,6 +484,54 @@ a case the rules are:
 * If all of the ``__torch_function__`` implementations return
   ``NotImplemented``, PyTorch raises a ``TypeError``.
 
+Testing Coverage of Overrides for the PyTorch API
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+One troublesome aspect of implementing ``__torch_function__`` is that if some
+operations do and others do not have overrides, users will at best see an
+inconsistent experience, or at worst will see errors raised at runtime when they
+use a function that does not have an override. To ease this process, PyTorch
+provides a developer-facing API for ensuring full support for
+``__torch_function__`` overrides. This API is private and may be subject to
+changes without warning in the future.
+
+First, to get a listing of all overridable functions, use
+``torch._overrides.get_overridable_functions``. This returns a dictionary whose
+keys are namespaces in the ``PyTorch`` Python API and whose values are a list of
+functions in that namespace that can be overriden. For example, let's print the
+names of the first 5 functions in ``torch.nn.functional`` that can be
+overriden::
+
+  >>> from torch._overrides import get_overridable_functions
+  >>> func_dict = get_overridable_functions()
+  >>> nn_funcs = func_dict[torch.nn.functional]
+  >>> print([f.__name__ for f in nn_funcs[:5])
+  ['adaptive_avg_pool1d', 'adaptive_avg_pool2d', 'adaptive_avg_pool3d',
+   'adaptive_max_pool1d', 'adaptive_max_pool1d_with_indices']
+
+This listing of functions makes it possible to iterate over all overridable
+functions, however in practice this is not enough to write tests for all of
+these functions without laboriously and manually copying the signature of each
+function for each test. To ease this process, the
+``torch._overrides.get_testing_overrides`` function returns a dictionary mapping
+overridable functions in the ``PyTorch`` API to dummy lambda functions that have
+the same signature as the original function but unconditionally return -1. These
+functions are most useful to use with ``inspect`` to analyze the function
+signature of the original ``PyTorch`` function::
+
+  >>> import inspect
+  >>> from torch._overrides import get_testing_overrides
+  >>> override_dict = get_testing_overrides()
+  >>> dummy_add = override_dict[torch.add]
+  >>> inspect.signature(dummy_add)
+  <Signature (input, other, out=None)>
+
+Finally, ``torch._overrides.get_ignored_functions`` returns a tuple of functions
+that explicitly cannot be overrided by ``__torch_function__``. This list can be
+useful to confirm that a function that isn't present in the dictionary returned
+by ``get_overridable_functions`` cannot be overriden.
+
+
 Writing custom C++ extensions
 -----------------------------
 
