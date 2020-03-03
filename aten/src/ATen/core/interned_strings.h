@@ -237,7 +237,8 @@ namespace c10 {
   _(attr, kinds)                     \
   _(attr, types)                     \
   _(attr, scope)                     \
-  _(attr, keepdims)
+  _(attr, keepdims)                  \
+  _(attr, cache_id)
 #else
 #define FORALL_NS_SYMBOLS(_) \
   _(namespaces, prim)              \
