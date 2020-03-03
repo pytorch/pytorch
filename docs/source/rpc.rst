@@ -101,8 +101,6 @@ to appropriate devices if necessary.
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
-.. autoclass:: RpcBackendOptions
-    :members:
 .. autoclass:: ProcessGroupRpcBackendOptions
     :members:
     :inherited-members:

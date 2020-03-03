@@ -215,9 +215,8 @@ If the future completes with an error, an exception is thrown.
       "ProcessGroupRpcBackendOptions",
       rpcBackendOptions,
       R"(
-          The backend options class for ``ProcessGroupAgent``. This is derived
-          from ``RpcBackendOptions`` by introducing an additional argument
-          ``num_send_recv_threads``.
+          The backend options class for ``ProcessGroupAgent``, which is derived
+          from ``RpcBackendOptions``.
 
           Arguments:
               num_send_recv_threads (int, optional): The number of threads in
@@ -230,7 +229,7 @@ If the future completes with an error, an exception is thrown.
 
           Example::
               >>> import datetime, os
-              >>> import torch.distributed.rpc as rpc
+              >>> from torch.distributed import rpc
               >>> os.environ['MASTER_ADDR'] = 'localhost'
               >>> os.environ['MASTER_PORT'] = '29500'
               >>>
