@@ -226,8 +226,7 @@ test_xla() {
   ./test/run_tests.sh
 
   # Disable MNIST test to avoid HTTP error from http://yann.lecun.com/exdb/mnist/
-  # Please add this test back when below is fixed in torchvision
-  # https://github.com/pytorch/vision/blob/master/torchvision/datasets/mnist.py#L32-L37
+  # Please add this test back after torchvision dataset is switched to S3 mirror
   # echo "Running MNIST Test"
   # python test/test_train_mnist.py --tidy
 
