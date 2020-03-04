@@ -54,7 +54,14 @@ test_python_all() {
   # using the address associated with the loopback interface.
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
-  python test/run_test.py --verbose
+
+  if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+    DETERMINE_FROM=$(mktemp)
+    file_diff_from_base "$DETERMINE_FROM"
+  fi
+
+  python test/run_test.py --verbose --determine-from="$DETERMINE_FROM"
+
   assert_git_not_dirty
 }
 
