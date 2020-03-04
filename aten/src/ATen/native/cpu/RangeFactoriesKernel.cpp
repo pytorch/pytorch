@@ -18,14 +18,10 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
     scalar_t start = scalar_start.to<scalar_t>();
     scalar_t end = scalar_end.to<scalar_t>();
     scalar_t step = (end - start) / static_cast<scalar_t>(steps - 1);
-    cpu_kernel_vec(
+    cpu_serial_kernel(
         iter,
         [start, step, &idx]() -> scalar_t {
           return start + static_cast<scalar_t>(idx ++) * step;
-        },
-        [start, step, &idx]() -> Vec256<scalar_t> {
-          return Vec256<scalar_t>::arange(start + static_cast<scalar_t>(idx) * step, step);
-          idx += Vec256<scalar_t>::size();
         });
   });
 }

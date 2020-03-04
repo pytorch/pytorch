@@ -1,9 +1,9 @@
 #include "import.h"
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/script/compilation_unit.h>
-#include <torch/csrc/jit/unpickler.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/csrc/jit/instruction.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 
 #include <fstream>
@@ -47,7 +47,7 @@ IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
   return row->elements().at(1);
 }
 
-void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::CompilationUnit> mcu) {
+void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -90,7 +90,7 @@ void parseMethods(const std::vector<IValue>& vals, std::shared_ptr<mobile::Compi
 
     function->set_register_size(register_size);
 
-    mcu->register_function(std::move(function));
+    mcu.register_function(std::move(function));
   }
 }
 
@@ -115,7 +115,7 @@ mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> devic
   device_ = device;
   auto bvals = readArchive("bytecode").toTuple()->elements();
   auto mcu = std::make_shared<mobile::CompilationUnit>();
-  parseMethods(bvals, mcu);
+  parseMethods(bvals, *mcu);
 
   return mobile::Module(readArchive("data").toObject(), mcu);
 }
