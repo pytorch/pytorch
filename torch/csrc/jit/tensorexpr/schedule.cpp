@@ -277,9 +277,9 @@ class Vectorizer : public IRMutator {
     return true;
   }
 
-  const Var* var_;
-  int lanes_;
-  const Expr* start_;
+  const Var* var_ = nullptr;
+  int lanes_ = 0;
+  const Expr* start_ = nullptr;
 };
 
 Stmt* Vectorize(const Stmt* stmt) {
@@ -360,7 +360,7 @@ class FunctionInliner : public IRMutator {
   }
 
   // Replace the target variable with the caller expressions.
-  const Expr* mutate(const Var* v) {
+  const Expr* mutate(const Var* v) override {
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return IRMutator::mutate(v);
@@ -396,9 +396,6 @@ static Stmt* InjectInlines(
 
 class DepTracker : public IRVisitor {
  public:
-  virtual ~DepTracker() = default;
-  DepTracker() {}
-
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
     tensor->body()->accept(this);
@@ -407,7 +404,7 @@ class DepTracker : public IRVisitor {
 
  private:
   void visit(const FunctionCall* v) override {
-    used_tensors.push_back(const_cast<Tensor*>(v->tensor()));
+    used_tensors.push_back(const_cast<Tensor*>(v->tensor())); // NOLINT
   }
 
   std::vector<Tensor*> used_tensors;
