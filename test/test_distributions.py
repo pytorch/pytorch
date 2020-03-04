@@ -3931,8 +3931,10 @@ class TestNumericalStability(TestCase):
 class TestLazyLogitsInitialization(TestCase):
     def setUp(self):
         super(TestLazyLogitsInitialization, self).setUp()
+        # ContinuousBernoulli is not tested because log_prob is not computed simply
+        # from 'logits', but 'probs' is also needed
         self.examples = [e for e in EXAMPLES if e.Dist in
-                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial, ContinuousBernoulli)]
+                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
 
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
