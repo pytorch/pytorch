@@ -13817,27 +13817,49 @@ class TestTorchDeviceType(TestCase):
         B2 = toscipy(B1)
         X2 = toscipy(X1)
 
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        tol = 1e-8
+        # tol for scipy lobpcg will be choosed so that the number of
+        # iterations will be equal or very close to pytorch lobpcg
+        # (that is around 170-180)
+
         # Standard eigenvalue problem
-        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True)
-        E2, V2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True)
+        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=1.1 * tol)
+        iters1 = len(lambdas1)
+        iters2 = len(lambdas2)
+        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
+
         E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
 
         eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
-        self.assertLess(eq_err, 1e-4)        # std
-        self.assertLess(eq_err_scipy, 1e-4)  # std
+        self.assertLess(eq_err, 1e-6)        # std
+        self.assertLess(eq_err_scipy, 1e-6)  # std
 
         self.assertEqual(E1, torch.from_numpy(E2.copy()))
 
         # Generalized eigenvalue problem
-        E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True)
-        E2, V2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True)
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=39 * tol)
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
+        iters1 = len(lambdas1)
+        iters2 = len(lambdas2)
+        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
 
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
-        self.assertLess(eq_err, 1e-5)        # general
-        self.assertLess(eq_err_scipy, 1e-5)  # general
+        self.assertLess(eq_err, 1e-6)        # general
+        self.assertLess(eq_err_scipy, 1e-6)  # general
 
         self.assertEqual(E1, torch.from_numpy(E2.copy()))
 
@@ -13848,22 +13870,22 @@ class TestTorchDeviceType(TestCase):
         elapsed_general_scipy = 0
         for i in range(repeat):
             start = time.time()
-            torch.lobpcg(A1, X=X1, niter=niter, method='ortho')
+            torch.lobpcg(A1, X=X1, niter=niter, method='ortho', tol=tol)
             end = time.time()
             elapsed_ortho += end - start
 
             start = time.time()
-            torch.lobpcg(A1, X=X1, B=B1, niter=niter, method='ortho')
+            torch.lobpcg(A1, X=X1, B=B1, niter=niter, method='ortho', tol=tol)
             end = time.time()
             elapsed_ortho_general += end - start
 
             start = time.time()
-            scipy_lobpcg(A2, X2, maxiter=niter)
+            scipy_lobpcg(A2, X2, maxiter=niter, tol=1.1 * tol)
             end = time.time()
             elapsed_scipy += end - start
 
             start = time.time()
-            scipy_lobpcg(A2, X2, B=B2, maxiter=niter)
+            scipy_lobpcg(A2, X2, B=B2, maxiter=niter, tol=39 * tol)
             end = time.time()
             elapsed_general_scipy += end - start
 
@@ -13882,6 +13904,42 @@ scipy_lobpcg  | {:10.2f}  | {:10.2f}  | N/A
         '''.format(elapsed_ortho_ms, elapsed_ortho_general_ms,
                    elapsed_scipy_ms, elapsed_general_scipy_ms,
                    m, k))
+
+        # Handling of very small tolerence
+        tol = 1e-100
+
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
+        iters1 = len(lambdas1)
+        iters2 = len(lambdas2)
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
+
+        lambdas1 = []
+
+        def tracker(worker):
+            lambdas1.append(worker.E[:])
+
+        E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
+        E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
+        iters1_general = len(lambdas1)
+        iters2_general = len(lambdas2)
+        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
+        eq_err_general_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
+
+        print('''\
+Handling of small tol={:6.0e}: torch.lobpcg vs scipy.sparse.linalg.lobpcg
+----------------------------------------------------------------------------
+              | standard    | generalized |  niter | method
+torch.lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | ortho
+scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
+---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
+'''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
     @slowTest
     @onlyCPU
