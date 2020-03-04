@@ -8789,6 +8789,8 @@ class TestTorchDeviceType(TestCase):
         import torch
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
+        dtype = torch.double
+
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
             if isinstance(matrix_size, int):
@@ -8796,11 +8798,11 @@ class TestTorchDeviceType(TestCase):
             else:
                 rows, columns = matrix_size
             if density == 1:
-                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device)
+                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device, dtype=dtype)
                 a = a_input
             else:
                 assert batches == ()
-                a_input = random_sparse_matrix(rows, columns, density, device=device)
+                a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
             q = min(*size)
@@ -8825,8 +8827,8 @@ class TestTorchDeviceType(TestCase):
                 # subspaces, respectively
                 u, s, v = u[..., :actual_rank], s[..., :actual_rank], v[..., :actual_rank]
                 U, S, V = U[..., :actual_rank], S[..., :actual_rank], V[..., :actual_rank]
-                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches))
-                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches))
+                self.assertEqual(u.transpose(-2, -1).matmul(U).det().abs(), torch.ones(batches, device=device, dtype=dtype))
+                self.assertEqual(v.transpose(-2, -1).matmul(V).det().abs(), torch.ones(batches, device=device, dtype=dtype))
 
         all_batches = [(), (1,), (3,), (2, 3)]
         for actual_rank, size, all_batches in [
@@ -8857,6 +8859,8 @@ class TestTorchDeviceType(TestCase):
     def test_pca_lowrank(self, device):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
+        dtype = torch.double
+
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
             if isinstance(matrix_size, int):
@@ -8864,10 +8868,10 @@ class TestTorchDeviceType(TestCase):
             else:
                 rows, columns = matrix_size
             if density == 1:
-                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device)
+                a_input = random_lowrank_matrix(actual_rank, rows, columns, *batches, device=device, dtype=dtype)
                 a = a_input
             else:
-                a_input = random_sparse_matrix(rows, columns, density, device=device)
+                a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
             u, s, v = pca(a_input, q=guess_rank, **options)
@@ -8888,7 +8892,7 @@ class TestTorchDeviceType(TestCase):
             if density == 1:
                 # actual rank is known only for dense input
                 detect_rank = (s.abs() > 1e-5).sum(axis=-1)
-                self.assertEqual(actual_rank * torch.ones(batches, device=device), detect_rank)
+                self.assertEqual(actual_rank * torch.ones(batches, device=device, dtype=torch.int64), detect_rank)
                 U, S, V = torch.svd(A2)
                 self.assertEqual(s[..., :actual_rank], S[..., :actual_rank])
 
