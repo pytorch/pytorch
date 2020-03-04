@@ -225,8 +225,11 @@ test_xla() {
   echo "Running Python Tests"
   ./test/run_tests.sh
 
-  echo "Running MNIST Test"
-  python test/test_train_mnist.py --tidy
+  # Disable MNIST test to avoid HTTP error from http://yann.lecun.com/exdb/mnist/
+  # Please add this test back when below is fixed in torchvision
+  # https://github.com/pytorch/vision/blob/master/torchvision/datasets/mnist.py#L32-L37
+  # echo "Running MNIST Test"
+  # python test/test_train_mnist.py --tidy
 
   echo "Running C++ Tests"
   pushd test/cpp
