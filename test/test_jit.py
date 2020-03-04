@@ -1066,45 +1066,82 @@ graph(%x : Tensor,
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
 
     def test_insert_observers_skip_values(self):
-        class M(torch.nn.Module):
+        class ConvFunctionalReLU(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(ConvFunctionalReLU, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
 
             def forward(self, x):
                 return F.relu(self.conv(x))
 
-        class M2(torch.nn.Module):
+        class ConvReLUModule(torch.nn.Module):
             def __init__(self):
-                super(M2, self).__init__()
+                super(ConvReLUModule, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 return self.relu(self.conv(x))
 
+        class AddReLUModule(torch.nn.Module):
+            def __init__(self):
+                super(AddReLUModule, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                out = x
+                out += x
+                return self.relu(out)
+
+        class AddFunctionalReLU(torch.nn.Module):
+            def __init__(self):
+                super(AddFunctionalReLU, self).__init__()
+
+            def forward(self, x):
+                out = x
+                out += x
+                return F.relu(out)
+
+        def attrs_with_prefix(module, prefix):
+            return [x for x, _ in module._modules._c.items()
+                    if x.startswith(prefix)]
+
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        m = torch.jit.script(M())
+        m = torch.jit.script(ConvFunctionalReLU())
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # observer for weight of conv
-        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
-            'Expected to have 1 observer submodule'
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
         # observer for input of conv and output of relu
-        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
-            'Expected to have 2 observer submodule'
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
 
-        m = torch.jit.script(M2())
+        m = torch.jit.script(ConvReLUModule())
         m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # observer for input of conv and output of relu
-        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
-            'Expected to have 2 observer submodule'
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
         # observer for weight of conv
-        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
-            'Expected to have 1 observer submodule'
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
         # observer for output of relu
-        assert len(attrs_with_prefix(m.relu, '_observer_')) == 0, \
-            'Expected to have 0 observer submodule'
+        assert len(attrs_with_prefix(m.relu, '_observer_')) == 0
 
+        m = torch.jit.script(AddReLUModule())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        assert len(attrs_with_prefix(m, '_observer')) == 2
+        assert len(attrs_with_prefix(m.relu, '_observer')) == 0
+        FileCheck().check('aten::add_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('ReLU = prim::GetAttr') \
+                   .run(str(get_forward_graph(m._c)))
+
+        m = torch.jit.script(AddFunctionalReLU())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        assert len(attrs_with_prefix(m, '_observer')) == 2
+        FileCheck().check('aten::add_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('CallFunction') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(str(get_forward_graph(m._c)))
 
     def test_insert_observers_weight_dtype(self):
         class M(torch.nn.Module):
