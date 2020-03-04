@@ -28,7 +28,9 @@ class TORCH_API Module {
   }
   Function* find_method(const std::string& basename) const;
   std::string name() {return object_->name();}
- private:
+  const std::vector<at::IValue>& slots() const {return object_->slots();}
+  const std::vector<at::Tensor> parameters() const;
+private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
   std::shared_ptr<CompilationUnit> cu_;
 };

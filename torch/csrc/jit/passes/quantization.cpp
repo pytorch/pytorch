@@ -445,7 +445,7 @@ class InsertObserversHelper {
    * And a vector of indexes of outputs that indicates whether the output value
    * is already observed or not, this is used for propagating the observed
    * property of a value through CallMethods, because we should skip inserting
-   * observers for ops that doesn't require observation
+   * observers for ops that don't require observation
    */
   std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>>
   insertObservers(script::Module& module,
@@ -507,8 +507,14 @@ class InsertObserversHelper {
   // Map from values from callsite into the values in the CallMethod graph
   std::unordered_map<Value*, std::unordered_set<Value*>> boundary_value_map_;
   std::unordered_set<Value*> observed_values_;
-  // This is used for the observed values to pass through the ops like max_pool2d,
-  // so that output values of max_pool2d do not need to be observed
+  // This is used for the observed values to pass through the ops like flatten,
+  // so that output value of platten do not need to be observed
+  // key of the map is the value from caller graph, and the value of the map
+  // is the list of values in the callee graph (the graph
+  // corresponding to the called method),
+  // the reason it is a vector is that a value in the caller graph
+  // can both correspond to the output of one callee graph and input of another
+  // callee graph.
   std::unordered_map<Value*, std::vector<Value*>> pass_through_value_map_;
   // Unique id generator for observer module, used for generating
   // unique observer names when we insert observer module, we
@@ -802,12 +808,10 @@ void InsertObserversHelper::fillPassThroughValueMap(const std::shared_ptr<Graph>
     for (Node* n : b->nodes()) {
       auto input_indexes = getGeneralOpTensorInputIndexes(n);
       GRAPH_DEBUG("input indexes: ", input_indexes.size());
-      if (input_indexes.size() > 0) {
-        for (auto i : input_indexes) {
-          for (auto j = 0; j < n->outputs().size(); ++j) {
-            GRAPH_DEBUG("addding ", n->outputs()[j]->debugName(), " -> ", n->inputs()[i]->debugName());
-            pass_through_value_map_[n->outputs()[j]].push_back(n->inputs()[i]);
-          }
+      for (auto i : input_indexes) {
+        for (auto* output : n->outputs()) {
+          GRAPH_DEBUG("addding ", output->debugName(), " -> ", n->input(i)->debugName());
+          pass_through_value_map_[output].push_back(n->input(i));
         }
       }
       for (Block* subblock : n->blocks()) {
@@ -862,11 +866,10 @@ void InsertObserversHelper::preprocess(
   replaceConvolutionWithConv2d(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
-  addIntermediateValuesToSkipObserver(module, method_name);
 
+  addIntermediateValuesToSkipObserver(module, method_name);
   fillValueObserverMap(module, method_name);
   fillBoundaryValueMap(module, method_name);
-
   fillPassThroughValueMap(graph);
 
   for (auto& invoked_method : getInvokedMethods(module, method_name)) {
@@ -1003,13 +1006,12 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
       module._ivalue()->setAttr(name, observer.clone_instance()._ivalue());
     }
   }
-  // NB: Why do we process the graph even if it's visited?
+  // NB: Why do we need to process the graph even if it's visited?
   // Reason is `graph_observed_values` can
   // change depending on where the method is called, and
   // outputs that's been observed(third item of the returned result)
   // can change depending on that, so for each graph we'll need to go through
-  // the whole process of inserting observers, instead of just setting up
-  // the observer module instances for visited graph
+  // the whole process of inserting observers
   GRAPH_DUMP("inserting observer for:", graph);
 
   std::stack<Block*> blocks_to_visit;
@@ -2395,15 +2397,19 @@ void DedupModuleUses(script::Module& module) {
 }
 
 script::Module Finalize(script::Module& module) {
+  GRAPH_DEBUG("In Finalize");
   SwapFunctionalLinearInModule(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
+  GRAPH_DUMP("Aftre inline:", graph);
   ReplicateDeQuant(graph);
   SwapDeQuant(graph);
   InsertPrepackUnpack(graph);
   ConstantPropagation(graph);
   QuantFusion(graph);
-  return freeze_module(module);
+  GRAPH_DUMP("Aftre quant fusion:", graph);
+  //return freeze_module(module);
+  return module;
 }
 
 } // namespace jit

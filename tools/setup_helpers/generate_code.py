@@ -25,7 +25,8 @@ def generate_code(ninja_global=None,
                   install_dir=None,
                   subset=None,
                   disable_autograd=False,
-                  selected_op_list_path=None):
+                  selected_op_list_path=None,
+                  disable_trace=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -48,6 +49,7 @@ def generate_code(ninja_global=None,
             autograd_gen_dir,
             'tools/autograd',
             disable_autograd=disable_autograd,
+            disable_trace=disable_trace,
         )
         gen_jit_dispatch(
             declarations_path or DECLARATIONS_PATH,
@@ -77,6 +79,12 @@ def main():
         '--selected-op-list-path',
         help='Path to the yaml file that contains the list of operators to include for custom build.',
     )
+    parser.add_argument(
+        '--disable_gen_tracing',
+        default=False,
+        action='store_true',
+        help='Disable generating the tracing codes.',
+    )
     options = parser.parse_args()
     generate_code(
         options.ninja_global,
@@ -86,6 +94,7 @@ def main():
         options.subset,
         options.disable_autograd,
         options.selected_op_list_path,
+        options.disable_gen_tracing,
     )
 
 
