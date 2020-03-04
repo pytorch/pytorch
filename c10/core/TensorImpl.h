@@ -1491,9 +1491,21 @@ protected:
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this point)
     // Dim 4+ is possibly be a channels last 3d format (Dim 5 only at this point)
     switch (dim()) {
-      case 0:
-      case 1:
-      case 2:
+      case 4:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case 5:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
+        break;
+      default:
         is_channels_last_contiguous_ = false;
         is_channels_last_3d_contiguous_ = false;
         // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
@@ -1503,20 +1515,6 @@ protected:
         is_channels_last_ = false;
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
-        break;
-      case 3:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = false;
-        is_channels_last_ = compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
-        break;
-      default:
-        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
-        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
-        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
     }
   }
 

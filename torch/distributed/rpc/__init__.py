@@ -6,8 +6,6 @@ import sys
 import torch
 import torch.distributed as dist
 
-from . import backend_registry
-
 
 def is_available():
     return sys.version_info >= (3, 0) and hasattr(torch._C, "_rpc_init")
@@ -18,7 +16,7 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
-    from . import api
+    from . import api, backend_registry
     from .api import _rpc_sync_torchscript, _rpc_async_torchscript, _remote_torchscript
     from .api import *  # noqa: F401
     import torch.distributed.autograd as dist_autograd
@@ -58,7 +56,9 @@ if is_available():
                 ``rpc_backend_options``, RPC would initialize the underlying
                 process group backend using ``init_method = "env://"``,
                 meaning that environment variables ``MASTER_ADDRESS`` and
-                ``MASTER_PORT`` needs to be set properly.
+                ``MASTER_PORT`` needs to be set properly. See
+                :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
+                for examples.
         """
 
         if not rpc_backend_options:
