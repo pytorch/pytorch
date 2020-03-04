@@ -72,16 +72,30 @@ BinaryOp::BinaryOp(
 ForLoop::ForLoop(
     Val* _index,
     Val* _begin,
-    Val* _end)
+    Val* _end,
+    const std::vector<const Expr*> &_body)
     : Expr(ExprType::ForLoop),
       index_{_index},
       begin_{_begin},
       end_{_end},
-      body_()
+      body_{_body}
 {
   addInput(_index);
   addInput(_begin);
   addInput(_end);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+IfThenElse::IfThenElse(
+    Val* _cond,
+    const std::vector<const Expr*> &_if_body,
+    const std::vector<const Expr*> &_else_body)
+    : Expr(ExprType::IfThenElse),
+      cond_{_cond},
+      if_body_{_if_body},
+      else_body_{_else_body}
+{
+  addInput(_cond);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 

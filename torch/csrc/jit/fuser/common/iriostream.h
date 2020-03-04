@@ -17,6 +17,7 @@ struct UnaryOp;
 struct BinaryOp;
 
 struct ForLoop;
+struct IfThenElse;
 
 struct Tensor;
 struct TensorDomain;
@@ -57,6 +58,9 @@ virtual void print(const Int* const);
 
 virtual void print(const UnaryOp* const);
 virtual void print(const BinaryOp* const);
+
+virtual void print(const ForLoop* const);
+virtual void print(const IfThenElse* const);
 
 virtual void print(const Split* const);
 virtual void print(const Merge* const);

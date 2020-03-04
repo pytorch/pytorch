@@ -454,7 +454,8 @@ struct TORCH_API ForLoop : public Expr {
   ForLoop(
     Val* _index
   , Val* _begin
-  , Val* _end);
+  , Val* _end
+  , const std::vector<const Expr*> &_body);
 
   ForLoop(const ForLoop& other) = delete;
   ForLoop& operator=(const ForLoop& other) = delete;
@@ -480,6 +481,42 @@ private:
   Val* const begin_;
   Val* const end_;
   std::vector<const Expr*> body_;
+};
+
+// TODO: Not sure if array of expressions is appropriate composition
+// TODO: I named it IfThenElse instead of For because it is easer to search for.
+struct TORCH_API IfThenElse : public Expr {
+  ~IfThenElse() = default;
+  IfThenElse(
+    Val* _cond
+  , const std::vector<const Expr*> &_if_body
+  , const std::vector<const Expr*> &_else_body={});
+
+  IfThenElse(const IfThenElse& other) = delete;
+  IfThenElse& operator=(const IfThenElse& other) = delete;
+
+  IfThenElse(IfThenElse&& other) = delete;
+  IfThenElse& operator=(IfThenElse&& other) = delete;
+
+  Val* cond() const noexcept { return cond_; }
+  const std::vector<const Expr*>& if_body() const noexcept { return if_body_; }
+  const std::vector<const Expr*>& else_body() const noexcept { return else_body_; }
+
+  void add_if_expr(const Expr* e) { if_body_.push_back(e); }
+  void add_else_expr(const Expr* e) { else_body_.push_back(e); }
+
+  bool hasElse() const noexcept { return !else_body_.empty(); }
+
+  // TODO: This should probably be more sophisiticated. 
+  bool same_as(const IfThenElse* other) const {
+    return static_cast<const Expr*>(this)->same_as(other);
+  }
+
+private:
+  // TODO: Why is the pointer const and not what's in the object?
+  Val* const cond_;
+  std::vector<const Expr*> if_body_;
+  std::vector<const Expr*> else_body_;
 };
 
 }}} //torch::jit::fuser

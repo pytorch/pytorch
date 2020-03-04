@@ -119,6 +119,7 @@ namespace jit {
   _(GPU_FusionCodeGen)           \
   _(GPU_FusionCodeGen2)          \
   _(GPU_FusionForLoop)           \
+  _(GPU_FusionIfThenElse)        \
 
 
 #define DECLARE_JIT_TEST(name) void test##name();

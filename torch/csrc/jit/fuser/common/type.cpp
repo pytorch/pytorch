@@ -40,12 +40,13 @@ static std::unordered_map<ValType, std::string> val_type_string_map {
 };
 
 static std::unordered_map<ExprType, std::string> expr_type_string_map {
-    {ExprType::UnaryOp,  "UnaryOp"}
-  , {ExprType::BinaryOp, "BinaryOp"}
-  , {ExprType::ForLoop,  "ForLoop"}
-  , {ExprType::Split,    "Split"}
-  , {ExprType::Merge,    "Merge"}
-  , {ExprType::Reorder,  "Reorder"}
+    {ExprType::UnaryOp,    "UnaryOp"}
+  , {ExprType::BinaryOp,   "BinaryOp"}
+  , {ExprType::ForLoop,    "ForLoop"}
+  , {ExprType::IfThenElse, "IfThenElse"}
+  , {ExprType::Split,      "Split"}
+  , {ExprType::Merge,      "Merge"}
+  , {ExprType::Reorder,    "Reorder"}
 };
 static std::unordered_map<UnaryOpType, std::string> unary_op_type_string_map {
     {UnaryOpType::Neg,  "Neg"}
