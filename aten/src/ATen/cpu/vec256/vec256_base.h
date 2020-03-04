@@ -606,7 +606,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   return c;
 }
 
-template <class T, typename Op>
+template <class T, typename Op, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
 static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
   using iT = int_same_size_t<T>;
   iT buffer[Vec256<T>::size()];
@@ -620,15 +620,15 @@ static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b
   return Vec256<T>::loadu(buffer);
 }
 
-template<class T>
+template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
 inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
   return bitwise_binary_op(a, b, std::bit_and<int_same_size_t<T>>());
 }
-template<class T>
+template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
 inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
   return bitwise_binary_op(a, b, std::bit_or<int_same_size_t<T>>());
 }
-template<class T>
+template<class T, typename std::enable_if_t<!std::is_integral<T>::value, int> = 0>
 inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
   return bitwise_binary_op(a, b, std::bit_xor<int_same_size_t<T>>());
 }
