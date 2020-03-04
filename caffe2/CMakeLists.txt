@@ -481,6 +481,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/unique_name_manager.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
   if (NOT INTERN_DISABLE_MOBILE_INTERP)
@@ -490,7 +491,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
         ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_ops.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
         )
     list (APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
