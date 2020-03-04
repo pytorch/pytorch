@@ -963,6 +963,15 @@ void* raw_alloc(size_t nbytes) {
   return r;
 }
 
+void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
+  if (nbytes == 0) {
+    return nullptr;
+  }
+  void* r = nullptr;
+  caching_allocator.malloc(&r, nbytes, stream);
+  return r;
+}
+
 void raw_delete(void* ptr) {
   caching_allocator.free(ptr);
 }

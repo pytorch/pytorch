@@ -14,7 +14,7 @@ namespace cpu {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIterator& iter, uint64_t range, int64_t base, RNG* generator) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     if ((
       std::is_same<scalar_t, int64_t>::value ||
@@ -197,8 +197,41 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG* gen
   }
 }
 
+static std::vector<int64_t> computeStrideForComplex(IntArrayRef oldstride) {
+  auto res = oldstride.vec();
+  for(size_t i = 0; i < res.size(); i++) {
+    res[i] = res[i] * 2;
+  }
+  res.emplace_back(1);
+  return res;
+}
+
+// expects as input a complex tensor and returns back a float tensor
+// containing the complex values in the last two dimensions
+static Tensor view_complex_as_float(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_complex());
+  auto new_sizes = self.sizes().vec();
+  // last dimension will always have two elements containing the real and imag vals
+  new_sizes.emplace_back(2);
+  auto new_strides = computeStrideForComplex(self.strides());
+  if(self.scalar_type() == at::kComplexFloat) {
+    float* data = reinterpret_cast<float*>(self.data_ptr<std::complex<float>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kFloat));
+  } else {
+    double* data = reinterpret_cast<double*>(self.data_ptr<std::complex<double>>());
+    return at::from_blob(data, new_sizes, new_strides, dtype(at::kDouble));
+  }
+}
+
 template<typename RNG>
 void normal_kernel(Tensor& self, double mean, double std, RNG* generator) {
+  if(self.is_complex()) {
+    // note: float_tensor lives only as long as the self tensor lives
+    auto float_tensor = view_complex_as_float(self);
+    // variance for normal distribution of the real and imaginary values
+    // is half of the input variance
+    return normal_kernel(float_tensor, mean, std/(std::sqrt(2)), generator);
+  }
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef __AVX2__
