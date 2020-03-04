@@ -5,6 +5,7 @@
 #endif
 #include <torch/csrc/jit/api/function.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <string>
 #include "unpickler.h"
 
@@ -146,13 +147,29 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
+void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
+  if (auto dict_type = type->cast<DictType>()) {
+    auto dict = ivalue.toGenericDict();
+    dict.unsafeSetKeyType(dict_type->getKeyType());
+    dict.unsafeSetValueType(dict_type->getValueType());
+  } else if (auto list_type = type->cast<ListType>()) {
+    ivalue.toList().unsafeSetElementType(list_type->getElementType());
+  } else {
+    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+  }
+}
+
+
 IValue Unpickler::parse_ivalue() {
   run();
   TORCH_CHECK(
       stack_.size() == 1,
       "Unpickler expected 1 element on the stack, but found ",
       stack_.size());
-  restoreAccurateTypeTagsIfPossible(stack_[0]);
+  if (version_ <= 2) {
+    // See [type tag serialization]
+    restoreAccurateTypeTagsIfPossible(stack_[0]);
+  }
   return stack_[0];
 }
 
@@ -461,6 +478,24 @@ void Unpickler::readGlobal(
             "Found a tensor table reference but Unpickler"
             " has no tensor table\n");
         stack_.emplace_back(tensor_table_->at(data.toInt()));
+      });
+    } else if (class_name == "restore_type_tag") {
+      globals_.emplace_back([this] {
+        auto data = stack_.back().toTuple()->elements();
+        auto type_str = data.at(1).toStringRef();
+        stack_.pop_back();
+        TypePtr type = nullptr;
+        auto entry = type_cache_.find(type_str);
+        if (entry != type_cache_.end()) {
+          type = entry->second;
+        } else {
+          type = c10::parseType(type_str);
+          type_cache_[type_str] = type;
+        }
+        // TODO: Use lookahead to avoid creating the tuple and immediately
+        // destroying it here
+        restoreContainerTypeTags(data.at(0), type);
+        stack_.emplace_back(data.at(0));
       });
     } else {
       TypePtr elem_type = nullptr;
