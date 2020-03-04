@@ -403,7 +403,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
     // TODO: Shouldn't all returned results be successful?
     // Double check documentation for cudnnFindConvolutionForwardAlgorithmEx
     if (perf.status == CUDNN_STATUS_SUCCESS) {
-      if (!args.params.deterministic || (perf.determinism == CUDNN_DETERMINISTIC && perf.algo == algorithm_search<perf_t>::DEFAULT_ALGO)) {
+      if (!args.params.deterministic || perf.determinism == CUDNN_DETERMINISTIC) {
 
         // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
@@ -637,24 +637,42 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
 
 template<typename perf_t>
 class AlgoIterator {
+  using search = algorithm_search<perf_t>;
   const ConvolutionArgs &args;
   bool benchmark;
 
 public:
   AlgoIterator(const ConvolutionArgs &args, bool benchmark): args(args), benchmark(benchmark) {}
 
+  static std::vector<perf_t> onlyDefaultAlgorithm(const ConvolutionArgs &args) {
+    std::vector<perf_t> perfResults(1);
+    perfResults[0].algo = search::DEFAULT_ALGO;
+    if (args.params.dataType == CUDNN_DATA_HALF) {
+      perfResults[0].mathType = CUDNN_TENSOR_OP_MATH;
+    } else {
+      perfResults[0].mathType = CUDNN_DEFAULT_MATH;
+    }
+    search::getWorkspaceSize(args, perfResults[0].algo, &(perfResults[0].memory));
+    return perfResults;
+  }
+
   void try_all(std::function<void (const perf_t &perf)> f) {
-    using search = algorithm_search<perf_t>;
     auto& cache = search::cache();
 
     perf_t algoPerf;
 
     if (cache.find(args.params, &algoPerf)) {
-      f(algoPerf);
-      return;
+      try {
+        f(algoPerf);
+        return;
+      } catch (c10::CUDAOutOfMemoryError &e) {
+        cudaGetLastError(); // clear CUDA error
+      }
     }
 
-    auto perfResults = search::findAlgorithms(args, benchmark);
+    bool only_use_default = args.params.deterministic && !benchmark;
+    auto perfResults = only_use_default ? onlyDefaultAlgorithm(args) : search::findAlgorithms(args, benchmark);
+
     for (auto &algoPerf : perfResults) {
       try {
         f(algoPerf);
