@@ -82,6 +82,32 @@ Tensor truncate(const Tensor& tensor) {
   return tensor;
 }
 
+Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/ true),
+            "True division requires a floating output type, but got ",
+            result.scalar_type());
+  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  div_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor true_divide(const Tensor& self, const Tensor& divisor) {
+  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
+   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
+    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
+    Tensor result = at::empty({0}, self.options().dtype(scalar_type));
+
+    auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+    div_stub(iter.device_type(), iter);
+    return result;
+  }
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  div_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
 Tensor floor_divide(const Tensor& input, const Tensor& other) {
   Tensor out = input / other;
   return truncate(out);
@@ -390,7 +416,7 @@ Tensor __lshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __lshift__(const Tensor& self, Scalar other) { 
+Tensor __lshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -418,7 +444,7 @@ Tensor __rshift__(const Tensor& self, const Tensor& other) {
   return iter.output();
 }
 
-Tensor __rshift__(const Tensor& self, Scalar other) { 
+Tensor __rshift__(const Tensor& self, Scalar other) {
   Tensor result;
   auto wrapper = wrapped_scalar_tensor(other).toType(self.scalar_type());
   auto iter = TensorIterator::binary_op(result, self, wrapper);
@@ -620,6 +646,10 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 
 Tensor& fmod_(Tensor& self, Scalar other) {
   return at::fmod_out(self, self, other);
+}
+
+Tensor true_divide(const Tensor& self, Scalar divisor) {
+  return at::true_divide(self, wrapped_scalar_tensor(divisor)); // redispatch!
 }
 
 }
