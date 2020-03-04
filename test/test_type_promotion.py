@@ -97,7 +97,7 @@ class TestTypePromotion(TestCase):
     def test_complex_scalar_mult_tensor_promotion(self, device):
         a = 1j * torch.ones(2, device=device)
         a = a + 1j
-        b = torch.tensor([2j, 2j])
+        b = torch.tensor([2j, 2j], device=device)
         self.assertEqual(a, b)
         self.assertEqual(a.dtype, b.dtype)
 
@@ -187,12 +187,17 @@ class TestTypePromotion(TestCase):
         shape = [5, 5, 5]
         if dtype == torch.bool:
             tensor = torch.randint(int(remove_zeros), 2, shape, device=device, dtype=dtype)
-        elif dtype.is_floating_point:
+        elif dtype.is_floating_point or dtype.is_complex:
             # "_th_normal_ not supported on CPUType for Half" so simpler create and convert
             tensor = torch.randn(shape, device=device)
             tensor = tensor.to(dtype)
             if remove_zeros:
-                tensor[torch.abs(tensor) < 0.05] = 5
+                tensor_abs = torch.abs(tensor)
+                if dtype == torch.complex64:
+                    tensor_abs = tensor_abs.to(torch.float)
+                elif dtype == torch.complex128:
+                    tensor_abs = tensor_abs.to(torch.double)
+                tensor[tensor_abs < 0.05] = 5
         else:
             tensor = torch.randint(-5 if dtype.is_signed else 0, 10, shape, device=device, dtype=dtype)
             if remove_zeros:
@@ -205,8 +210,8 @@ class TestTypePromotion(TestCase):
     def test_many_promotions(self, device):
         # Can also include half on CPU in cases where it will be promoted to a
         # supported dtype
-        dtypes1 = torch.testing.get_all_math_dtypes('cuda')
-        dtypes2 = torch.testing.get_all_math_dtypes(device)
+        dtypes1 = torch.testing.get_all_math_dtypes_and_complex('cuda')
+        dtypes2 = torch.testing.get_all_math_dtypes_and_complex(device)
         ops = [torch.add, torch.sub, torch.mul, torch.div, torch.rsub]
         for dt1, dt2 in itertools.product(dtypes1, dtypes2):
             for op, non_contiguous in itertools.product(ops, [True, False]):

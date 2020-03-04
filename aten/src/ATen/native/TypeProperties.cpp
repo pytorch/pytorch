@@ -60,7 +60,7 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   if(isComplexType(higher)) {
     return higher;
   }
-  if(!isComplexType(lower) && isFloatingType(higher)) {
+  else if(!isComplexType(lower) && isFloatingType(higher)) {
     return higher;
   }
   if (higher == ScalarType::Bool || isFloatingType(lower) || isComplexType(lower)) {
@@ -81,7 +81,7 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     auto current_default = typeMetaToScalarType(at::get_default_dtype());
     if(isComplexType(current)) {
-      current = (current_default == at::kFloat) ? at::kComplexFloat : at::kComplexDouble;
+      current = typeMetaToScalarType(at::get_default_complex_dtype());
     }
     if(isFloatingType(current)) {
       current = current_default;
