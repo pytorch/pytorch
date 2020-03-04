@@ -47,6 +47,15 @@ IValue expect_field(IValue tup, const std::string& expected_name, size_t entry){
   return row->elements().at(1);
 }
 
+void print_unsupported_ops_and_throw(const std::unordered_set<std::string>& unsupported_ops) {
+  std::string error_message("{");
+  for (const auto& op_name : unsupported_ops) {
+    error_message += op_name + ", ";
+  }
+  error_message += "}";
+  TORCH_CHECK(false, "Following ops cannot be found:", error_message);
+}
+
 void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu) {
   for (const auto& element : vals) {
     const auto& m_tuple = element.toTuple()->elements();
@@ -72,13 +81,21 @@ void parseMethods(const std::vector<IValue>& vals, mobile::CompilationUnit& mcu)
       function->append_instruction(op_code, X, N);
     }
 
+    std::unordered_set<std::string> unsupported_op_names;
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(op_item.size() == 2,
                   "There should be two parts in an operator name.");
-      function->append_operator(op_item[0].toString()->string(),
+      auto op_found = function->append_operator(op_item[0].toString()->string(),
                            op_item[1].toString()->string());
+      if (not op_found) {
+        unsupported_op_names.emplace(op_item[0].toString()->string() + "." + op_item[1].toString()->string());
+      }
     }
+
+    if (not unsupported_op_names.empty()) {
+      print_unsupported_ops_and_throw(unsupported_op_names);
+    };
 
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
