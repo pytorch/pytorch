@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
+#include <Python.h>
 #include <pybind11/pybind11.h>
 
 namespace torch { namespace autograd {

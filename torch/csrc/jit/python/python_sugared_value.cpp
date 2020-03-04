@@ -10,7 +10,7 @@
 #include <tuple>
 #include <vector>
 
-#include <torch/csrc/python_headers.h>
+#include <Python.h>
 
 namespace torch {
 namespace jit {
