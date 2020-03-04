@@ -2512,6 +2512,9 @@ class _TestTorchMixin(object):
         self.assertEqual(b.nelement(), 3 * 100 * 100)
         self.assertEqual(b.numel(), 3 * 100 * 100)
 
+    # Note: the warning this tests for only appears once per program, so
+    # other instances of this warning should be addressed to avoid
+    # the tests depending on the order in which they're run.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_non_writeable(self):
         arr = np.zeros(5)
