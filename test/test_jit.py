@@ -1065,54 +1065,83 @@ graph(%x : Tensor,
         # weight of linear
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
 
-    @unittest.skip("we are changing this test in next PR")
     def test_insert_observers_skip_values(self):
-        class M(torch.nn.Module):
+        class ConvFunctionalReLU(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super(ConvFunctionalReLU, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
 
             def forward(self, x):
                 return F.relu(self.conv(x))
 
-        class M2(torch.nn.Module):
+        class ConvReLUModule(torch.nn.Module):
             def __init__(self):
-                super(M2, self).__init__()
+                super(ConvReLUModule, self).__init__()
                 self.conv = torch.nn.Conv2d(3, 5, 3)
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        def test_module(module, relu_call, num_observers):
-            m = torch.jit.script(module())
-            # TODO: this is because right-now the InsertObservers is in-place.
-            # When we change the implementation to clone the module before
-            # inserting observers, we can remove this copy
-            m = m.copy()
-            observer = torch.jit.script(default_observer())
-            qconfig_dict = {
-                '':
-                QConfig(
-                    activation=observer._c,
-                    weight=observer._c)
-            }
-            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-            assert len([x for x, _ in m._modules._c.items()
-                        if x.startswith('_observer_')]) == num_observers, \
-                'Expected to have ' + str(num_observers) + ' observer submodules'
-            c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
-                           .check_next('prim::CallMethod[name="forward"]') \
-                           .check_not('Observer = prim::GetAttr[name="_observer_') \
-                           .check(relu_call)
-            if num_observers == 1:
-                c = c.check('Observer = prim::GetAttr[name="_observer_') \
-                     .check_next('prim::CallMethod[name="forward"](%_observer_')
-            c.run(str(get_forward_graph(m._c)))
-            # TODO: add checks for conv and relu later, graph looks correct but this pr
-            # has too many changes already
-        test_module(M, 'prim::CallFunction(', 1)
-        test_module(M2, 'prim::CallMethod[name="forward"]', 0)
+        class AddReLUModule(torch.nn.Module):
+            def __init__(self):
+                super(AddReLUModule, self).__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                out = x
+                out += x
+                return self.relu(out)
+
+        class AddFunctionalReLU(torch.nn.Module):
+            def __init__(self):
+                super(AddFunctionalReLU, self).__init__()
+
+            def forward(self, x):
+                out = x
+                out += x
+                return F.relu(out)
+
+        def attrs_with_prefix(module, prefix):
+            return [x for x, _ in module._modules._c.items()
+                    if x.startswith(prefix)]
+
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(ConvFunctionalReLU())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # observer for weight of conv
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
+
+        m = torch.jit.script(ConvReLUModule())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2
+        # observer for weight of conv
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1
+        # observer for output of relu
+        assert len(attrs_with_prefix(m.relu, '_observer_')) == 0
+
+        m = torch.jit.script(AddReLUModule())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        assert len(attrs_with_prefix(m, '_observer')) == 2
+        assert len(attrs_with_prefix(m.relu, '_observer')) == 0
+        FileCheck().check('aten::add_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('ReLU = prim::GetAttr') \
+                   .run(str(get_forward_graph(m._c)))
+
+        m = torch.jit.script(AddFunctionalReLU())
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        assert len(attrs_with_prefix(m, '_observer')) == 2
+        FileCheck().check('aten::add_') \
+                   .check_not('Observer = prim::GetAttr[name="_observer_') \
+                   .check('CallFunction') \
+                   .check('Observer = prim::GetAttr[name="_observer_') \
+                   .run(str(get_forward_graph(m._c)))
 
     def test_insert_observers_weight_dtype(self):
         class M(torch.nn.Module):
@@ -10351,9 +10380,54 @@ a")
             for sub in m.mods:
                 v = sub(v)
             self.assertEqual(o, v)
-
             with self.assertRaisesRegex(Exception, "object is not iterable"):
                 print(list(m))
+
+    def test_script_modulelist_index(self):
+        class Sub(torch.nn.Module):
+            def __init__(self, i):
+                super(Sub, self).__init__()
+                self.i = i
+
+            def forward(self, thing):
+                return thing - self.i
+
+        class M(torch.nn.Module):
+            __constants__ = ['mods']
+
+            def __init__(self):
+                super(M, self).__init__()
+                self.mods = nn.ModuleList([Sub(i) for i in range(10)])
+
+            def forward(self, v):
+                v = self.mods[4].forward(v)
+                v = self.mods[-1].forward(v)
+                v = self.mods[-9].forward(v)
+                return v
+
+        x = torch.tensor(1)
+        self.checkModule(M(), (x,))
+
+        class M2(M):
+            def __init__(self):
+                super(M2, self).__init__()
+
+            def forward(self, v):
+                return self.mods[-11].forward(v)
+
+        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+            torch.jit.script(M2())
+
+
+        class M2(M):
+            def __init__(self):
+                super(M2, self).__init__()
+
+            def forward(self, v):
+                return self.mods[-11].forward(v)
+
+        with self.assertRaisesRegex(Exception, "Index -11 out of range"):
+            torch.jit.script(M2())
 
     def test_attr_qscheme_script(self):
         class Foo(torch.nn.Module):
