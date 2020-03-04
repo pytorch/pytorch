@@ -1,4 +1,5 @@
 set DEBUG=1
+set USE_CUDA=0
 
 if "%DEBUG%" == "1" (
   set BUILD_TYPE=debug
