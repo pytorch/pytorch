@@ -73,8 +73,7 @@ class Rprop(Optimizer):
                 grad[sign.eq(etaminus)] = 0
 
                 # update parameters
-                # Need to avoid version tracking for parameter.
-                p.data.addcmul_(grad.sign(), step_size, value=-1)
+                p.addcmul_(grad.sign(), step_size, value=-1)
 
                 state['prev'].copy_(grad)
 

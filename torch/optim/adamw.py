@@ -70,8 +70,7 @@ class AdamW(Optimizer):
                     continue
 
                 # Perform stepweight decay
-                # Need to avoid version tracking for parameter.
-                p.data.mul_(1 - group['lr'] * group['weight_decay'])
+                p.mul_(1 - group['lr'] * group['weight_decay'])
 
                 # Perform optimization step
                 grad = p.grad
@@ -114,7 +113,6 @@ class AdamW(Optimizer):
 
                 step_size = group['lr'] / bias_correction1
 
-                # Need to avoid version tracking for parameter.
-                p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                p.addcdiv_(exp_avg, denom, value=-step_size)
 
         return loss

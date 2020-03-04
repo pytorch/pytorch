@@ -101,7 +101,6 @@ class SparseAdam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                # Need to avoid version tracking for parameter.
-                p.data.add_(make_sparse(-step_size * numer.div_(denom)))
+                p.add_(make_sparse(-step_size * numer.div_(denom)))
 
         return loss

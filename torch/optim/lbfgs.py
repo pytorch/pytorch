@@ -261,8 +261,7 @@ class LBFGS(Optimizer):
         for p in self._params:
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
-            # Need to avoid version tracking for parameter.
-            p.data.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
+            p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
             offset += numel
         assert offset == self._numel()
 
@@ -271,8 +270,7 @@ class LBFGS(Optimizer):
 
     def _set_param(self, params_data):
         for p, pdata in zip(self._params, params_data):
-            # Need to avoid version tracking for parameter.
-            p.data.copy_(pdata)
+            p.copy_(pdata)
 
     @torch.enable_grad()
     def _directional_evaluate(self, closure, x, t, d):

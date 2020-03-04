@@ -113,6 +113,9 @@ class TestDataParallel(JitTestCase):
         optimizer.step()
         second_forward = module.forward(first_forward)
 
+        # The replica must be re-created after the weights are changed
+        replica = dp.replicate(module, {0, 1})
+
         # replica which is on the same GPU has a shallow copy of the original
         # params and buffers
         r0_forward = replica[0].forward(x)
