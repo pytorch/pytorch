@@ -47,9 +47,9 @@ public:
   //These functions will start at outputs and propagate op through the DAG
   //in depth first traversal. Next could be called on nodes multiple times,
   //however, once handle is called on a node next will not be called.
-  std::vector<Statement*> next(Statement* stmt);
-  std::vector<Statement*> next(Expr* expr);
-  std::vector<Statement*> next(Val* v);
+  std::vector<Statement*> next(const Fusion* fusion, Statement* stmt);
+  std::vector<Statement*> next(const Fusion* fusion, Expr* expr);
+  std::vector<Statement*> next(const Fusion* fusion, Val* v);
 
 
   //Hierarchal dispatch functions for handle
