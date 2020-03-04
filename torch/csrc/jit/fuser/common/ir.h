@@ -447,4 +447,39 @@ private:
   Val* const rhs_;
 };
 
+// TODO: Not sure if array of expressions is appropriate composition
+// TODO: I named it ForLoop instead of For because it is easer to search for.
+struct TORCH_API ForLoop : public Expr {
+  ~ForLoop() = default;
+  ForLoop(
+    Val* _index
+  , Val* _begin
+  , Val* _end);
+
+  ForLoop(const ForLoop& other) = delete;
+  ForLoop& operator=(const ForLoop& other) = delete;
+
+  ForLoop(ForLoop&& other) = delete;
+  ForLoop& operator=(ForLoop&& other) = delete;
+
+  Val* index() const noexcept { return index_; }
+  Val* begin() const noexcept { return begin_; }
+  Val* end()   const noexcept { return end_; }
+  const std::vector<const Expr*>& body() const noexcept { return body_; }
+
+  void add_expr(const Expr* e) { body_.push_back(e); }
+
+  // TODO: This should probably be more sophisiticated. 
+  bool same_as(const ForLoop* other) const {
+    return static_cast<const Expr*>(this)->same_as(other);
+  }
+
+private:
+  // TODO: Why is the pointer const and not what's in the object?
+  Val* const index_;
+  Val* const begin_;
+  Val* const end_;
+  std::vector<const Expr*> body_;
+};
+
 }}} //torch::jit::fuser

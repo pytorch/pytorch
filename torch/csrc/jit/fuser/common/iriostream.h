@@ -57,6 +57,8 @@ void print(const Int* const);
 void print(const UnaryOp* const);
 void print(const BinaryOp* const);
 
+void print(const ForLoop* const);
+
 void print(const Split* const);
 void print(const Merge* const);
 void print(const Reorder* const);
