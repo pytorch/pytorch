@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/fuser/cuda/parser.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
+#include <torch/csrc/jit/fuser/common/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <ATen/cuda/CUDAContext.h>
@@ -23,10 +24,6 @@ struct CudaKernelEntry {
   // TODO: we don't need to keep the whole Fusion around after compilation.
   Fusion fusion_;
 
-  void debugPrint() {
-    FusionGuard fg(&fusion_);
-    std::cout << "fusion group: \n"  << &fusion_ << std::endl;
-  }
 };
 
 // The reason for two unordered_map here is to cache `torch::jit::Graph` lowering
@@ -72,44 +69,19 @@ public:
   // TODO: IO construction should go outside;
   void runFusionNode(
       int32_t kernel_id,
-      Stack& stack) {
+      const at::ArrayRef<IValue> inputs,
+      std::vector<at::Tensor> outputs) {
+    assert(kernel_cache_.count(kernel_id) != 0);
+
     CudaKernelEntry& cuda_kernel_entry = kernel_cache_[kernel_id];
     const Fusion& fusion = cuda_kernel_entry.fusion_;
-    at::ArrayRef<IValue> inputs = last(stack, fusion.inputs().size());
-    std::vector<at::Tensor> outputs;
+    std::cout << "executing cached kernel: " << kernel_id << std::endl <<
+        &fusion << std::endl;
 
-    cuda_kernel_entry.debugPrint();
-
-    for (const auto* const output : fusion.outputs()) {
-      assert(output->getValType() == ValType::Tensor);
-      /*
-      auto type = output->type()->expect<TensorType>();
-
-      auto options = at::TensorOptions()
-          .dtype(*(type->scalar_type()))
-          .layout(at::kStrided)
-          .device(*(type->device()))
-          .requires_grad(type->requires_grad());
-      // TODO: shape inference needed, we should generate output shape based on
-      //       input shape.
-      auto sizes = extractSizes(type);
-      auto strides = extractStrides(type);
-      auto tensor = at::empty_strided(sizes, strides, options);
-       */
-      auto tensor = at::empty({5});
-
-      outputs.push_back(tensor);
-      printf("push one tensor back\n");
+    for (auto& output : outputs) {
+      output.fill_(kernel_id+0.1234);
     }
 
-    // TODO: execute kernel with inputs/outputs;
-    //cuda_kernel_entry.launch(launch_config, inputs, outputs);
-
-    // Modify stack AFTER execution.
-    drop(stack, inputs.size());
-    stack.insert(stack.end(),
-        std::make_move_iterator(outputs.begin()),
-        std::make_move_iterator(outputs.end()));
   }
 
 protected:
@@ -150,20 +122,45 @@ void compileCudaFusionGroup(Node* fusion_node) {
 
 void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   assert(fusion_node->kind() == prim::FusionGroup);
-  /*
-  if (!fusion_node->hasAttribute(attr::cache_id)) {
-    AT_WARN("runCudaFusionGroup called before registration/compilation");
-    int32_t fusion_cache_id = 
-        CudaFusionManager::getManager().registerOrGetCacheId(fusion_node->g(attr::Subgraph));
-    fusion_node->i_(attr::cache_id, fusion_cache_id);
-  }
-  */
+  // TODO: should we support runtime compilation with updated dynamic shape;
+  //       shape inference would be needed so we can allocate output;
   assert(fusion_node->hasAttribute(attr::cache_id));
   int32_t kernel_id = fusion_node->i(attr::cache_id);
 
-  printf("run it through fusion manager: %d\n", kernel_id);
-  // TODO: we need to construct outputs;
-  CudaFusionManager::getManager().runFusionNode(kernel_id, stack);
+  // Currently we just construct I/O tensors for static graph;
+  const std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph);
+  const auto nInputs = graph->inputs().size();
+  at::ArrayRef<IValue> inputs = last(stack, nInputs);
+
+  // we need to construct outputs;
+  std::vector<at::Tensor> outputs;
+  for (const auto* const output : graph->outputs()) {
+    auto type = output->type()->expect<TensorType>();
+    // Expect output to be tensor;
+    assert(type && type->isComplete());
+
+    const auto device = *(type->device());
+    const auto scalar_type = *(type->scalarType());
+
+    auto options = at::TensorOptions()
+      .dtype(scalar_type)
+      .layout(at::kStrided)
+      .device(device)
+      .requires_grad(type->requires_grad());
+
+    const auto sizes = extractSizes(type);
+    const auto strides= extractStrides(type);
+
+    auto tensor = at::empty_strided(sizes, strides, options);
+    outputs.push_back(tensor);
+  }
+
+  CudaFusionManager::getManager().runFusionNode(kernel_id, inputs, outputs);
+
+  drop(stack, inputs.size());
+  stack.insert(stack.end(),
+      std::make_move_iterator(outputs.begin()),
+      std::make_move_iterator(outputs.end()));
 }
 
 }}}} // namespace torch::jit::fuser::cuda
