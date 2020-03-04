@@ -17,6 +17,7 @@ namespace impl {
 class OperatorEntry final {
 public:
   explicit OperatorEntry(FunctionSchema&& schema);
+  explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
   OperatorEntry(OperatorEntry&&) noexcept = delete;
@@ -24,7 +25,8 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    return schema_;
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    return *schema_;
   }
 
   const DispatchTable& dispatch_table() const {
@@ -36,13 +38,15 @@ public:
   RegistrationHandleRAII registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
-    schema_.setAliasAnalysis(a);
+    TORCH_INTERNAL_ASSERT(schema_.has_value());
+    schema_->setAliasAnalysis(a);
   }
 
 private:
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
 
-  FunctionSchema schema_;
+  OperatorName name_;
+  c10::optional<FunctionSchema> schema_;
 
   // The dispatchTable stores the current kernel for each dispatch key
   DispatchTable dispatchTable_;

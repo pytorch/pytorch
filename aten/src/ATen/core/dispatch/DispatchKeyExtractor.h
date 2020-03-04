@@ -101,6 +101,10 @@ public:
     return DispatchKeyExtractor(schema.arguments().size());
   }
 
+  static DispatchKeyExtractor makeUninitialized() {
+    return DispatchKeyExtractor(0);
+  }
+
   DispatchKey getDispatchKeyBoxed(DispatchKeySet backendsWithoutFallthrough, const torch::jit::Stack* stack) const {
     // TODO Unboxed dispatch supports TensorOptions (i.e. ScalarType/Device/Layout) arguments
     //      but boxed doesn't yet. See https://github.com/pytorch/pytorch/issues/26428

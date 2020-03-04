@@ -89,6 +89,16 @@ class DispatchTable final {
   , dispatchKeyExtractor_(DispatchKeyExtractor::make(schema))
   , operatorName_(toString(schema.operator_name())) {}
 
+  // a dispatch table may be default constructed with only an
+  // operator name.  Such a dispatch table is not callable until
+  // the schema is provided
+  DispatchTable(const OperatorName& op_name)
+  : kernels_()
+  , catchallKernel_()
+  , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
+  // TODO: this toString call is a travesty
+  , operatorName_(toString(op_name)) {}
+
   /**
    * Register a kernel in the table at some dispatch key.
    * @param dispatch_key Dispatch key to define when this kernel is selected.
@@ -165,6 +175,7 @@ class DispatchTable final {
 
   const KernelFunction* lookup(DispatchKey dispatchKey) const {
     auto& slot = kernels_[dispatchKey];
+    // TODO: this condition shouldn't be necessary
     if (slot.isValid()) {
       return &slot;
     } else {
@@ -173,6 +184,7 @@ class DispatchTable final {
   }
 
   const KernelFunction* lookupCatchallKernel() const {
+    // TODO: this condition shouldn't be necessary
     if (!catchallKernel_.isValid()) {
       return nullptr;
     }
