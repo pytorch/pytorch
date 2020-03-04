@@ -112,13 +112,14 @@ def check_process_group_type(
 
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
-        gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
+        gLogger.info(
+            f"Initializing RemoteEM with {num_embeddings} {embedding_dim}"
+        )
         super(RemoteEM, self).__init__()
-        init_em = [1] * embedding_dim
         self.em = nn.EmbeddingBag(
             num_embeddings,
             embedding_dim,
-            _weight=torch.Tensor([init_em] * num_embeddings),
+            _weight=torch.ones(num_embeddings, embedding_dim),
         )
 
     def forward(self, input: torch.Tensor):
@@ -132,7 +133,7 @@ class RemoteEM(nn.Module):
 
 class RemoteNet(nn.Module):
     def __init__(self, d_in: int, d_out: int):
-        gLogger.info(f"Initing RemoteNet with {d_in} {d_out}")
+        gLogger.info(f"Initializing RemoteNet with {d_in} {d_out}")
         super(RemoteNet, self).__init__()
         self.fc = nn.Linear(d_in, d_out)
         self.relu = nn.ReLU()
@@ -181,13 +182,13 @@ class HybridModel(nn.Module):
 
     def forward(self, input: FeatureSet):
         gLogger.debug(f"Running HybridModel.forward on {input}")
-        sparse = _remote_method(
+        em_features = _remote_method(
             RemoteEM.forward, self.remote_em_rref, input.sparse_features
         )
         # The same size of mini batch.
-        assert sparse.shape[0] == input.dense_features.shape[0]
+        assert em_features.shape[0] == input.dense_features.shape[0]
         dense = self.fc1(input.dense_features)
-        x = torch.cat((dense, sparse), 1)
+        x = torch.cat((dense, em_features), 1)
         gLogger.debug(f"Concatenated feature: {x}")
         x = _remote_method(RemoteNet.forward, self.remote_net_rref, x)
         return self.fc2(x)
@@ -208,7 +209,7 @@ class Trainer:
         rank: int,
     ):
         gLogger.info(
-            f"Initing trainer process group by traner #{rank} with ranks {TRAINER_RANKS}"
+            f"Initializing trainer process group by traner #{rank} with ranks {TRAINER_RANKS}"
         )
         self.process_group_for_ddp = dist_c10d.new_group(ranks=TRAINER_RANKS)
         check_process_group_type(f"trainer #{rank}", self.process_group_for_ddp)
@@ -255,7 +256,7 @@ class Trainer:
         loss = 0
 
         with dist_autograd.context() as context_id:
-            output = self.hybrid_module.forward(mini_batch)
+            output = self.hybrid_module(mini_batch)
             with torch.no_grad():
                 gLogger.debug(
                     f"Output: {output} softmax: {torch.softmax(output, 1)} labels: {mini_batch.labels}"
