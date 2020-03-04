@@ -29,8 +29,9 @@ if [ -n "${IN_CIRCLECI}" ]; then
   fi
 fi
 
-python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+# Temporarily disable MNIST tests
+# python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_filter='-*MNIST*'
 time python test/run_test.py --verbose -i distributed/test_distributed
 time python test/run_test.py --verbose -i distributed/test_c10d
 time python test/run_test.py --verbose -i distributed/test_c10d_spawn

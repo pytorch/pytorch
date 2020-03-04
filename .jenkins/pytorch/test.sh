@@ -194,8 +194,9 @@ test_libtorch() {
       build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    # Temporarily disable MNIST tests
+    # python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_filter='-*MNIST*'
     assert_git_not_dirty
   fi
 }
@@ -225,8 +226,9 @@ test_xla() {
   echo "Running Python Tests"
   ./test/run_tests.sh
 
-  echo "Running MNIST Test"
-  python test/test_train_mnist.py --tidy
+  # Temporarily disable MNIST tests
+  # echo "Running MNIST Test"
+  # python test/test_train_mnist.py --tidy
 
   echo "Running C++ Tests"
   pushd test/cpp
