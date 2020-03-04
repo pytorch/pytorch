@@ -2684,6 +2684,8 @@ t2.start()
             @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
             def forward(ctx, a, container):
                 b = container[1][0]
+                self.assertTrue(a.dtype is torch.float32)
+                self.assertTrue(b.dtype is torch.float32)
                 self.assertFalse(torch.is_autocast_enabled())
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
