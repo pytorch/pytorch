@@ -44,7 +44,12 @@ class ContinuousBernoulli(ExponentialFamily):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             is_scalar = isinstance(probs, Number)
-            self.probs, = broadcast_all(clamp_probs(probs))
+            self.probs, = broadcast_all(probs)
+            # validate 'probs' here if necessary as it is clamped later
+            if validate_args is not None:
+                if not self.arg_constraints['probs'].check(getattr(self, 'probs')).all():
+                    raise ValueError("The parameter {} has invalid values".format('probs'))
+            self.probs = clamp_probs(self.probs)
         else:
             is_scalar = isinstance(logits, Number)
             self.logits, = broadcast_all(logits)
@@ -58,6 +63,7 @@ class ContinuousBernoulli(ExponentialFamily):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ContinuousBernoulli, _instance)
+        new._lims = self._lims
         batch_shape = torch.Size(batch_shape)
         if 'probs' in self.__dict__:
             new.probs = self.probs.expand(batch_shape)
@@ -171,6 +177,12 @@ class ContinuousBernoulli(ExponentialFamily):
             (torch.log1p(-cut_probs + value * (2.0 * cut_probs - 1.0))
              - torch.log1p(-cut_probs)) / (torch.log(cut_probs) - torch.log1p(-cut_probs)),
             value)
+
+    def entropy(self):
+        log_probs0 = torch.log1p(-self.probs)
+        log_probs1 = torch.log(self.probs)
+        return self.mean * (log_probs0 - log_probs1) \
+               - self._cont_bern_log_norm() - log_probs0
 
     @property
     def _natural_params(self):
