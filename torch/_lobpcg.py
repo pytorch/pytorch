@@ -439,7 +439,7 @@ class LOBPCG(object):
             Ri = self._get_rayleigh_ritz_transform(S_)
             M = _utils.qform(_utils.qform(self.A, S_), Ri)
             E_, Z = _utils.symeig(M, largest)
-            self.X[:, nc:] = mm(S_, mm(Ri, Z[:, nc:n]))
+            self.X[:, nc:] = mm(S_, mm(Ri, Z[:, :n - nc]))
             self.E[nc:] = E_[:n - nc]
             P = mm(S_, mm(Ri, Z[:, n:2 * n - nc]))
             np = P.shape[-1]
