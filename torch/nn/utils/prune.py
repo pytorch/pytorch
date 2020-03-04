@@ -766,16 +766,26 @@ class CustomFromMask(BasePruningMethod):
 
     PRUNING_TYPE = "global"
 
-    def __init__(self, mask):
+    def __init__(self, mask, store_mask=False):
         self.mask = mask
+        self.store_mask = store_mask
 
     def compute_mask(self, t, default_mask):
+        if self.mask is None:
+            raise RuntimeError(
+                "Cannot recompute mask when store_mask is False, and "
+                "custom mask has been deleted."
+            )
+
         assert default_mask.shape == self.mask.shape
         mask = default_mask * self.mask.to(dtype=default_mask.dtype)
+
+        if not self.store_mask:
+            self.mask = None
         return mask
 
     @classmethod
-    def apply(cls, module, name, mask):
+    def apply(cls, module, name, mask, store_mask=False):
         r"""Adds the forward pre-hook that enables pruning on the fly and
         the reparametrization of a tensor in terms of the original tensor
         and the pruning mask.
@@ -784,9 +794,12 @@ class CustomFromMask(BasePruningMethod):
             module (nn.Module): module containing the tensor to prune
             name (str): parameter name within ``module`` on which pruning
                 will act.
+            store_mask (bool, optional): whether to store a copy of the
+                user-provided mask after it has been used to `compute_mask`.
+                Dafault: False.
         """
         return super(CustomFromMask, cls).apply(
-            module, name, mask
+            module, name, mask, store_mask
         )
 
 
@@ -1065,7 +1078,7 @@ def global_unstructured(parameters, pruning_method, **kwargs):
         pointer += num_param
 
 
-def custom_from_mask(module, name, mask):
+def custom_from_mask(module, name, mask, store_mask=False):
     r"""Prunes tensor corresponding to parameter called ``name`` in ``module``
     by applying the pre-computed mask in ``mask``.
     Modifies module in place (and also return the modified module) 
@@ -1081,6 +1094,9 @@ def custom_from_mask(module, name, mask):
         name (str): parameter name within ``module`` on which pruning
             will act.
         mask (Tensor): binary mask to be applied to the parameter.
+        store_mask (bool, optional): whether to store a copy of the
+            user-provided mask after it has been used to `compute_mask`.
+            Dafault: False.
 
     Returns:
         module (nn.Module): modified (i.e. pruned) version of the input module 
@@ -1093,7 +1109,7 @@ def custom_from_mask(module, name, mask):
         tensor([0., 1., 0.])
 
     """
-    CustomFromMask.apply(module, name, mask)
+    CustomFromMask.apply(module, name, mask, store_mask)
     return module
 
 

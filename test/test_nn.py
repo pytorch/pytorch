@@ -2560,6 +2560,29 @@ class TestNN(NNTestCase):
 
         self.assertEqual(computed_mask, expected_mask)
 
+    def test_custom_pruning_mask_storage(self):
+        r"""By default, custom pruning should not store a copy of the
+        user-provided custom mask after it has been used to compute the final
+        mask for a tensor. If the `store_mask` flag is set to True, then the
+        mask will remain attached to the pruning object (and therefore to the
+        module the pruning object is acting on).
+        """
+        # Case 1: by default, `store_mask` is False
+        m = nn.Conv2d(3, 5, 3)
+        custom_mask = torch.randint(0, 2, size=m.weight.shape)
+        prune.custom_from_mask(m, 'weight', mask=custom_mask)
+        # Extract the pruning object from the hooks
+        hook = list(m._forward_pre_hooks.values())[-1]
+        self.assertIsNone(hook.mask)
+
+        # Case 2: manually set `store_mask` to True
+        m = nn.Conv2d(3, 5, 3)
+        prune.custom_from_mask(m, 'weight', mask=custom_mask, store_mask=True)
+        # Extract the pruning object from the hooks
+        hook = list(m._forward_pre_hooks.values())[-1]
+        self.assertIsNotNone(hook.mask)
+        self.assertEqual(hook.mask, custom_mask)
+
     @unittest.skipIf(not PY3, "mock is not available in Python 2")
     def test_pruning_rollback(self):
         r"""Test that if something fails when the we try to compute the mask,
