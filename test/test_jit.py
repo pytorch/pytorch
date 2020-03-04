@@ -1023,7 +1023,7 @@ graph(%x : Tensor,
         m = torch.jit.script(M())
         observer = torch.jit.script(default_observer())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
         # for input and output of conv
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # for weight
@@ -1055,7 +1055,7 @@ graph(%x : Tensor,
         }
         torch._C._jit_pass_insert_observers(m._c, "forward",
                                             qconfig_dict,
-                                            True)
+                                            False)
         # input and output of sub
         assert len(attrs_with_prefix(m, '_observer_')) == 2
         # not quantized
@@ -1085,7 +1085,7 @@ graph(%x : Tensor,
 
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True))
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
             'Expected to have 1 observer submodule'
@@ -1094,7 +1094,7 @@ graph(%x : Tensor,
             'Expected to have 2 observer submodule'
 
         m = torch.jit.script(M2())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True))
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2, \
             'Expected to have 2 observer submodule'
@@ -1119,7 +1119,7 @@ graph(%x : Tensor,
         qconfig_dict = {
             '': script_qconfig(default_qconfig)
         }
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
         activation_dtypes = set([obs.getattr('dtype') for x, obs in m._modules._c.items()
                                  if x.startswith('_observer_')])
         weight_dtypes = set([obs.getattr('dtype') for x, obs in m.conv._modules._c.items()
@@ -1214,7 +1214,7 @@ graph(%x : Tensor,
 
         m = torch.jit.script(M())
         qconfig_dict = {'': script_qconfig(default_qconfig)}
-        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
+        torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False)
         m(torch.rand(1, 3, 10, 10), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3), torch.rand(3, 3, 3, 3))
         torch._C._jit_pass_insert_quant_dequant(m._c, "forward", True)
 
