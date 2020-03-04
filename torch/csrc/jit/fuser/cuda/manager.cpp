@@ -22,6 +22,11 @@ struct CudaKernelEntry {
 
   // TODO: we don't need to keep the whole Fusion around after compilation.
   Fusion fusion_;
+
+  void debugPrint() const {
+    FusionGuard fg(const_cast<Fusion*>(&fusion_));
+    std::cout << "fusion group: " << std::endl << fusion_ << std::endl;
+  }
 };
 
 // The reason for two unordered_map here is to cache `torch::jit::Graph` lowering
@@ -46,7 +51,7 @@ public:
     auto repr = graph->toString(false);
 
     // create new graph_cache_ entry;
-    if (!graph_cache_.count(repr) == 0) {
+    if (graph_cache_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
 
       graph_cache_[repr] = kernel_id;
@@ -73,6 +78,8 @@ public:
     at::ArrayRef<IValue> inputs = last(stack, fusion.inputs().size());
     std::vector<at::Tensor> outputs;
 
+    cuda_kernel_entry.debugPrint();
+
     for (const auto* const output : fusion.outputs()) {
       assert(output->getValType() == ValType::Tensor);
       /*
@@ -89,9 +96,10 @@ public:
       auto strides = extractStrides(type);
       auto tensor = at::empty_strided(sizes, strides, options);
        */
-      auto tensor = at::empty({1});
+      auto tensor = at::empty({5});
 
       outputs.push_back(tensor);
+      printf("push one tensor back\n");
     }
 
     // TODO: execute kernel with inputs/outputs;
@@ -153,6 +161,7 @@ void runCudaFusionGroup(const Node* const fusion_node, Stack& stack) {
   assert(fusion_node->hasAttribute(attr::cache_id));
   int32_t kernel_id = fusion_node->i(attr::cache_id);
 
+  printf("run it through fusion manager: %d\n", kernel_id);
   // TODO: we need to construct outputs;
   CudaFusionManager::getManager().runFusionNode(kernel_id, stack);
 }
