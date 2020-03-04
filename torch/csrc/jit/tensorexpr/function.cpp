@@ -26,7 +26,7 @@ static void unpack_dim_args(
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const std::vector<VarHandle>&)> body_func) {
+    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func) {
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
   unpack_dim_args(dim_args, &dims, &args);
@@ -38,7 +38,7 @@ Tensor* Compute(
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&)> body_func) {
+    const std::function<ExprHandle(const VarHandle&)>& body_func) {
   CHECK_EQ(dim_args.size(), 1ULL);
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -51,7 +51,8 @@ Tensor* Compute(
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&, const VarHandle&)> body_func) {
+    const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
+        body_func) {
   CHECK_EQ(dim_args.size(), 2ULL);
   std::vector<const Expr*> dims;
   std::vector<const Var*> args;
@@ -64,8 +65,8 @@ Tensor* Compute(
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<
-        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>
+    const std::function<
+        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
         body_func) {
   CHECK_EQ(dim_args.size(), 3ULL);
   std::vector<const Expr*> dims;
@@ -81,19 +82,18 @@ Tensor* Compute(
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(
+    const std::function<ExprHandle(
         const VarHandle&,
         const VarHandle&,
         const VarHandle&,
-        const VarHandle&)> body_func) {
+        const VarHandle&)>& body_func) {
   CHECK_EQ(dim_args.size(), 4ULL);
   std::vector<const Expr*> dims;
   std::vector<const Var*> args_nodes;
   unpack_dim_args(dim_args, &dims, &args_nodes);
   auto args = VarVectorToVarHandleVector(args_nodes);
   const Expr* body = body_func(args[0], args[1], args[2], args[3]).node();
-  Function* func = new Function(
-      func_name, std::move(dims), std::move(args_nodes), std::move(body));
+  Function* func = new Function(func_name, dims, args_nodes, body);
   return new Tensor(func, 0);
 }
 
