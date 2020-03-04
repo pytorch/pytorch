@@ -340,7 +340,7 @@ def elu(input, alpha=1., inplace=False, out=None):
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
-    if out != None:
+    if out is not None:
         return torch._C._nn.elu(input, alpha, out=out)
     if inplace:
         return torch._C._nn.elu_(input, alpha)

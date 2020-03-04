@@ -193,20 +193,20 @@ class TestQuantizedOps(TestCase):
         # test regular
         qY = op(qX, alpha=alpha)
         self.assertEqual(qY, qY_hat,
-            message="F.elu failed ({} vs {})".format(qY, qY_hat))
+                         message="F.elu failed ({} vs {})".format(qY, qY_hat))
 
         # test inplace
         qXcopy = qX.clone()
         op(qXcopy, alpha=alpha, inplace=True)
         self.assertEqual(qXcopy, qY_hat,
-            message="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
+                         message="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
 
         # test .out
         qY = torch.quantize_per_tensor(torch.zeros(X.shape), scale=scale,
                                        zero_point=zero_point, dtype=torch_type)
         op(qX, alpha=alpha, out=qY)
         self.assertEqual(qY, qY_hat,
-            message="F.elu.out failed ({} vs {})".format(qY, qY_hat))
+                         message="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
