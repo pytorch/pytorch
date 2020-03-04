@@ -621,7 +621,6 @@ def configure_extension_build():
 
     if build_type.is_debug():
         if IS_WINDOWS:
-            extra_compile_args.append('/MDd')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
