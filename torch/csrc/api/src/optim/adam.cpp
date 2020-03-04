@@ -40,10 +40,14 @@ void AdamOptions::serialize(torch::serialize::InputArchive& archive) {
 }
 
 bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
+  bool is_max_exp_avg_sq_defined_and_equal = !(lhs.max_exp_avg_sq().defined() ^ rhs.max_exp_avg_sq().defined());
+  if(!is_max_exp_avg_sq_defined_and_equal) {
+    is_max_exp_avg_sq_defined_and_equal = torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
+  }
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          !(lhs.max_exp_avg_sq().defined() ^ rhs.max_exp_avg_sq().defined());
+          is_max_exp_avg_sq_defined_and_equal;
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
@@ -70,6 +74,7 @@ void Adam::step() {
       TORCH_CHECK(!grad.is_sparse(), "Adam does not support sparse gradients"/*, please consider SparseAdam instead*/);
       auto param_state = state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
       auto& options = static_cast<AdamOptions&>(group.options());
+
       // State initialization
       if(param_state == state_.end()) {
         auto state = std::make_unique<AdamParamState>();
@@ -91,7 +96,6 @@ void Adam::step() {
       auto& max_exp_avg_sq = state.max_exp_avg_sq();
 
       state.step(state.step()+1);
-      std::cout<<"step_val: "<<state.step();
       auto beta1 = std::get<0>(options.betas());
       auto beta2 = std::get<1>(options.betas());
 
@@ -99,9 +103,10 @@ void Adam::step() {
       auto bias_correction2 = 1 - std::pow(beta2, state.step());
 
       if(options.weight_decay() != 0) {
-        grad = grad.add(p.data(), options.weight_decay());
+        grad = grad.add(p, options.weight_decay());
       }
 
+      NoGradGuard no_grad;
       // Decay the first and second moment running average coefficient
       exp_avg.mul_(beta1).add_(grad, 1 - beta1);
       exp_avg_sq.mul_(beta2).addcmul_(grad, grad, 1 - beta2);
@@ -117,11 +122,7 @@ void Adam::step() {
       }
 
       auto step_size = options.lr() / bias_correction1;
-      std::cout<<"before --- p.data(): "<<p.data();
-      std::cout<<"\nexp_avg: "<<exp_avg<<"\ndenom: "<<denom<<"\n-step_size: "<<step_size;
       p.data().addcdiv_(exp_avg, denom, -step_size);
-      std::cout<<"\nafter ---- p.data(): "<<p.data();
-      std::cout<<"\np.grad.data(): "<<p.grad().data();
     }
   }
 }

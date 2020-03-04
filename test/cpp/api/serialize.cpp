@@ -89,8 +89,6 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
       model2->parameters(), options);
   auto optim2_2 = OptimizerClass(
       model2->parameters(), options);
-  auto optim2_3 = OptimizerClass(
-      model2->parameters(), options);
   auto optim3 = OptimizerClass(
       model3->parameters(), options);
   auto optim3_2 = OptimizerClass(
@@ -106,22 +104,14 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   };
 
   // Do 2 steps of model1
-  std::cout<<"step1 model1\n";
   step(optim1, model1);
-  std::cout<<"step2 model1\n";
   step(optim1, model1);
-  std::cout<<"step3 model1\n";
-  step(optim1, model1);
+
   // Do 2 steps of model 2 without saving the optimizer
-  std::cout<<"step1 model2\n";
   step(optim2, model2);
-  std::cout<<"step1 model2\n";
   step(optim2_2, model2);
-  std::cout<<"step1 model2\n";
-  step(optim2_3, model2);
 
   // Do 1 step of model 3
-  std::cout<<"step1 model3\n";
   step(optim3, model3);
 
   // save the optimizer
@@ -150,10 +140,8 @@ void test_serialize_optimizer(DerivedOptimizerOptions options) {
   }
 
   // Do step2 for model 3
-  std::cout<<"step2 model3\n";
   step(optim3_2, model3);
-  std::cout<<"step3 model3\n";
-  step(optim3_2, model3);
+
   param1 = model1->named_parameters();
   param2 = model2->named_parameters();
   param3 = model3->named_parameters();
@@ -566,7 +554,7 @@ TEST(SerializeTest, Optim_SGD) {
 }
 
 TEST(SerializeTest, Optim_Adam) {
-  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().amsgrad(true).weight_decay(1e-2).betas(std::make_tuple(0.9, 0.99)));
+  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
