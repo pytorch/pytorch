@@ -97,6 +97,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
+  _(prim, tolist)                    \
   _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
@@ -127,6 +128,7 @@ namespace c10 {
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
