@@ -323,6 +323,29 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
 
+def elu(input, alpha=1., inplace=False, out=None):
+    # TODO question for reviewers: should we support specifying scale
+    #   and zp explicitly, or should we just force people to use the .out API for that?
+    r"""float(input, alpha_) -> Tensor
+
+    Applies the quantized ELU function element-wise:
+
+    .. math::
+        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+
+    Args:
+        input: quantized input
+        alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
+        inplace: Inplace modification of the input tensor
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.elu' must be quantized!")
+    if out != None:
+        return torch._C._nn.elu(input, alpha, out=out)
+    if inplace:
+        return torch._C._nn.elu_(input, alpha)
+    return torch._C._nn.elu(input, alpha)
+
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor
     r"""float(input, min_, max_) -> Tensor
