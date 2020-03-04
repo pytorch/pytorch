@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/fuser/cuda/parser.h>
+#include <torch/csrc/jit/constants.h>
 
 #include <unordered_map>
 
@@ -38,8 +39,10 @@ public:
 
     // mark output;
     for (auto jit_output : block->outputs()) {
+      printf("add output!\n");
       fusion_->addOutput(value_maps_[jit_output->unique()]);
     }
+    std::cout << fusion_ << std::endl;
   }
 
 protected:
@@ -63,22 +66,37 @@ protected:
       auto rhs = value_maps_[node->inputs()[1]->unique()];
       auto out = value_maps_[node->output()->unique()];
       cg_op = new BinaryOp(binary_op_mapping[node->kind()], out, lhs, rhs);
+    } else if (node->kind() == prim::Constant) {
+      // we should just ignore constant node;
     } else {
       assert(false);
     }
   }
 
-  //void registerValues(at::ArrayRef<const JitValue*> values) {
   void registerValue(const JitValue* val) {
     CgValue* cg_val;
     if (val->isCompleteTensor()) {
       // TODO: make this a static function in Tensor class;
       // create tensor;
+      printf("register tensor\n");
       cg_val = new Tensor(val->type()->cast<TensorType>());
-    } else if (val->type()->isSubtypeOf(NumberType::get())) {
-      // create constant;
+    } else if (val->type()->isSubtypeOf(FloatType::get())) {
+      printf("register float\n");
+      if (auto ival = toIValue(val)) {
+        cg_val = new Float(ival.value().to<float>());
+      } else {
+        cg_val = new Float();
+      }
+    } else if (val->type()->isSubtypeOf(IntType::get())) {
+      printf("register int\n");
+      if (auto ival = toIValue(val)) {
+        cg_val = new Int(ival.value().to<int>());
+      } else {
+        cg_val = new Int();
+      }
     } else {
       // error out!
+      assert(false);
     }
     value_maps_.emplace(val->unique(), cg_val);
   }

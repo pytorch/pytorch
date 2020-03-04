@@ -2033,6 +2033,17 @@ struct GraphFuser {
   }
 };
 
+void compileFusionRecursive(Block* block) {
+  for (auto node : block->nodes()) {
+    if (node->kind() == prim::FusionGroup) {
+      compileFusion(node);
+    }
+    for (Block* sub_block : node->blocks()) {
+      compileFusionRecursive(sub_block);
+    }
+  }
+}
+
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
@@ -2050,6 +2061,12 @@ void FuseGraph(std::shared_ptr<Graph>& graph) {
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
   std::cout << "----finished fusion" << std::endl;
+  std::cout << (*graph) << std::endl;
+
+  // compile graph now;
+  compileFusionRecursive(graph->block());
+
+  std::cout << "----compiled fusion" << std::endl;
   std::cout << (*graph) << std::endl;
 }
 
