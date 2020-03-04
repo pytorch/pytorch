@@ -37,11 +37,11 @@ class autocast(object):
 
     :class:`autocast` can also be used as a decorator, e.g., on the ``forward`` method of your model::
 
-    class AutocastModel(nn.Module):
-        ...
-        @autocast()
-        def forward(self, input):
+        class AutocastModel(nn.Module):
             ...
+            @autocast()
+            def forward(self, input):
+                ...
 
     :class:`autocast` is nestable.  If you want to force particular ops to run in ``float32``,
     you can nest ``autocast(enabled=False)`` regions in a surrounding autocast-enabled region::
