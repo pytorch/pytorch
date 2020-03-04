@@ -125,6 +125,8 @@ def get_ignored_functions():
         torch.nn.functional.upsample_nearest,
         torch.nn.functional.has_torch_function,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.sigmoid,
+        torch.nn.functional.tanh,
     )
 
 def get_testing_overrides():
@@ -489,7 +491,6 @@ def get_testing_overrides():
         torch.nn.functional.relu6: lambda input, inplace=False: -1,
         torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
-        torch.nn.functional.sigmoid: lambda input: -1,
         torch.nn.functional.smooth_l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.soft_margin_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.softmax: lambda input, dim=None, _stacklevel=3, dtype=None: -1,
@@ -497,7 +498,6 @@ def get_testing_overrides():
         torch.nn.functional.softplus: lambda input, beta=1, threshold=20: -1,
         torch.nn.functional.softshrink: lambda input, lambd=0.5: -1,
         torch.nn.functional.softsign: lambda input: -1,
-        torch.nn.functional.tanh: lambda input: -1,
         torch.nn.functional.tanhshrink: lambda input: -1,
         torch.nn.functional.threshold: lambda input, threshold, value, inplace=False: -1,
         torch.nn.functional.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06,
