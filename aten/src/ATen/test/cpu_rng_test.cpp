@@ -180,6 +180,87 @@ TEST_F(RNGTest, Normal) {
   ASSERT_TRUE(torch::allclose(actual, expected));
 }
 
+TEST_F(RNGTest, Normal_float_Tensor_out) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = torch::empty({3, 3});
+  at::normal_out(actual, mean, torch::full({3, 3}, std), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Normal_Tensor_float_out) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = torch::empty({3, 3});
+  at::normal_out(actual, torch::full({3, 3}, mean), std, gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Normal_Tensor_Tensor_out) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = torch::empty({3, 3});
+  at::normal_out(actual, torch::full({3, 3}, mean), torch::full({3, 3}, std), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Normal_float_Tensor) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = at::normal(mean, torch::full({3, 3}, std), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Normal_Tensor_float) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = at::normal(torch::full({3, 3}, mean), std, gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
+TEST_F(RNGTest, Normal_Tensor_Tensor) {
+  const auto mean = 123.45;
+  const auto std = 67.89;
+  auto gen = new TestCPUGenerator(42.0);
+
+  auto actual = at::normal(torch::full({3, 3}, mean), torch::full({3, 3}, std), gen);
+
+  auto expected = torch::empty_like(actual);
+  native::templates::cpu::normal_kernel(expected, mean, std, gen);
+
+  ASSERT_TRUE(torch::allclose(actual, expected));
+}
+
 // =======================================================================================================================================
 
 TEST_F(RNGTest, Cauchy) {
