@@ -86,6 +86,85 @@ namespace jit {
   _(ATenleInt)                  \
   _(ATenltInt)
 
+#define TH_FORALL_TESTS_LLVM(_) \
+  _(LLVMByteImmTest)            \
+  _(LLVMCharImmTest)            \
+  _(LLVMShortImmTest)           \
+  _(LLVMIntImmTest)             \
+  _(LLVMLongImmTest)            \
+  _(LLVMFloatImmTest)           \
+  _(LLVMDoubleImmTest)          \
+  _(LLVMHalfImmTest)            \
+  _(LLVMByteAddTest)            \
+  _(LLVMCharAddTest)            \
+  _(LLVMShortAddTest)           \
+  _(LLVMIntAddTest)             \
+  _(LLVMLongAddTest)            \
+  _(LLVMFloatAddTest)           \
+  _(LLVMDoubleAddTest)          \
+  _(LLVMHalfAddTest)            \
+  _(LLVMByteSubTest)            \
+  _(LLVMCharSubTest)            \
+  _(LLVMShortSubTest)           \
+  _(LLVMIntSubTest)             \
+  _(LLVMLongSubTest)            \
+  _(LLVMFloatSubTest)           \
+  _(LLVMDoubleSubTest)          \
+  _(LLVMHalfSubTest)            \
+  _(LLVMByteMulTest)            \
+  _(LLVMCharMulTest)            \
+  _(LLVMShortMulTest)           \
+  _(LLVMIntMulTest)             \
+  _(LLVMLongMulTest)            \
+  _(LLVMFloatMulTest)           \
+  _(LLVMDoubleMulTest)          \
+  _(LLVMHalfMulTest)            \
+  _(LLVMByteDivTest)            \
+  _(LLVMCharDivTest)            \
+  _(LLVMShortDivTest)           \
+  _(LLVMIntDivTest)             \
+  _(LLVMLongDivTest)            \
+  _(LLVMFloatDivTest)           \
+  _(LLVMDoubleDivTest)          \
+  _(LLVMHalfDivTest)            \
+  _(LLVMIntToFloatCastTest)     \
+  _(LLVMFloatToIntCastTest)     \
+  _(LLVMIntToLongCastTest)      \
+  _(LLVMByteToCharCastTest)     \
+  _(LLVMHalfToLongCastTest)     \
+  _(LLVMByteToDoubleCastTest)   \
+  _(LLVMLetTest01)              \
+  _(LLVMLetTest02)              \
+  _(LLVMLetTestMultitype)       \
+  _(LLVMBufferTest)             \
+  _(LLVMBlockTest)              \
+  _(LLVMLoadStoreTest)          \
+  _(LLVMVecLoadStoreTest)       \
+  _(LLVMMemcpyTest)             \
+  _(LLVMBzeroTest)              \
+  _(LLVMElemwiseAdd)            \
+  _(LLVMElemwiseAddFloat)       \
+  _(LLVMElemwiseLog10Float)     \
+  _(LLVMElemwiseMaxInt)         \
+  _(LLVMElemwiseMinInt)         \
+  _(LLVMElemwiseMaxNumFloat)    \
+  _(LLVMElemwiseMaxNumNaNFloat) \
+  _(LLVMElemwiseMinNumFloat)    \
+  _(LLVMElemwiseMinNumNaNFloat) \
+  _(LLVMCompareSelectIntEQ)     \
+  _(LLVMCompareSelectFloatEQ)   \
+  _(LLVMStoreFloat)             \
+  _(LLVMSimpleMath01)           \
+  _(LLVMComputeMul)             \
+  _(LLVMBroadcastAdd)           \
+  _(LLVMBitwiseOps)             \
+  _(LLVMDynamicShapeAdd)        \
+  _(LLVMBindDynamicShapeAdd)    \
+  _(LLVMTensorDynamicShapeAdd)  \
+  _(LLVMDynamicShape2D)         \
+  _(LLVMIfThenElseTest)         \
+  _(LLVMVectorizerLoadStoreTest)
+
 #define TH_FORALL_TESTS_CUDA(_) \
   _(CudaTestVectorAdd01)        \
   _(CudaTestVectorAdd02)        \
@@ -95,6 +174,9 @@ namespace jit {
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TESTS(DECLARE_TENSOREXPR_TEST)
+#ifdef ENABLE_LLVM
+TH_FORALL_TESTS_LLVM(DECLARE_TENSOREXPR_TEST)
+#endif
 #ifdef USE_CUDA
 TH_FORALL_TESTS_CUDA(DECLARE_TENSOREXPR_TEST)
 #endif

@@ -52,6 +52,7 @@ class TensorExprKernel {
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
+    kLLVMCodeGen,
     kCudaCodeGen,
   };
 
