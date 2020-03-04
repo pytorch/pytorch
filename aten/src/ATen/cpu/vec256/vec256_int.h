@@ -665,23 +665,18 @@ Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   return Vec256<T>::loadu(values_a);
 }
 
-#define DEFINE_INTEGER_BINARY_OP(op, func)                                                \
-template <>                                                                               \
-Vec256<int64_t> inline operator op(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {  \
-  return func(a, b);                                                                      \
-}                                                                                         \
-template <>                                                                               \
-Vec256<int32_t> inline operator op(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {  \
-  return func(a, b);                                                                      \
-}                                                                                         \
-template <>                                                                               \
-Vec256<int16_t> inline operator op(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {  \
-  return func(a, b);                                                                      \
+template <>
+Vec256<int64_t> inline operator/(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  return intdiv_256(a, b);
 }
-
-DEFINE_INTEGER_BINARY_OP(/, intdiv_256)
-
-#undef DEFINE_INTEGER_BINARY_OP
+template <>
+Vec256<int32_t> inline operator/(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return intdiv_256(a, b);
+}
+template <>
+Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return intdiv_256(a, b);
+}
 
 template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
 inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
