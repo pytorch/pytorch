@@ -481,7 +481,11 @@ def generate_tensor_like_override_tests(cls):
 
     for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
-        name = 'test_{}'.format(func.__name__)
+        module = func.__module__
+        if module:
+            name = 'test_{}_{}'.format(module.replace('.', '_'), func.__name__)
+        else:
+            name = 'test_{}'.format(func.__name__)
         test_method.__name__ = name
         setattr(cls, name, test_method)
 
