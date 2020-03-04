@@ -1131,7 +1131,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             )
 
             with self.assertRaisesRegex(
-                RuntimeError, "Simulate error on backward pass"
+                RuntimeError, "Error on Node [0-9]+: Simulate error on backward pass"
             ):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
