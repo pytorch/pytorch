@@ -14,7 +14,7 @@ class autocast(object):
     for GPU operations to improve performance while maintaining accuracy.
 
     When entering an autocast-enabled region, Tensors may be any type.  It is not necessary or
-    recommended to call ``.half()`` on your model or data to use autocasting.
+    recommended to call ``.half()`` on your model(s) or data to use autocasting.
 
     :class:`autocast` should wrap the forward pass(es) of your network::
 
