@@ -219,6 +219,17 @@ Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
 
+SugaredValuePtr ModuleValue::getitem(
+    const SourceRange& loc,
+    Function& m,
+    Value* idx) {
+  if (concreteType_->getIterableModuleKind() == IterableModuleKind::LIST) {
+    return getSugaredModuleDict(loc, m)->getModules()->getitem(loc, m, idx);
+  }
+  throw ErrorReport(loc)
+      << "Only ModuleLists, Sequentials, and ModuleDict Modules are subscriptable";
+}
+
 void recurseThroughNestedModules(
     const SourceRange& loc,
     Function& m,

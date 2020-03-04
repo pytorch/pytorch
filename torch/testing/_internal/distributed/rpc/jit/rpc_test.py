@@ -18,6 +18,7 @@ def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
 
 
+# Define Script functions on both client and server sides.
 @torch.jit.script
 def no_arg():
     return 0
@@ -26,6 +27,23 @@ def no_arg():
 @torch.jit.script
 def one_arg(value):
     return value + 1
+
+
+class MyScriptModuleWithRRefs(torch.jit.ScriptModule):
+    def __init__(self, dst_worker):
+        super().__init__()
+        self.rrefs = []
+        for _ in range(4):
+            self.rrefs.append(rpc_return_rref(dst_worker))
+
+    @torch.jit.script_method
+    def forward(self):
+        # type: () -> Tensor
+        res_tensor = torch.ones(2, 2)
+        for rref in self.rrefs:
+            res_tensor += rref.to_here()
+
+        return res_tensor
 
 
 @torch.jit.script
@@ -52,7 +70,49 @@ class MyScriptModule(torch.jit.ScriptModule):
         return self.a
 
 
-# Define Script functions on both client and server sides.
+@torch.jit.script
+def rref_to_here(rref_var):
+    # type: (RRef[Tensor]) -> Tensor
+    return rref_var.to_here()
+
+
+@torch.jit.script
+def return_rref(rref_var):
+    # type: (RRef[Tensor]) -> RRef[Tensor]
+    return rref_var
+
+
+@torch.jit.ignore
+def my_script_module_init(rank):
+    # type: (int) -> MyModuleInterface
+    return MyScriptModule(rank)
+
+
+@torch.jit.script
+def construct_my_script_module(rank):
+    # type: (int) -> MyModuleInterface
+    return my_script_module_init(rank)
+
+
+@torch.jit.script
+def run_ref_script_module(ref_script_module, t):
+    # type: (RRef[MyModuleInterface], Tensor) -> Tensor
+    module = ref_script_module.to_here()
+    return module.forward() + t
+
+
+@torch.jit.ignore
+def rref_python_annotation(rref_var):
+    # type: (RRef[Tensor]) -> RRef[Tensor]
+    return rref_var
+
+
+@torch.jit.script
+def rref_script_annotation(rref_var):
+    # type: (RRef[Tensor]) -> Tensor
+    return rref_python_annotation(rref_var).to_here()
+
+
 @torch.jit.script
 def two_args_two_kwargs(
     first_arg,
@@ -254,9 +314,7 @@ class JitRpcAsyncOpTest:
             ):
                 args = (torch.tensor([1, 1]),)
                 kwargs = {}
-                fut = rpc.rpc_async(
-                    dst_worker_name, two_args_two_kwargs, args, kwargs
-                )
+                fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
                 ret = fut.wait()
                 return ret
 
@@ -285,9 +343,7 @@ class JitRpcAsyncOpTest:
                     torch.tensor([5, 5]),
                 )
                 kwargs = {}
-                fut = rpc.rpc_async(
-                    dst_worker_name, two_args_two_kwargs, args, kwargs
-                )
+                fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
                 ret = fut.wait()
                 return ret
 
@@ -450,16 +506,6 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
 
     @dist_init
     def test_rref_as_arg_and_return(self):
-        @torch.jit.script
-        def rref_to_here(rref_var):
-            # type: (RRef[Tensor]) -> Tensor
-            return rref_var.to_here()
-
-        @torch.jit.script
-        def return_rref(rref_var):
-            # type: (RRef[Tensor]) -> RRef[Tensor]
-            return rref_var
-
         n = self.rank + 1
         dst_rank = n % self.world_size
         local_ret = one_arg(torch.ones(2, 2))
@@ -487,22 +533,6 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
 
     @dist_init
     def test_remote_script_module(self):
-        @torch.jit.ignore
-        def my_script_module_init(rank):
-            # type: (int) -> MyModuleInterface
-            return MyScriptModule(rank)
-
-        @torch.jit.script
-        def construct_my_script_module(rank):
-            # type: (int) -> MyModuleInterface
-            return my_script_module_init(rank)
-
-        @torch.jit.script
-        def run_ref_script_module(ref_script_module, t):
-            # type: (RRef[MyModuleInterface], Tensor) -> Tensor
-            module = ref_script_module.to_here()
-            return module.forward() + t
-
         # TODO, need more investigation
         # there is rref leak when shutting down, suspect it is because
         # ref as arg is passed to pybind boundary, and the ref is not garbage
@@ -542,20 +572,19 @@ class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
         self.assertEqual(res, False)
 
     @dist_init
+    def test_my_script_module_with_rrefs(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+
+        module_with_rrefs = MyScriptModuleWithRRefs("worker{}".format(dst_rank))
+        res = module_with_rrefs()
+        self.assertEqual(res, torch.ones(2, 2) * 9)
+
+    @dist_init
     def test_rref_python_annotation(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
         rref_var = rpc_return_rref("worker{}".format(dst_rank))
-
-        @torch.jit.ignore
-        def rref_python_annotation(rref_var):
-            # type: (RRef[Tensor]) -> RRef[Tensor]
-            return rref_var
-
-        @torch.jit.script
-        def rref_script_annotation(rref_var):
-            # type: (RRef[Tensor]) -> Tensor
-            return rref_python_annotation(rref_var).to_here()
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)

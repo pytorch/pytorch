@@ -122,6 +122,23 @@ size_t ClassType::addConstant(const std::string& name, const IValue& value) {
   return slot;
 }
 
+void ClassType::unsafeRemoveMethod(const std::string& name) {
+  size_t slot = 0;
+  for (auto method : methods_) {
+    if (method->name() == name) {
+      methods_.erase(methods_.begin() + slot);
+      return;
+    }
+    slot++;
+  }
+  TORCH_CHECK(
+      false,
+      "Can't delete undefined method ",
+      name,
+      " on class: ",
+      python_str());
+}
+
 IValue ClassType::getConstant(const std::string& name) const {
   const auto& v = findConstant(name);
   TORCH_CHECK(
