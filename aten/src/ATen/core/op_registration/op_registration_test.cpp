@@ -1316,6 +1316,19 @@ TEST(NewOperatorRegistrationTest, testBasics) {
   ASSERT_TRUE(Dispatcher::singleton().findSchema({"_test::dummy5", ""}).has_value());
 }
 
+TEST(OperatorRegistrationTest, whenDeregisteringOp_thenHandleBecomesInvalid) {
+  std::unique_ptr<OperatorHandle> handle;
+  {
+    auto schema = torch::jit::parseSchema("_test::dummy(Tensor dummy) -> Tensor");
+    std::pair<c10::RegistrationHandleRAII, OperatorHandle> registration =
+        c10::Dispatcher::singleton().registerSchema(schema, c10::OperatorOptions());
+    handle = std::make_unique<OperatorHandle>(registration.second);
+    EXPECT_TRUE(handle->isValid());
+  }
+  // Now the RegistrationHandleRAII went out of scope and the op is deregistered
+  EXPECT_FALSE(handle->isValid());
+}
+
 }
 
 #pragma GCC diagnostic pop
