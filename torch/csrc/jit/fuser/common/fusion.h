@@ -107,8 +107,8 @@ struct TORCH_API Fusion : public IRInputOutput {
   Fusion(const Fusion& other) = delete;
   Fusion& operator=(const Fusion& other) = delete;
 
-  Fusion(Fusion&& other) = default;
-  Fusion& operator=(Fusion&& other) = default;
+  Fusion(Fusion&& other) = delete;
+  Fusion& operator=(Fusion&& other) = delete;
 
   ~Fusion() {
     for (auto it = val_set_.begin(); it != val_set_.end(); ++it) {
