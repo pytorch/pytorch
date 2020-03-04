@@ -168,12 +168,13 @@ template <
     typename T,
     std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
+  const int precision = 16;
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
     os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
   } else {
-    os << std::setprecision(16) << v;
+    os << std::setprecision(precision) << v;
     formatFPSuffix(os, v);
   }
 }
@@ -185,6 +186,7 @@ static void formatImm(std::ostream& os, T v) {
   os << v;
 }
 
+// NOLINTNEXTLINE
 #define IMM_PRINT_VISIT(Type, Name)           \
   void IRPrinter::visit(const Name##Imm* v) { \
     formatImm(os(), v->value());              \
