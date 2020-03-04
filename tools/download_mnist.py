@@ -20,6 +20,8 @@ RESOURCES = [
     't10k-labels-idx1-ubyte.gz',
 ]
 
+BASE_URL = 'https://pytorch-ci-utils.s3.us-east-2.amazonaws.com/mnist'
+
 
 def report_download_progress(chunk_number, chunk_size, file_size):
     if file_size != -1:
@@ -76,7 +78,7 @@ def main():
     try:
         for resource in RESOURCES:
             path = os.path.join(options.destination, resource)
-            url = 'http://yann.lecun.com/exdb/mnist/{}'.format(resource)
+            url = '{}{}'.format(BASE_URL, resource)
             download(path, url, options.quiet)
             unzip(path, options.quiet)
     except KeyboardInterrupt:
