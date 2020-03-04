@@ -279,7 +279,7 @@ TensorView* TransformReplay::runReplay(
   // Domain sizes must match at root for replay.
   TORCH_CHECK(axis_map.size() == ref_root->size());
   for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
-    TORCH_CHECK(ref_root->axis(i)->same_as(target_root->axis(axis_map[i])));
+    TORCH_CHECK(ref_root->axis(i)->size()->same_as(target_root->axis(axis_map[i])->size()));
   }
 
   /* STEP 3 */

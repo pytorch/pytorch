@@ -2,13 +2,14 @@
 
 #include <torch/csrc/jit/fuser/common/arith.h>
 #include <torch/csrc/jit/fuser/common/index_compute.h>
-#include <torch/csrc/jit/fuser/common/predicate_compute.h>
 #include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/predicate_compute.h>
 #include <torch/csrc/jit/fuser/common/transform_iter.h>
 
 #include <ostream>
 #include <stack>
+#include <map>
 
 namespace torch {
 namespace jit {
@@ -28,27 +29,39 @@ std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
 }
 */
 
+struct FindUsedVals : public IterVisitor {
+  std::set<Val*> used_vals;
+
+  void handle(Val* v) {
+    used_vals.emplace(v);
+  }
+
+ public:
+  static std::set<Val*> find() {
+    FindUsedVals finder;
+    finder.traverse(FusionGuard::getCurFusion(), true);
+    return finder.used_vals;
+  }
+
+};
+
 struct TORCH_API CodeWrite : public Printer {
  private:
-  bool producer = false;
-  TensorView* consumer = nullptr;
-  int extra_indent = 0;
-
   bool isTVOp(const Expr* expr);
 
   void print_indices(const std::vector<Int*>&);
   bool print_predicate(const TensorView* const);
 
-  //Print lhs of uop/bop, returns if predicate was needed
+  // Print lhs of uop/bop, returns if predicate was needed
   bool print_lhs(TensorView*);
   void print(const TensorView* const);
   void print(const Val* const);
   void print(const UnaryOp* const);
   void print(const BinaryOp* const);
 
-  void print(const Split* const){}
-  void print(const Merge* const){}
-  void print(const Reorder* const){}
+  void print(const Split* const) {}
+  void print(const Merge* const) {}
+  void print(const Reorder* const) {}
 
   void indent();
   void handle(Expr*);
@@ -59,20 +72,42 @@ struct TORCH_API CodeWrite : public Printer {
 
   std::vector<Int*> getLoopIndices();
   void openFor(IterDomain*);
-  void closeScope();
+  void closeFor();
   void resetFors();
   void clearActiveView();
 
-  std::vector<std::pair<Int*, Int*> > fors;
+  bool producer = false;
+  TensorView* consumer = nullptr;
+
+  std::vector<std::pair<Int*, IterDomain*>> fors;
+  int indent_size = 0;
 
   const TensorView* active_view = nullptr;
   int active_view_axis = 0;
+
   bool reset_fors = false;
 
+  std::set<IterDomain*> bound_iters;
+  std::map<const Val* const, std::string> overrides;
+  // Grab all values that are used. Look for Tensors
+  // to set Int* -> Tensor->size(i)
+  // Grab all IterDoms that are used. Look for any
+  // mappings to threadIdx.x / blockIdx.x
+  // Add them to bound_iters
+  void bind(IterDomain* id, Val* iterator);
+  void setupOverrides();
+
+  std::map<const Val* const, std::string>::iterator
+    overrides_find(Val* val){
+      return overrides.find(const_cast<const Val* const>(val));
+    }
+
+  void overrides_emplace(Val* val, std::string str){
+    overrides[const_cast<const Val* const>(val)] = str;
+  }
+
  public:
-
-  CodeWrite(std::ostream& _os) : Printer(_os){}
-
+  CodeWrite(std::ostream& _os) : Printer(_os) {}
 
   void traverse(
       const Fusion* const fusion,

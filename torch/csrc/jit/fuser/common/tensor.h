@@ -89,6 +89,9 @@ struct TORCH_API IterDomain : public Val {
   bool isReduction() const noexcept {
     return is_reduction_domain_;
   }
+  
+  void parallelize(ParallelType t){parallel_method_ = t;}
+
   ParallelType parallel_method() const noexcept {
     return parallel_method_;
   }
@@ -248,6 +251,13 @@ struct TORCH_API TensorView : public Val {
   bool hasComputeAt() const { return compute_at_view_ != nullptr; }
 
   const TensorView* getComputeAtView() const noexcept { return compute_at_view_; }
+  
+  IterDomain* getAxis(int axis){
+    if(!hasComputeAt()
+      || getComputeAtAxis() <= axis)
+      return domain()->axis(axis);
+    return compute_at_view_->getAxis(axis);
+  }
 
   int getComputeAtAxis() const noexcept { return compute_at_axis_; }
   

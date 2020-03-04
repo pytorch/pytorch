@@ -34,7 +34,6 @@ enum class TORCH_API ExprType {
   , Split
   , Merge
   , Reorder
-// , Loop
 // , Swap
 // , Index
 };

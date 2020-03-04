@@ -21,7 +21,7 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
 void CodeWrite::print_indices(const std::vector<Int*>& indices) {
   os << "[";
   for (const auto& ind : indices) {
-    Printer(os).print_inline(ind);
+    print_inline(ind);
     if (ind != *(indices.end() - 1))
       os << ", ";
   }
@@ -59,7 +59,9 @@ void CodeWrite::print(const TensorView* const tv) {
 void CodeWrite::print(const Val* const val) {
   if (*(val->getValType()) == ValType::TensorView)
     print(static_cast<const TensorView* const>(val));
-  else 
+  else if(overrides.find(val) != overrides.end())
+    os << overrides[val];
+  else
    Printer::print(val);
 }
 
@@ -86,7 +88,7 @@ bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
     
   }
   os  << " ) {\n";
-  ++extra_indent;
+  ++indent_size;
   indent();
   return true;
   
@@ -135,7 +137,7 @@ void CodeWrite::print(const UnaryOp* const uop) {
   os << ";\n";
 
   if(predicated){
-    --extra_indent;
+    --indent_size;
     indent();
     os << "}\n";
   }
@@ -170,7 +172,7 @@ void CodeWrite::print(const BinaryOp* const bop) {
   os << ";\n";
 
   if(predicated){
-    --extra_indent;
+    --indent_size;
     indent();
     os << "}\n";
   }
@@ -178,22 +180,80 @@ void CodeWrite::print(const BinaryOp* const bop) {
 }
 
 void CodeWrite::indent() {
-  for (int i = 0; i < fors.size() + extra_indent; i++)
+  for (int i = 0; i < indent_size; i++)
     os << "  ";
 }
 
-void CodeWrite::closeScope() {
+void CodeWrite::closeFor() {
+  IterDomain* id = fors.back().second;
+  Val* iterator = fors.back().first;
   fors.pop_back();
+  if(id->parallel_method() != ParallelType::Serial){
+    auto it = overrides_find(iterator);
+    if(it != overrides.end())
+      overrides.erase(it);
+    return;
+  }
+  
+  indent_size--;
   indent();
   os << "}" << std::endl;
 }
 
-void CodeWrite::openFor(IterDomain* id) {
-  indent();
-  fors.push_back(std::pair<Int*, Int*>{new Int(), id->size()});
+void CodeWrite::bind(IterDomain* id, Val* iterator){
+  switch(id->parallel_method()){
+    case(ParallelType::BIDz):
+      overrides_emplace(iterator, "blockIdx.z");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::BIDy):
+      overrides_emplace(iterator, "blockIdx.y");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::BIDx):
+      overrides_emplace(iterator, "blockIdx.x");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::TIDz):
+      overrides_emplace(iterator, "threadIdx.z");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::TIDy):
+      overrides_emplace(iterator, "threadIdx.y");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::TIDx):
+      overrides_emplace(iterator, "threadIdx.x");
+      bound_iters.emplace(id);
+      break;
+    case(ParallelType::Vectorize):
+    case(ParallelType::Unroll):
+      throw std::runtime_error("Unroll and Vectorize are not yet implemented for code generation.");
+    case(ParallelType::Serial):
+      break;
+  }
+}
 
-  os << "for( " << fors.back().first << " : ";
-  print_inline(id);
+void CodeWrite::openFor(IterDomain* id) {
+  
+  fors.push_back({new Int(), id});
+  
+  if(id->parallel_method() != ParallelType::Serial){
+    bind(id, fors.back().first);
+    return;
+  }    
+
+  indent();
+  indent_size++;
+
+  os << "for( size_t ";
+  print(fors.back().first);
+  os << " = 0; ";
+  print(fors.back().first);
+  os << " < ";
+  print_inline(id->size());
+  os << "; ++";
+  print(fors.back().first);
   os << " ) {" << std::endl;
 }
 
@@ -204,7 +264,7 @@ void CodeWrite::clearActiveView() {
 
 void CodeWrite::resetFors() {
   while (!fors.empty())
-    closeScope();
+    closeFor();
 
   reset_fors = false;
   clearActiveView();
@@ -213,6 +273,7 @@ void CodeWrite::resetFors() {
 
 // Update fors based on tv.
 void CodeWrite::updateView(TensorView* tv) {
+
   // If previous tv flaged that fors need to be reset, clear them all
   if (reset_fors)
     resetFors();
@@ -229,7 +290,7 @@ void CodeWrite::updateView(TensorView* tv) {
       int depth = fors.size();
       // reduce down to previous active view_axis
       for (int i = active_view_axis; i < depth; i++)
-        closeScope();
+        closeFor();
       //Remove the active view
       clearActiveView();
     } else {
@@ -238,7 +299,7 @@ void CodeWrite::updateView(TensorView* tv) {
       resetFors();
     }
     for (int i = fors.size(); i < tv->domain()->size(); i++)
-      openFor(tv->domain()->axis(i));
+      openFor(tv->getAxis(i));
     reset_fors = true;
   } else {
     active_view_axis = tv->getComputeAtAxis();
@@ -246,9 +307,9 @@ void CodeWrite::updateView(TensorView* tv) {
 
     int depth = fors.size();
     for (int i = active_view_axis; i < depth; i++)
-      closeScope();
+      closeFor();
     for (int i = fors.size(); i < tv->domain()->size(); i++)
-      openFor(tv->domain()->axis(i));
+      openFor(tv->getAxis(i));
   }
 }
 
@@ -260,13 +321,52 @@ bool CodeWrite::isTVOp(const Expr* expr){
   return false;
 }
 
+void CodeWrite::setupOverrides(){
+  std::set<Val*> used_vals = FindUsedVals::find();
+  for(Val* val : used_vals){
+    if(val->getValType().value() == ValType::TensorView){
+      TensorView* tv = static_cast<TensorView*>(val);
+      TensorDomain* td = tv->domain();
+      if(tv->tensor() == nullptr)
+        continue;
+
+      TensorDomain* root = TransformIter::getRoot(tv->domain());
+      for(decltype(root->size())i{0}; i<root->size(); i++){
+        if(overrides_find(root->axis(i)->size()) == overrides.end()){
+          std::stringstream ss;
+          ss << "T" << tv->tensor()->name() << "->size( " << i << " )";
+          overrides_emplace(root->axis(i)->size(), ss.str());
+        }
+      }
+    }
+
+  }
+}
+
 void CodeWrite::traverse(
     const Fusion* const fusion,
     bool from_outputs_only,
     bool breadth_first,
     std::unordered_set<ValType> val_types) {
+
+
+  //reset state.
+  producer = false;
+  consumer = nullptr;
+
+  fors = std::vector<std::pair<Int*, IterDomain*>>();
+  indent_size = 0;
+  active_view = nullptr;
+  active_view_axis = 0;
+  reset_fors = false;
+
+  std::set<IterDomain*> bound_iters;
+  std::map<const Val* const, std::string> overrides;
+
+  setupOverrides();
   //IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
   std::vector<Expr*> exprs = FusionGuard::getCurFusion()->exprs();
+
   for(auto* expr : exprs)
     Printer::print(expr);
   resetFors();
