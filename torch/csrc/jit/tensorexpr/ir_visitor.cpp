@@ -68,6 +68,7 @@ void IRVisitor::visit(const CompareSelect* v) {
   v->ret_val2()->accept(this);
 }
 
+// NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name) \
   void IRVisitor::visit(const Name##Imm* v) {}
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
