@@ -133,9 +133,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   if (!PyArray_ISWRITEABLE(array)) {
     TORCH_WARN(
-      "The given Numpy array is not writeable, and PyTorch does "
-      "not support non-writeable tensors. You may want to copy the array or make "
-      "it writeable before converting it to a tensor.");
+      "The given NumPy array is not writeable, and PyTorch does "
+      "not support non-writeable tensors. This means you can write to the "
+      "underlying (supposedly non-writeable) NumPy array using the tensor. "
+      "You may want to copy the array to protect its data or make it writeable "
+      "to suppress this warning before converting it to a tensor.");
   }
 
   int ndim = PyArray_NDIM(array);
