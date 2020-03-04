@@ -1542,6 +1542,26 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(timeout, set_timeout)
         rpc.shutdown()
 
+    @dist_init(setup_rpc=False)
+    @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
+    def test_set_and_get_num_send_recv_threads(self):
+        NUM_THREADS = 27
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.rpc_backend_options.init_method,
+            num_send_recv_threads=NUM_THREADS
+        )
+        rpc.init_rpc(
+            name="worker{}".format(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        info = rpc.api._get_current_rpc_agent().get_debug_info()
+        self.assertEqual(int(info["agent.thread_pool_size"]), NUM_THREADS)
+        rpc.shutdown()
+
     @dist_init
     @requires_process_group_agent("PROCESS_GROUP rpc backend specific test, skip")
     def test_rpc_timeouts(self):
