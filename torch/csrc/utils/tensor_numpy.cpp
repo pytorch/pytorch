@@ -132,10 +132,10 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   auto array = (PyArrayObject*)obj;
 
   if (!PyArray_ISWRITEABLE(array)) {
-    throw TypeError(
+    TORCH_WARN(
       "The given Numpy array is not writeable, and PyTorch does "
-      "not support non-writeable tensors. Copy the array or make it "
-      "writeable.");
+      "not support non-writeable tensors. You may want to copy the array or make "
+      "it writeable before converting it to a tensor.");
   }
 
   int ndim = PyArray_NDIM(array);

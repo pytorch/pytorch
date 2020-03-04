@@ -2498,7 +2498,7 @@ class _TestTorchMixin(object):
     def test_numpy_non_writeable(self):
         arr = np.zeros(5)
         arr.flags['WRITEABLE'] = False
-        self.assertRaises(TypeError, lambda: torch.from_numpy(arr))
+        self.assertWarns(lambda: torch.from_numpy(arr))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_empty_storage_view(self):
