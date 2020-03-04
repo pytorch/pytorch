@@ -479,6 +479,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_printer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/ir_visitor.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/kernel.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/schedule.cpp
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/tensor.cpp
