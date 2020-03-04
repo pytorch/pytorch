@@ -70,7 +70,6 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-    'test_determination',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -88,6 +87,7 @@ if PY33:
 if PY36:
     TESTS.extend([
         'test_jit_py3',
+        'test_determination',
     ])
 
 WINDOWS_BLACKLIST = [
