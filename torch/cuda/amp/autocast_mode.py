@@ -91,8 +91,8 @@ class autocast(object):
 
     .. note::
         Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
-        regions, but won't be autocasted (e.g., :func:`torch.addmm` is guaranteed to run in ``float16``, but
-        :func:`torch.addmm_` may not).  For best performance and accuracy, prefer out-of-place ops if possible.
+        regions, but won't be autocasted (e.g., ``a.addmm(b)`` is guaranteed to run in ``float16``, but
+        ``a.addmm_(b)` may not).  For best performance and accuracy, prefer out-of-place ops if possible.
     """
     def __init__(self, enabled=True):
         if enabled and not torch.cuda.is_available():
@@ -152,8 +152,8 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Arguments:
-        cast_inputs (torch.dtype or None, optional, default=None):  If not ``None``, casts incoming floating-point
-            Tensors to the target dtype and causes ``forward`` to execute with autocast disabled.
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
+            floating-point Tensors to the target dtype and causes ``forward`` to execute with autocast disabled.
             If ``None``, inputs are not cast and ``forward`` executes with whatever autocast state surrounds the
             point-of-use.
     """
