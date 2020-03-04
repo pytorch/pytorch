@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import torch
 from .qconfig import QConfig
+from torch.jit._recursive import wrap_cpp_module
 
 class ConvPackedParams(torch.nn.Module):
     def __init__(self):
@@ -24,7 +25,8 @@ class ConvPackedParams(torch.nn.Module):
     @torch.jit.export
     def set_weight_bias(self, weight, bias):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride, self.padding, self.dilation, self.groups)
+        self._packed_params = torch.ops.quantized.conv2d_prepack(weight, bias, self.stride,
+                                                                 self.padding, self.dilation, self.groups)
 
     @torch.jit.export
     def _weight_bias(self):
@@ -68,24 +70,19 @@ def prepare_script(model, qconfig_dict, inplace=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
-    torch._C._jit_pass_insert_observers(model._c,
-                                        'forward',
-                                        qconfig_dict,
-                                        True)
+    model = wrap_cpp_module(torch._C._jit_pass_insert_observers(model._c,
+                                                                'forward',
+                                                                qconfig_dict,
+                                                                False))
     return model
 
 def convert_script(model, inplace=False):
     _check_is_script_module(model)
     if not inplace:
         model = model.copy()
-    torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', True)
+    model = wrap_cpp_module(torch._C._jit_pass_insert_quant_dequant(model._c, 'forward', False))
     if 'fbgemm' in torch.backends.quantized.supported_engines:
         torch._C._jit_pass_insert_prepack_unpack(model._c)
-        if linear_packed_params and conv_packed_params:
-            torch._C._jit_pass_fold_prepack(model._c,
-                                            linear_packed_params,
-                                            conv_packed_params)
-
     return model
 
 # TODO: non-scriptable QConfig will be supported later
@@ -102,18 +99,9 @@ def quantize_script(model, qconfig_dict, run_fn, run_args, inplace=False):
     if not inplace:
         model = model.copy()
     scripted_qconfig_dict = {k: script_qconfig(v) for k, v in qconfig_dict.items()}
-    # We are not going to run fold_convbn pass right now
-    # since it is not able to work correctly, we will
-    # revisit after constants is properly handled in
-    # JIT
-    # torch._C._jit_pass_fold_convbn(model._c)
-    prepare_script(model, scripted_qconfig_dict, True)
+    torch._C._jit_pass_dedup_module_uses(model._c)
+    model = wrap_cpp_module(torch._C._jit_pass_fold_convbn(model._c))
+    model = prepare_script(model, scripted_qconfig_dict, True)
     run_fn(model._c._get_method('forward'), *run_args)
-    # When we mutating graph we didn't create a new ClassType
-    # and the graph executor will run an out dated version
-    # of the graph if we do inplace graph mutation, therefore
-    # we copy the model here
-    # [TODO] This will be fixed later when we figure out
-    # how to properly mutate types
-    model = convert_script(model, False)
+    model = convert_script(model, True)
     return model

@@ -17,19 +17,56 @@ from torch._C import parse_schema
 #
 # Whitelist entries can be removed after the date listed on them passes.
 white_list = [
-    ('c10_experimental', datetime.date(2020, 1, 1)),
-    ('_batch_norm_impl_index', datetime.date(2019, 11, 15)),
-    ('_batch_norm_impl_index_backward', datetime.date(2019, 11, 15)),
-    ('cudnn_batch_norm', datetime.date(2019, 11, 15)),
-    ('cudnn_batch_norm_backward', datetime.date(2019, 11, 15)),
-    ('_nnpack_spatial_convolution', datetime.date(2019, 11, 12)),
-    ('_aten', datetime.date(2019, 12, 22)),
-    ('_prim::ListConstruct', datetime.date(2019, 11, 22)),
-    ('thnn_conv3d', datetime.date(9999, 1, 1)),
-    ('thnn_conv3d.out', datetime.date(9999, 1, 1)),
-    ('grad', datetime.date(2020, 1, 1)),
-    ('logical_and', datetime.date(2019, 12, 12)),
-    ('logical_or', datetime.date(2019, 12, 12)),
+    ('c10_experimental', datetime.date(2222, 1, 1)),
+    # We export some functions and classes for test_jit.py directly from libtorch.so,
+    # it's not important to have BC for them
+    ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
+    ('aten::tril_indices', datetime.date(2020, 3, 1)),
+    ('aten::triu_indices', datetime.date(2020, 3, 1)),
+    ('prim::Drop', datetime.date(2020, 3, 1)),
+    ('prim::Store', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_view', datetime.date(2020, 3, 1)),
+    ('aten::_ncf_unsqueeze', datetime.date(2020, 3, 1)),
+    ('prim::Load', datetime.date(2020, 3, 1)),
+    ('prim::ImplicitTensorToNum', datetime.date(2020, 3, 1)),
+    ('aten::is_owner', datetime.date(2020, 3, 1)),
+    ('aten::to_here', datetime.date(2020, 3, 1)),
+    ('prim::isinstance', datetime.date(2020, 3, 1)),
+    ('prim::CreateObject', datetime.date(2020, 3, 1)),
+    ('prim::Uninitialized', datetime.date(2020, 3, 1)),
+    ('prim::fork', datetime.date(2020, 3, 1)),
+    ('prim::unchecked_cast', datetime.date(2020, 3, 1)),
+    ('prim::DictConstruct', datetime.date(2020, 3, 1)),
+    ('prim::ListConstruct', datetime.date(2020, 3, 1)),
+    ('prim::ListUnpack', datetime.date(2020, 3, 1)),
+    ('prim::TupleConstruct', datetime.date(2020, 3, 1)),
+    ('prim::TupleIndex', datetime.date(2020, 3, 1)),
+    ('prim::TupleSlice', datetime.date(2020, 3, 1)),
+    ('prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('prim::AutogradAdd', datetime.date(2020, 3, 1)),
+    ('prim::AutogradAnyNonZero', datetime.date(2020, 3, 1)),
+    ('onnx::Shape', datetime.date(2020, 3, 1)),
+    ('onnx::Reshape', datetime.date(2020, 3, 1)),
+    ('prim::BroadcastSizes', datetime.date(2020, 3, 1)),
+    ('prim::Print', datetime.date(2020, 3, 1)),
+    ('prim::MMTreeReduce', datetime.date(2020, 3, 1)),
+    ('prim::Constant', datetime.date(2020, 3, 1)),
+    ('_prim::TupleUnpack', datetime.date(2020, 3, 1)),
+    ('aten::random_', datetime.date(2020, 3, 1)),
+    ('quantized::add_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::cat_(relu_)?out', datetime.date(2020, 3, 1)),
+    ('quantized::mul_(scalar_)?(relu_)?out', datetime.date(2020, 3, 1)),
+    ('aten::leaky_relu_backward', datetime.date(2020, 3, 6)),
+    ('aten::rrelu_with_noise_backward', datetime.date(2020, 3, 6)),
+    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
+    ('aten::randn_like', datetime.date(2020, 3, 15)),
+    ('aten::full_like', datetime.date(2020, 3, 15)),
+    ('aten::empty_like', datetime.date(2020, 3, 15)),
+    ('aten::rand_like', datetime.date(2020, 3, 15)),
+    ('aten::ones_like', datetime.date(2020, 3, 15)),
+    ('aten::randint_like', datetime.date(2020, 3, 15)),
+    ('aten::zeros_like', datetime.date(2020, 3, 15)),
+    ('_aten', datetime.date(2020, 4, 1)),
 ]
 
 
@@ -45,6 +82,8 @@ def white_listed(schema, white_list):
 
 def check_bc(new_schema_dict):
     existing_schemas = torch._C._jit_get_all_schemas()
+    is_bc = True
+    broken_ops = []
     for existing_schema in existing_schemas:
         if white_listed(existing_schema, white_list):
             print("skipping schema: ", str(existing_schema))
@@ -62,13 +101,17 @@ def check_bc(new_schema_dict):
                   .format(
                       str(existing_schema),
                       "\n\t".join(str(s) for s in new_schemas)))
-            print('The PR is introducing backward incompatible changes to the '
-                  'operator library. Please contact PyTorch team to confirm '
-                  'whether this change is wanted or not.')
             # TODO Print out more details about why candidates don't match.
-            return False
-    print('Found backward compatible schemas for all existing schemas')
-    return True
+            broken_ops.append(str(existing_schema))
+            is_bc = False
+    if is_bc:
+        print('Found backward compatible schemas for all existing schemas')
+    else:
+        print('The PR is introducing backward incompatible changes to the '
+              'operator library. Please contact PyTorch team to confirm '
+              'whether this change is wanted or not. \n\nBroken ops: '
+              '[\n\t{}\n]'.format("\n\t".join(broken_ops)))
+    return is_bc
 
 
 if __name__ == '__main__':
@@ -81,10 +124,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
     new_schema_dict = dict()
     with open(args.new_schemas, 'r') as f:
-        line = f.readline()
-        while line:
-            s = parse_schema(line.strip())
+        while True:
             line = f.readline()
+            if not line:
+                break
+            if "torch.classes" in line:
+                # TODO Fix type __torch__.torch.classes.xxx
+                continue
+
+            s = parse_schema(line.strip())
             slist = new_schema_dict.get(s.name, [])
             slist.append(s)
             new_schema_dict[s.name] = slist

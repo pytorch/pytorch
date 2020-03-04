@@ -12,7 +12,7 @@ from torch.backends import ContextProp, PropModule, __allow_nonbracketed_mutatio
 #
 #   torch.backends.cudnn.enabled = False
 #
-# to globally disable CuDNN
+# to globally disable CuDNN/MIOpen
 
 lib = None
 __cudnn_version = None
@@ -21,7 +21,7 @@ __cudnn_version = None
 def find_cudnn_windows_lib():
     # Override the default search process
     # Fixes https://github.com/pytorch/pytorch/issues/20202
-    # The libary selection will be done in these directories one by one
+    # The library selection will be done in these directories one by one
     # 1. [Package Root]\Lib 
     #    That's where our libraries are in, which should be loaded first.
     # 2. Default directories
@@ -38,9 +38,7 @@ def find_cudnn_windows_lib():
     if len(out) > 0:
         if out.find('\r\n') != -1:
             out = out.split('\r\n')[0]
-        cudnn_lib_name = os.path.basename(out)
-        cudnn_lib = os.path.splitext(cudnn_lib_name)[0]
-        cudnn_lib = str(cudnn_lib)
+        cudnn_lib = str(out)
         return ctypes.cdll.LoadLibrary(cudnn_lib)
     else:
         return None
@@ -74,6 +72,13 @@ def _libcudnn():
                 raise RuntimeError(
                     'cuDNN version incompatibility: PyTorch was compiled against {} '
                     'but linked against {}'.format(compile_version, __cudnn_version))
+        elif hasattr(lib, 'miopenGetVersion'):
+            miopen_major = ctypes.c_size_t()
+            miopen_minor = ctypes.c_size_t()
+            miopen_patch = ctypes.c_size_t()
+            # miopen version is MAJOR*1000000 + MINOR*1000 + PATCH
+            lib.miopenGetVersion(ctypes.byref(miopen_major), ctypes.byref(miopen_minor), ctypes.byref(miopen_patch))
+            __cudnn_version = miopen_major.value * 1000000 + miopen_minor.value * 1000 + miopen_patch.value
         else:
             lib = None
     return lib
@@ -104,11 +109,11 @@ def is_acceptable(tensor):
         return False
     if not is_available():
         warnings.warn(
-            "PyTorch was compiled without cuDNN support. To use cuDNN, rebuild "
+            "PyTorch was compiled without cuDNN/MIOpen support. To use cuDNN/MIOpen, rebuild "
             "PyTorch making sure the library is visible to the build system.")
         return False
     if _libcudnn() is None:
-        warnings.warn('cuDNN library not found. Check your {libpath}'.format(
+        warnings.warn('cuDNN/MIOpen library not found. Check your {libpath}'.format(
             libpath={
                 'darwin': 'DYLD_LIBRARY_PATH',
                 'win32': 'PATH'

@@ -1838,7 +1838,7 @@ class TestOperators(hu.HypothesisTestCase):
         # error increases dramtically when input is close to 0 or 1
         # and it will fail the test.
         # So we only run gradient test in the range of (0.01, 0.99)
-        # very occationally, test may fail due to random accumulated error
+        # very occasionally, test may fail due to random accumulated error
         # reduce test range to (0.02, 0.98) will improve test stability
         op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
         self.assertDeviceChecks(dc, op, [a], [0])

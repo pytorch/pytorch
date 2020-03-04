@@ -49,6 +49,18 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const std::string& msg,
+    const void* caller) {
+    throw c10::EnforceFiniteError(
+      file, line, condition, msg, (*GetFetchStackTrace())(), caller
+    );
+}
+
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, const std::string& msg)
@@ -80,13 +92,20 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
-void LogAPIUsage(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+void LogAPIUsage(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+} catch (std::bad_function_call&) {
+  // static destructor race
 }
 
 namespace detail {
-bool LogAPIUsageFakeReturn(const std::string& event) {
-  (*GetAPIUsageLogger())(event);
+bool LogAPIUsageFakeReturn(const std::string& event) try {
+  if (auto logger = GetAPIUsageLogger())
+    (*logger)(event);
+  return true;
+} catch (std::bad_function_call&) {
+  // static destructor race
   return true;
 }
 } // namespace detail

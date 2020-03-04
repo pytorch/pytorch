@@ -1,5 +1,7 @@
-#include "simple_ops.h"
 #include <torch/script.h>
+
+#include "quantized_ops.h"
+#include "simple_ops.h"
 
 int main() {
   torch::autograd::AutoGradMode guard(false);
@@ -11,5 +13,7 @@ int main() {
   at::call_DD_op(input);
   at::call_EE_op(input);
   at::call_FF_op(input);
+  callOp("quantized::t_add", "", input, input, 1.0, 0);
+  callOp("quantized::t_add_relu", "", input, input, 1.0, 0);
   return 0;
 }

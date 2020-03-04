@@ -14,6 +14,7 @@ import torch
 split_configs_short = op_bench.config_list(
     attr_names=["M", "N", "parts"],
     attrs=[
+        [8, 8, 2],
         [256, 512, 2],
         [512, 512, 2],
     ],

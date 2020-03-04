@@ -22,7 +22,7 @@ void MutexSerializer::Serialize(
 
 void MutexDeserializer::Deserialize(const BlobProto& /* unused */, Blob* blob) {
   *blob->GetMutable<std::unique_ptr<std::mutex>>() =
-      caffe2::make_unique<std::mutex>();
+      std::make_unique<std::mutex>();
 }
 
 REGISTER_CPU_OPERATOR(Iter, IterOp<CPUContext>);

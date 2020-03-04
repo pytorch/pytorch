@@ -256,6 +256,7 @@ class OnnxifiOp final : public Operator<Context> {
               weight_descs.size(),
               weight_descs.data(),
               &graph,
+              static_cast<uint32_t>(max_seq_size_),
               defered_blob_reader),
           ONNXIFI_STATUS_SUCCESS);
 

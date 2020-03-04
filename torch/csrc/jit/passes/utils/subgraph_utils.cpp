@@ -33,8 +33,6 @@ std::shared_ptr<Graph> getSubgraph(Node* n) {
 }
 
 void unmergeSubgraph(Node* subgraphNode) {
-  AT_ASSERT(subgraphNode->kind() == prim::DifferentiableGraph);
-
   // Inline the graph, replace uses of node outputs and destroy the node
   auto outerGraph = subgraphNode->owningGraph();
   WithInsertPoint guard(subgraphNode);

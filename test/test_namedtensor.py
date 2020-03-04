@@ -1,6 +1,6 @@
 import unittest
-from common_utils import TestCase, run_tests, TEST_NUMPY
-from common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testing._internal.common_cuda import TEST_CUDA
 from collections import namedtuple, OrderedDict
 import itertools
 import functools
@@ -14,9 +14,6 @@ import io
 import sys
 import warnings
 
-skipIfNamedTensorDisabled = \
-    unittest.skipIf(not torch._C._BUILD_NAMEDTENSOR,
-                    'PyTorch not compiled with namedtensor support')
 
 def pass_name_to_python_arg_parser(name):
     x = torch.empty(2, names=(name,))
@@ -274,6 +271,26 @@ class TestNamedTensor(TestCase):
 
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
+
+    def test_max_pooling(self):
+        def check_tuple_return(op, inputs, expected_names):
+            values, indices = op(*inputs)
+            self.assertEqual(values.names, expected_names)
+            self.assertEqual(indices.names, expected_names)
+
+        for device in torch.testing.get_all_device_types():
+
+            named_tensor_1d = torch.zeros(2, 3, 5, device=device, names=list('ABC'))
+            named_tensor_2d = torch.zeros(2, 3, 5, 7, device=device, names=list('ABCD'))
+            named_tensor_3d = torch.zeros(2, 3, 5, 7, 9, device=device, names=list('ABCDE'))
+
+            self.assertEqual(F.max_pool1d(named_tensor_1d, 2).names, named_tensor_1d.names)
+            self.assertEqual(F.max_pool2d(named_tensor_2d, [2, 2]).names, named_tensor_2d.names)
+            self.assertEqual(F.max_pool3d(named_tensor_3d, [2, 2, 2]).names, named_tensor_3d.names)
+
+            check_tuple_return(F.max_pool1d_with_indices, [named_tensor_1d, 2], named_tensor_1d.names)
+            check_tuple_return(F.max_pool2d_with_indices, [named_tensor_2d, [2, 2]], named_tensor_2d.names)
+            check_tuple_return(F.max_pool3d_with_indices, [named_tensor_3d, [2, 2, 2]], named_tensor_3d.names)
 
     def test_no_save_support(self):
         named_tensor = torch.zeros(2, 3, names=('N', 'C'))
@@ -705,6 +722,9 @@ class TestNamedTensor(TestCase):
         def method(name, *args, **kwargs):
             return [Function(name, lambda a, b: getattr(a, name)(b, *args, **kwargs))]
 
+        def function(name, *args, **kwargs):
+            return [Function(name, lambda a, b: getattr(torch, name)(a, b, *args, **kwargs))]
+
         def out_function(name, *args, **kwargs):
             out_fn = getattr(torch, name)
 
@@ -730,6 +750,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
+            function('floor_divide'),
         ]
         tests = flatten(tests)
 
@@ -738,26 +759,27 @@ class TestNamedTensor(TestCase):
             test_wildcard(op)
             test_mixed_unnamed_named(op, is_inplace=name.endswith('_'))
 
-    def test_logical_xor(self):
+    def test_logical_ops(self):
         # Implemented via TensorIterator, so just check that each version
         # (out-of-place, inplace, out=) propagates names.
         def zeros(*args, **kwargs):
             return torch.zeros(*args, dtype=torch.bool, **kwargs)
 
-        self._test_name_inference(
-            torch.logical_xor,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+        for op in ('logical_xor', 'logical_and', 'logical_or'):
+            self._test_name_inference(
+                getattr(torch, op),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            Tensor.logical_xor_,
-            (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                getattr(Tensor, op + '_'),
+                (create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
-        self._test_name_inference(
-            lambda out, x, y: torch.logical_xor(x, y, out=out),
-            (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
-            expected_names=['N', 'C'])
+            self._test_name_inference(
+                lambda out, x, y: getattr(torch, op)(x, y, out=out),
+                (create('0', zeros), create('N:2,C:3', zeros), create('N:2,C:3', zeros)),
+                expected_names=['N', 'C'])
 
     def test_pow_special(self):
         # There are a few pow cases that don't go through TensorIterator.
@@ -955,6 +977,17 @@ class TestNamedTensor(TestCase):
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):
             _test(testcase, device=device)
 
+    def test_cummax_cummin(self):
+        def test_ops(op):
+            for device in torch.testing.get_all_device_types():
+                names = ('N', 'D')
+                tensor = torch.rand(2, 3, names=names)
+                result = op(tensor, 0)
+                self.assertEqual(result[0].names, names)
+                self.assertEqual(result[1].names, names)
+        test_ops(torch.cummax)
+        test_ops(torch.cummin)
+
     def test_bitwise_not(self):
         for device in torch.testing.get_all_device_types():
             names = ('N', 'D')
@@ -1043,6 +1076,11 @@ class TestNamedTensor(TestCase):
 
         # takes positional dim
         out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
+        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
+        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+
+        # takes negative positional dim
+        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
         self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
         self.assertEqual(out.shape, (7, 2, 3, 5, 11))
 
@@ -1943,11 +1981,6 @@ class TestNamedTensor(TestCase):
             res = torch.isinf(a)
             self.assertEqual(res.names, ['N', 'C'])
 
-# Disable all tests if named tensor is not available.
-for attr in dir(TestNamedTensor):
-    if attr.startswith('test_'):
-        new_test = skipIfNamedTensorDisabled(getattr(TestNamedTensor, attr))
-        setattr(TestNamedTensor, attr, new_test)
 
 if __name__ == '__main__':
     run_tests()

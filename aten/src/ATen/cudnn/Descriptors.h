@@ -33,10 +33,22 @@ inline int dataSize(cudnnDataType_t dataType)
 // that the stride for dim i is the product of the sizes of dims
 // i+1 to the end.  This stride is indeed uniquely determined.  This
 // function modifies 'stride' in place so this invariant holds.
-static inline void fixSizeOneDimStride(int dim, const int *size, int *stride) {
+static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bool nhwc) {
   int64_t z = 1;
-  for(int d = dim-1; d >= 0; d--)
-  {
+  int index = 0;
+  std::vector<int> permutation(dim);
+  
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (int d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (int d : permutation) {
     if (size[d] == 1) {
       stride[d] = z;
     } else {
@@ -76,7 +88,7 @@ public:
   T* desc() const { return desc_.get(); }
   T* desc() { return desc_.get(); }
 
-  // Use mut_desc() to access the underlying desciptor pointer
+  // Use mut_desc() to access the underlying descriptor pointer
   // if you intend to modify what it points to (e.g., using
   // cudnnSetFooDescriptor).  This will ensure that the descriptor
   // is initialized.  Code in this file will use this function.
@@ -123,8 +135,10 @@ public:
   void print();
 
 private:
-  void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
-    fixSizeOneDimStride(dim, size, stride);
+  void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
+
+  void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    fixSizeOneDimStride(dim, size, stride, nhwc);
     AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
   }
 };
@@ -137,7 +151,7 @@ class FilterDescriptor
                       &cudnnDestroyFilterDescriptor>
 {
 public:
-  void set(const at::Tensor &t, int64_t pad = 0);
+  void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
 
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
@@ -183,7 +197,6 @@ struct TORCH_CUDA_API DropoutDescriptor
 
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
-  // NB: it takes a Type so that we can generate a Variable if necessary.
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
@@ -191,7 +204,6 @@ struct TORCH_CUDA_API DropoutDescriptor
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
     state = at::empty({static_cast<int64_t>(state_size)}, options);
-    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
@@ -202,7 +214,6 @@ struct TORCH_CUDA_API DropoutDescriptor
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value
-    setCuDNNStreamToCurrent();
     AT_CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));
   }
 
@@ -237,7 +248,6 @@ struct TORCH_CUDA_API RNNDescriptor
           mode,
           algo,
           datatype));
-#if CUDA_VERSION >= 9000
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
@@ -248,7 +258,6 @@ struct TORCH_CUDA_API RNNDescriptor
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
-#endif
   }
 };
 

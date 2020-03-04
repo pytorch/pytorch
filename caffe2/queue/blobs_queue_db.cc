@@ -25,7 +25,7 @@ class CreateBlobsQueueDBOp : public Operator<CPUContext> {
       : Operator<CPUContext>(operator_def, ws) {}
 
   bool RunOnDevice() override {
-    std::unique_ptr<db::DB> db = caffe2::make_unique<BlobsQueueDB>(
+    std::unique_ptr<db::DB> db = std::make_unique<BlobsQueueDB>(
         "",
         db::READ,
         OperatorBase::Input<std::shared_ptr<BlobsQueue>>(0),

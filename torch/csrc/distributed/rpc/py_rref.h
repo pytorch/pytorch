@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/distributed/rpc/rref.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -12,19 +12,20 @@ namespace rpc {
 // pickle and unpickle.
 class PyRRef {
  public:
-  explicit PyRRef(std::shared_ptr<RRef> rref);
-  // creates a local RRef with the given object as value
   explicit PyRRef(const py::object& value);
+  explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
   bool isOwner() const;
   WorkerInfo owner() const;
   py::object toHere();
   py::object localValue();
+  std::string str() const;
   py::tuple pickle() const;
   static PyRRef unpickle(const py::tuple& t);
+  c10::IValue toIValue();
 
  private:
-  std::shared_ptr<RRef> rref_;
+  c10::intrusive_ptr<RRef> rref_;
 };
 
 } // namespace rpc

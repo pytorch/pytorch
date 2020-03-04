@@ -1,7 +1,7 @@
 #include <torch/csrc/utils/tensor_list.h>
 
+#include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
@@ -30,10 +30,9 @@ static PyObject* recursive_to_list(
 
 PyObject* tensor_to_list(const Tensor& tensor) {
   Tensor data = tensor;
-  if (data.type().backend() != Backend::CPU) {
-    with_no_gil([&]() {
-      data = data.toBackend(Backend::CPU);
-    });
+  if (data.options().backend() != Backend::CPU) {
+    pybind11::gil_scoped_release no_gil;
+    data = data.toBackend(Backend::CPU);
   }
   return recursive_to_list(
       (char*)data.data_ptr(), data.sizes(), data.strides(), 0,

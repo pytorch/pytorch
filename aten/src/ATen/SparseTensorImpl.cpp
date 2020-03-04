@@ -6,13 +6,13 @@
 namespace at {
 
 namespace {
-  DeviceType sparseTensorSetToDeviceType(TensorTypeSet type_set) {
-    if (type_set.has(TensorTypeId::SparseCPUTensorId)) {
+  DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
+    if (key_set.has(DispatchKey::SparseCPUTensorId)) {
       return kCPU;
-    } else if (type_set.has(TensorTypeId::SparseCUDATensorId)) {
+    } else if (key_set.has(DispatchKey::SparseCUDATensorId)) {
       return kCUDA;
     } else {
-      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", type_set);
+      AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
     }
   }
 }
@@ -30,13 +30,13 @@ namespace {
 //
 // This means that we allocate a [1,0] size indices tensor and a [0] size
 // values tensor for such an empty tensor.
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type)
-  :   SparseTensorImpl(type_set, data_type
-      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(ScalarType::Long))
-      , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(type_set)).dtype(data_type))) {}
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type)
+  :   SparseTensorImpl(key_set, data_type
+      , at::empty({1, 0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
+      , at::empty({0}, at::initialTensorOptions().device(sparseTensorSetToDeviceType(key_set)).dtype(data_type))) {}
 
-SparseTensorImpl::SparseTensorImpl(at::TensorTypeSet type_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
-    : TensorImpl(type_set, data_type, values.device())
+SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type, at::Tensor indices, at::Tensor values)
+    : TensorImpl(key_set, data_type, values.device())
     , sparse_dim_(1)
     , dense_dim_(0)
     , indices_(std::move(indices))
@@ -57,9 +57,6 @@ bool SparseTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 int64_t SparseTensorImpl::stride(int64_t d) const {
   AT_ERROR("sparse tensors do not have strides");
 }
-void SparseTensorImpl::resize_dim(int64_t ndim) {
-  AT_ERROR("sparse tensors do not have resize_dim");
-}
 void SparseTensorImpl::set_size(int64_t dim, int64_t new_size) {
   AT_ERROR("sparse tensors do not have set_size");
 }
@@ -72,13 +69,6 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
 
 int64_t SparseTensorImpl::dim() const {
   return sparse_dim_ + dense_dim_;
-}
-TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
-  TORCH_CHECK(condition_when_zero_dim == (dim() == 0),
-           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
-           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
-           " changing dimensionality via maybe_zero_dim");
-  return this;
 }
 bool SparseTensorImpl::has_storage() const {
   return false;
@@ -99,7 +89,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(), ") must match device type of device().type()", device().type(), ")");
   TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", typeMetaToScalarType(dtype()), ")");
   TORCH_CHECK(indices.scalar_type() == kLong, "indices must be an int64 tensor");
-  TORCH_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
+  TORCH_CHECK(indices.options().backend() == values.options().backend(), "backend of indices (", indices.options().backend(), ") must match backend of values (", values.options().backend(), ")");
   TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
   TORCH_CHECK(indices.dim() == 2, "indices must be sparse_dim x nnz, but got: ", indices.sizes());

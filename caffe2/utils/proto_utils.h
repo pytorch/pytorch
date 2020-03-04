@@ -270,7 +270,7 @@ class C10_EXPORT ArgumentHelper {
     if (arg_map_.at(name).has_s()) {
       CAFFE_ENFORCE(
           message.ParseFromString(arg_map_.at(name).s()),
-          "Faild to parse content from the string");
+          "Failed to parse content from the string");
     } else {
       VLOG(1) << "Return empty message for parameter " << name;
     }
@@ -284,7 +284,7 @@ class C10_EXPORT ArgumentHelper {
     for (int i = 0; i < messages.size(); ++i) {
       CAFFE_ENFORCE(
           messages[i].ParseFromString(arg_map_.at(name).strings(i)),
-          "Faild to parse content from the string");
+          "Failed to parse content from the string");
     }
     return messages;
   }

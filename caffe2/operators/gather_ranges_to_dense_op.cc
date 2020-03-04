@@ -64,7 +64,7 @@ are sorted by the corresponding KEY.
         "RANGES",
         "Tensor of int32/int64 ranges, of dims (N, M, 2). "
         "Where N is number of examples and M is a size of each example. "
-        "Last dimention represents a range in the format (start, lengths)")
+        "Last dimension represents a range in the format (start, lengths)")
     .Input(2, "KEY", "Tensor of rank 1 and type int64.")
     .Output(0, "OUTPUT", "1-D tensor of size sum of range lengths")
     .Arg("lengths", "Expected lengths for ranges")
@@ -76,6 +76,10 @@ are sorted by the corresponding KEY.
     .Arg(
         "max_mismatched_ratio",
         "An error is raised when ratio of mismatched ranges exceeds this.")
+    .Arg(
+        "max_empty_ratio",
+        "An error is raised when ratio of empty ranges exceeds this (default is"
+        " 1, which means by default no error will be triggered).")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);

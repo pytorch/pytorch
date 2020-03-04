@@ -63,7 +63,7 @@ if (NOT INTERN_BUILD_MOBILE)
   # ---[ Check if certain std functions are supported. Sometimes
   # _GLIBCXX_USE_C99 macro is not defined and some functions are missing.
   cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+  set(CMAKE_REQUIRED_FLAGS "-std=c++14")
   CHECK_CXX_SOURCE_COMPILES("
   #include <cmath>
   #include <string>
@@ -90,7 +90,7 @@ endif()
 
 # ---[ Check if std::exception_ptr is supported.
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+set(CMAKE_REQUIRED_FLAGS "-std=c++14")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <string>
     #include <exception>
@@ -111,35 +111,13 @@ else()
 endif()
 cmake_pop_check_state()
 
-# ---[ Check for NUMA support
-if (USE_NUMA)
-  cmake_push_check_state(RESET)
-  set(CMAKE_REQUIRED_FLAGS "-std=c++11")
-  CHECK_CXX_SOURCE_COMPILES(
-    "#include <numa.h>
-    #include <numaif.h>
-
-    int main(int argc, char** argv) {
-    }" CAFFE2_IS_NUMA_AVAILABLE)
-  if (CAFFE2_IS_NUMA_AVAILABLE)
-    message(STATUS "NUMA is available")
-  else()
-    message(STATUS "NUMA is not available")
-    set(CAFFE2_DISABLE_NUMA 1)
-  endif()
-  cmake_pop_check_state()
-else()
-  message(STATUS "NUMA is disabled")
-  set(CAFFE2_DISABLE_NUMA 1)
-endif()
-
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we
 # are building under. If yes, we will turn off deprecation warning for a
 # cleaner build output.
 cmake_push_check_state(RESET)
-set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+set(CMAKE_REQUIRED_FLAGS "-std=c++14")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <glog/stl_logging.h>
     int main(int argc, char** argv) {

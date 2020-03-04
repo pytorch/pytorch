@@ -14,6 +14,7 @@ import torch.nn as nn
 linear_configs_short = op_bench.config_list(
     attr_names=["N", "IN", "OUT"],
     attrs=[
+        [1, 1, 1],
         [4, 256, 128],
         [16, 512, 256],
     ],

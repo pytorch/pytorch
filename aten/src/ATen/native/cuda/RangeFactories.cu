@@ -1,12 +1,50 @@
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/detail/FunctionTraits.h>
 #include <cmath>
 #include <limits>
 
-#include <ATen/native/cuda/Loops.cuh>
+#define GPU_LAMBDA __device__ __host__
+
+namespace {
+
+constexpr int num_threads = C10_WARP_SIZE * 2;
+constexpr int thread_work_size = 1;
+constexpr int block_work_size = thread_work_size * num_threads;
+
+template<typename index_t, typename func_t>
+C10_LAUNCH_BOUNDS_1(num_threads)
+__global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
+  #pragma unroll
+  for (int i = 0; i < thread_work_size; i++) {
+    index_t idx = block_work_size * blockIdx.x + num_threads * i + threadIdx.x;
+    if (idx < N) {
+      data[idx] = f(idx);
+    }
+  }
+}
+
+template<typename func_t>
+void gpu_kernel_with_index(at::Tensor &output, func_t f) {
+  int64_t N = output.numel();
+  if (N == 0) {
+    return;
+  }
+  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  using scalar_t = typename function_traits<func_t>::result_type;
+  if (N <= std::numeric_limits<int>::max()) {
+    elementwise_kernel_with_index<int><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+  } else {
+    elementwise_kernel_with_index<int64_t><<<grid, num_threads, 0, stream>>>(N, f, output.data_ptr<scalar_t>());
+  }
+}
+
+}  // namespace
 
 namespace at {
 namespace native {
@@ -17,36 +55,38 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   if (result.numel() != steps) {
     result.resize_({steps});
   }
-  // Using TensorIter, output no longer need to be contiguous
-  // We still need to check if there is internal overlap
-  // YES: error out, TOO_HARD: fallback to copy behavior, NO: use result directly
-  auto overlap = has_internal_overlap(result);
-  TORCH_CHECK(overlap != MemOverlap::YES,
-              "unsupported operation: more than one element of the written-to tensor "
-              "refers to a single memory location. Please clone() the tensor before "
-              "performing the operation.");
-  Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+  bool is_contiguous = result.is_contiguous();
+  Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
     r.fill_(start);
+  } else if (isIntegralType(r.scalar_type(), 0)) {
+    AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
+      scalar_t scalar_start = start.to<scalar_t>();
+      scalar_t scalar_end = end.to<scalar_t>();
+      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
+
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int64_t ind) -> scalar_t {
+        scalar_t val = scalar_start + step * ind;
+        return val;
+      });
+    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "linspace_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step]GPU_LAMBDA(int ind) -> scalar_t {
-          scalar_t inc = step * ind;
-          scalar_t val = scalar_start + inc;
-          return val;
-        });
+      gpu_kernel_with_index(r, [scalar_start, step]GPU_LAMBDA(int64_t ind) -> scalar_t {
+        scalar_t val = scalar_start + step * ind;
+        return val;
+      });
     });
   }
 
-  if(overlap == MemOverlap::TOO_HARD) {
+  if(!is_contiguous) {
     result.copy_(r);
   }
 
@@ -60,37 +100,40 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   if (result.numel() != steps) {
     result.resize_({steps});
   }
-  // Using TensorIter, output no longer need to be contiguous
-  // We still need to check if there is internal overlap
-  // YES: error out, TOO_HARD: fallback to copy behavior, NO: use result directly
-  auto overlap = has_internal_overlap(result);
-  TORCH_CHECK(overlap != MemOverlap::YES,
-              "unsupported operation: more than one element of the written-to tensor "
-              "refers to a single memory location. Please clone() the tensor before "
-              "performing the operation.");
-  Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+  bool is_contiguous = result.is_contiguous();
+  Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
   if (steps == 0) {
     // skip
   } else if (steps == 1) {
     r.fill_(std::pow(base, start.to<double>()));
+  } else if (isIntegralType(r.scalar_type(), 0)) {
+    AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
+      float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
+      scalar_t scalar_start = start.to<scalar_t>();
+      scalar_t scalar_end = end.to<scalar_t>();
+      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
+
+      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
+        scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
+        return val;
+      });
+    });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, r.scalar_type(), "logspace_cuda", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "logspace_cuda", [&]() {
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
 
-      auto iter = TensorIterator::nullary_op(r);
-      gpu_kernel_with_index(iter, [scalar_start, step, scalar_base]GPU_LAMBDA(int ind) -> scalar_t {
-          scalar_t inc = step * ind;
-          scalar_t val = std::pow(scalar_base, scalar_start + inc);
+      gpu_kernel_with_index(r, [scalar_start, step, scalar_base]GPU_LAMBDA(int64_t ind) -> scalar_t {
+          scalar_t val = std::pow(scalar_base, scalar_start + step * ind);
           return val;
         });
     });
   }
 
-  if(overlap == MemOverlap::TOO_HARD) {
+  if(!is_contiguous) {
     result.copy_(r);
   }
 
@@ -116,24 +159,16 @@ Tensor& range_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     if (result.numel() != size) {
       result.resize_({size});
     }
-    // Using TensorIter, output no longer need to be contiguous
-    // We still need to check if there is internal overlap
-    // YES: error out, TOO_HARD: fallback to copy behavior, NO: use result directly
-    auto overlap = has_internal_overlap(result);
-    TORCH_CHECK(overlap != MemOverlap::YES,
-                "unsupported operation: more than one element of the written-to tensor "
-                "refers to a single memory location. Please clone() the tensor before "
-                "performing the operation.");
-    Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+    bool is_contiguous = result.is_contiguous();
+    Tensor r = !is_contiguous ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    auto iter = TensorIterator::nullary_op(r);
-    gpu_kernel_with_index(iter, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
     });
 
-    if(overlap == MemOverlap::TOO_HARD) {
+    if(!is_contiguous) {
       result.copy_(r);
     }
 
@@ -187,24 +222,16 @@ Tensor& arange_cuda_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
       }
       result.resize_({size});
     }
-    // Using TensorIter, output no longer need to be contiguous
-    // We still need to check if there is internal overlap
-    // YES: error out, TOO_HARD: fallback to copy behavior, NO: use result directly
-    auto overlap = has_internal_overlap(result);
-    TORCH_CHECK(overlap != MemOverlap::YES,
-                "unsupported operation: more than one element of the written-to tensor "
-                "refers to a single memory location. Please clone() the tensor before "
-                "performing the operation.");
-    Tensor r = (overlap == MemOverlap::TOO_HARD) ?  at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
+    bool is_contiguous = result.is_contiguous();
+    Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-    auto iter = TensorIterator::nullary_op(r);
-    gpu_kernel_with_index(iter, [xstart, xstep]GPU_LAMBDA(int ind) -> scalar_t {
+    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
         accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
         accscalar_t val = xstart + inc;
         return static_cast<scalar_t>(val);
     });
 
-    if(overlap == MemOverlap::TOO_HARD) {
+    if(!is_contiguous) {
       result.copy_(r);
     }
 

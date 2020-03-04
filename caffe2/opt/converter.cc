@@ -1,4 +1,5 @@
 #include <limits>
+#include <utility>
 
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
@@ -341,7 +342,7 @@ repr::NNModule convertToNNModule(
   }
 
   /// \brief For the construction of the control flow graph we keep track
-  /// of a current basic block, which we split up as we come accross control
+  /// of a current basic block, which we split up as we come across control
   /// flow operations such as if and while.
   auto bbNode = cfg.createNamedFunction("main");
 
@@ -606,7 +607,7 @@ void injectDataEdgeIndicators(caffe2::NetDef* net) {
     caffe2::OperatorDef op;
     op.set_type("Export");
     op.add_input(output);
-    *net->add_op() = op;
+    *net->add_op() = std::move(op);
   }
   net->clear_external_input();
   net->clear_external_output();

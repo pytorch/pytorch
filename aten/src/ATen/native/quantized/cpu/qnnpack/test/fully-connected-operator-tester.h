@@ -19,6 +19,7 @@
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
+#include <qnnpack/AlignedAllocator.h>
 
 class FullyConnectedOperatorTester {
  public:
@@ -108,7 +109,13 @@ class FullyConnectedOperatorTester {
     return this->iterations_;
   }
 
-  void testQ8(bool runtime_quant = false ) const {
+  enum class Mode {
+    Static,
+    Dynamic,
+    Runtime,
+  };
+
+  void testQ8(const Mode mode) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -121,9 +128,10 @@ class FullyConnectedOperatorTester {
     std::vector<int32_t> bias(outputChannels());
     std::vector<uint8_t> output(
         (batchSize() - 1) * outputStride() + outputChannels());
+    std::vector<float> output_dynamic(output.size());
     std::vector<int32_t> accumulators(batchSize() * outputChannels());
 
-    const uint8_t* inputPtr = input.data() + 8;
+    const uint8_t* const inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
     const uint8_t kernelZeroPoint = 127;
 
@@ -132,6 +140,7 @@ class FullyConnectedOperatorTester {
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       std::fill(output.begin(), output.end(), 0xA5);
+      std::fill(output_dynamic.begin(), output_dynamic.end(), 0.0f);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
       for (size_t i = 0; i < batchSize(); i++) {
@@ -150,6 +159,7 @@ class FullyConnectedOperatorTester {
           }
         }
       }
+
       // Create dummy min/max for empty inputs.
       // These are only used to compute scale and zero point,
       // and real callers will just pull those values from the model.
@@ -172,7 +182,89 @@ class FullyConnectedOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      if (runtime_quant) {
+
+      switch(mode) {
+        case Mode::Static:
+        {
+          pytorch_qnnp_operator_t convolution = nullptr;
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_fully_connected_nc_q8(
+                  inputChannels(),
+                  outputChannels(),
+                  inputZeroPoint,
+                  1.0f /* input scale */,
+                  kernelZeroPoint,
+                  1.0f /* kernel scale */,
+                  kernel.data(),
+                  bias.data(),
+                  outputZeroPoint,
+                  outputScale,
+                  qmin(),
+                  qmax(),
+                  0,
+                  &convolution));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_fully_connected_nc_q8(
+                  convolution,
+                  batchSize(),
+                  inputPtr,
+                  inputStride(),
+                  output.data(),
+                  outputStride()));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(convolution));
+          convolution = nullptr;
+        }
+        break;
+
+        case Mode::Dynamic:
+        {
+          auto packW = std::unique_ptr<qnnpack::PackBMatrix>(
+              new qnnpack::PackBMatrix(
+                  inputChannels(),
+                  outputChannels(),
+                  kernelZeroPoint,
+                  1.0f,
+                  kernel.data(),
+                  nullptr));
+
+          // Attention! Bias size must be a multiple of 8.
+          constexpr size_t kBiasSizeMultiple = 8u;
+          std::vector<float, AlignedAllocator<float, 32>> bias_float(
+            (bias.size() + (kBiasSizeMultiple - 1)) & -kBiasSizeMultiple);
+          std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
+
+          const pytorch_qnnp_status runStatus = qnnpack::qnnpackLinearDynamic(
+              batchSize() /* batch_size */,
+              inputChannels() /* input_channels */,
+              outputChannels() /* output_channels */,
+              inputZeroPoint,
+              1.0f /* input scale */,
+              kernelZeroPoint,
+              1.0f /* kernel scale */,
+              inputPtr,
+              inputChannels() /* input_stride */,
+              packW->getPackedWeights(),
+              bias_float.data(),
+              output_dynamic.data(),
+              outputStride() /* output_stride */,
+              nullptr /* threadpool */);
+          ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+        }
+        break;
+
+        case Mode::Runtime:
+        {
           auto packW = std::unique_ptr<qnnpack::PackBMatrix>(
               new qnnpack::PackBMatrix(
                   inputChannels(),
@@ -201,62 +293,54 @@ class FullyConnectedOperatorTester {
               outputStride() /* output_stride */,
               nullptr /* threadpool */);
           ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
-
-      }
-      else {
-        pytorch_qnnp_operator_t convolution = nullptr;
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_create_fully_connected_nc_q8(
-                inputChannels(),
-                outputChannels(),
-                inputZeroPoint,
-                1.0f /* input scale */,
-                kernelZeroPoint,
-                1.0f /* kernel scale */,
-                kernel.data(),
-                bias.data(),
-                outputZeroPoint,
-                outputScale,
-                qmin(),
-                qmax(),
-                0,
-                &convolution));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_setup_fully_connected_nc_q8(
-                convolution,
-                batchSize(),
-                inputPtr,
-                inputStride(),
-                output.data(),
-                outputStride()));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
-
-        ASSERT_EQ(
-            pytorch_qnnp_status_success,
-            pytorch_qnnp_delete_operator(convolution));
-        convolution = nullptr;
-      }
-      for (size_t i = 0; i < batchSize(); i++) {
-        for (size_t c = 0; c < outputChannels(); c++) {
-          const double scaledAccumulator =
-              accumulators[i * outputChannels() + c] / outputScale;
-          const double clampedAccumulator = std::max(
-              std::min(
-                  scaledAccumulator, double(qmax()) - double(outputZeroPoint)),
-              double(qmin()) - double(outputZeroPoint));
-          ASSERT_NEAR(
-              clampedAccumulator,
-              (int32_t(output[i * outputStride() + c]) - outputZeroPoint),
-              0.9)
-              << "batch index = " << i << ", channel = " << c;
         }
+        break;
+
+        default:
+          // Undefined!
+          ASSERT_TRUE(false);
+      }
+
+      switch (mode) {
+        case Mode::Static:
+        case Mode::Runtime:
+        {
+          for (size_t i = 0; i < batchSize(); i++) {
+            for (size_t c = 0; c < outputChannels(); c++) {
+              const double scaledAccumulator =
+                  accumulators[i * outputChannels() + c] / outputScale;
+              const double clampedAccumulator = std::max(
+                  std::min(
+                      scaledAccumulator, double(qmax()) - double(outputZeroPoint)),
+                  double(qmin()) - double(outputZeroPoint));
+              ASSERT_NEAR(
+                  clampedAccumulator,
+                  (int32_t(output[i * outputStride() + c]) - outputZeroPoint),
+                  0.9)
+                  << "batch index = " << i << ", channel = " << c;
+            }
+          }
+        }
+        break;
+
+        case Mode::Dynamic:
+        {
+          for (size_t i = 0; i < batchSize(); i++) {
+            for (size_t c = 0; c < outputChannels(); c++) {
+              ASSERT_EQ(
+                  output_dynamic[i * outputChannels() + c],
+                  (float)accumulators[i * outputChannels() + c])
+                  << "at " << i << ", " << c
+                  << ": reference = " << (float)accumulators[i * outputChannels() + c]
+                  << ", optimized = " << output_dynamic[i * outputChannels() + c];
+            }
+          }
+        }
+        break;
+
+        default:
+          // Undefined!
+          ASSERT_TRUE(false);
       }
     }
   }

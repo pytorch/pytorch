@@ -8,9 +8,9 @@ PROJ_ROOT=/Users/distiller/project
 export TCLLIBPATH="/usr/local/lib" 
 
 # Install conda
-curl --retry 3 -o ~/Downloads/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
-chmod +x ~/Downloads/conda.sh
-/bin/bash ~/Downloads/conda.sh -b -p ~/anaconda
+curl --retry 3 -o ~/conda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh
+chmod +x ~/conda.sh
+/bin/bash ~/conda.sh -b -p ~/anaconda
 export PATH="~/anaconda/bin:${PATH}"
 source ~/anaconda/bin/activate
 

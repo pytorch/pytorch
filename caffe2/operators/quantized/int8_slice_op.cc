@@ -38,6 +38,11 @@ Example:
     .Arg("Y_zero_point", "Output tensor quantization offset")
     .Arg("starts", "List of starting indices")
     .Arg("ends", "List of ending indices")
+    .Arg(
+        "dim",
+        "(Optional) The dimension to slice over. If specified start_idx and end_idx should also be given and it takes precedence over starts and ends")
+    .Arg("start_idx", "(Optional) The dimension to start slice from. Default is 0")
+    .Arg("end_idx", "(Optional) The dimension to end the slice. Default is -1")
     .Output(0, "output", "Sliced Int8 data tensor.")
     .InheritOnnxSchema("Slice");
 

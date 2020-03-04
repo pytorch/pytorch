@@ -63,7 +63,7 @@ SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered 
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
 SIGNAL_HANDLER(SIGFPE, handler_SIGFPE, "ERROR: Unexpected floating-point exception encountered in worker.\n");
 
-// When an error happend in DataLoader methods and Python starts to exit, the
+// When an error happened in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
 // processes first before deleting the loader object. Then the cleaning up
 // methods in DataLoader.__del__ are not yet called, and SIGCHILD will print an
@@ -182,7 +182,7 @@ static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_i
   int64_t key = THPUtils_unpackLong(loader_id);
   auto it = worker_pids.find(key);
   if (it == worker_pids.end()) {
-    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %ld.", key);
+    throw ValueError("Cannot find worker information for _BaseDataLoaderIter with id %" PRId64, key);
   }
   worker_pids.erase(it);
 

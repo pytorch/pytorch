@@ -175,18 +175,12 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_amd.py"
 fi
 
-# building bundled nccl in this config triggers a bug in nvlink. For
-# more, see https://github.com/pytorch/pytorch/issues/14486
-if [[ "${BUILD_ENVIRONMENT}" == *-cuda8*-cudnn7* ]]; then
-    build_args+=("USE_SYSTEM_NCCL=ON")
-fi
-
 # Try to include Redis support for Linux builds
 if [ "$(uname)" == "Linux" ]; then
   build_args+=("USE_REDIS=ON")
 fi
 
-# Use a speciallized onnx namespace in CI to catch hardcoded onnx namespace
+# Use a specialized onnx namespace in CI to catch hardcoded onnx namespace
 build_args+=("ONNX_NAMESPACE=ONNX_NAMESPACE_FOR_C2_CI")
 
 ###############################################################################

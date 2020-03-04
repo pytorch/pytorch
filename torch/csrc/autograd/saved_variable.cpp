@@ -57,7 +57,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (saved_version_ != version_counter_.current_version()) {
     std::stringstream message;
     message << "one of the variables needed for gradient computation has been "
-        "modified by an inplace operation: [" << data_.type().toString() << " "
+        "modified by an inplace operation: [" << data_.toString() << " "
         << data_.sizes() << "]";
     if (grad_fn) {
         message << ", which is output " << output_nr_

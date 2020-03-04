@@ -176,7 +176,7 @@ class CounterDeserializer : public BlobDeserializerBase {
     CAFFE_ENFORCE_EQ(
         tensorProto.int64_data_size(), 1, "Unexpected size of data");
     *blob->GetMutable<std::unique_ptr<Counter<int64_t>>>() =
-        caffe2::make_unique<Counter<int64_t>>(tensorProto.int64_data(0));
+        std::make_unique<Counter<int64_t>>(tensorProto.int64_data(0));
   }
 };
 }
