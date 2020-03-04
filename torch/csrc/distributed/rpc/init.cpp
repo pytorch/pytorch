@@ -39,10 +39,11 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<RpcBackendOptions>(
           module,
           "RpcBackendOptions",
-          R"(A structure encapsulating the options passed into the RPC backend.
-            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
-            in order to initialize RPC with specific configurations, such as the
-             RPC timeout and init_method to be used. )")
+          R"(An abstract structure encapsulating the options passed into the RPC
+            backend. An instance of this class can be passed in to
+            :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
+            with specific configurations, such as the RPC timeout and
+            `init_method` to be used. )")
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeout,
@@ -53,7 +54,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               "init_method",
               &RpcBackendOptions::initMethod,
               R"(URL specifying how to initialize the process group.
-                Default is env://)");
+                Default is ``env://``)");
+
+  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -207,11 +211,54 @@ If the future completes with an error, an exception is thrown.
               )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
-      .def(py::init<>())
+      module,
+      "ProcessGroupRpcBackendOptions",
+      rpcBackendOptions,
+      R"(
+          The backend options class for ``ProcessGroupAgent``, which is derived
+          from ``RpcBackendOptions``.
+
+          Arguments:
+              num_send_recv_threads (int, optional): The number of threads in
+                  the thread-pool used by ``ProcessGroupAgent`` (default: 4).
+              rpc_timeout (datetime.timedelta, optional): The timeout for RPC
+                  requests (default: ``timedelta(seconds=60)``).
+              init_method (str, optional): The URL to initialize
+                  ``ProcessGroupGloo`` (default: ``env://``).
+
+
+          Example::
+              >>> import datetime, os
+              >>> from torch.distributed import rpc
+              >>> os.environ['MASTER_ADDR'] = 'localhost'
+              >>> os.environ['MASTER_PORT'] = '29500'
+              >>>
+              >>> rpc.init_rpc(
+              >>>     "worker1",
+              >>>     rank=0,
+              >>>     world_size=2,
+              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+              >>>         num_send_recv_threads=16,
+              >>>         datetime.timedelta(seconds=20)
+              >>>     )
+              >>> )
+              >>>
+              >>> # omitting init_rpc invocation on worker2
+      )")
+      .def(
+          py::init<int, std::chrono::milliseconds, std::string>(),
+          py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
+          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
-          &ProcessGroupRpcBackendOptions::numSendRecvThreads);
+          &ProcessGroupRpcBackendOptions::numSendRecvThreads,
+          R"(
+              The number of threads in the thread-pool used by ProcessGroupAgent.
+          )");
+
+  module.attr("_DEFAULT_NUM_SEND_RECV_THREADS") =
+      py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
