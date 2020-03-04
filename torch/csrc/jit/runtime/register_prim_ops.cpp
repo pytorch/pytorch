@@ -2959,7 +2959,7 @@ RegisterOperators reg2({
     Operator(
         "aten::all(bool[] self) -> bool",
         [](Stack& stack) {
-          c10::List<int64_t> l = pop(stack).toIntList();
+          c10::List<bool> l = pop(stack).toBoolList();
           push(stack, std::move(l));
           push(stack, true);
           for(int i = 0; i < l.size(); i++){
