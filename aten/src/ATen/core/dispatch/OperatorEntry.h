@@ -29,13 +29,19 @@ public:
     return *schema_;
   }
 
+  const OperatorName& operator_name() const {
+    return name_;
+  }
+
   const DispatchTable& dispatch_table() const {
     return dispatchTable_;
   }
 
   void prepareForDeregistration();
 
-  RegistrationHandleRAII registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
+  // Postcondition: caller is responsible for disposing of the kernel
+  std::list<KernelFunction>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
+  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
 
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
     TORCH_INTERNAL_ASSERT(schema_.has_value());
@@ -43,7 +49,6 @@ public:
   }
 
 private:
-  void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
 
   OperatorName name_;
   c10::optional<FunctionSchema> schema_;

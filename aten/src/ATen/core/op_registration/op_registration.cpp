@@ -10,13 +10,17 @@ static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRA
 
 // OperatorRegistrar in its constructor registers an operator in the dispatch
 // table deregisters it in the destructor.
+//
+// TODO: just use the RAII returned by dispatcher directly, stop indirecting
+// here
 class RegisterOperators::OperatorRegistrar final {
 public:
   explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : op_(Dispatcher::singleton().registerSchema(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
+  : operator_name_(schema.operator_name())
+  , op_(Dispatcher::singleton().registerDef(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
     if (kernel.has_value()) {
       TORCH_INTERNAL_ASSERT(kernel->isValid());
-      kernel_registration_handle_ = Dispatcher::singleton().registerKernel(op_.second, dispatch_key, std::move(*kernel));
+      kernel_registration_handle_ = Dispatcher::singleton().registerImpl(operator_name_, dispatch_key, std::move(*kernel));
     }
   }
 
@@ -28,7 +32,8 @@ public:
   OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
 
 private:
-  std::pair<RegistrationHandleRAII, OperatorHandle> op_;
+  OperatorName operator_name_;
+  RegistrationHandleRAII op_;
   c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
 };
 

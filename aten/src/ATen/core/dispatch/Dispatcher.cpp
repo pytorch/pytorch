@@ -57,7 +57,9 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
   return findSchema({name, overload_name}).value();
 }
 
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
+// Postcondition: caller is responsible for disposing of registration when they
+// are done
+OperatorHandle Dispatcher::findOrRegisterWithSchema_(FunctionSchema&& schema) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
@@ -86,26 +88,45 @@ OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
   return handle;
 }
 
-std::pair<RegistrationHandleRAII, OperatorHandle> Dispatcher::registerSchema(FunctionSchema schema) {
+// Postcondition: caller is responsible for disposing of registration when they
+// are done
+OperatorHandle Dispatcher::findOrRegisterWithName_(const OperatorName& op_name) {
+  const auto found = findSchema(op_name);
+  if (found != c10::nullopt) {
+    return *found;
+  }
+
+  operators_.emplace_back(OperatorName(op_name));
+  OperatorHandle handle(--operators_.end());
+  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+    operatorLookupTable.emplace(op_name, handle);
+  });
+
+  return handle;
+}
+
+
+RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
   OperatorName op_name = schema.operator_name();
 
-  auto op = findOrRegisterSchema_(std::move(schema));
+  auto op = findOrRegisterWithSchema_(std::move(schema));
 
   ++op.operatorIterator_->refcount;
+  ++op.operatorIterator_->weak_refcount;
   if (1 == op.operatorIterator_->refcount) {
     // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
     listeners_->callOnOperatorRegistered(op);
   }
 
-  return std::make_pair(RegistrationHandleRAII([this, op, op_name] {
-    deregisterSchema_(op, op_name);
-  }), op);
+  return RegistrationHandleRAII([this, op, op_name] {
+    deregisterDef_(op, op_name);
+  });
 }
 
-void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name) {
+void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op_name) {
   // we need a lock to avoid concurrent writes
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -113,13 +134,18 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
 
   // reduce refcount and actually deregister if no references left
   TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->weak_refcount > 0);
   --op.operatorIterator_->refcount;
+  --op.operatorIterator_->weak_refcount;
   if (0 == op.operatorIterator_->refcount) {
-    op.operatorIterator_->op.prepareForDeregistration();
-
     // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
+    // TODO: check that listeners are not relying on prepareForDeregistration()
+    // invariant
     listeners_->callOnOperatorDeregistered(op);
-
+  }
+  if (0 == op.operatorIterator_->weak_refcount) {
+    // TODO: rename this to "assert deregistration invariants"
+    op.operatorIterator_->op.prepareForDeregistration();
     operators_.erase(op.operatorIterator_);
     operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
       operatorLookupTable.erase(op_name);
@@ -127,7 +153,41 @@ void Dispatcher::deregisterSchema_(const OperatorHandle& op, const OperatorName&
   }
 }
 
-RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dispatchKey, KernelFunction kernel) {
+RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  auto op = findOrRegisterWithName_(op_name);
+
+  auto kernel_handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
+
+  ++op.operatorIterator_->weak_refcount;
+
+  return RegistrationHandleRAII([this, op, op_name, dispatch_key, kernel_handle] {
+    op.operatorIterator_->op.deregisterKernel_(dispatch_key, kernel_handle);
+    deregisterImpl_(op, op_name);
+  });
+}
+
+// NB: This doesn't actually deregister the op, that's handled by the lambda
+// above
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
+
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->weak_refcount > 0);
+  --op.operatorIterator_->weak_refcount;
+  if (0 == op.operatorIterator_->weak_refcount) {
+    // TODO: rename this to "assert deregistration invariants"
+    op.operatorIterator_->op.prepareForDeregistration();
+    operators_.erase(op.operatorIterator_);
+    operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+      operatorLookupTable.erase(op_name);
+    });
+  }
+}
+
+RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, KernelFunction kernel) {
   auto inserted = backendFallbackKernels_.setKernel(dispatchKey, std::move(kernel));
   TORCH_CHECK(inserted == impl::KernelFunctionTable::SetKernelResult::ADDED_NEW_KERNEL, "Tried to register a backend fallback kernel for ", dispatchKey, " but there was already one registered.");
   if (kernel.isFallthrough()) {
@@ -135,20 +195,16 @@ RegistrationHandleRAII Dispatcher::registerBackendFallbackKernel(DispatchKey dis
   }
 
   return RegistrationHandleRAII([this, dispatchKey] {
-    deregisterBackendFallbackKernel_(dispatchKey);
+    deregisterFallback_(dispatchKey);
   });
 }
 
-void Dispatcher::deregisterBackendFallbackKernel_(DispatchKey dispatchKey) {
+void Dispatcher::deregisterFallback_(DispatchKey dispatchKey) {
   auto result = backendFallbackKernels_.removeKernelIfExists(dispatchKey);
   backendsWithoutFallthrough_ = backendsWithoutFallthrough_.add(dispatchKey);
   TORCH_INTERNAL_ASSERT(result == impl::KernelFunctionTable::RemoveKernelIfExistsResult::REMOVED_KERNEL, "Tried to deregister a backend fallback kernel for ", dispatchKey, " but there was none registered.");
 }
 
-RegistrationHandleRAII Dispatcher::registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
-  // note: this doesn't need the mutex to protect the iterator because write operations on the list keep iterators intact.
-  return op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
-}
 
 void Dispatcher::addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener) {
   std::lock_guard<std::mutex> lock(mutex_);

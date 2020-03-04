@@ -6,7 +6,7 @@ using c10::KernelFunction;
 
 namespace {
 
-static auto registry = Dispatcher::singleton().registerBackendFallbackKernel(
+static auto registry = Dispatcher::singleton().registerFallback(
     DispatchKey::BackendSelect,
     KernelFunction::makeFallthrough()
 );

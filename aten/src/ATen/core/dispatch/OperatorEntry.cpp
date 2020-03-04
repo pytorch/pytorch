@@ -47,7 +47,7 @@ void OperatorEntry::prepareForDeregistration() {
   TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator is ", toString(name_));
 }
 
-RegistrationHandleRAII OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
+std::list<KernelFunction>::iterator OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
@@ -58,12 +58,7 @@ RegistrationHandleRAII OperatorEntry::registerKernel(c10::optional<DispatchKey> 
   // update the dispatch table, i.e. re-establish the invariant
   // that the dispatch table points to the newest kernel
   updateDispatchTable_(dispatch_key);
-
-  return RegistrationHandleRAII([this, dispatch_key, inserted] {
-    // list iterators stay valid even if the list changes,
-    // so we can use the iterator to remove the kernel from the list
-    deregisterKernel_(dispatch_key, inserted);
-  });
+  return inserted;
 }
 
 void OperatorEntry::deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel) {

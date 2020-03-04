@@ -15,6 +15,9 @@ class CAFFE2_API OperatorHandle;
  * Implement this interface and register your instance with the dispatcher
  * to get notified when operators are registered or deregistered with
  * the dispatcher.
+ *
+ * NB: registration events only occur when a 'def' occurs; we don't trigger
+ * on 'impl' or 'fallback' calls.
  */
 class CAFFE2_API OpRegistrationListener {
 public:
@@ -38,10 +41,26 @@ class CAFFE2_API Dispatcher final {
 private:
   struct OperatorDef final {
     explicit OperatorDef(FunctionSchema&& schema)
-    : op(std::move(schema)), refcount(0) {}
+    : op(std::move(schema)) {}
+
+    explicit OperatorDef(OperatorName&& op_name)
+    : op(std::move(op_name)) {}
 
     impl::OperatorEntry op;
-    size_t refcount;
+
+    // These are not "true" refcounts in the traditional sense; instead
+    // they refer to the number of outstanding RegistrationHandleRAII
+    // for this operator.  Refcount reflects only def() registrations
+    // (in the new world, this should only ever be 1, but old style
+    // registrations may register the schema multiple times, which
+    // will increase this count).  Weak refcount reflects the number
+    // of impl() registrations.  When a def() gets unregistered,
+    // we must immediately call the Deregistered listeners, but we
+    // must not actually delete the handle as there are other outstanding
+    // RAII destructors which will try to destruct and they had better
+    // still have a working operator handle in this case
+    size_t refcount = 0;
+    size_t weak_refcount = 0;
   };
   friend class OperatorHandle;
 
@@ -110,13 +129,8 @@ public:
    *
    * If a schema with the same operator name and overload name already exists,
    * this function will check that both schemas are exactly identical.
-   *
-   * @return An OperatorHandle for the registered schema which can be used to
-   *         register kernels for the operator and a RegistrationHandleRAII RAII
-   *         object that manages the lifetime of the registration. Once that
-   *         object is destructed, the kernel will be deregistered.
    */
-  std::pair<RegistrationHandleRAII, OperatorHandle> registerSchema(FunctionSchema schema);
+  RegistrationHandleRAII registerDef(FunctionSchema schema);
 
   /**
    * Register a kernel to the dispatch table for an operator.
@@ -125,7 +139,7 @@ public:
    * @return A RAII object that manages the lifetime of the registration.
    *         Once that object is destructed, the kernel will be deregistered.
    */
-  RegistrationHandleRAII registerKernel(const OperatorHandle& op, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
 
   /**
    * Register a fallback kernel for a backend.
@@ -133,7 +147,7 @@ public:
    * key of the given operator arguments, it will check if there is such a
    * fallback kernel for the given dispatch key and, if yes, call that one.
    */
-  RegistrationHandleRAII registerBackendFallbackKernel(DispatchKey dispatch_key, KernelFunction kernel);
+  RegistrationHandleRAII registerFallback(DispatchKey dispatch_key, KernelFunction kernel);
 
   // ------------------------------------------------------------------------
   //
@@ -152,10 +166,13 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterWithSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterWithName_(const OperatorName& op_name);
 
-  void deregisterSchema_(const OperatorHandle& op, const OperatorName& op_name);
-  void deregisterBackendFallbackKernel_(DispatchKey dispatchKey);
+  void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name);
+  void deregisterFallback_(DispatchKey dispatchKey);
+
   [[noreturn]] static void reportError(const DispatchTable& dispatchTable, DispatchKey dispatchKey);
 
   const KernelFunction& dispatch_(const DispatchTable& dispatchTable, DispatchKey dispatch_key) const;
@@ -182,6 +199,10 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+
+  const OperatorName& operator_name() const {
+    return operatorIterator_->op.operator_name();
+  }
 
   const FunctionSchema& schema() const {
     return operatorIterator_->op.schema();
