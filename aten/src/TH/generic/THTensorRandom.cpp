@@ -12,7 +12,7 @@
 #include <ATen/Utils.h>
 #include <TH/THGenerator.hpp>
 
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BFLOAT16)
 
 #if defined(TH_REAL_IS_FLOAT)
 #define TH_REAL_MIN FLT_MIN
@@ -26,7 +26,7 @@ void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_gene
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen->mutex_);
 
-  #if defined(TH_REAL_IS_FLOAT)
+  #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_BFLOAT16)
   at::uniform_real_distribution<float> uniform((float)a, (float)b);
   TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)uniform(gen););
   #else
@@ -35,6 +35,7 @@ void THTensor_(uniform)(THTensor *self, double a, double b, at::Generator *_gene
   #endif
 }
 
+#if !defined(TH_REAL_IS_BFLOAT16)
 #undef TH_REAL_MIN
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
@@ -161,6 +162,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THTensor *q, THLongTens
       THLongTensor_fastSet1d(self, i, sample_idx);
     }
 }
+#endif
 #endif
 
 #if defined(TH_REAL_IS_BYTE)

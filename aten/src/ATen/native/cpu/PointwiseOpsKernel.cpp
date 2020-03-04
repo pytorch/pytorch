@@ -12,7 +12,7 @@ namespace {
 
 static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, dtype, "addcmul_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(
@@ -30,7 +30,7 @@ static void addcmul_cpu_kernel(TensorIterator& iter, Scalar value) {
 
 static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcdiv_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, dtype, "addcdiv_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(
@@ -48,7 +48,7 @@ static void addcdiv_cpu_kernel(TensorIterator& iter, Scalar value) {
 
 static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES(dtype, "smooth_l1_backward_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, dtype, "smooth_l1_backward_cpu_out", [&] {
     auto norm_val = norm.to<scalar_t>();
     auto norm_val_vec = Vec256<scalar_t>(norm_val);
     const auto neg_1_vec = Vec256<scalar_t>(-1);
@@ -75,7 +75,7 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm) {
 
 static void mse_backward_cpu_kernel(TensorIterator& iter, Scalar value) {
   ScalarType dtype = iter.dtype(0);
-  AT_DISPATCH_ALL_TYPES(dtype, "mse_backward_cpu_out", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, dtype, "mse_backward_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
     auto scalar_vec = Vec256<scalar_t>(scalar_val);
     cpu_kernel_vec(

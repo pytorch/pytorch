@@ -329,8 +329,6 @@ void THTensor_(addr)(THTensor *r_, THTensor *t, THTensor *vec1, THTensor *vec2, 
   #undef LDA_COND
 }
 
-#ifndef TH_REAL_IS_BFLOAT16 /* non bfloat16 only part */
-
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(scalar_t a, scalar_t b) {
   return (a != 0) && (a < 0) != (b < 0);
@@ -382,6 +380,8 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
     TH_TENSOR_APPLY3(scalar_t, r_, scalar_t, t, scalar_t, src, *r__data = *t_data * *src_data;);
   }
 }
+
+#ifndef TH_REAL_IS_BFLOAT16 /* non bfloat16 only part */
 
 void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
 {

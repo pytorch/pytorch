@@ -49,7 +49,7 @@ struct Reduction {
             bool cmp = greater ? (zabs_(result) > zabs_(value)) : (zabs_(result) < zabs_(value));
             result = cmp ? result : value;
             result_index = cmp ? result_index : k;
-            if (_isnan<scalar_t>(result)) {
+            if (_isnan(result)) {
               break;
             }
           }
@@ -70,7 +70,7 @@ struct Reduction {
             bool cmp = greater ? (zabs_(result) > zabs_(value)) : (zabs_(result) < zabs_(value));
             result = cmp ? result : value;
             result_index = cmp ? result_index : k;
-            if (_isnan<scalar_t>(result)) {
+            if (_isnan(result)) {
               break;
             }
           }
@@ -87,7 +87,7 @@ static void max_kernel_impl(
     Tensor& max_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "max", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Bool, ScalarType::BFloat16, self.scalar_type(), "max", [&] {
     Reduction<scalar_t, int64_t>::apply(max, max_indices, self, dim, true);
   });
 }
@@ -97,7 +97,7 @@ static void min_kernel_impl(
     Tensor& min_indices,
     const Tensor& self,
     c10::optional<int64_t> dim) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::Bool, self.scalar_type(), "min", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(ScalarType::Bool, ScalarType::BFloat16, self.scalar_type(), "min", [&] {
     Reduction<scalar_t, int64_t>::apply(min, min_indices, self, dim, false);
   });
 }

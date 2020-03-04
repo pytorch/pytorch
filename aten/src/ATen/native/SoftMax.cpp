@@ -131,12 +131,12 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
       "dim must be non-negative and less than input dimensions");
-  if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
+  if (input.scalar_type() != ScalarType::BFloat16 && input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, input.scalar_type(), "softmax", [&] {
       host_softmax<scalar_t, false>(output, input, dim);
-    });
+    });//temporarily internal enabling only
   }
   return output;
 }
@@ -187,12 +187,12 @@ Tensor softmax_backward_cpu(
   TORCH_CHECK(
       dim >= 0 && dim < grad.dim(),
       "dim must be non-negative and less than input dimensions");
-  if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
+  if (grad.scalar_type() != ScalarType::BFloat16 && grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
-    });
+    });//temporarily internal enabling only
   }
   return grad_input;
 }

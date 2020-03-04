@@ -4317,6 +4317,20 @@ class TestNN(NNTestCase):
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_mse_loss_bfloat16(self):
+        i = torch.randn((10, 1), dtype=torch.float, requires_grad=True)
+        t = torch.randn((10, 1), dtype=torch.float)
+        i_bf16= i.detach().to(torch.bfloat16).requires_grad_(True)
+        t_bf16= t.to(torch.bfloat16)
+        outputf = F.mse_loss(i, t)
+        output = F.mse_loss(i_bf16, t_bf16)
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output, outputf, prec=1e-02)
+        outputf.sum().backward()
+        output.sum().backward()
+        self.assertEqual(i_bf16.grad.dtype, torch.bfloat16)
+        self.assertEqual(i_bf16.grad, i.grad, prec=1e-02)
+
     def test_poisson_nll_loss_reduction_modes(self):
         input = torch.tensor([0.5, 1.5, 2.5])
         target = torch.tensor([1., 2., 3.])
@@ -5986,6 +6000,17 @@ class TestNN(NNTestCase):
                 _test_gelu(n, m, torch.float64, True)
                 _test_gelu(n, m, torch.float64, False)
 
+    def test_gelu_bfloat16(self):
+        inputf = torch.randn((10, 10), dtype=torch.float, requires_grad=True)
+        input = inputf.detach().bfloat16().requires_grad_(True)
+        outputf = F.gelu(inputf)
+        output = F.gelu(input)
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output, outputf, prec=0.1)
+        gO = torch.empty_like(outputf).uniform_()
+        outputf.backward(gO)
+        output.backward(gO.bfloat16())
+        self.assertEqual(input.grad, inputf.grad, prec=0.01)
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
@@ -8119,6 +8144,24 @@ class TestNN(NNTestCase):
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
 
+    def test_bce_loss(self, dtype=torch.bfloat16):
+        sigmoid = nn.Sigmoid()
+        loss = nn.BCELoss().cpu()
+        inputf = torch.randn(3, device='cpu', dtype=torch.float, requires_grad=True)
+        input = inputf.to(dtype).detach().requires_grad_(True)
+        targetf = torch.empty(3, device='cpu', dtype=torch.float).random_(2)
+        target = targetf.to(dtype)
+
+        outf = loss(sigmoid(inputf), targetf)
+        out = loss(sigmoid(input), target)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out, outf, prec=1e-1)
+
+        outf.backward()
+        out.backward()
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad, prec=1e-1)
+
 class TestNNInit(TestCase):
     def setUp(self):
         super(TestNNInit, self).setUp()
@@ -8190,6 +8233,10 @@ class TestNNInit(TestCase):
             a = self._random_float(-3, 3)
             b = a + self._random_float(1, 5)
             init.uniform_(input_tensor, a=a, b=b)
+            assert self._is_uniform(input_tensor, a, b)
+
+            #bfloat16
+            init.uniform_(input_tensor.to(torch.bfloat16), a=a, b=b)
             assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
@@ -9033,6 +9080,19 @@ class TestNNDeviceType(NNTestCase):
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
 
+    def test_LayerNorm_cpu_bfloat16(self, device="cpu", dtype=torch.bfloat16):
+        inputf = torch.empty(2, 3, 3, 2, device="cpu", dtype=torch.float).random_(1, 10).requires_grad_(True)
+        input = inputf.detach().to(dtype).requires_grad_(True)
+        m = nn.LayerNorm([3, 2]).to("cpu", torch.float)
+        outputf = m(inputf)
+        output = m(input)
+        outputf.sum().backward()
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+        self.assertEqual(output, outputf, prec=0.01)
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad)
+
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
             (1, 2, 3, 4): 2,
@@ -9834,6 +9894,20 @@ class TestNNDeviceType(NNTestCase):
         outf.backward(gO)
         # should be bitwise equal
         self.assertEqual(input.grad, inputf.grad.to(dtype), prec=0)
+
+    def test_softmax_cpu_bfloat16(self, device="cpu", dtype=torch.bfloat16):
+        inputf = torch.rand(3200, 16000, device="cpu", dtype=torch.float, requires_grad=True)
+        input = inputf.detach().to(dtype).requires_grad_(True)
+        outf = F.softmax(inputf, dim=-1)
+        out = F.softmax(input, dim=-1)
+        self.assertEqual(out.dtype, dtype)
+        self.assertEqual(out, outf)
+        gO = torch.empty_like(outf).uniform_()
+        outf.backward(gO)
+        out.backward(gO.to(dtype))
+        self.assertEqual(input.grad.dtype, dtype)
+        self.assertEqual(input.grad, inputf.grad)
+
 
     @onlyCUDA
     def test_pool3d_size_one_feature_dim(self, device):

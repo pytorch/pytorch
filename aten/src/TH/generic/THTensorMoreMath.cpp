@@ -883,6 +883,9 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   }
 }
 
+#endif
+#endif
+#if !defined(TH_REAL_IS_BOOL)
 static void THTensor_(propagate_names_if_named_tensor_enabled)(THTensor* result, THTensor* src) {
   at::namedinference::propagate_names(result, src);
 }
@@ -962,18 +965,21 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,)
 #endif /* for byte, identity due to it being unsigned */
 
 /* floating point only now */
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_BFLOAT16)
 
-#if defined (TH_REAL_IS_FLOAT)
+#if defined (TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_BFLOAT16)
 #define TH_MATH_NAME(fn) fn##f
 #else
 #define TH_MATH_NAME(fn) fn
 #endif
+LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+#endif
+#if !defined(TH_REAL_IS_BFLOAT16)
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 void THTensor_(renorm)(THTensor *res, THTensor *src, scalar_t value, int dimension, scalar_t maxnorm)
 {

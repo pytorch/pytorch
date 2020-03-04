@@ -24,8 +24,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     int64_t N,
     double eps) {
   Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  Tensor mean = at::empty({M}, X.options());
-  Tensor rstd = at::empty({M}, X.options());
+  Tensor mean;
+  Tensor rstd;
+  if (X.scalar_type() == ScalarType::BFloat16) {
+    mean = at::empty({M}, X.options().dtype(kFloat));
+    rstd = at::empty({M}, X.options().dtype(kFloat));
+  } else {
+    mean = at::empty({M}, X.options());
+    rstd = at::empty({M}, X.options());
+  }
   if (M > 0) {
     LayerNormKernel(kCPU, X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
   }
