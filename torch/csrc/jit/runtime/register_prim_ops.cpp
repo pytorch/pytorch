@@ -2931,13 +2931,11 @@ RegisterOperators reg2({
         [](Stack& stack) {
           c10::List<int64_t> l = pop(stack).toIntList();
           push(stack, std::move(l));
+          push(stack, true);
           for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
+            if(!l[i]){
               push(stack, false);
               break;
-            }
-            else{
-              push(stack, true);
             }
           }
           return 0;
@@ -2948,13 +2946,11 @@ RegisterOperators reg2({
         [](Stack& stack) {
           c10::List<double> l = pop(stack).toDoubleList();
           push(stack, std::move(l));
+          push(stack, true);
           for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
+            if(!l[i]){
               push(stack, false);
               break;
-            }
-            else{
-              push(stack, true);
             }
           }
           return 0;
@@ -2963,15 +2959,13 @@ RegisterOperators reg2({
     Operator(
         "aten::all(bool[] self) -> bool",
         [](Stack& stack) {
-          c10::List<bool> l = pop(stack).toBoolList();
+          c10::List<int64_t> l = pop(stack).toIntList();
           push(stack, std::move(l));
+          push(stack, true);
           for(int i = 0; i < l.size(); i++){
-            if(l[i] == 0){
+            if(!l[i]){
               push(stack, false);
               break;
-            }
-            else{
-              push(stack, true);
             }
           }
           return 0;
