@@ -58,6 +58,8 @@ void Printer::print(const Expr* const expr) {
       print(static_cast<const UnaryOp* const>(expr)); return;
     case ExprType::BinaryOp:
       print(static_cast<const BinaryOp* const>(expr)); return;
+    case ExprType::ForLoop:
+      print(static_cast<const ForLoop* const>(expr)); return;
     case ExprType::Split:
       print(static_cast<const Split* const>(expr)); return;
     case ExprType::Merge:
@@ -210,6 +212,14 @@ void Printer::print(const BinaryOp* const bop) {
   
   if(!print_inline_)
     os<<"\n";
+}
+
+void Printer::print(const ForLoop* const fl) {
+  os << "ForLoop: " << fl->index() << " index " << fl->begin() << " begin " << fl->end() << " end \n";
+  for(auto &expr : fl->body()) {
+    os << "\t";
+    print(expr);	
+  }
 }
 
 void Printer::print(const Split* const s) {

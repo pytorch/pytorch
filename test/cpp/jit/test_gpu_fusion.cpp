@@ -854,6 +854,29 @@ void testGPU_FusionCodeGen2() {
   
  }
 
+void testGPU_FusionForLoop() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const auto T0  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T1  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T2  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+
+  fusion.addInput(T0);
+  fusion.addInput(T1);
+  fusion.addOutput(T2);
+
+  auto TV2 = new TensorView(T2);
+  
+  /**** Operator Expressions ****/ 
+
+  BinaryOp* op = new BinaryOp(BinaryOpType::Add, TV2, T0, T1);
+  ForLoop*  fl = new ForLoop(new Int(), new Int(0), new Int(5));
+
+  fl->add_expr(op);
+  std::cout << fl;
+ }
+
 void testGPU_Fusion() {}
 
 } // namespace jit

@@ -69,6 +69,22 @@ BinaryOp::BinaryOp(
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
+ForLoop::ForLoop(
+    Val* _index,
+    Val* _begin,
+    Val* _end)
+    : Expr(ExprType::ForLoop),
+      index_{_index},
+      begin_{_begin},
+      end_{_end},
+      body_()
+{
+  addInput(_index);
+  addInput(_begin);
+  addInput(_end);
+  this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
 Statement::~Statement() {}
 
 template <typename T>
@@ -142,6 +158,9 @@ void Expr::dispatch(T handler, Expr* expr) {
       return;
     case ExprType::BinaryOp:
       ptr(handler)->handle(static_cast<BinaryOp*>(expr));
+      return;
+    case ExprType::ForLoop:
+      ptr(handler)->handle(static_cast<ForLoop*>(expr));
       return;
     case ExprType::Split:
       ptr(handler)->handle(static_cast<Split*>(expr));
@@ -218,6 +237,8 @@ Statement* Expr::dispatch_mutator(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
     case ExprType::BinaryOp:
       return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
+    case ExprType::ForLoop:
+      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     case ExprType::Split:
       return ptr(mutator)->mutate(static_cast<Split*>(expr));
     case ExprType::Merge:
@@ -258,20 +279,6 @@ template Statement* Val::dispatch_mutator(BaseMutator, Val*);
 template Statement* Val::dispatch_mutator(BaseMutator*, Val*);
 template Statement* Expr::dispatch_mutator(BaseMutator, Expr*);
 template Statement* Expr::dispatch_mutator(BaseMutator*, Expr*);
-
-template void Statement::dispatch(IRMathPrinter, Statement*);
-template void Statement::dispatch(IRMathPrinter*, Statement*);
-template void Val::dispatch(IRMathPrinter, Val*);
-template void Val::dispatch(IRMathPrinter*, Val*);
-template void Expr::dispatch(IRMathPrinter, Expr*);
-template void Expr::dispatch(IRMathPrinter*, Expr*); 
-
-template void Statement::dispatch(IRTransformPrinter, Statement*);
-template void Statement::dispatch(IRTransformPrinter*, Statement*);
-template void Val::dispatch(IRTransformPrinter, Val*);
-template void Val::dispatch(IRTransformPrinter*, Val*);
-template void Expr::dispatch(IRTransformPrinter, Expr*);
-template void Expr::dispatch(IRTransformPrinter*, Expr*); 
 
 /*
  * Val member definitions
