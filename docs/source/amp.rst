@@ -13,12 +13,6 @@ use ``torch.float16`` (``half``). Some ops, like linear layers and convolutions,
 are much faster in ``float16``. Other ops, like reductions, often require the dynamic
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
-:class:`torch.cuda.amp.autocast` automatically chooses the precision for GPU operations
-in specified regions of your network.
-
-:class:`torch.cuda.amp.GradScaler` improves convergence for networks with ``float16``
-gradients by minimizing gradient underflow.
-
 Ordinarily, "automatic mixed precision training" uses :class:`torch.cuda.amp.autocast` and
 :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`Automatic Mixed Precision examples<amp-examples>`.
 However, :class:`autocast` and :class:`GradScaler` are modular, and may be used separately if desired.
