@@ -13,6 +13,7 @@
 #include <TH/THGenerateBFloat16Type.h>
 
 #include <ATen/native/Resize.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/TensorUtils.h>
 
 #include <numeric>
@@ -25,47 +26,18 @@ void THTensor_free(THTensor *self)
 }
 
 void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
-  if (stride_.data()) {
-    THArgCheck(size_.size() == stride_.size(), 5, "inconsistent size/stride sizes");
-  }
-
-#ifdef DEBUG
-  THAssert(size_.size() <= INT_MAX);
-#endif
-  THTensor_setStorageNd(self,
-                        storage_,
-                        storageOffset_,
-                        size_.size(),
-                        size_.data(),
-                        stride_.data());
+  c10::raw::intrusive_ptr::incref(storage_);
+  at::Storage at_storage(c10::intrusive_ptr<at::StorageImpl>::reclaim(storage_));
+  auto at_self = THTensor_wrap(self);
+  at::native::set_cpu_(at_self, at_storage, storageOffset_, size_, stride_);
 }
 
-void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
-{
-  /* storage */
-  if(THTensor_getStoragePtr(self) != storage)
-  {
-    if (!THTensor_getStoragePtr(self)) {
-      THError("Tensor: invalid null storage");
-    }
-    if(storage)
-    {
-      c10::raw::intrusive_ptr::incref(storage);
-      THTensor_stealAndSetStoragePtr(self, storage);
-    }
-    else {
-      THError("Tensor: invalid new null storage");
-    }
+void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride) {
+  at::IntArrayRef at_stride;
+  if (stride) {
+    at_stride = at::IntArrayRef(stride, nDimension);
   }
-
-  /* storageOffset */
-  if(storageOffset < 0) {
-    THError("Tensor: invalid storage offset");
-  }
-  self->set_storage_offset(storageOffset);
-
-  /* size and stride */
-  THTensor_resizeNd(self, nDimension, size, stride);
+  THTensor_setStorage(self, storage, storageOffset, at::IntArrayRef(size, nDimension), at_stride);
 }
 
 void THTensor_resize(THTensor *self, at::IntArrayRef size, at::IntArrayRef stride)
@@ -89,21 +61,4 @@ void THTensor_resizeNd(THTensor *self, int nDimension, const int64_t *size, cons
     strides = at::IntArrayRef(stride, nDimension);
   }
   at::native::resize_impl_cpu_(self, sizes, strides);
-}
-
-// NB: Steals ownership of storage
-void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
-  // Caffe2 might have tensors whose storages are null, but we
-  // don't allow it in PyTorch.
-  AT_ASSERT(storage);
-  // Caffe2 also has uninitialized dtype states, which we disallow here
-  AT_ASSERT(tensor->storage().dtype() == storage->dtype());
-
-  // We used to allow this, but this breaks device caching.
-  // Let's put an actual error message for this one.
-  TORCH_CHECK(tensor->storage().device() == storage->device(),
-            "Attempted to set the storage of a tensor on device \"", tensor->storage().device(),
-             "\" to a storage on different device \"", storage->device(),
-            "\".  This is no longer allowed; the devices must match.");
-  tensor->set_storage(at::Storage(c10::intrusive_ptr<THStorage>::reclaim(storage)));
 }

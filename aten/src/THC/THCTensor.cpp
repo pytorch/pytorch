@@ -16,6 +16,7 @@
 #include <THC/THCTensorInfo.cuh>
 
 #include <ATen/native/cuda/Resize.cuh>
+#include <ATen/native/TensorShape.h>
 
 int THCTensor_nDimension(THCState *state, const THCTensor *self) {
   return THTensor_nDimension(self);
@@ -153,19 +154,16 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if (storage) {
-      c10::raw::intrusive_ptr::incref(storage);
-      THTensor_stealAndSetStoragePtr(self, storage);
-    } else {
+    if (!storage) {
       THError("Tensor: invalid new null storage");
     }
-  }
 
-  /* storageOffset */
-  if (storageOffset < 0) {
-    THError("Tensor: invalid storage offset");
+    auto at_self = THTensor_wrap(self);
+    c10::raw::intrusive_ptr::incref(storage);
+    at::Storage at_storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim(storage));
+    at::native::set_tensor_storage(
+        THTensor_wrap(self), at_storage, storageOffset);
   }
-  self->set_storage_offset(storageOffset);
 
   /* size and stride */
   THCTensor_resizeNd(state, self, nDimension, size, stride);

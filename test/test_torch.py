@@ -5146,7 +5146,7 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
                 t.set_()
             with self.assertRaisesRegex(
                     RuntimeError,
-                    "set_storage_offset is not allowed on a Tensor created from .data or .detach()"):
+                    "set_storage is not allowed on a Tensor created from .data or .detach()"):
                 t.set_(t.storage(), 0, t.size(), list(t.stride()))
 
         do_test(torch.tensor([[1, 2]]).data)

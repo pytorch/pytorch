@@ -49,12 +49,54 @@ Tensor& set_tensor_(Tensor& result, const Tensor& source) {
   return result;
 }
 
+void set_tensor_storage(const Tensor& tensor, at::Storage storage, ptrdiff_t storage_offset) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
+  // Caffe2 also has uninitialized dtype states, which we disallow here
+  AT_ASSERT(tensor.dtype() == storage.dtype());
+
+  // We used to allow this, but this breaks device caching.
+  // Let's put an actual error message for this one.
+  TORCH_CHECK(tensor.device() == storage.device(),
+      "Attempted to set the storage of a tensor on device \"", tensor.device(),
+      "\" to a storage on different device \"", storage.device(),
+      "\".  This is no longer allowed; the devices must match.");
+
+  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset");
+
+  auto * impl = tensor.unsafeGetTensorImpl();
+  AT_ASSERT(impl);
+  impl->set_storage(storage);
+  impl->set_storage_offset(storage_offset);
+}
+
 // this needs to be split along CPU/CUDA lines because we don't have a consistent
 // way of getting the allocator to use for a device (c10::GetAllocator is not
 // the same as at::cuda::getCUDADeviceAllocator().
+Tensor& set_cpu_(
+    Tensor& self,
+    Storage storage,
+    ptrdiff_t storage_offset,
+    IntArrayRef size,
+    IntArrayRef stride) {
+  TORCH_CHECK(storage, "Tensor: invalid new null storage");
+  TORCH_CHECK(self.defined(), "Tensor: cannot set undefined tensor");
+
+  c10::optional<IntArrayRef> opt_stride;
+  if (stride.data()) {
+    TORCH_CHECK(size.size() == stride.size(), "size and stride must have same length");
+    opt_stride = stride;
+  }
+
+  set_tensor_storage(self, storage, storage_offset);
+  resize_impl_cpu_(self.unsafeGetTensorImpl(), size, opt_stride);
+  return self;
+}
+
 Tensor& set_cpu_(Tensor& result) {
   Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
-  return result.set_(storage, 0, {0}, {});
+  return set_cpu_(result, storage, 0, {0}, {});
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {

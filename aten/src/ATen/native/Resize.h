@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/TensorShape.h>
 #include <TH/THTensor.hpp>
 
 namespace at { namespace native {
@@ -17,7 +18,8 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, int64_t new_size) 
   // (same comment is in Resize.cuh)
   if (new_size > 0) {
     if (!THTensor_getStoragePtr(self)) {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(self->dtype()));
+      Storage storage(self->dtype(), 0, c10::GetAllocator(kCPU), true);
+      set_tensor_storage(THTensor_wrap(self), storage, 0);
     }
     if (new_size + self->storage_offset() > self->storage().numel()) {
       THStorage_resize(

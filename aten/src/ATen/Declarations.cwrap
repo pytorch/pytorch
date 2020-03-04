@@ -2,10 +2,9 @@
   name: _th_set_
   cname: set
   variants: function
-  cpu_half: True
-  cpu_bool: True
+  backends:
+    - CUDA
   cuda_bool: True
-  cpu_bfloat16: True
   cuda_bfloat16: True
   device_guard: False
   return: argument 0
