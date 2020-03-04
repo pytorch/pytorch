@@ -12155,8 +12155,7 @@ class TestTorchDeviceType(TestCase):
     # Check https://github.com/pytorch/pytorch/pull/33322 for more details
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_intbool_to_float_upcasting(self, device, dtype):
-        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log2", \
-                   "sin", "cos", "sinh", "sqrt", "trunc"]
+        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sin", "cos", "sinh", "sqrt", "trunc"]
         for op_name in op_list:
             x = torch.tensor([2], dtype=dtype, device=device)
             out = getattr(torch, op_name)(x)
