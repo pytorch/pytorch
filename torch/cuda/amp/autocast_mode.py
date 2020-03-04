@@ -91,8 +91,8 @@ class autocast(object):
 
     .. note::
         Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
-        regions, but won't be autocasted (e.g., ``torch.addmm`` is guaranteed to run in ``float16``, but
-        ``torch.addmm_`` may not).  For best performance and accuracy, prefer out-of-place ops if possible.
+        regions, but won't be autocasted (e.g., :func:`torch.addmm` is guaranteed to run in ``float16``, but
+        :func:`torch.addmm_` may not).  For best performance and accuracy, prefer out-of-place ops if possible.
     """
     def __init__(self, enabled=True):
         if enabled and not torch.cuda.is_available():

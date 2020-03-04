@@ -239,7 +239,7 @@ The gotchas described here only affect :class:`autocast`.  Use :class:`GradScale
 DataParallel within a single process
 ------------------------------------
 
-:class:`torch.nn.parallel.DataParallel` spawns side threads to run the forward pass on each device.
+:class:`torch.nn.DataParallel` spawns side threads to run the forward pass on each device.
 The autocast state is thread local, so the following will not work::
 
     model = MyModel()
@@ -287,7 +287,7 @@ DistributedDataParallel, multiple GPUs per process
 --------------------------------------------------
 
 Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread to run the forward pass on each
-device, like :class:`torch.nn.parallel.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
+device, like :class:`torch.nn.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
 apply autocast as part of your model's ``forward`` method to ensure it's enabled in side threads.
 
 .. _amp-custom-examples:
@@ -333,7 +333,7 @@ as you would for any explicitly ``float32`` subregion::
             output = float32_function(input.float())
 
 Alternatively, you can use the :func:`custom_fwd` decorator with ``cast_inputs=torch.float32`` in the function's
-definition.  The ``cast_inputs=torch.float32`` argument disables autocast in ``forward`` and ``backward``,
+definition.  The ``cast_inputs=torch.float32`` argument locally disables autocast in ``forward`` and ``backward``,
 and casts incoming floating-point CUDA Tensors to ``float32``::
 
     class Float32Function(torch.autograd.Function):
