@@ -23,7 +23,6 @@ class Conf:
     # for gpu files and host compiler (gcc/clang) for cpu files)
     compilers: [Ver]
     build_only: bool
-    test: bool
     is_important: bool
 
     @property
@@ -34,9 +33,9 @@ class Conf:
     def get_cudnn_insertion(self):
 
         omit = self.language == "onnx_py2" \
-            or self.language == "onnx_py3.6" \
-            or self.language == "onnx_py3.6_part1" \
-            or self.language == "onnx_py3.6_part2" \
+            or self.language == "onnx_main_py3.6" \
+            or self.language == "onnx_ort1_py3.6" \
+            or self.language == "onnx_ort2_py3.6" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
             or str(self.distro) in ["ubuntu14.04", "macos10.13"]
 
@@ -55,8 +54,8 @@ class Conf:
         root_parts = self.get_build_name_root_parts()
 
         build_name_substitutions = {
-            "onnx_py3.6_part1": "onnx_py3.6",
-            "onnx_py3.6_part2": "onnx_py3.6",
+            "onnx_ort1_py3.6": "onnx_main_py3.6",
+            "onnx_ort2_py3.6": "onnx_main_py3.6",
         }
         if phase == "build":
             root_parts = [miniutils.override(r, build_name_substitutions) for r in root_parts]
@@ -72,9 +71,9 @@ class Conf:
 
         lang_substitutions = {
             "onnx_py2": "py2",
-            "onnx_py3.6": "py3.6",
-            "onnx_py3.6_part1": "py3.6",
-            "onnx_py3.6_part2": "py3.6",
+            "onnx_main_py3.6": "py3.6",
+            "onnx_ort1_py3.6": "py3.6",
+            "onnx_ort2_py3.6": "py3.6",
             "cmake": "py2",
         }
 
@@ -86,9 +85,9 @@ class Conf:
         parameters = OrderedDict()
         lang_substitutions = {
             "onnx_py2": "onnx-py2",
-            "onnx_py3.6": "onnx-py3.6",
-            "onnx_py3.6_part1": "onnx-py3.6-part1",
-            "onnx_py3.6_part2": "onnx-py3.6-part2",
+            "onnx_main_py3.6": "onnx-main-py3.6",
+            "onnx_ort1_py3.6": "onnx-ort1-py3.6",
+            "onnx_ort2_py3.6": "onnx-ort2-py3.6",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -150,7 +149,6 @@ def instantiate_configs():
             distro=fc.find_prop("distro_version"),
             compilers=fc.find_prop("compiler_version"),
             build_only=fc.find_prop("build_only"),
-            test=fc.find_prop("test"),
             is_important=fc.find_prop("important"),
         )
 
@@ -168,10 +166,8 @@ def get_workflow_jobs():
 
         if conf_options.build_only:
             phases = ["test"]
-        elif conf_options.test:
-            phases = dimensions.PHASES
         else:
-            phases = ["build"]
+            phases = dimensions.PHASES
 
         for phase in phases:
             x.append(conf_options.gen_workflow_job(phase))
