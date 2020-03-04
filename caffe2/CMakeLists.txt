@@ -556,6 +556,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
       ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
     )
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
     target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB})
