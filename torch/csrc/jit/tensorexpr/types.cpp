@@ -50,6 +50,7 @@ TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
 
 Dtype ToDtype(ScalarType type) {
   switch (type) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
     return k##n;
@@ -79,6 +80,7 @@ TORCH_API std::ostream& operator<<(
     std::ostream& stream,
     const ScalarType& type) {
   switch (type) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(ttt, Name) \
   case ScalarType::Name:     \
     stream << #ttt;          \
@@ -108,6 +110,7 @@ TORCH_API std::ostream& operator<<(
 int Dtype::byte_size() const {
   int scalar_size = -1;
   switch (scalar_type_) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name)   \
   case ScalarType::Name:        \
     scalar_size = sizeof(Type); \
@@ -124,6 +127,7 @@ int Dtype::byte_size() const {
 
 std::string Dtype::ToCppString() const {
   switch (scalar_type_) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(t, n) \
   case ScalarType::n:   \
     return #t;
