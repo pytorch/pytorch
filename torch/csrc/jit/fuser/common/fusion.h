@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/iter_visitor.h>
+#include <torch/csrc/jit/fuser/common/iriostream.h>
 #include <torch/csrc/jit/fuser/common/ir_printer.h>
 
 #include <c10/util/Exception.h>
@@ -10,6 +11,7 @@
 #include <algorithm>
 #include <deque>
 #include <iostream>
+#include <sstream>
 #include <queue>
 #include <set>
 #include <unordered_map>
@@ -52,7 +54,7 @@ struct TORCH_API FusionGuard {
   static thread_local Fusion* cur_fusion;
   Fusion* prev_fusion;
 
-  FusionGuard(Fusion* const fusion) {
+  FusionGuard(Fusion* fusion) {
     prev_fusion = cur_fusion;
     cur_fusion = fusion;
   }
@@ -74,7 +76,7 @@ struct ExprSort : public IterVisitor{
     exprs.push_back(expr);
   }
 
-  static std::vector<Expr*> getExprs(const Fusion* const fusion, bool from_outputs_only, bool breadth_first){
+  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only, bool breadth_first){
     ExprSort es;
     es.traverse(fusion, from_outputs_only, breadth_first, {});
     return es.exprs;
@@ -125,9 +127,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    * delete expr.
    */
   void removeExpr(Expr* expr) {
-    if (!inFusion(expr))
-      throw std::runtime_error(
-          "Cannot remove expr as it is not registered with this fusion.");
+    assertInFusion(expr, "Cannot remove expr ");
       // If we hit this error too frequently, we could lighten the restrictions so that removing something
       // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
 
@@ -155,11 +155,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    */
   void removeVal(Val* val) {
     
-    if (!inFusion(val))
-      throw std::runtime_error(
-          "Cannot remove val as it is not registered with this fusion.");
-      // If we hit this error too frequently, we could lighten the restrictions so that removing something
-      // that doesn't exist simply does nothing. For now, we're going with the strictest model which errors.
+    assertInFusion(val, "Cannot remove val ");
 
     for(Val* inp : inputs())
       if(val->same_as(inp))
@@ -185,37 +181,44 @@ struct TORCH_API Fusion : public IRInputOutput {
 
   // Functions for adding inputs and outputs
   void addInput(Val* const input) {
-    if (!inFusion(input))
-      throw std::runtime_error(
-          "Cannot register input as it does not belong to this fusion.");
+    assertInFusion(input, "Cannot register input ");
     IRInputOutput::addInput(input);
   }
 
   void addOutput(Val* const output) {
-    if (!inFusion(output))
-      throw std::runtime_error(
-          "Cannot register output as it does not belong to this fusion.");
+    assertInFusion(output, "Cannot register output ");
     IRInputOutput::addOutput(output);
   }
 
   // Functions for querying / enumerating IR objets
-  bool inFusion(Statement* stmt) {
+  bool inFusion(const Statement* stmt) const {
     bool infusion = stmt->fusion() == this;
+    Statement* nonconst_stmt = const_cast<Statement*>(stmt);
 
     if (stmt->isExpr())
       infusion &=
-          expr_set_.find(static_cast<Expr*>(stmt)) != expr_set_.end();
+          expr_set_.find(static_cast<Expr*>(nonconst_stmt)) != expr_set_.end();
     if (stmt->isVal())
       infusion &=
-          val_set_.find(static_cast<Val*>(stmt)) != val_set_.end();
+          val_set_.find(static_cast<Val*>(nonconst_stmt)) != val_set_.end();
 
     return infusion;
   }
 
+  // Functions for querying / enumerating IR objets
+  void assertInFusion(const Statement* stmt, std::string msg = "") const {
+    if(inFusion(stmt))
+      return;
+    std::stringstream errmsg;
+    errmsg << stmt << msg << " was not found in the active fusion.";
+    throw std::runtime_error(errmsg.str());
+  }
+
+
   /*
    * Return list of exprs, can choose to be topologically sorted. We can start by
    * only traversing back from registered outputs, or from any terminating Vals.
-   * Can also select depth first traversal, or breadth first.
+   * Can also select depth first traversal, or breadth first.1
    *
    * from_outputs_only : will only sort DAG associated with registered outputs
    * breadth_first : breadth first topological sort
@@ -224,7 +227,7 @@ struct TORCH_API Fusion : public IRInputOutput {
    */
   std::vector<Expr*> exprs(
       bool from_outputs_only = false,
-      bool breadth_first = false) const {
+      bool breadth_first = false) {
     
     if (breadth_first)
       throw std::runtime_error("Not implemented yet.");
@@ -233,7 +236,7 @@ struct TORCH_API Fusion : public IRInputOutput {
 
   }
 
-  void print() const {
+  void print() {
     std::cout << "%kernel {\n";
     IRMathPrinter op_exprs(std::cout); 
     op_exprs.print(this); 
@@ -308,7 +311,8 @@ struct TORCH_API Fusion : public IRInputOutput {
     return UNINITIALIZED_STMTNAMETYPE;
   }
 
-  bool used(Val* val) {
+  bool used(Val* val) const {
+    assertInFusion(val, "Cannot detect if val was used, ");
     return (uses_.find(val) != uses_.end()) &&
         (uses_.find(val)->second.size() > 0);
   }
@@ -322,12 +326,14 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   const std::set<Expr*>& uses(Val* val) const {
+    assertInFusion(val, "Cannot detect where val was used, ");
     if(uses_.find(val) != uses_.end())
       return uses_.find(val)->second;
     return std::move(std::set<Expr*>());
   }
 
   Expr* origin(Val* val) const {
+    assertInFusion(val, "Cannot dettect the origin of val, ");
     auto it = origin_.find(val);
 
     if (it == origin_.end())
@@ -337,6 +343,7 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   const Expr* origin(const Val* val) const {
+    assertInFusion(val, "Cannot dettect the origin of val, ");
     auto it = origin_.find(const_cast<Val*>(val));
     if( it == origin_.end())
       return nullptr;

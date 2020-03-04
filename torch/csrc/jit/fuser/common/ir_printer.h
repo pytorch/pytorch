@@ -33,7 +33,7 @@ public:
     IRPrinter(os)
   { } 
   
-  void print(const Fusion* const fusion);
+  void print(Fusion* fusion);
  
   // High Level Handles 
   void handle(Statement* s) override;
@@ -56,7 +56,7 @@ public:
 	IRPrinter(os) 
   { } 
   
-  void print(const Fusion* const fusion);
+  void print(Fusion* const fusion);
  
   // High Level Handles 
   void handle(Statement* s) override;

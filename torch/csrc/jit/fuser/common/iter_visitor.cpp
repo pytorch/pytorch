@@ -17,31 +17,32 @@ namespace fuser {
  */ 
 
 std::vector<Statement*> IterVisitor::next(
-    const Fusion* fusion,
     Statement* statement) {
   if (statement->isVal())
-    return next(fusion, static_cast<Val*>(statement));
+    return next(static_cast<Val*>(statement));
   else if (statement->isExpr())
-    return next(fusion, static_cast<Expr*>(statement));
+    return next(static_cast<Expr*>(statement));
   else
     throw std::runtime_error("Could not detect type in next_dispatch.");
 }
 
-std::vector<Statement*> IterVisitor::next(const Fusion* fusion, Val* v) {
-  // ensure IterVisitor does not traverse across fusion;
-  assert(fusion == v->fusion());
-  if (fusion->origin(v))
-    return {fusion->origin(v)};
-  return {};
-}
+std::vector<Statement*> IterVisitor::next(Val* v) {
+  if (FusionGuard::getCurFusion()->origin(v) != nullptr)
+    return {FusionGuard::getCurFusion()->origin(v)};
+   return {};
+ }
 
-std::vector<Statement*> IterVisitor::next(const Fusion* fusion, Expr* expr) {
+
+std::vector<Statement*> IterVisitor::next(Expr* expr) {
+  FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
   return {expr->inputs().begin(), expr->inputs().end()};
 }
 
 void IterVisitor::traverseFrom(
-    const Fusion* const fusion,
-    std::vector<Val*> from) {
+    Fusion* const fusion
+  , std::vector<Val*> from ) {
+  FusionGuard fg(fusion);
+
   std::set<Statement*> visited;
   std::deque<Statement*> to_visit;
   
@@ -62,7 +63,7 @@ void IterVisitor::traverseFrom(
         break;
 
       Statement* stmt = to_visit.front();
-      std::vector<Statement*> inps = next(fusion, stmt);
+      std::vector<Statement*> inps = next(stmt);
       for (auto it = inps.rbegin(); it != inps.rend(); it++){
         Statement* inp = *it;
         if (visited.find(inp) == visited.end()) {
@@ -85,10 +86,12 @@ void IterVisitor::traverseFrom(
 }
 
 void IterVisitor::traverse(
-      const Fusion* const fusion
+      Fusion* const fusion
     , bool from_outputs_only
     , bool breadth_first
     , std::unordered_set<ValType> val_types) {
+  FusionGuard fg(fusion);
+
   if (breadth_first)
     throw std::runtime_error("Not implemented yet.");
   std::set<Statement*> visited;

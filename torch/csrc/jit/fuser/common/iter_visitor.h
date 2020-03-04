@@ -34,7 +34,6 @@ enum class ValType;
 struct TORCH_API IterVisitor {
   virtual ~IterVisitor() = default;
 
-public:
   IterVisitor() = default;
 
   IterVisitor(const IterVisitor& other) = default;
@@ -47,10 +46,9 @@ public:
   //These functions will start at outputs and propagate op through the DAG
   //in depth first traversal. Next could be called on nodes multiple times,
   //however, once handle is called on a node next will not be called.
-  std::vector<Statement*> next(const Fusion* fusion, Statement* stmt);
-  std::vector<Statement*> next(const Fusion* fusion, Expr* expr);
-  std::vector<Statement*> next(const Fusion* fusion, Val* v);
-
+  std::vector<Statement*> next(Statement* stmt);
+  std::vector<Statement*> next(Expr* expr);
+  std::vector<Statement*> next(Val* v);
 
   //Hierarchal dispatch functions for handle
   virtual void handle(Statement* s);
@@ -79,19 +77,20 @@ public:
   //Callback function when a Stmt is added to the "to_visit" queue
   virtual void toVisitCallback(Statement* stmt) {}
 
+public:
   // This version of traverse collects the points of the graph to start from
   // The "from_outputs_only" argument forces the graph to start from outputs
   // instead of search for Val typed nodes that have no uses.
   // The output type set limits further the set of Val nodes to search by type.
   void traverse(
-      const Fusion* const fusion
+      Fusion* const fusion
     , bool from_outputs_only = false
     , bool breadth_first = false
     , std::unordered_set<ValType> val_types = {});
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes
   // in depth first topological sorted order.
-  void traverseFrom(const Fusion* const fusion, std::vector<Val*> from);
+  void traverseFrom(Fusion* const fusion, std::vector<Val*> from);
 };
 
 
