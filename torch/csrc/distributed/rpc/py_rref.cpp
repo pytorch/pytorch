@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
@@ -46,6 +47,46 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
 
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }
+
+c10::optional<TypePtr> typePyObjToTypePtr(const py::object& type_value) {
+  if (type_value.is(py::none())) {
+    return c10::nullopt;
+  }
+  c10::QualifiedName type_value_str = c10::QualifiedName(py::cast<std::string>(
+      py::module::import("torch.jit").attr("_qualified_name")(type_value)));
+  return jit::get_python_cu()->get_type(type_value_str);
+}
+
+TypePtr decidePyObjIValueType(
+    const py::object& value,
+    c10::optional<TypePtr> type_hint) {
+  jit::InferredType type_inferred = jit::tryToInferType(value);
+  if (type_inferred.success()) {
+    // If we could infer the type from the pyobject, we create
+    // the RRef with the IValue of that type.
+    return type_inferred.type();
+  }
+
+  // If the py::object contains a ScripModule, we enforce users
+  // to specify it's ModuleInterface type.
+  c10::optional<jit::script::Module> module = jit::script::as_module(value);
+  if (module.has_value()) {
+    TORCH_CHECK(
+        type_hint.has_value(),
+        "If the RRef being created contains a ScriptModule, user must provide it's ModuleInterface type.");
+    // TODO: Check is subtype if ModuleInterface.
+    TORCH_CHECK(
+        type_hint.value()->kind() == TypeKind::InterfaceType,
+        "The py::object is a Module, type hint must be a ModuleInterface");
+    // TODO: Check object is instance of ModuleInterface.
+    return type_hint.value();
+  }
+
+  // Otherwise it's a spure pyobject, create the RRef
+  // that holds an IValue of an pyobject
+  return PyObjectType::get();
+}
+
 } // namespace
 
 ///////////////////////////  PyRRef  //////////////////////////////////
@@ -54,18 +95,18 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
-PyRRef::PyRRef(const py::object& value)
-    : PyRRef([&value]() {
-        jit::InferredType type_inferred = jit::tryToInferType(value);
-        TypePtr elem_type = nullptr;
-        if (type_inferred.success()) {
-          // If we could infer the type from the pyobject, we create
-          // the RRef with the IValue of that type.
-          elem_type = type_inferred.type();
-        } else {
-          // Otherwise it's a pure pyobject, create the RRef
-          // that holds an IValue of an pyobject
-          elem_type = PyObjectType::get();
+PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
+    : PyRRef([&value, &type_hint]() {
+        c10::optional<TypePtr> optional_type_ptr =
+            typePyObjToTypePtr(type_hint);
+        TypePtr elem_type = decidePyObjIValueType(value, optional_type_ptr);
+        if (optional_type_ptr.has_value()) {
+          TORCH_CHECK(
+              optional_type_ptr.value() == elem_type,
+              "The specificied type hint is ",
+              optional_type_ptr.value()->python_str(),
+              "The decided type is ",
+              elem_type->python_str());
         }
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount

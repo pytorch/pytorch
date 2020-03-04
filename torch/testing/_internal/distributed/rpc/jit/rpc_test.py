@@ -58,6 +58,16 @@ class MyScriptModule(torch.jit.ScriptModule):
         return self.a
 
 
+def owner_create_rref_my_script_module(a):
+    return rpc.RRef(MyScriptModule(a), MyModuleInterface)
+
+
+@torch.jit.script
+def script_run_forward_rref_my_script_module(rref):
+    # type: (RRef[MyModuleInterface]) -> Tensor
+    return rref.to_here().forward()
+
+
 @torch.jit.script
 def rref_to_here(rref_var):
     # type: (RRef[Tensor]) -> Tensor
@@ -101,10 +111,42 @@ def rref_script_annotation(rref_var):
     return rref_python_annotation(rref_var).to_here()
 
 
+class LocalRRefTest(RpcAgentTestFixture):
+    @dist_init
+    def test_create_local_ivalue_rref(self):
+        if self.rank != 0:
+            return
+
+        # Create a local RRef<MyScriptClass>.
+        rref_script_class = rpc.RRef(MyScriptClass(10))
+        ret = rref_script_class.to_here().get_value()
+        self.assertEqual(ret, 10)
+
+        # Create a local RRef<MyModuleInterface>.
+        rref_script_module = rpc.RRef(MyScriptModule(3))
+        ret = rref_script_module.to_here().forward()
+        self.assertEqual(ret, torch.ones(3))
+
+    @dist_init
+    def test_return_local_ivalue_rref_in_py_and_use_in_script(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Remote side creates and returns a local RRef<MyScriptModuleInterface> in Python.
+        rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_module, args=(3,))
+        # Remote side uses the RRef in Script.
+        ret = rpc.rpc_sync(
+            rref.owner(), script_run_forward_rref_my_script_module, args=(rref,)
+        )
+        self.assertEqual(ret, torch.ones(3))
+
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
-class JitRpcTest(RpcAgentTestFixture):
+class JitRpcTest(LocalRRefTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
@@ -256,14 +298,3 @@ class JitRpcTest(RpcAgentTestFixture):
 
         res = rref_script_annotation(rref_var)
         self.assertEqual(res, torch.ones(2, 2) + 1)
-
-    @dist_init
-    def test_local_rref_creation_with_ivalue(self):
-
-        # create a local RRef that holds a IValue
-        rref_local_script_class = rpc.RRef(MyScriptClass())
-        self.assertEqual(rref_local_script_class.to_here().a, 10)
-
-        # create a local RRef that holds a ScriptModule
-        rref_local_script_mod = rpc.RRef(MyScriptModule(3)._c)
-        self.assertEqual(rref_local_script_mod.to_here().forward(), torch.ones(3))
