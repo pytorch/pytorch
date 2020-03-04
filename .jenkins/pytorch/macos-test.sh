@@ -84,8 +84,6 @@ test_libtorch() {
     VERBOSE=1 DEBUG=1 python $BUILD_LIBTORCH_PY
     popd
 
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-
     # Unfortunately it seems like the test can't load from miniconda3
     # without these paths being set
     export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
