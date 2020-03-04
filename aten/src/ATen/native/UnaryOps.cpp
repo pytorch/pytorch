@@ -319,6 +319,16 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return result;                                                     \
   }
 
+// IMPLEMENT_UNARY_FLOATING_OP_* macros are used for ops which support 
+// implicit type promotion (integral and boolean inputs to default floating type)
+// Check PR #33322 for more details on this
+#define IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                           \
+  Tensor op(const Tensor& self) {                                      \
+    Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : at::empty({0}, self.options()); \
+    at::op##_out(result, self.to(result.scalar_type()));               \
+    return result;                                                     \
+  }
+
 #define IMPLEMENT_UNARY_OP_OUT_INPLACE(op, prefix, device)             \
   Tensor& _##op##__##prefix(Tensor& self) {                            \
     return at::op##_out(self, self);                                   \
@@ -341,15 +351,24 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
-IMPLEMENT_UNARY_OP_VEC(atan)
-IMPLEMENT_UNARY_OP_VEC(cos)
-IMPLEMENT_UNARY_OP_VEC(cosh)
+#define IMPLEMENT_UNARY_FLOATING_OP_VEC(op)                            \
+  IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                                 \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
+
+#define IMPLEMENT_UNARY_FLOATING_OP_VEC_CUDA(op)                       \
+  IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                                 \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CUDA)              
+
+IMPLEMENT_UNARY_FLOATING_OP_VEC(atan)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(cos)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
 IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
-IMPLEMENT_UNARY_OP_VEC(exp)
-IMPLEMENT_UNARY_OP_VEC(tan)
-IMPLEMENT_UNARY_OP_VEC(tanh)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(exp)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(tan)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
