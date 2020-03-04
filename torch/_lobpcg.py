@@ -179,9 +179,10 @@ def lobpcg(A,                   # type: Tensor
 
     dtype = _utils.get_floating_dtype(A)
     device = A.device
-    feps = {torch.float32: 1.2e-07,
-            torch.float64: 2.23e-16}[dtype]
-    tol = feps ** 0.5
+    if tol is None:
+        feps = {torch.float32: 1.2e-07,
+                torch.float64: 2.23e-16}[dtype]
+        tol = feps ** 0.5
 
     m = A.shape[-1]
     k = (1 if X is None else X.shape[-1]) if k is None else k
@@ -352,7 +353,6 @@ class LOBPCG(object):
         B_norm = self.fvars['B_norm']
         E, X, R = self.E, self.X, self.R
         rerr = torch.norm(R, 2, (0, )) * (torch.norm(X, 2, (0, )) * (A_norm + E[:X.shape[-1]] * B_norm)) ** -1
-
         converged = rerr < tol
         count = 0
         for b in converged:
