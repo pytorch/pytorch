@@ -10,13 +10,13 @@ class autocast(object):
     Instances of :class:`autocast` serve as context managers or decorators that
     allow regions of your script to run in mixed precision.
 
-    Within autocast-enabled regions, the backend automatically chooses the precision
+    In autocast-enabled regions, the backend automatically chooses the precision
     for GPU operations to improve performance while maintaining accuracy.
 
     When entering an autocast-enabled region, Tensors may be any type.  It is not necessary or
     recommended to call ``.half()`` on your model or data to use autocasting.
 
-    :class:`autocast` should wrap the forward pass of your model::
+    :class:`autocast` should wrap the forward pass(es) of your network::
 
         # Creates model in default precision (float32)
         model = Net().cuda()
@@ -44,12 +44,12 @@ class autocast(object):
             ...
 
     :class:`autocast` is nestable.  If you want to force particular ops to run in ``float32``,
-    you can nest ``autocast(enabled=False)`` regions within a surrounding autocast-enabled region::
+    you can nest ``autocast(enabled=False)`` regions in a surrounding autocast-enabled region::
 
-        mat0 = torch.rand((8,8), device="cuda", dtype.torch.float32)
-        mat1 = torch.rand((8,8), device="cuda", dtype.torch.float32)
-        mat2 = torch.rand((8,8), device="cuda", dtype.torch.float32)
-        mat3_float16 = torch.rand((8,8), device="cuda", dtype.torch.float16)
+        mat0 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
+        mat1 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
+        mat2 = torch.rand((8, 8), device="cuda", dtype.torch.float32)
+        mat3_float16 = torch.rand((8, 8), device="cuda", dtype.torch.float16)
 
         with autocast():
             # torch.mm is on autocast's list of ops that should run in float16..
@@ -58,7 +58,7 @@ class autocast(object):
             tmp_float16 = torch.mm(mat0, mat1)
 
             with autocast(enabled=False):
-                # Here torch.mm does not autocast.
+                # Here torch.mm behaves normally.
                 # To force float32 execution, ensure the inputs are float32.
                 # The output type matches the input types.
                 tmp_float32 = torch.mm(tmp_float16.float(), mat2)
@@ -68,16 +68,15 @@ class autocast(object):
             # Note that mismatched input types are transparently handled.
             float16_result = torch.mm(tmp_float32, mat3_float16)
 
-
     Arguments:
-        enabled(bool, optional, default=True):  Whether autocasting should be enabled within this region.
+        enabled(bool, optional, default=True):  Whether autocasting should be enabled in this region.
 
     .. note::
         Tensors produced in an autocast-enabled region may be ``float16``.  After returning to an
         autocast-disabled region, using them along with ``float32`` tensors may cause type mismatch errors.
         If so, simply call ``.float()`` on the offending tensor(s).
 
-        Type mismatch errors *within* an autocast-enabled region are a bug; if this is what you observe,
+        Type mismatch errors *in* an autocast-enabled region are a bug; if this is what you observe,
         please file an issue.
 
     .. note::
@@ -149,7 +148,7 @@ def _cast(value, dtype):
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
-    :class:`torch.autograd.Function`).  See the :ref:`example<amp-custom-examples>` for more detail.
+    :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Arguments:
         cast_inputs (torch.dtype or None, optional, default=None):  If not ``None``, casts incoming floating-point
@@ -180,7 +179,7 @@ def custom_bwd(bwd):
     Helper decorator for backward methods of custom autograd functions (subclasses of
     :class:`torch.autograd.Function`).
     Ensures that ``backward`` executes with the same autocast state as ``forward``.
-    See the :ref:`example<amp-custom-examples>` for more detail.
+    See the :ref:`example page<amp-custom-examples>` for more detail.
     """
     @functools.wraps(bwd)
     def decorate_bwd(*args, **kwargs):
