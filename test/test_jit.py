@@ -1085,7 +1085,7 @@ graph(%x : Tensor,
 
         qconfig_dict = {'': script_qconfig(default_qconfig)}
         m = torch.jit.script(M())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True))
         # observer for weight of conv
         assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
             'Expected to have 1 observer submodule'
@@ -1094,7 +1094,7 @@ graph(%x : Tensor,
             'Expected to have 2 observer submodule'
 
         m = torch.jit.script(M2())
-        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True))
         # observer for input of conv and output of relu
         assert len(attrs_with_prefix(m, '_observer_')) == 2, \
             'Expected to have 2 observer submodule'
