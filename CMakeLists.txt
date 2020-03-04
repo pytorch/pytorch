@@ -219,6 +219,8 @@ cmake_dependent_option(
 set(ONNX_NAMESPACE "onnx_torch" CACHE STRING "A namespace for ONNX; needed to build with other frameworks that share ONNX.")
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
+set(OP_DEPENDENCY "" CACHE STRING
+    "Path to the yaml file that contains the op dependency graph for custom build.")
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -273,7 +275,7 @@ if (MSVC)
 
     # /bigobj increases number of sections in .obj file, which is needed to link
     # against libraries in Python 2.7 under Windows
-    # For Visual Studio generators, if /MP is not added, then we may need 
+    # For Visual Studio generators, if /MP is not added, then we may need
     # to add /MP to the flags.
     # For other generators like ninja, we don't need to add /MP because it is
     # already handled by the generator itself.
