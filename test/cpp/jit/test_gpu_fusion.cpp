@@ -871,14 +871,39 @@ void testGPU_FusionForLoop() {
 
   auto TV2 = new TensorView(T2);
   
-  /**** Operator Expressions ****/ 
-
   BinaryOp* op = new BinaryOp(BinaryOpType::Add, TV2, T0, T1);
-  ForLoop*  fl = new ForLoop(new Int(), new Int(0), new Int(5));
+  ForLoop*  fl = new ForLoop(new Int(), new Int(0), new Int(5), {op});
 
-  fl->add_expr(op);
   std::cout << fl;
- }
+}
+
+void testGPU_FusionIfThenElse() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const auto T0  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T1  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T2  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T3  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T4  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+  const auto T5  = new Tensor(DataType::Float, new TensorDomain({new IterDomain(new Int(16))}));
+
+  fusion.addInput(T0);
+  fusion.addInput(T1);
+  fusion.addOutput(T2);
+  fusion.addInput(T3);
+  fusion.addInput(T4);
+  fusion.addOutput(T5);
+
+  auto TV2 = new TensorView(T2);
+  auto TV5 = new TensorView(T5);
+  
+  BinaryOp*   op1 = new BinaryOp(BinaryOpType::Add, TV2, T0, T1);
+  BinaryOp*   op2 = new BinaryOp(BinaryOpType::Add, TV5, T3, T4);
+  IfThenElse* ite = new IfThenElse(new Int(0), {op1}, {op2});
+
+  std::cout << ite;
+}
 
 void testGPU_Fusion() {}
 

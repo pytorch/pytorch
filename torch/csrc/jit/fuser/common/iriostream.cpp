@@ -60,6 +60,8 @@ void Printer::print(const Expr* const expr) {
       print(static_cast<const BinaryOp* const>(expr)); return;
     case ExprType::ForLoop:
       print(static_cast<const ForLoop* const>(expr)); return;
+    case ExprType::IfThenElse:
+      print(static_cast<const IfThenElse* const>(expr)); return;
     case ExprType::Split:
       print(static_cast<const Split* const>(expr)); return;
     case ExprType::Merge:
@@ -219,6 +221,20 @@ void Printer::print(const ForLoop* const fl) {
   for(auto &expr : fl->body()) {
     os << "\t";
     print(expr);	
+  }
+}
+void Printer::print(const IfThenElse* const ite) {
+  os << "IfThenElse: if " << ite->cond() << " \n";
+  for(auto &expr : ite->if_body()) {
+    os << "\t";
+    print(expr);	
+  }
+  if(ite->hasElse()) {
+    os << "IfThenElse: else\n";
+    for(auto &expr : ite->else_body()) {
+      os << "\t";
+      print(expr);	
+    }
   }
 }
 
