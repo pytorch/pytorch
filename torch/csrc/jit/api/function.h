@@ -100,7 +100,7 @@ struct TORCH_API Function {
       return executor_;
     }
     check_single_output();
-    executor_ = GraphExecutor(optimized_graph());
+    executor_ = GraphExecutor(optimized_graph(), name_.name());
     return executor_;
   }
 
