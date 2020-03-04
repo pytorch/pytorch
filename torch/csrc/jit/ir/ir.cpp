@@ -991,6 +991,8 @@ Operation Node::getOperation() const {
 }
 
 bool Node::isNondeterministic() const {
+  // TODO: This should match against operator NAME only (do not include
+  // overload, do not include schema string)
   static const OperatorSet nondeterministic_ops = {
       "aten::dropout(Tensor input, float p, bool train) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",

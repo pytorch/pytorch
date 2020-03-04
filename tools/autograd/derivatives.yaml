@@ -956,7 +956,7 @@
   self: grad.to_dense().sparse_mask(mask).to_dense()
   mask: non_differentiable
 
-- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType dtype, Layout layout, Device device, bool pin_memory=False) -> Tensor
+- name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, int[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   values: sparse_constructor_values_backward(grad, indices, values.sizes())
 
 - name: _sparse_sum.dim(Tensor self, int[1] dim) -> Tensor
