@@ -140,7 +140,6 @@ if (INTERN_BUILD_ATEN_OPS)
 
   set(cwrap_files
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/Declarations.cwrap
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THNN/generic/THNN.h
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THCUNN/generic/THCUNN.h
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/nn.yaml
     ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml)

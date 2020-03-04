@@ -39,18 +39,6 @@ TH_API THTensor *THTensor_(new)(void);
 TH_API THTensor *THTensor_(newWithTensor)(THTensor *tensor);
 TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
-TH_API THTensor *THTensor_(newWithStorage2d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_);
-TH_API THTensor *THTensor_(newWithStorage3d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_);
-TH_API THTensor *THTensor_(newWithStorage4d)(THStorage *storage_, ptrdiff_t storageOffset_,
-                                int64_t size0_, int64_t stride0_,
-                                int64_t size1_, int64_t stride1_,
-                                int64_t size2_, int64_t stride2_,
-                                int64_t size3_, int64_t stride3_);
 
 /* stride might be NULL */
 TH_API THTensor *THTensor_(newWithSize1d)(int64_t size0_);
