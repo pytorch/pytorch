@@ -17,22 +17,25 @@ namespace fuser {
  */ 
 
 std::vector<Statement*> IterVisitor::next(
+    const Fusion* fusion,
     Statement* statement) {
   if (statement->isVal())
-    return next(static_cast<Val*>(statement));
+    return next(fusion, static_cast<Val*>(statement));
   else if (statement->isExpr())
-    return next(static_cast<Expr*>(statement));
+    return next(fusion, static_cast<Expr*>(statement));
   else
     throw std::runtime_error("Could not detect type in next_dispatch.");
 }
 
-std::vector<Statement*> IterVisitor::next(Val* v) {
-  if (v->fusion() && v->fusion()->origin(v))
-    return {v->fusion()->origin(v)};
+std::vector<Statement*> IterVisitor::next(const Fusion* fusion, Val* v) {
+  // ensure IterVisitor does not traverse across fusion;
+  assert(fusion == v->fusion());
+  if (fusion->origin(v))
+    return {fusion->origin(v)};
   return {};
 }
 
-std::vector<Statement*> IterVisitor::next(Expr* expr) {
+std::vector<Statement*> IterVisitor::next(const Fusion* fusion, Expr* expr) {
   return {expr->inputs().begin(), expr->inputs().end()};
 }
 
@@ -59,7 +62,7 @@ void IterVisitor::traverseFrom(
         break;
 
       Statement* stmt = to_visit.front();
-      std::vector<Statement*> inps = next(stmt);
+      std::vector<Statement*> inps = next(fusion, stmt);
       for (auto it = inps.rbegin(); it != inps.rend(); it++){
         Statement* inp = *it;
         if (visited.find(inp) == visited.end()) {
