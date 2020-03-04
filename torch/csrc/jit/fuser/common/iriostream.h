@@ -16,6 +16,8 @@ struct Expr;
 struct UnaryOp;
 struct BinaryOp;
 
+struct ForLoop;
+
 struct Tensor;
 struct TensorDomain;
 struct TensorView;

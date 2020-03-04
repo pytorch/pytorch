@@ -842,13 +842,16 @@ void testGPU_FusionCodeGen2() {
   tv0->computeAt(tv3, 1);
   tv1->computeAt(tv3, 1);
   
+  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  
 
-  // std::cout<<fusion<<std::endl;
+  std::cout<<fusion<<std::endl;
   std::cout
   << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
   << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
   << "::::::::::::" << std::endl;
-  
   CodeWrite cw(std::cout);
   cw.traverse(&fusion);
   
