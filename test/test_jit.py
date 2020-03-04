@@ -1065,7 +1065,6 @@ graph(%x : Tensor,
         # weight of linear
         assert len(attrs_with_prefix(m.sub.fc, '_observer_')) == 1
 
-    @unittest.skip("we are changing this test in next PR")
     def test_insert_observers_skip_values(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1084,35 +1083,28 @@ graph(%x : Tensor,
             def forward(self, x):
                 return self.relu(self.conv(x))
 
-        def test_module(module, relu_call, num_observers):
-            m = torch.jit.script(module())
-            # TODO: this is because right-now the InsertObservers is in-place.
-            # When we change the implementation to clone the module before
-            # inserting observers, we can remove this copy
-            m = m.copy()
-            observer = torch.jit.script(default_observer())
-            qconfig_dict = {
-                '':
-                QConfig(
-                    activation=observer._c,
-                    weight=observer._c)
-            }
-            torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, True)
-            assert len([x for x, _ in m._modules._c.items()
-                        if x.startswith('_observer_')]) == num_observers, \
-                'Expected to have ' + str(num_observers) + ' observer submodules'
-            c = FileCheck().check('Conv2d = prim::GetAttr[name="conv"]') \
-                           .check_next('prim::CallMethod[name="forward"]') \
-                           .check_not('Observer = prim::GetAttr[name="_observer_') \
-                           .check(relu_call)
-            if num_observers == 1:
-                c = c.check('Observer = prim::GetAttr[name="_observer_') \
-                     .check_next('prim::CallMethod[name="forward"](%_observer_')
-            c.run(str(get_forward_graph(m._c)))
-            # TODO: add checks for conv and relu later, graph looks correct but this pr
-            # has too many changes already
-        test_module(M, 'prim::CallFunction(', 1)
-        test_module(M2, 'prim::CallMethod[name="forward"]', 0)
+        qconfig_dict = {'': script_qconfig(default_qconfig)}
+        m = torch.jit.script(M())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # observer for weight of conv
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
+            'Expected to have 1 observer submodule'
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
+            'Expected to have 2 observer submodule'
+
+        m = torch.jit.script(M2())
+        m = wrap_cpp_module(torch._C._jit_pass_insert_observers(m._c, "forward", qconfig_dict, False))
+        # observer for input of conv and output of relu
+        assert len(attrs_with_prefix(m, '_observer_')) == 2, \
+            'Expected to have 2 observer submodule'
+        # observer for weight of conv
+        assert len(attrs_with_prefix(m.conv, '_observer_')) == 1, \
+            'Expected to have 1 observer submodule'
+        # observer for output of relu
+        assert len(attrs_with_prefix(m.relu, '_observer_')) == 0, \
+            'Expected to have 0 observer submodule'
+
 
     def test_insert_observers_weight_dtype(self):
         class M(torch.nn.Module):
