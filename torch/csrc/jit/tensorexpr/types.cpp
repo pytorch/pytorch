@@ -39,6 +39,7 @@ Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
 }
 
+// NOLINTNEXTLINE
 #define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
