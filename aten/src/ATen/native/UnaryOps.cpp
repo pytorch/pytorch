@@ -76,7 +76,7 @@ Tensor asin(const Tensor& self) { return unary_float_op_impl(self, at::asin_out)
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
-Tensor abs(const Tensor& self) { return unary_float_op_impl(self, at::abs_out); }
+Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
@@ -89,7 +89,7 @@ Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
-Tensor conj(const Tensor& self) { return unary_float_op_impl(self, at::conj_out); }
+Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
@@ -176,7 +176,7 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return unary_op_impl_out(result, self, neg_stub);
 }
-Tensor neg(const Tensor& self) { return unary_float_op_impl(self, at::neg_out); }
+Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor logical_not(const Tensor& self) {

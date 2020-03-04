@@ -6066,6 +6066,13 @@ class TestTorchDeviceType(TestCase):
         int_types = [torch.int, torch.short, torch.int8, torch.uint8]
         float_types = [torch.float, torch.double, torch.long]
 
+        # Tests bool tensor negation raises the correct error
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"Negation, the `\-` operator, on a bool tensor is not supported. "
+            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
+            lambda: - torch.tensor([False, True], device=device))
+
         for dtype in float_types + int_types:
             if dtype in float_types:
                 a = torch.randn(100, 90).type(dtype).to(device)
@@ -12148,7 +12155,8 @@ class TestTorchDeviceType(TestCase):
     # Check https://github.com/pytorch/pytorch/pull/33322 for more details
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_intbool_to_float_upcasting(self, device, dtype):
-        op_list = ["abs", "acos", "asin", "conj", "ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sign", "sin", "sinh", "sqrt", "trunc", "neg"]
+        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log2", \
+                   "sin", "cos", "sinh", "sqrt", "trunc"]
         for op_name in op_list:
             x = torch.tensor([2], dtype=dtype, device=device)
             out = getattr(torch, op_name)(x)
