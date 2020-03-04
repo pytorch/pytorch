@@ -2649,6 +2649,44 @@ t2.start()
                 with self.assertRaises(RuntimeError):
                     getattr(module, op)(*args)
 
+    @skipIfRocm
+    def test_autocast_custom(self):
+        cast = None
+
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd(cast_inputs=cast)
+            def forward(ctx, a, b):
+                self.assertEqual(torch.is_autocast_enabled(), cast is None)
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertEqual(torch.is_autocast_enabled(), cast is None)
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), a.t().mm(grad)
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+        y = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float16)
+            loss = output.sum()
+        loss.backward()
+
+        cast = torch.float32
+
+        with torch.cuda.amp.autocast():
+            output = mymm(x, y)
+            self.assertTrue(output.dtype is torch.float16)
+            loss = output.sum()
+        loss.backward()
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):

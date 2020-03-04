@@ -283,6 +283,8 @@ Here :class:`torch.nn.parallel.DistributedDataParallel` may spawn a side thread 
 device, like :class:`torch.nn.parallel.DataParallel`.  :ref:`The fix is the same<amp-dataparallel>`:
 apply autocast as part of your model's ``forward`` method to ensure it's enabled in side threads.
 
+.. _amp-custom-examples:
+
 Autocast and Custom Autograd Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -290,19 +292,21 @@ If your network uses :ref:`custom autograd functions<extending-autograd>`
 (subclasses of :class:`torch.autograd.Function`), :class:`autocast` may just work.
 If you observe errors, see the appropriate case below.
 
-Functions that should receive autocasting
------------------------------------------
+Functions that should allow autocasting
+---------------------------------------
 
-For robustness, enable autocast explicitly in ``forward`` and ``backward``::
+The :func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators
+ensure ``backward`` executes with the same autocast state as ``forward``, which can
+prevent type mismatch errors in ``backward``::
 
     class MyMM(torch.autograd.Function):
         @staticmethod
-        @autocast()
+        @custom_fwd
         def forward(ctx, a, b):
             ctx.save_for_backward(a, b)
             return a.mm(b)
         @staticmethod
-        @autocast()
+        @custom_bwd
         def backward(ctx, grad):
             a, b = ctx.saved_tensors
             return grad.mm(b.t()), a.t().mm(grad)
@@ -310,33 +314,36 @@ For robustness, enable autocast explicitly in ``forward`` and ``backward``::
 Functions that need a particular datatype
 -----------------------------------------
 
-If your function has limited datatype support, you may not want it to receive autocasting.
-For example, if it wraps a `CUDA extension <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
-that was only compiled for ``float32``, force the function to run in ``float32`` as you would for any explicitly
-``float32`` subregion::
+If a function has limited datatype support, you may not want it to allow autocasting.
+
+Consider a custom autograd function wrapping
+`CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
+that were only compiled for ``float32``.  You can force the function to run in ``float32`` at the point of use,
+as you would for any explicitly ``float32`` subregion::
 
     with autocast():
-        # autocasted ops
         with autocast(enabled=False):
-            output = custom_float32_function(input.float())
+            output = float32_extension_function(input.float())
 
-Alternatively, you can change the function definition to force the desired type::
+Alternatively, you can call :func:`custom_fwd` with ``cast_inputs=torch.float32`` in the function's definition.
+This disables autocast in ``forward`` and ``backward``, and casts incoming floating-point Tensors to
+``float32``::
 
     class Float32Function(torch.autograd.Function):
         @staticmethod
-        @autocast(enabled=False)
+        @custom_fwd(cast_inputs=torch.float32)
         def forward(ctx, input):
-            input = input.float()
             ctx.save_for_backward(input)
             ...
             return fwd_output
         @staticmethod
-        @autocast(enabled=False)
+        @custom_bwd
         def backward(ctx, grad):
-            grad = grad.float() # For safety.  Likely a no-op because autograd ensures grad.dtype == fwd_output.dtype.
             ...
 
-Now ``Float32Function`` can be used anywhere, without needing to disable autocast at the point-of-use::
+Now ``Float32Function`` can be invoked anywhere, without disabling autocast at the point of use::
+
+    func = Float32Function.apply
 
     with autocast():
-        output =
+        output = func(input)

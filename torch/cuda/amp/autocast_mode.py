@@ -1,6 +1,8 @@
 import torch
 import functools
 import warnings
+import numpy as np
+from torch._six import container_abcs, string_classes
 
 
 class autocast(object):
@@ -84,7 +86,7 @@ class autocast(object):
     .. note::
         The autocast state is thread-local.  If you want it enabled in a new thread, the context manager or decorator
         must be invoked in that thread.  This affects :class:`torch.nn.DataParallel`, which spawns
-        new threads to run ``forward`` on each device.  See the :ref:`DataParallel example<amp-dataparallel`
+        new threads to run ``forward`` on each device.  See the :ref:`DataParallel example<amp-dataparallel>`
         for best practices.
 
     .. note::
@@ -117,3 +119,71 @@ class autocast(object):
             with self:
                 return func(*args, **kwargs)
         return decorate_autocast
+
+
+# Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
+# may be falsely detected as "Iterables."
+def _cast(value, dtype):
+    if isinstance(value, torch.Tensor):
+        return value.to(dtype) if (value.is_floating_point() and value.is_cuda()) else value
+    elif isinstance(value, string_classes):
+        return value
+    elif isinstance(value, np.ndarray):
+        return value
+    elif isinstance(value, container_abcs.Mapping):
+        return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
+    elif isinstance(value, container_abcs.Iterable):
+        return type(value)(_cast(v, dtype) for v in value)
+    else:
+        return value
+
+
+# custom_fwd is a decorator that may or may not be used with arguments, following
+# https://github.com/dabeaz/python-cookbook/tree/master/src/9/defining_a_decorator_that_takes_an_optional_argument.
+# this works:
+#     @custom_fwd
+#     def forward(...):
+# this also works:
+#     @custom_fwd(cast_inputs=torch.float)
+#     def forward(...):
+def custom_fwd(fwd=None, *, cast_inputs=None):
+    """
+    Helper decorator for ``forward`` methods of custom autograd functions (subclasses of
+    :class:`torch.autograd.Function`).  See the :ref:`example<amp-custom-examples>` for more detail.
+
+    Arguments:
+        cast_inputs (torch.dtype or None, optional, default=None):  If not ``None``, casts incoming floating-point
+            Tensors to the target dtype and causes ``forward`` to execute with autocast disabled.
+            If ``None``, inputs are not cast and ``forward`` executes with whatever autocast state surrounds the
+            point-of-use.
+    """
+    if fwd is None:
+        return functools.partial(custom_fwd, cast_inputs=cast_inputs)
+
+    @functools.wraps(fwd)
+    def decorate_fwd(*args, **kwargs):
+        if cast_inputs is None:
+            args[0]._fwd_used_autocast = torch.is_autocast_enabled()
+            return fwd(*args, **kwargs)
+        else:
+            args[0]._fwd_used_autocast = False
+            with autocast(enabled=False):
+                return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
+    return decorate_fwd
+
+
+# Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
+# cast_inputs_to argument on custom_bwd is unnecessary and could cause errors if it doesn't match
+# cast_inputs_to supplied to custom_fwd.
+def custom_bwd(bwd):
+    """
+    Helper decorator for backward methods of custom autograd functions (subclasses of
+    :class:`torch.autograd.Function`).
+    Ensures that ``backward`` executes with the same autocast state as ``forward``.
+    See the :ref:`example<amp-custom-examples>` for more detail.
+    """
+    @functools.wraps(bwd)
+    def decorate_bwd(*args, **kwargs):
+        with autocast(args[0]._fwd_used_autocast):
+            return bwd(*args, **kwargs)
+    return decorate_bwd

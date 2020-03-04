@@ -34,6 +34,10 @@ Autocasting
 .. autoclass:: autocast
     :members:
 
+.. autofunction::  custom_fwd
+
+.. autofunction::  custom_bwd
+
 .. _gradient-scaling:
 
 Gradient Scaling
@@ -49,7 +53,7 @@ invokes a backward pass on the scaled loss(es).  Gradients flowing backward thro
 then scaled by the same factor.  In other words, gradient values have a larger magnitude,
 so they don't flush to zero.
 
-The parameters' gradients (``.grad`` attributes) should be unscaled before the optimizer uses them
+The parameters' gradient (``.grad`` attributes) should be unscaled before the optimizer uses them
 to update the parameters, so the scale factor does not interfere with the learning rate.
 
 .. autoclass:: GradScaler
