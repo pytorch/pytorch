@@ -333,14 +333,17 @@ ProcessGroupGloo::SendWork::SendWork(
 
 bool ProcessGroupGloo::SendWork::wait() {
   bool sendCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     sendCompleted = buffer_->waitSend();
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
@@ -363,14 +366,17 @@ int ProcessGroupGloo::RecvWork::sourceRank() const {
 
 bool ProcessGroupGloo::RecvWork::wait() {
   bool recvCompleted = false;
-  std::unique_lock<std::mutex> lock(mutex_);
+  std::exception_ptr exception{nullptr};
   try {
     recvCompleted = buffer_->waitRecv(&srcRank_);
   } catch (...) {
-    exception_ = std::current_exception();
+    exception = std::current_exception();
   }
-
+  // Lock to write completed_ and exception_, and throw if there is an
+  // exception.
+  std::lock_guard<std::mutex> lock(mutex_);
   completed_ = true;
+  exception_ = exception;
   if (exception_) {
     std::rethrow_exception(exception_);
   }
