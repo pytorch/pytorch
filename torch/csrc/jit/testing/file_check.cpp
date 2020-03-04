@@ -13,13 +13,13 @@
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/source_range.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {

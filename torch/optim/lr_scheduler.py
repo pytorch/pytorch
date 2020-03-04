@@ -247,9 +247,8 @@ class MultiplicativeLR(_LRScheduler):
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
-        >>> # Assuming optimizer has two groups.
         >>> lmbda = lambda epoch: 0.95
-        >>> scheduler = LambdaLR(optimizer, lr_lambda=lmbda)
+        >>> scheduler = MultiplicativeLR(optimizer, lr_lambda=lmbda)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -312,7 +311,7 @@ class MultiplicativeLR(_LRScheduler):
             return [group['lr'] * lmbda(self.last_epoch)
                     for lmbda, group in zip(self.lr_lambdas, self.optimizer.param_groups)]
         else:
-            return [base_lr for base_lr in self.base_lrs]
+            return list(self.base_lrs)
 
 
 class StepLR(_LRScheduler):

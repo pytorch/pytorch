@@ -48,6 +48,8 @@ SET(INTEL_COMPILER_DIR "${DEFAULT_INTEL_COMPILER_DIR}" CACHE STRING
   "Root directory of the Intel Compiler Suite (contains ipp, mkl, etc.)")
 SET(INTEL_MKL_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
   "Root directory of the Intel MKL (standalone)")
+SET(INTEL_OMP_DIR "${DEFAULT_INTEL_MKL_DIR}" CACHE STRING
+  "Root directory of the Intel OpenMP (standalone)")
 SET(MKL_THREADING "OMP" CACHE STRING "MKL flavor: SEQ, TBB or OMP (default)")
 
 IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
@@ -135,10 +137,34 @@ IF (EXISTS ${INTEL_MKL_DIR})
   IF (MSVC)
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
       "${INTEL_MKL_DIR}/lib/${iccvers}")
+    IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+      SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+        "${INTEL_MKL_DIR}/win-x64")
+    ENDIF ()
   ENDIF()
   IF (APPLE)
     SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
       "${INTEL_MKL_DIR}/lib")
+  ENDIF()
+ENDIF()
+
+IF (EXISTS ${INTEL_OMP_DIR})
+  # TODO: diagnostic if dir does not exist
+  SET(CMAKE_INCLUDE_PATH ${CMAKE_INCLUDE_PATH}
+    "${INTEL_OMP_DIR}/include")
+  SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+    "${INTEL_OMP_DIR}/lib/${mklvers}")
+  IF (MSVC)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_OMP_DIR}/lib/${iccvers}")
+    IF ("${SIZE_OF_VOIDP}" EQUAL 8)
+      SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+        "${INTEL_OMP_DIR}/win-x64")
+    ENDIF ()
+  ENDIF()
+  IF (APPLE)
+    SET(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH}
+      "${INTEL_OMP_DIR}/lib")
   ENDIF()
 ENDIF()
 
@@ -212,7 +238,8 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
       ELSE()
-        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${_library})
+        SET(lib_names ${_library})
+        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))
