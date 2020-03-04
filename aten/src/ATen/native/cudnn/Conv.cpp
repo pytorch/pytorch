@@ -657,11 +657,11 @@ public:
   }
 
   void try_all(std::function<void (const perf_t &perf)> f) {
+    bool only_use_default = args.params.deterministic && !benchmark;
+
     auto& cache = search::cache();
-
     perf_t algoPerf;
-
-    if (cache.find(args.params, &algoPerf)) {
+    if (!only_use_default && cache.find(args.params, &algoPerf)) {
       try {
         f(algoPerf);
         return;
@@ -670,9 +670,7 @@ public:
       }
     }
 
-    bool only_use_default = args.params.deterministic && !benchmark;
     auto perfResults = only_use_default ? onlyDefaultAlgorithm(args) : search::findAlgorithms(args, benchmark);
-
     for (auto &algoPerf : perfResults) {
       try {
         f(algoPerf);
