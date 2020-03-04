@@ -628,27 +628,16 @@ class ModuleAPITest(QuantizationTestCase):
             Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
         # The below check is meant to ensure that `torch.save` and `torch.load`
-        # serialization works, however it is currently broken by the following:
-        # https://github.com/pytorch/pytorch/issues/24045
-        #
-        # Instead, we currently check that the proper exception is thrown on
-        # save.
-        # <start code>
-        # b = io.BytesIO()
-        # torch.save(conv_under_test, b)
-        # b.seek(0)
-        # loaded_conv = torch.load(b)
-        #
-        # self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
-        # self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
-        # self.assertEqual(loaded_qconv_module.zero_point,
-        #                  qconv_module.zero_point)
-        # <end code>
-        with self.assertRaisesRegex(
-            RuntimeError, r'torch.save\(\) is not currently supported'
-        ):
-            bytes_io = io.BytesIO()
-            torch.save(qconv_module, bytes_io)
+        # serialization works.
+        b = io.BytesIO()
+        torch.save(qconv_module, b)
+        b.seek(0)
+        loaded_qconv_module = torch.load(b)
+        
+        self.assertEqual(loaded_qconv_module.bias(), qconv_module.bias())
+        self.assertEqual(loaded_qconv_module.scale, qconv_module.scale)
+        self.assertEqual(loaded_qconv_module.zero_point,
+                         qconv_module.zero_point)
 
         # JIT testing
         self.checkScriptable(
