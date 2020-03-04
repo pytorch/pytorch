@@ -462,7 +462,7 @@ void testControlFlow() {
 
   auto run = [&](const std::string& name, std::vector<IValue> stack) {
     auto graph = cu->get_function(name).graph();
-    Code code(graph);
+    Code code(graph, "");
     InterpreterState interp(code);
     interp.run(stack);
     return stack;
@@ -1026,7 +1026,7 @@ graph(%a):
 
   std::vector<IValue> stack = {IValue(torch::randn({22}, at::kCPU))};
   auto run = [&](std::shared_ptr<Graph>& graph, std::vector<IValue> stack) {
-    GraphExecutor executor(graph);
+    GraphExecutor executor(graph, "");
     executor.run(stack);
     return stack;
   };
@@ -1065,7 +1065,7 @@ void testInsertAndEliminateRedundantGuards() {
   auto y = at::randn({2, 3}, at::kCPU);
   auto stack = createStack({x, y});
   // introduce some profiling information
-  Code cd(pr->profiled_graph_);
+  Code cd(pr->profiled_graph_, "");
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
@@ -1115,7 +1115,7 @@ void testInsertBailOuts() {
   auto y = at::randn({2, 3}, at::kCPU);
   auto stack = createStack({x, y});
   // introduce some profiling information
-  Code cd(pr->profiled_graph_);
+  Code cd(pr->profiled_graph_, "");
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
@@ -1158,7 +1158,7 @@ void testProfiler() {
       arg_spec_creator.create(autograd::GradMode::is_enabled(), stack);
   arg_spec_creator.specializeTypes(opt_graph, spec);
   auto pr = ProfilingRecord::instrumentGraph(g);
-  Code cd(pr->profiled_graph_);
+  Code cd(pr->profiled_graph_, "");
   InterpreterState is{cd};
   is.run(stack);
 
