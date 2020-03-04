@@ -18,8 +18,9 @@ class autocast(object):
 
     :class:`autocast` should wrap the forward pass(es) of your network::
 
-        # Creates model in default precision (float32)
+        # Creates model and optimizer in default precision (float32)
         model = Net().cuda()
+        optimizer = optim.SGD(model.parameters, ...)
 
         for input, target in data:
             optimizer.zero_grad()

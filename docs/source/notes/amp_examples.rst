@@ -27,6 +27,10 @@ Typical Mixed Precision Training
 
 ::
 
+    # Creates model and optimizer in default precision (float32)
+    model = Net().cuda()
+    optimizer = optim.SGD(model.parameters, ...)
+
     # Creates a GradScaler once at the beginning of training.
     scaler = GradScaler()
 
@@ -40,6 +44,8 @@ Typical Mixed Precision Training
                 loss = loss_fn(output, target)
 
             # Scales the loss, and calls backward() on the scaled loss to create scaled gradients.
+            # Running backward() under autocast is not necessary or recommended.
+            # Backward ops run in the same precision that autocast used for corresponding forward ops.
             scaler.scale(loss).backward()
 
             # scaler.step() first unscales the gradients of the optimizer's assigned params.
