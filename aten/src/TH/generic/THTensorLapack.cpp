@@ -305,7 +305,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = THTensor_size(ra__, 0);
+  n = THTensor_(size)(ra__, 0);
   lda = n;
 
   /* Run inverse */
@@ -401,7 +401,7 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = THTensor_size(ra__, 0);
+  int m = THTensor_(size)(ra__, 0);
   int k = THTensor_sizeLegacyNoScalars(tau, 0);
   int lda = m;
 
