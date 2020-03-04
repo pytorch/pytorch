@@ -1,4 +1,4 @@
-#include <Python.h>
+#include <torch/csrc/python_headers.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/pybind.h>

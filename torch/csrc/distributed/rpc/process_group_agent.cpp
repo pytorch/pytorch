@@ -5,7 +5,7 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#include <Python.h>
+#include <torch/csrc/python_headers.h>
 
 namespace torch {
 namespace distributed {
