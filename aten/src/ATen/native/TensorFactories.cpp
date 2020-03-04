@@ -234,18 +234,6 @@ Tensor empty_like(
     }
 
 
-    // Note [Explicit nullopt MemoryFormat argument]
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // Some functions which we call default the OPTIONAL MemoryFormat
-    // argument to something that's not nullopt.  If we pass the
-    // MemoryFormat via TensorOptions, we must explicitly disable this
-    // defaulting process, by explicitly passing nullopt for the MemoryFormat
-    // argument.  When codegen is adjusted so we can delete this argument from
-    // the method signature, the argument will just disappear entirely.
-    //
-    // BTW, there are a few places where the optional MemoryFormat is None,
-    // but I still pass in nullopt for robustness.
-
     // We could check if dtype is still quantized?  But then should we shift/scale
     // the q_zero_point / q_scale or not?
     TORCH_CHECK(!options.has_dtype() || options.dtype() == self.dtype(),
@@ -256,9 +244,7 @@ Tensor empty_like(
     if (qscheme == kPerTensorAffine) {
       return at::_empty_affine_quantized(self.sizes(), options.memory_format(memory_format),
                                          self.q_scale(),
-                                         self.q_zero_point(),
-                                         // See Note [Explicit nullopt MemoryFormat argument]
-                                         c10::nullopt);
+                                         self.q_zero_point());
     } else if (qscheme == kPerChannelAffine) {
       // Copy the tensors with channels to avoid accidental overrides
       return at::_empty_per_channel_affine_quantized(
@@ -266,9 +252,7 @@ Tensor empty_like(
           self.q_per_channel_scales().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_zero_points().clone(at::MemoryFormat::Preserve),
           self.q_per_channel_axis(),
-          options.memory_format(memory_format),
-          // See Note [Explicit nullopt MemoryFormat argument]
-          c10::nullopt);
+          options.memory_format(memory_format));
     } else {
       TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
     }
@@ -280,12 +264,10 @@ Tensor empty_like(
     if (self.is_non_overlapping_and_dense()) {
       result = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
     } else {
-      // See Note [Explicit nullopt MemoryFormat argument]
-      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()), c10::nullopt);
+      result = at::empty(self.sizes(), options.memory_format(self.suggest_memory_format()));
     }
   } else {
-    // See Note [Explicit nullopt MemoryFormat argument]
-    result = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
+    result = at::empty(self.sizes(), options.memory_format(memory_format));
   }
 
   if (self.opt_names()) {
