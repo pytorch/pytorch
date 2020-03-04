@@ -194,8 +194,13 @@ test_libtorch() {
       build/bin/test_jit "[cpu]"
     fi
     python test/cpp/jit/tests_setup.py shutdown
-    python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    if [[ -d /usr/local/mnist ]] ; then
+      echo "Using local MNIST dataset"
+      OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="/usr/local/mnist" build/bin/test_api
+    else
+      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
+      OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api
+    fi
     assert_git_not_dirty
   fi
 }
