@@ -46,11 +46,12 @@ def download(destination_path, resource, quiet):
                 urlretrieve(url, destination_path, reporthook=hook)
             except URLError as e:
                 print('Failed to download (trying next):\n{}'.format(e))
+                continue
             finally:
                 if not quiet:
                     # Just a newline.
                     print()
-                break
+            break
         else:
             raise RuntimeError('Error downloading resource!')
 
