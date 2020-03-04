@@ -786,8 +786,9 @@ class TestCase(expecttest.TestCase):
         torch.double: 5e-7,
         torch.int: 0
     }
+
     def compared_dtype(self, x, y):
-        dtype=torch.float
+        dtype = torch.float
         if isinstance(x, torch.Tensor):
             dtype = x.dtype
         elif isinstance(y, torch.Tensor):
@@ -888,7 +889,7 @@ class TestCase(expecttest.TestCase):
                     self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
                                      message=message, allow_inf=allow_inf, exact_dtype=exact_dtype)
                     self.assertEqual(x.q_zero_point(), y.q_zero_point(), 
-                                    atol=atol, rtol=rtol, message=message,
+                                     atol=atol, rtol=rtol, message=message,
                                      allow_inf=allow_inf, exact_dtype=exact_dtype)
                 elif x.qscheme() == torch.per_channel_affine:
                     self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
