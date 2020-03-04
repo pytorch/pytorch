@@ -473,7 +473,7 @@ class InsertObserversHelper {
 
   c10::optional<script::Module> getObserverFor(Value* v);
 
-  void findIntermediateValuesInPattern(
+  void skipValuesInPattern(
       Graph& graph,
       const PatternInfo& pattern);
 
@@ -511,27 +511,30 @@ class InsertObserversHelper {
   const PatternInfo conv_functional_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input, %inplace):
     %relu = prim::Constant[name="relu"]()
-    %conv = match::module[name="Conv2d"](%self)
-    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
-    %r = prim::CallFunction(%relu, %intermediate_val, %inplace)
-    return (%r) )");
-  const PatternInfo conv_relu_module = PatternInfo::parse_from_str(R"(
+    %first_module = match::module[name="Conv2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )");
+  const PatternInfo conv_relu = PatternInfo::parse_from_str(R"(
 graph(%self, %input):
-    %conv = match::module[name="Conv2d"](%self)
-    %intermediate_val = prim::CallMethod[name="forward"](%conv, %input)
-    %relu = match::module[name="ReLU"](%self)
-    %r = prim::CallMethod[name="forward"](%relu, %intermediate_val)
-    return (%r) )");
+    %first_module = match::module[name="Conv2d"](%self)
+    %first_output = prim::CallMethod[name="forward"](%first_module, %input)
+    %second_module = match::module[name="ReLU"](%self)
+    %second_output = prim::CallMethod[name="forward"](%second_module, %first_output)
+    return (%second_output) )");
   const PatternInfo matmul_add = PatternInfo::parse_from_str(R"(
 graph(%input, %weight, %bias, %4):
      %weight_t = aten::t(%weight)
-     %intermediate_val = aten::matmul(%input, %weight_t)
-     %res = aten::add_(%intermediate_val, %bias, %4)
-     return (%res) )");
-  const std::vector<std::reference_wrapper<const PatternInfo>> patterns = {
-      conv_functional_relu,
-      conv_relu_module,
-      matmul_add};
+     %first_output = aten::matmul(%input, %weight_t)
+     %second_output = aten::add_(%first_output, %bias, %4)
+     return (%second_output) )");
+
+
+  const std::vector<std::reference_wrapper<const PatternInfo>> skip_patterns = {
+    conv_functional_relu,
+    conv_relu,
+    matmul_add
+  };
 };
 
 // Check if `use` is an aten function of name `func_name` and if value
@@ -730,7 +733,7 @@ void InsertObserversHelper::insertObserverFor(
   observed_values_.insert(v);
 }
 
-void InsertObserversHelper::findIntermediateValuesInPattern(
+void InsertObserversHelper::skipValuesInPattern(
     Graph& graph,
     const PatternInfo& pattern) {
   const Graph& pattern_graph = *pattern.pattern_graph;
@@ -738,11 +741,10 @@ void InsertObserversHelper::findIntermediateValuesInPattern(
 
   const auto& matches = findPatternMatches(pattern_graph, graph);
   for (const auto& match : matches) {
-    auto output_value = vmap.at("intermediate_val");
-    TORCH_INTERNAL_ASSERT(
-        match.values_map.find(output_value) != match.values_map.end(),
-        "Didn't find Value output in match result.");
-    values_to_skip_.emplace(match.values_map.at(output_value));
+    auto output_value = match.values_map.at(vmap.at("first_output"));
+    GRAPH_DEBUG("Skipping value in function pattern:",
+                output_value->debugName());
+    values_to_skip_.insert(output_value);
   }
 }
 
@@ -752,8 +754,8 @@ void InsertObserversHelper::addIntermediateValuesToSkipObserver(
   script::Method method = module.get_method(method_name);
   auto graph = method.graph();
 
-  for (const auto& pattern : patterns) {
-    findIntermediateValuesInPattern(*graph, pattern);
+  for (const auto& pattern : skip_patterns) {
+    skipValuesInPattern(*graph, pattern);
   }
 }
 
