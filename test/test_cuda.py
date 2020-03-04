@@ -2650,28 +2650,26 @@ t2.start()
                     getattr(module, op)(*args)
 
     @skipIfRocm
-    def test_autocast_custom(self):
-        cast = None
-
+    def test_autocast_custom_enabled(self):
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd(cast_inputs=cast)
+            @torch.cuda.amp.custom_fwd
             def forward(ctx, a, b):
-                self.assertEqual(torch.is_autocast_enabled(), cast is None)
+                self.assertTrue(torch.is_autocast_enabled())
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
             @torch.cuda.amp.custom_bwd
             def backward(ctx, grad):
-                self.assertEqual(torch.is_autocast_enabled(), cast is None)
+                self.assertTrue(torch.is_autocast_enabled())
                 a, b = ctx.saved_tensors
                 return grad.mm(b.t()), a.t().mm(grad)
 
         mymm = MyMM.apply
 
-        x = torch.randn((8, 8), device="cuda", dtype=torch.float32)
-        y = torch.randn((8, 8), device="cuda", dtype=torch.float32)
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
+        y = torch.randn((8, 8), device="cuda", dtype=torch.float32, requires_grad=True)
 
         with torch.cuda.amp.autocast():
             output = mymm(x, y)
@@ -2679,11 +2677,35 @@ t2.start()
             loss = output.sum()
         loss.backward()
 
-        cast = torch.float32
+    @skipIfRocm
+    def test_autocast_custom_disabled(self):
+        class MyMM(torch.autograd.Function):
+            @staticmethod
+            @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+            def forward(ctx, a, container):
+                b = container[1][0]
+                self.assertFalse(torch.is_autocast_enabled())
+                ctx.save_for_backward(a, b)
+                return a.mm(b)
+
+            @staticmethod
+            @torch.cuda.amp.custom_bwd
+            def backward(ctx, grad):
+                self.assertFalse(torch.is_autocast_enabled())
+                a, b = ctx.saved_tensors
+                return grad.mm(b.t()), None
+
+        mymm = MyMM.apply
+
+        x = torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        # Puts one input tensor in a nested container.  y's contained Tensor won't receive a gradient,
+        # because torch.autograd.Function can't hand gradients back to non-Tensor forward arguments.
+        # Sets requires_grad=False explicitly so we don't lie about expecting a gradient.
+        y = (0, {0: torch.randn((8, 8), device="cuda", dtype=torch.float16, requires_grad=False)})
 
         with torch.cuda.amp.autocast():
             output = mymm(x, y)
-            self.assertTrue(output.dtype is torch.float16)
+            self.assertTrue(output.dtype is torch.float32)
             loss = output.sum()
         loss.backward()
 

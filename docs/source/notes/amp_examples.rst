@@ -5,7 +5,7 @@ Automatic Mixed Precision examples
 
 .. currentmodule:: torch.cuda.amp
 
-Typically, "automatic mixed precision training" means training with
+Ordinarily, "automatic mixed precision training" means training with
 :class:`torch.cuda.amp.autocast` and :class:`torch.cuda.amp.GradScaler` together.
 
 Instances of :class:`torch.cuda.amp.autocast` enable autocasting for chosen regions.
@@ -114,7 +114,7 @@ For some operations, you may need to work with scaled gradients in a setting whe
 Gradient penalty
 ----------------
 
-A gradient penalty implementation typically creates gradients out-of-place using
+A gradient penalty implementation commonly creates gradients out-of-place using
 :func:`torch.autograd.grad`, combines them to create the penalty value,
 and adds the penalty value to the loss.
 
@@ -242,7 +242,7 @@ The autocast state is thread local, so the following will not work::
     with autocast():
         # dp_model's internal side threads won't autocast.  The main thread's autocast state has no effect.
         output = dp_model(input)
-        # This still autocasts, but it's too late...
+        # loss_fn still autocasts, but it's too late...
         loss = loss_fn(output)
 
 The fix is simple.  Enable autocast as part of ``MyModel.forward``::
@@ -295,9 +295,9 @@ If you observe errors, see the appropriate case below.
 Functions that should allow autocasting
 ---------------------------------------
 
-The :func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators
-ensure ``backward`` executes with the same autocast state as ``forward``, which can
-prevent type mismatch errors in ``backward``::
+The :func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators (with no arguments)
+ensure that ``forward`` executes with whatever autocast state surrounds the point of use, and that
+``backward`` executes with the same autocast state as ``forward`` (which can prevent type mismatch errors)::
 
     class MyMM(torch.autograd.Function):
         @staticmethod
@@ -323,11 +323,11 @@ as you would for any explicitly ``float32`` subregion::
 
     with autocast():
         with autocast(enabled=False):
-            output = float32_extension_function(input.float())
+            output = float32_function(input.float())
 
-Alternatively, you can call :func:`custom_fwd` with ``cast_inputs=torch.float32`` in the function's definition.
-This disables autocast in ``forward`` and ``backward``, and casts incoming floating-point Tensors to
-``float32``::
+Alternatively, you can use the :func:`custom_fwd` decorator with ``cast_inputs=torch.float32`` in the function's
+definition.  The ``cast_inputs=torch.float32`` argument disables autocast in ``forward`` and ``backward``,
+and casts incoming floating-point CUDA Tensors to ``float32``::
 
     class Float32Function(torch.autograd.Function):
         @staticmethod
