@@ -110,10 +110,21 @@ void remainder_kernel(TensorIterator& iter) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return a - b * at::native::floor_impl(a / b);
+          if (b == 0) {
+            return std::numeric_limits<scalar_t>::quiet_NaN();
+          } else {
+            return a - b * at::native::floor_impl(a / b);
+          }
         },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          return a - b * (a / b).floor();
+          Vec256<scalar_t> r = a - b * (a / b).floor();
+          Vec256<scalar_t> r_nans = b.map([](const scalar_t x) -> scalar_t {
+            return (x == static_cast<scalar_t>(0)) ?
+              std::numeric_limits<scalar_t>::quiet_NaN() :
+              static_cast<scalar_t>(0);
+          });
+          // Adding a NaN to any other number will result in NaN
+          return r + r_nans;
         });
     });
   }
