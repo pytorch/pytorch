@@ -59,7 +59,7 @@ struct TORCH_API KernelSpec {
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},
-        code_{_graph},
+        code_{_graph, "<fused code>"},
         nInputs_{_graph->inputs().size()},
         nTensorInputs_{},
         inputBroadcastGroups_{},
