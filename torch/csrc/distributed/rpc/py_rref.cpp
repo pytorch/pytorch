@@ -48,7 +48,7 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }
 
-c10::optional<TypePtr> typePyObjToTypePtr(const py::object& type_value) {
+c10::optional<TypePtr> tryTypePyObjToTypePtr(const py::object& type_value) {
   if (type_value.is(py::none())) {
     return c10::nullopt;
   }
@@ -57,7 +57,7 @@ c10::optional<TypePtr> typePyObjToTypePtr(const py::object& type_value) {
   return jit::get_python_cu()->get_type(type_value_str);
 }
 
-TypePtr decidePyObjIValueType(
+TypePtr decidePyObjJitType(
     const py::object& value,
     c10::optional<TypePtr> type_hint) {
   jit::InferredType type_inferred = jit::tryToInferType(value);
@@ -74,11 +74,15 @@ TypePtr decidePyObjIValueType(
     TORCH_CHECK(
         type_hint.has_value(),
         "If the RRef being created contains a ScriptModule, user must provide it's ModuleInterface type.");
-    // TODO: Check is subtype if ModuleInterface.
     TORCH_CHECK(
         type_hint.value()->kind() == TypeKind::InterfaceType,
         "The py::object is a Module, type hint must be a ModuleInterface");
-    // TODO: Check object is instance of ModuleInterface.
+    TORCH_CHECK(
+        module.value().type()->isSubtypeOf(type_hint.value()),
+        "The Module type: ",
+        module.value().type()->python_str(),
+        ", is not subtype of type hint: ",
+        type_hint.value()->python_str());
     return type_hint.value();
   }
 
@@ -98,11 +102,11 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
 PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
     : PyRRef([&value, &type_hint]() {
         c10::optional<TypePtr> optional_type_ptr =
-            typePyObjToTypePtr(type_hint);
-        TypePtr elem_type = decidePyObjIValueType(value, optional_type_ptr);
+            tryTypePyObjToTypePtr(type_hint);
+        TypePtr elem_type = decidePyObjJitType(value, optional_type_ptr);
         if (optional_type_ptr.has_value()) {
           TORCH_CHECK(
-              optional_type_ptr.value() == elem_type,
+              elem_type->isSubtypeOf(optional_type_ptr.value()),
               "The specificied type hint is ",
               optional_type_ptr.value()->python_str(),
               "The decided type is ",
