@@ -55,8 +55,8 @@ public:
       int32_t kernel_id = getNextUniqueID();
 
       graph_cache_[repr] = kernel_id;
-      kernel_cache_[kernel_id] = CudaKernelEntry();
 
+      // default constructor via accessing empty key;
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
       parseJitIR(graph, kernel_cache_[kernel_id].fusion_);
 

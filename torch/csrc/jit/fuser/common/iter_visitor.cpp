@@ -27,8 +27,8 @@ std::vector<Statement*> IterVisitor::next(
 }
 
 std::vector<Statement*> IterVisitor::next(Val* v) {
-  if (FusionGuard::getCurFusion()->origin(v) != nullptr)
-    return {FusionGuard::getCurFusion()->origin(v)};
+  if (v->fusion() && v->fusion()->origin(v))
+    return {v->fusion()->origin(v)};
   return {};
 }
 
@@ -42,8 +42,6 @@ void IterVisitor::traverseFrom(
   std::set<Statement*> visited;
   std::deque<Statement*> to_visit;
   
-  if (FusionGuard::getCurFusion() != fusion)
-    throw std::runtime_error("fusion is not active.");
   std::queue<Val*> outputs_to_visit;
   for (Val* entry : from)
     outputs_to_visit.emplace(entry);
@@ -92,9 +90,6 @@ void IterVisitor::traverse(
     throw std::runtime_error("Not implemented yet.");
   std::set<Statement*> visited;
   std::deque<Statement*> to_visit;
-
-  if (FusionGuard::getCurFusion() != fusion)
-    throw std::runtime_error("fusion is not active.");
 
   std::vector<Val*> outputs_to_visit;
 
@@ -175,7 +170,7 @@ void DependencyCheck::toVisitCallback(Statement* stmt){
 
 bool DependencyCheck::check(){
   is_dependency = false;
-  IterVisitor::traverseFrom(FusionGuard::getCurFusion(), {of_});
+  IterVisitor::traverseFrom(of_->fusion(), {of_});
   return is_dependency;
 }
 
