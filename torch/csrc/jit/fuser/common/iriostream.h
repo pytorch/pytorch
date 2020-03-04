@@ -36,8 +36,8 @@ public:
 
 Printer(std::ostream& _os):os(_os){}
 
-virtual void print(const Fusion* const);
-virtual void print(const Fusion& f){print(&f);}
+virtual void print(Fusion* const);
+virtual void print(Fusion& f){print(&f);}
 
 virtual void print(const Statement* const);
 
@@ -70,8 +70,8 @@ void print_inline(const Statement* const stmt){
 };
 
 TORCH_API std::ostream& operator<< (std::ostream& os, const Statement* const stmt);
-TORCH_API std::ostream& operator<< (std::ostream& os, const Fusion* const f);
-TORCH_API std::ostream& operator<< (std::ostream& os, const Fusion& f);
+TORCH_API std::ostream& operator<< (std::ostream& os, Fusion* f);
+TORCH_API std::ostream& operator<< (std::ostream& os, Fusion& f);
 
 } // namespace fuser
 } // namespace jit

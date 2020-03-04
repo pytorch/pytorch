@@ -23,9 +23,9 @@ struct CudaKernelEntry {
   // TODO: we don't need to keep the whole Fusion around after compilation.
   Fusion fusion_;
 
-  void debugPrint() const {
-    FusionGuard fg(const_cast<Fusion*>(&fusion_));
-    std::cout << "fusion group: " << std::endl << fusion_ << std::endl;
+  void debugPrint() {
+    FusionGuard fg(&fusion_);
+    std::cout << "fusion group: \n"  << &fusion_ << std::endl;
   }
 };
 
@@ -73,7 +73,7 @@ public:
   void runFusionNode(
       int32_t kernel_id,
       Stack& stack) {
-    const CudaKernelEntry& cuda_kernel_entry = kernel_cache_[kernel_id];
+    CudaKernelEntry& cuda_kernel_entry = kernel_cache_[kernel_id];
     const Fusion& fusion = cuda_kernel_entry.fusion_;
     at::ArrayRef<IValue> inputs = last(stack, fusion.inputs().size());
     std::vector<at::Tensor> outputs;

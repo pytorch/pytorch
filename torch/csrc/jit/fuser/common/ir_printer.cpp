@@ -33,7 +33,7 @@ void IRPrinter::handle(Float* val) {
 // IRTransformPrinter Methods
 // ****************************************************************************
 
-void IRTransformPrinter::print(const Fusion* const fusion) {
+void IRTransformPrinter::print(Fusion* fusion) {
   irstream_ << "\n\t// Tensor Expressions ...\n";
   traverse(fusion, false /*from_outputs_only*/, false /*breadth_first*/, {ValType::TensorDomain});
   irstream_ << "\n";
@@ -107,7 +107,7 @@ void IRTransformPrinter::handle(IterDomain* idom) {
 // IRMathPrinter Methods
 // ****************************************************************************
 
-void IRMathPrinter::print(const Fusion* const fusion) {
+void IRMathPrinter::print(Fusion* fusion) {
   irstream_ << "\nPrinting TensorViews...\n";
   for(auto &val : fusion->vals()) {
     if(val->getValType().value() == ValType::TensorView)

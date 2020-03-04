@@ -9,7 +9,7 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-void Printer::print(const Fusion* const fusion) {
+void Printer::print(Fusion* fusion) {
   for (const Expr* expr : fusion->exprs()) {
     print(expr);
   }
@@ -252,13 +252,13 @@ std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
   return os;
 }
 
-std::ostream& operator<< (std::ostream& os, const Fusion* const f){
+std::ostream& operator<< (std::ostream& os, Fusion* f){
   Printer p(os);
   p.print(f);
   return os;
 }
 
-std::ostream& operator<< (std::ostream& os, const Fusion& f){
+std::ostream& operator<< (std::ostream& os, Fusion& f){
   return os << &f;
 }
 
