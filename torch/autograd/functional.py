@@ -34,8 +34,8 @@ def _tuple_postprocess(inp, tuple_inp):
 def _grad_preprocess(inputs, create_graph, need_graph):
     # Preprocess the inputs to make sure they require gradient
     # inputs is a tuple of Tensor to preprocess
-    # create_graph specifies if the user wants gradients to flow back to the original input
-    # need_graph specifies if we internally want gradients to flow back for this Tensor
+    # create_graph specifies if the user wants gradients to flow back to the Tensors in inputs
+    # need_graph specifies if we internally want gradients to flow back to the Tensors in res
     # Note that we *always* create a new Tensor object to be able to see the difference between
     # inputs given as arguments and the same Tensors automatically captured by the user function.
     # Check this issue for more details on how that can happen: https://github.com/pytorch/pytorch/issues/32576
@@ -135,18 +135,18 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         v (tuple of Tensor or Tensor): The vector that will multiply the Jacobian. Must be the
             same size as the output of ``func``. This argument is optional when
-            ``func``'s output contains a single element and it will be set as a Tensor
+            ``func``'s output contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict if ``False``, the result can not
+            computed in a differentiable way. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
@@ -228,18 +228,18 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         v (tuple of Tensor or Tensor): The vector that will multiply the Jacobian. Must be the
             same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and it will be set as a Tensor
+            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict if ``False``, the result can not
+            computed in a differentiable way. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
@@ -319,14 +319,14 @@ def jacobian(func, inputs, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a tuple of Tensor or a Tensor.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         create_graph (bool, optional): If ``True``, the Jacobian will be computed in
-            a differentiable manner. Note that when strict if ``False``, the result can not
+            a differentiable manner. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
@@ -335,8 +335,8 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             linearized inputs and output. If one of the two is a tuple, then the Jacobian
             will be a tuple of Tensors. If both of them are tuples, then the Jacobian will
             be a tuple of tuple of Tensors where ``Jacobian[i][j]`` will contain the Jacobian
-            of the ``i``th output and ``j``th input and will have as size the sum of the size
-            of the corresponding output plus the size of the corresponding input.
+            of the ``i``th output and ``j``th input and will have as size the concatenation of the
+            sizes of the corresponding output and the corresponding input.
 
     Example::
 
@@ -383,12 +383,11 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             vj = _autograd_grad(out.reshape(-1)[j], inputs, retain_graph=True, create_graph=create_graph)
 
             for el_idx, (jac_i_el, vj_el, inp_el) in enumerate(zip(jac_i, vj, inputs)):
-                # Note that grad_out_view might share memory with vj
                 if vj_el is not None:
                     if strict and create_graph and not vj_el.requires_grad:
                         raise RuntimeError("The jacobian of the user-provided function is independent of "
                                            "input {}. This is not allowed in strict mode when create_graph=True.".format(i))
-                    jac_i_el.append(vj_el.clone())
+                    jac_i_el.append(vj_el)
                 else:
                     if strict:
                         raise RuntimeError("Output {} of the user-provided function is independent of "
@@ -409,14 +408,14 @@ def hessian(func, inputs, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         create_graph (bool, optional): If ``True``, the Hessian will be computed in
-            a differentiable manner. Note that when strict if ``False``, the result can not
+            a differentiable manner. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
@@ -496,7 +495,6 @@ def hessian(func, inputs, create_graph=False, strict=False):
         return jac
 
     res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict)
-    # False here to remove the tuple dimension from the output as we know it does not have any.
     return _tuple_postprocess(res, (tuple_inputs, tuple_inputs))
 
 
@@ -507,18 +505,18 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         v (tuple of Tensor or Tensor): The vector that will multiply the Hessian. Must be the
             same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and it will be set as a Tensor
+            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict if ``False``, the result can not
+            computed in a differentiable way. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:
@@ -607,18 +605,18 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
     Args:
         func (function): a Python function that takes Tensor inputs and returns
             a Tensor with a single element.
-        inputs (tuple of Tensor or Tensor): inputs to the function.
+        inputs (tuple of Tensor or Tensor): inputs to the function ``func``.
         v (tuple of Tensor or Tensor): The vector that will multiply the Hessian. Must be the
             same size as the input of ``func``. This argument is optional when
-            ``func``'s input contains a single element and it will be set as a Tensor
+            ``func``'s input contains a single element and (if it is not provided) will be set as a Tensor
             containing a single ``1``.
         create_graph (bool, optional): If ``True``, both the output and result will be
-            computed in a differentiable way. Note that when strict if ``False``, the result can not
+            computed in a differentiable way. Note that when strict is ``False``, the result can not
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
-        strict (bool, optional): If ``True``, an error will be raised when we detect we detect that some quantities
-            are independent of the element we want to differentiate it with. If ``False``, such quantity
-            will only be set to ``0`` which is the expected mathematical value.
+        strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
     Returns:

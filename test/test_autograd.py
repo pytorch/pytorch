@@ -4132,17 +4132,17 @@ def add_test(
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
-        # base and res should be Tensors or tuple of Tensors containing the same thing
+        # base and res should be Tensors or tuple of Tensors with the same size
         if torch.is_tensor(base):
             self.assertTrue(torch.is_tensor(res))
-            self.assertTrue(base.size() == res.size())
+            self.assertEqual(base.size(), res.size())
         elif isinstance(base, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(base), len(res))
             for el_base, el_res in zip(base, res):
                 self.assertTrue(torch.is_tensor(el_base))
                 self.assertTrue(torch.is_tensor(el_res))
-                self.assertTrue(el_base.size() == el_res.size())
+                self.assertEqual(el_base.size(), el_res.size())
         else:
             # Wrong base
             raise RuntimeError("The base given to `_assert_same_struct` doesn't have"
@@ -4158,21 +4158,21 @@ class TestAutogradFunctional(TestCase):
         # - Tensor, Tensor: res[k][l] = (base1[k], base2[l])
         if torch.is_tensor(base1) and torch.is_tensor(base2):
             self.assertTrue(torch.is_tensor(res))
-            self.assertTrue(res.size() == base1.size() + base2.size())
+            self.assertEqual(res.size(), base1.size() + base2.size())
         elif isinstance(base1, tuple) and torch.is_tensor(base2):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base1))
             for el_res, el_base1 in zip(res, base1):
                 self.assertTrue(torch.is_tensor(el_res))
                 self.assertTrue(torch.is_tensor(el_base1))
-                self.assertTrue(el_res.size() == el_base1.size() + base2.size())
+                self.assertEqual(el_res.size(), el_base1.size() + base2.size())
         elif torch.is_tensor(base1) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base2))
             for el_res, el_base2 in zip(res, base2):
                 self.assertTrue(torch.is_tensor(el_res))
                 self.assertTrue(torch.is_tensor(el_base2))
-                self.assertTrue(el_res.size() == base1.size() + el_base2.size())
+                self.assertEqual(el_res.size(), base1.size() + el_base2.size())
         elif isinstance(base1, tuple) and isinstance(base2, tuple):
             self.assertTrue(isinstance(res, tuple))
             self.assertEqual(len(res), len(base1))
@@ -4182,7 +4182,7 @@ class TestAutogradFunctional(TestCase):
                 for el_el_res, el_base2 in zip(el_res, base2):
                     self.assertTrue(torch.is_tensor(el_el_res))
                     self.assertTrue(torch.is_tensor(el_base2))
-                    self.assertTrue(el_el_res.size() == el_base1.size() + el_base2.size())
+                    self.assertEqual(el_el_res.size(), el_base1.size() + el_base2.size())
         else:
             # Wrong bases
             raise RuntimeError("The bases given to `_assert_interleaved_struct` don't have"
@@ -4275,6 +4275,10 @@ class TestAutogradFunctional(TestCase):
         inputs = torch.rand(4, 4)
         v = torch.ones([])
         res = autogradF.vjp(reducer, inputs, v)
+        self._assert_same_struct(res[0], v)
+        self._assert_same_struct(res[1], inputs)
+
+        res = autogradF.vjp(reducer, inputs)
         self._assert_same_struct(res[0], v)
         self._assert_same_struct(res[1], inputs)
 
@@ -4406,6 +4410,10 @@ class TestAutogradFunctional(TestCase):
         inputs = torch.rand([])
         v = torch.ones([])
         res = autogradF.jvp(expander, inputs, v)
+        self._assert_same_struct(res[0], torch.zeros(4))
+        self._assert_same_struct(res[1], res[0])
+
+        res = autogradF.jvp(expander, inputs)
         self._assert_same_struct(res[0], torch.zeros(4))
         self._assert_same_struct(res[1], res[0])
 
@@ -4780,6 +4788,9 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.vhp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
+        res = autogradF.vhp(reducer, inputs)
+        self._assert_same_struct(res[1], inputs)
+
         def bad_reducer(x):
             return x.sum().view(1, 1, 1)
         inputs = torch.rand(4, 4)
@@ -4921,6 +4932,9 @@ class TestAutogradFunctional(TestCase):
         inputs = torch.rand([])
         v = torch.rand([])
         res = autogradF.hvp(reducer, inputs, v)
+        self._assert_same_struct(res[1], inputs)
+
+        res = autogradF.hvp(reducer, inputs)
         self._assert_same_struct(res[1], inputs)
 
         def bad_reducer(x):
