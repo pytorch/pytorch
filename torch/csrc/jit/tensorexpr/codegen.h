@@ -55,10 +55,11 @@ class CodeGen::BufferArg {
         dtype_(tensor->function()->body(tensor->output_index())->dtype()) {}
   BufferArg(const Function& func)
       : var_(func.func_var(0)), dtype_(func.body(0)->dtype()) {
-        // TODO: Support multiple-output functions
-        CHECK(func.func_vars().size() == 1);
-      }
-  BufferArg(const VarHandle& var) : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
+    // TODO: Support multiple-output functions
+    CHECK(func.func_vars().size() == 1);
+  }
+  BufferArg(const VarHandle& var)
+      : var_(var.node()), dtype_(var.dtype()), isVar_(true) {}
 
   const Var* var() const {
     return var_;
@@ -89,7 +90,7 @@ class CodeGen::CallArg {
 
 #define ARG_TYPE_CTOR(Type, Name) \
   CallArg(Type v) : Name##val_(v) {}
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_TYPE_CTOR);
 #undef ARG_TYPE_CTOR
 
   void* data() const {
@@ -97,25 +98,24 @@ class CodeGen::CallArg {
   }
 
 #define ARG_DATA_DEFINE(Type, Name) \
-  Type Name##Data() const { \
-    return Name##val_; \
+  Type Name##Data() const {         \
+    return Name##val_;              \
   }
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_DATA_DEFINE);
 #undef ARG_DATA_DEFINE
 
-#define ARG_PTR_DEFINE(Type, Name) \
-  Type* Name##Ptr() const { \
+#define ARG_PTR_DEFINE(Type, Name)         \
+  Type* Name##Ptr() const {                \
     return const_cast<Type*>(&Name##val_); \
   }
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_PTR_DEFINE);
 #undef ARG_PTR_DEFINE
 
  private:
   union {
     void* ptr_;
 
-#define ARG_BACKING(Type, Name) \
-    Type Name##val_;
+#define ARG_BACKING(Type, Name) Type Name##val_;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, ARG_BACKING);
 #undef ARG_BACKING
   };
@@ -153,8 +153,7 @@ class RegisterCodeGen {
   explicit RegisterCodeGen(const std::string& name) {
     RegisterCodeGenList& codegen_list = RegisterCodeGenList::GetInstance();
     codegen_list.AddStmtFactoryMethod(
-        name,
-        [](Stmt* stmt, const std::vector<CodeGen::BufferArg>& params) {
+        name, [](Stmt* stmt, const std::vector<CodeGen::BufferArg>& params) {
           std::unique_ptr<CodeGen> method(new CodeGenType(stmt, params));
           return method;
         });

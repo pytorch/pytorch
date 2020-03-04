@@ -28,7 +28,7 @@ class CudaPrinter : public IRPrinter {
     }
   }
 
-  void visit(const Cast* v)  override {
+  void visit(const Cast* v) override {
     auto dtype = v->dtype();
     if (dtype == kHalf) {
       os() << "half";
@@ -75,8 +75,7 @@ class CudaPrinter : public IRPrinter {
 class TORCH_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
-  CudaCodeGen(Stmt* stmt, Ts... ts)
-      : CodeGen(stmt, std::forward<Ts>(ts)...) {
+  CudaCodeGen(Stmt* stmt, Ts... ts) : CodeGen(stmt, std::forward<Ts>(ts)...) {
     Initialize();
   }
 

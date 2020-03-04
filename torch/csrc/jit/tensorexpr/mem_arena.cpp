@@ -8,7 +8,7 @@ namespace {
 // Define in an anonymous namespace to hide this symbol from other compilation
 // units
 thread_local KernelArena* current_arena = nullptr;
-}
+} // namespace
 
 KernelArena::~KernelArena() {
   for (KernelScopedObject* p : kernel_objects_) {
@@ -26,7 +26,7 @@ static std::vector<KernelArena*>& GetKernelArenaStack() {
   return kernel_arena_stack;
 }
 
-void KernelArena::SetCurrentKernelArena(KernelArena *new_kernel_arena) {
+void KernelArena::SetCurrentKernelArena(KernelArena* new_kernel_arena) {
   current_arena = new_kernel_arena;
 }
 

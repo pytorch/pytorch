@@ -12,6 +12,7 @@ import elementwise
 #import pooling
 #import conv
 #import matmul
+import swish
 
 
 def main():

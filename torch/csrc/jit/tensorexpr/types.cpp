@@ -39,8 +39,7 @@ Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
 }
 
-#define DTYPE_DEFINE(_1, n) \
-  TORCH_API Dtype k##n(ScalarType::n, 1);
+#define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
 
@@ -52,7 +51,7 @@ TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
 Dtype ToDtype(ScalarType type) {
   switch (type) {
 #define TYPE_CASE(_1, n) \
-  case ScalarType::n: \
+  case ScalarType::n:    \
     return k##n;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE)
 #undef TYPE_CASE
@@ -77,12 +76,13 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
 }
 
 TORCH_API std::ostream& operator<<(
-    std::ostream& stream, const ScalarType& type) {
+    std::ostream& stream,
+    const ScalarType& type) {
   switch (type) {
 #define TYPE_CASE(ttt, Name) \
-  case ScalarType::Name: \
-      stream << #ttt; \
-      break;
+  case ScalarType::Name:     \
+    stream << #ttt;          \
+    break;
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -108,10 +108,10 @@ TORCH_API std::ostream& operator<<(
 int Dtype::byte_size() const {
   int scalar_size = -1;
   switch (scalar_type_) {
-#define TYPE_CASE(Type, Name) \
-  case ScalarType::Name: \
-      scalar_size = sizeof(Type); \
-      break;
+#define TYPE_CASE(Type, Name)   \
+  case ScalarType::Name:        \
+    scalar_size = sizeof(Type); \
+    break;
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -125,14 +125,15 @@ int Dtype::byte_size() const {
 std::string Dtype::ToCppString() const {
   switch (scalar_type_) {
 #define TYPE_CASE(t, n) \
-  case ScalarType::n: \
-      return #t;
+  case ScalarType::n:   \
+    return #t;
     AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
 #undef TYPE_CASE
-  case ScalarType::Half:
-    return "half";
-  default:
-    throw std::runtime_error("Invalid dtype: " + std::to_string(scalar_type_));
+    case ScalarType::Half:
+      return "half";
+    default:
+      throw std::runtime_error(
+          "Invalid dtype: " + std::to_string(scalar_type_));
   }
 }
 

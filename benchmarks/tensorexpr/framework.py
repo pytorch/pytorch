@@ -8,6 +8,7 @@ import torch
 class BenchmarkBase(object):
     def __init__(self, mode, device):
         self.mode = mode
+        self.deterministic = False
         self.device = device
         if mode == 'both':
             self.requires_grad = True

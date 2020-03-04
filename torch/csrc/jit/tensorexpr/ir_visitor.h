@@ -60,10 +60,9 @@ class TORCH_API IRVisitor {
   virtual void visit(const Rshift* v);
   virtual void visit(const CompareSelect* v);
 
-#define IMM_PRINT_VISIT(Type, Name) \
-  virtual void visit(const Name##Imm* v);
+#define IMM_PRINT_VISIT(Type, Name) virtual void visit(const Name##Imm* v);
 
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
   virtual void visit(const Cast* v);

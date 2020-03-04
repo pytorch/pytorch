@@ -3,7 +3,7 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -12,17 +12,6 @@ namespace rpc {
 /////////////////////  Pickle/Unpickle Helplers ////////////////////////////
 
 namespace {
-constexpr int OWNER_IDX = 0; // index of ownerId in the tuple
-constexpr int RREFID_ON_IDX = 1; // index of RRefId.createdOn_ in the tuple
-constexpr int RREFID_ID_IDX = 2; // index of RRefId.localId_ in the tuple
-constexpr int FORKID_ON_IDX = 3; // index of ForkId.createdOn_ in the tuple
-constexpr int FORKID_ID_IDX = 4; // index of ForkId.localId_ in the tuple
-constexpr int PARENT_IDX = 5; // index of parent in the tuple
-constexpr int TYPE_IDX = 6; // index of parent in the tuple
-
-// NB: if more fields are added, make sure this field is also bumped
-constexpr int RFD_TUPLE_SIZE = 7; // number of RRefForkData fields in py::tuple
-
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
   // add GIL as it is contructing a py::object
   pybind11::gil_scoped_acquire ag;
@@ -40,7 +29,9 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   pybind11::gil_scoped_acquire ag;
   TORCH_INTERNAL_ASSERT(
       pyTuple.size() == RFD_TUPLE_SIZE,
-      "Pickled RRefForkData must contain 6 numbers.");
+      "Pickled RRefForkData must contain ",
+      RFD_TUPLE_SIZE,
+      " numbers.");
   worker_id_t ownerId = pyTuple[OWNER_IDX].cast<worker_id_t>();
   // const reference will extend the lifetime of the temporary variable
   const RRefId& rrefId = RRefId(
@@ -65,11 +56,22 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
 
 PyRRef::PyRRef(const py::object& value)
     : PyRRef([&value]() {
+        jit::InferredType type_inferred = jit::tryToInferType(value);
+        TypePtr elem_type = nullptr;
+        if (type_inferred.success()) {
+          // If we could infer the type from the pyobject, we create
+          // the RRef with the IValue of that type.
+          elem_type = type_inferred.type();
+        } else {
+          // Otherwise it's a pure pyobject, create the RRef
+          // that holds an IValue of an pyobject
+          elem_type = PyObjectType::get();
+        }
         auto rref =
-            RRefContext::getInstance().createOwnerRRef(PyObjectType::get());
+            RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
-        IValue py_ivalue = jit::toIValue(std::move(copy), PyObjectType::get());
-        rref->setValue(std::move(py_ivalue));
+        IValue ivalue = jit::toIValue(std::move(copy), elem_type);
+        rref->setValue(std::move(ivalue));
         return rref;
       }()) {}
 

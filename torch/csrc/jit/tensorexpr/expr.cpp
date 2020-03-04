@@ -195,7 +195,10 @@ ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2) {
   return Intrinsics::make(kRemainder, v1, v2);
 }
 
-ExprHandle ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f) {
+ExprHandle ifThenElse(
+    const ExprHandle& c,
+    const ExprHandle& t,
+    const ExprHandle& f) {
   return IfThenElse::make(c, t, f);
 }
 

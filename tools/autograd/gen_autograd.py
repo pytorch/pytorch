@@ -30,6 +30,11 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
+# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
+# you **MUST** also update the public list of view ops accordingly in
+# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
+# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
+#
 # A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -108,6 +113,12 @@ def load_aten_declarations(path):
                                               for arg in declaration['arguments']]
         declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']]
         declaration['api_name'] = declaration['name']
+        # NB: keep this in sync with common_with_cwrap.py
+        if declaration.get('overload_name'):
+            declaration['type_wrapper_name'] = "{}_{}".format(
+                declaration['name'], declaration['overload_name'])
+        else:
+            declaration['type_wrapper_name'] = declaration['name']
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']

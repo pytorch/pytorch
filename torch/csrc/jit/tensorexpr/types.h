@@ -21,16 +21,17 @@ enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
 #undef DEFINE_ENUM
-      // Undefined must be next to match c10::ScalarType;
-      Undefined,
-      Handle,
-      Uninitialized,
-      None,
+  // Undefined must be next to match c10::ScalarType;
+  Undefined,
+  Handle,
+  Uninitialized,
+  None,
   NumOptions
 };
 
 TORCH_API std::ostream& operator<<(
-    std::ostream& stream, const ScalarType& dtype);
+    std::ostream& stream,
+    const ScalarType& dtype);
 
 TORCH_API bool is_integral(const ScalarType& type);
 TORCH_API bool is_floating_point(const ScalarType& type);
@@ -40,12 +41,10 @@ class TORCH_API Dtype {
  public:
   explicit Dtype(int8_t type)
       : scalar_type_(static_cast<ScalarType>(type)), lanes_(1) {}
-  explicit Dtype(ScalarType type)
-      : scalar_type_(type), lanes_(1) {}
+  explicit Dtype(ScalarType type) : scalar_type_(type), lanes_(1) {}
   Dtype(int8_t type, int lanes)
       : scalar_type_(static_cast<ScalarType>(type)), lanes_(lanes) {}
-  Dtype(ScalarType type, int lanes)
-      : scalar_type_(type), lanes_(lanes) {}
+  Dtype(ScalarType type, int lanes) : scalar_type_(type), lanes_(lanes) {}
   Dtype(Dtype type, int lanes)
       : scalar_type_(type.scalar_type_), lanes_(lanes) {
     CHECK(type.lanes() == 1);
@@ -53,7 +52,9 @@ class TORCH_API Dtype {
   int lanes() const {
     return lanes_;
   }
-  ScalarType scalar_type() const { return scalar_type_; }
+  ScalarType scalar_type() const {
+    return scalar_type_;
+  }
   Dtype scalar_dtype() const;
   bool operator==(const Dtype& other) const {
     return scalar_type_ == other.scalar_type_ && lanes_ == other.lanes_;
@@ -64,8 +65,12 @@ class TORCH_API Dtype {
   int byte_size() const;
   std::string ToCppString() const;
 
-  bool is_integral() const { return tensorexpr::is_integral(scalar_type_); }
-  bool is_floating_point() const { return tensorexpr::is_floating_point(scalar_type_); }
+  bool is_integral() const {
+    return tensorexpr::is_integral(scalar_type_);
+  }
+  bool is_floating_point() const {
+    return tensorexpr::is_floating_point(scalar_type_);
+  }
 
  private:
   friend std::ostream& operator<<(std::ostream& stream, const Dtype& dtype);
@@ -76,8 +81,7 @@ class TORCH_API Dtype {
 extern TORCH_API Dtype kUninitialized;
 extern TORCH_API Dtype kHandle;
 
-#define NNC_DTYPE_DECLARATION(ctype,name) \
-  extern TORCH_API Dtype k##name;
+#define NNC_DTYPE_DECLARATION(ctype, name) extern TORCH_API Dtype k##name;
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
 #undef NNC_DTYPE_DECLARATION
@@ -85,10 +89,10 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_DTYPE_DECLARATION)
 template <typename T>
 TORCH_API Dtype ToDtype();
 
-#define NNC_TODTYPE_DECLARATION(ctype,name) \
-  template <> \
-  inline Dtype ToDtype<ctype>() { \
-    return k##name; \
+#define NNC_TODTYPE_DECLARATION(ctype, name) \
+  template <>                                \
+  inline Dtype ToDtype<ctype>() {            \
+    return k##name;                          \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, NNC_TODTYPE_DECLARATION)
 #undef NNC_TODTYPE_DECLARATION

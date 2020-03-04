@@ -19,6 +19,7 @@ class BaseTestClass(unittest.TestCase):
         # TODO: read the old value and restore it rather than always set to True
         # on exit
         torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_register_tensorexpr_fuser()
 
     def tearDown(self):
         torch._C._jit_override_can_fuse_on_gpu(True)
@@ -1216,6 +1217,6 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_where(a, b)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
-        
+
 if __name__ == '__main__':
     unittest.main()

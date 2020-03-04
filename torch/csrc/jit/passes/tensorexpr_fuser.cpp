@@ -1,31 +1,22 @@
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/autograd/record_function.h>
-#include <torch/csrc/jit/custom_operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/operator_options.h>
-#include <torch/csrc/jit/pass_manager.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-
-using namespace torch::jit;
-using namespace torch::jit::tensorexpr;
 
 namespace torch {
 namespace jit {
-namespace tensorexpr {
 
 static bool texpr_fuser_enabled = true;
-TORCH_API void SetTexprFuserEnabled(bool val) {
+void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled = val;
 }
-
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
-
-namespace {
 
 const Symbol& getTensorExprSymbol() {
   static Symbol s = Symbol::fromQualString("tensorexpr::Group");
@@ -141,10 +132,7 @@ bool canHandle(Node* node, AliasDb& aliasDb) {
     return false;                           \
   }
 
-bool canMerge(
-    Node* consumer,
-    Node* producer,
-    AliasDb& aliasDb) {
+bool canMerge(Node* consumer, Node* producer, AliasDb& aliasDb) {
   // Only handle complete tensor types
   for (torch::jit::Value* output : consumer->outputs()) {
     REQ(output->isCompleteTensor());
@@ -163,8 +151,7 @@ bool canMerge(
   REQ(aliasDb.couldMoveAfterTopologically(consumer, producer));
 
   // Ops that return aliases can only be folded if this is the only use.
-  if (producer->kind() == aten::slice ||
-      producer->kind() == aten::unsqueeze ||
+  if (producer->kind() == aten::slice || producer->kind() == aten::unsqueeze ||
       producer->kind() == prim::ConstantChunk) {
     for (auto& use : producer->output(0)->uses()) {
       REQ(use.user == consumer);
@@ -197,11 +184,12 @@ bool canMerge(
 }
 #undef REQ
 
-Node *getOrCreateTensorExprSubgraph(Node *n) {
+Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
-  auto te_group = SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
+  auto te_group =
+      SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
   GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group);
   return te_group;
 }
@@ -323,7 +311,8 @@ void fuseTensorExprs(std::shared_ptr<Graph>& graph) {
 }
 
 Operation createTensorExprOp(const Node* node) {
-  auto kernel = std::make_shared<TensorExprKernel>(*node->g(attr::Subgraph));
+  auto kernel =
+      std::make_shared<tensorexpr::TensorExprKernel>(*node->g(attr::Subgraph));
   return [kernel](Stack& stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
     kernel->run(stack);
@@ -344,6 +333,12 @@ RegisterOperators TensorExprOps({
         getAliasAnalysisOption(AliasAnalysisKind::PURE_FUNCTION)),
 });
 
-RegisterPass pass(fuseTensorExprs);
-
-} // namespace
+void registerTensorExprFuser() {
+  static bool already_registered = false;
+  if (!already_registered) {
+    RegisterPass pass(fuseTensorExprs);
+    already_registered = true;
+  }
+}
+} // namespace jit
+} // namespace torch

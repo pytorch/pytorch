@@ -237,11 +237,10 @@ void ExpectAllNear(
   f1.ValidateWatermark();
   f2.ValidateWatermark();
   for (int i = 0; i < total_size; i++) {
-   ASSERT_NEAR(v1[kPaddingSize + i], v2[kPaddingSize + i], abs_error);
-        // << CompareErrorMsg(f1, f2, i);
+    ASSERT_NEAR(v1[kPaddingSize + i], v2[kPaddingSize + i], abs_error);
+    // << CompareErrorMsg(f1, f2, i);
   }
 }
-
 
 } // namespace tensorexpr
 } // namespace jit

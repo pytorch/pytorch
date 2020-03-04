@@ -9,53 +9,8 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-namespace schedule {
-class TensorExprNode;
-class ScheduleNode;
-} // namespace schedule
 
-using schedule::TensorExprNode;
-
-class TORCH_API TensorOperation : public KernelScopedObject {
- public:
-  void SplitWithTail(
-      const VarHandle& loop_var,
-      int factor,
-      bool factor_on_inner,
-      VarHandle* outer_var,
-      VarHandle* inner_var,
-      VarHandle* tail_var,
-      TensorOperation** tail_op);
-
-  void SplitWithMask(
-      const VarHandle& loop_var,
-      int factor,
-      bool factor_on_inner,
-      VarHandle* outer_var,
-      VarHandle* inner_var);
-
-  void ComputeInline();
-
-  void GPUExecConfig(
-      const std::vector<VarHandle>& blockIdx,
-      const std::vector<VarHandle>& threadIdx);
-
-  TensorExprNode* expr_node() {
-    return expr_node_;
-  }
-
- protected:
-  TensorOperation() {}
-  explicit TensorOperation(TensorExprNode* expr_node) : expr_node_(expr_node) {}
-
- private:
-  void check_expr_node();
-
-  friend class schedule::ScheduleNode;
-  TensorExprNode* expr_node_ = nullptr;
-};
-
-class Tensor : public TensorOperation {
+class Tensor {
  public:
   Function* function() const {
     return function_;
@@ -63,7 +18,6 @@ class Tensor : public TensorOperation {
   int output_index() const {
     return output_index_;
   }
-
 
   // Wrappers over accessors to fields of the underlying function
   const Expr* body() const {
@@ -137,12 +91,17 @@ TORCH_API Tensor* Compute(
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)> body_func);
+    std::function<
+        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>
+        body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&, const VarHandle&)>
-        body_func);
+    std::function<ExprHandle(
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&)> body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
@@ -151,7 +110,9 @@ TORCH_API Tensor* Compute(
 class FunctionCall : public CallNode<FunctionCall> {
  public:
   using BaseClass = CallNode<FunctionCall>;
-  static ExprHandle make(Tensor* tensor, const std::vector<ExprHandle>& params) {
+  static ExprHandle make(
+      Tensor* tensor,
+      const std::vector<ExprHandle>& params) {
     std::vector<const Expr*> params_nodes(params.size());
     for (size_t i = 0; i < params.size(); i++) {
       params_nodes[i] = params[i].node();
@@ -167,10 +128,15 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(tensor->function()->body(tensor->output_index())->dtype(), kFunctionCall, params),
+      : BaseClass(
+            tensor->function()->body(tensor->output_index())->dtype(),
+            kFunctionCall,
+            params),
         tensor_(tensor) {}
+
  private:
-  const Expr* DefaultMutator(const std::vector<const Expr*>& new_params) const override {
+  const Expr* DefaultMutator(
+      const std::vector<const Expr*>& new_params) const override {
     return new FunctionCall(tensor_, new_params);
   }
 

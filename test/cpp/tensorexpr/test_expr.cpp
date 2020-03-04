@@ -56,7 +56,8 @@ void testExprLetTest02() {
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle value = ExprHandle(3.f);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
+  ExprHandle body =
+      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
   ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
   SimpleIRExprEval eval(e2);
@@ -422,8 +423,10 @@ void testCond01() {
   PaddedBuffer<float> a_v(N);
   Buffer a_buf("a", kFloat, {N});
   VarHandle index = VarHandle("index", kInt);
-  Stmt* assign_x2 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
-  Stmt* assign_x3 = Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
+  Stmt* assign_x2 =
+      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 2, 1);
+  Stmt* assign_x3 =
+      Store::make(VarHandle(a_buf.data()), index, cast<float>(index) * 3, 1);
   ExprHandle even_cond = CompareSelect::make(Mod::make(index, 2), 0, kEQ);
   Stmt* assign = Cond::make(even_cond, assign_x2, assign_x3);
   Stmt* for_stmt = For::make(index, 0, N, assign);

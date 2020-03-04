@@ -26,6 +26,7 @@ class Stmt : public KernelScopedObject {
   static void set_parent(Stmt* s, Stmt* new_parent) {
     s->parent_ = new_parent;
   }
+
  private:
   Stmt* parent_ = nullptr;
 };
@@ -95,7 +96,7 @@ class Block : public StmtNode<Block> {
     return stmts_.size();
   }
 
-  void append_stmt(Stmt *s) {
+  void append_stmt(Stmt* s) {
     stmts_.push_back(s);
     set_parent(s, this);
   }
@@ -119,6 +120,7 @@ class Block : public StmtNode<Block> {
       set_parent(s, this);
     }
   }
+
  private:
   std::list<Stmt*> stmts_;
 };
@@ -151,14 +153,16 @@ class TORCH_API Store : public StmtNode<Store> {
       const ExprHandle& index,
       const ExprHandle& value,
       const ExprHandle& mask) {
-    return new Store(base_handle.node(), index.node(), value.node(), mask.node());
+    return new Store(
+        base_handle.node(), index.node(), value.node(), mask.node());
   }
 
   static Stmt* make(
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& value) {
-    return new Store(base_handle.node(), index.node(), value.node(), ExprHandle(1).node());
+    return new Store(
+        base_handle.node(), index.node(), value.node(), ExprHandle(1).node());
   }
 
   // TODO: merge this with Load.
@@ -179,8 +183,8 @@ class TORCH_API Store : public StmtNode<Store> {
     CHECK_EQ(index->dtype().lanes(), value->dtype().lanes());
     CHECK_EQ(index->dtype().scalar_type(), ScalarType::Int);
   }
- private:
 
+ private:
   const Var* base_handle_;
   const Expr* index_;
   const Expr* value_;
@@ -215,7 +219,10 @@ class Allocate : public StmtNode<Allocate> {
     return dims_;
   }
 
-  Allocate(const Var* buffer_var, Dtype dtype, const std::vector<const Expr*>& dims)
+  Allocate(
+      const Var* buffer_var,
+      Dtype dtype,
+      const std::vector<const Expr*>& dims)
       : buffer_var_(buffer_var), dtype_(dtype), dims_(dims) {}
 
  private:

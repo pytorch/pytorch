@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -12,7 +12,8 @@ template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
   for (int i = 0; i < t->function()->ndim(); i++) {
-    sizes.push_back(dynamic_cast<const IntImm*>(t->function()->dim(i))->value());
+    sizes.push_back(
+        dynamic_cast<const IntImm*>(t->function()->dim(i))->value());
   }
   return sizes;
 }
@@ -59,7 +60,8 @@ class TensorExprKernel {
 
   template <typename T, typename T1>
   ExprHandle broadcast(const T& t, const std::vector<T1>& axes) {
-    return t->call(computeIndicesToBroadcast(axes, ExprVectorToExprHandleVector(t->function()->dims())));
+    return t->call(computeIndicesToBroadcast(
+        axes, ExprVectorToExprHandleVector(t->function()->dims())));
   }
 
   template <typename T, typename T1>
@@ -109,17 +111,21 @@ class TensorExprKernel {
   Tensor* ComputeTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>
+          inner_expr);
 
   Tensor* ComputeTwoOperandWithAlpha(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)> inner_expr);
+      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>
+          inner_expr);
 
   Tensor* ComputeThreeOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)> inner_expr);
+      std::function<
+          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>
+          inner_expr);
 
   Tensor* ComputeConditionWithTwoOperand(
       const std::string& name,
@@ -131,8 +137,11 @@ class TensorExprKernel {
   Tensor* ComputeFourOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&, const ExprHandle&)>
-          inner_expr);
+      std::function<ExprHandle(
+          const ExprHandle&,
+          const ExprHandle&,
+          const ExprHandle&,
+          const ExprHandle&)> inner_expr);
 
   Tensor* ComputeValue(const torch::jit::Value* v);
 
@@ -201,7 +210,6 @@ class TensorExprKernel {
 TORCH_API int& GetTECudaPointwiseLoopLevels();
 TORCH_API int& GetTECudaPointwiseBlockCount();
 TORCH_API int& GetTECudaPointwiseBlockSize();
-TORCH_API void SetTexprFuserEnabled(bool val);
 
 } // namespace tensorexpr
 } // namespace jit

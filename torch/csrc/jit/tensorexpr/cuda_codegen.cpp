@@ -20,10 +20,7 @@ DEFINE_TRIGGER(cuda_codegen_executed);
 // TODO: move this to a more shared place.
 class ScopedVarName {
  public:
-  ScopedVarName(
-      VarNameMap* mapping,
-      const Var* var,
-      const std::string& name)
+  ScopedVarName(VarNameMap* mapping, const Var* var, const std::string& name)
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
     if (iter != mapping->end()) {
@@ -141,8 +138,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   // get type of resulting expression.
   ScalarType returnType = v->param(0)->dtype().scalar_type();
   for (int i = 1; i < v->nparams(); ++i) {
-    returnType =
-        promoteTypes(returnType, v->param(i)->dtype().scalar_type());
+    returnType = promoteTypes(returnType, v->param(i)->dtype().scalar_type());
   }
 
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
@@ -233,8 +229,7 @@ std::string cudaDtypeCppString(const Dtype& dtype) {
       return "short";
     case ScalarType::Long:
       return "long";
-    default:
-      ;/* nothing */
+    default:; /* nothing */
   }
   return dtype.ToCppString();
 }
@@ -247,8 +242,7 @@ void CudaPrinter::visit(const LetStmt* v) {
   } else {
     os() << cudaDtypeCppString(var->dtype());
   }
-  os() << " " << *var << " = " << *v->value() << "; "
-       << std::endl;
+  os() << " " << *var << " = " << *v->value() << "; " << std::endl;
   v->body()->accept(this);
 }
 
@@ -293,12 +287,11 @@ class PrioritizeLoad : public IRMutator {
     }
     Stmt* body_with_loads = AddMemLoadsFromList(body_new);
     PopList();
-    if (var == var_new && start == start_new &&
-        stop == stop_new && body == body_with_loads) {
+    if (var == var_new && start == start_new && stop == stop_new &&
+        body == body_with_loads) {
       return (Stmt*)v;
     }
-    return new For(
-        var_new, start_new, stop_new, body_with_loads, loop_options);
+    return new For(var_new, start_new, stop_new, body_with_loads, loop_options);
   }
 
   Stmt* mutate(const LetStmt* v) override {
@@ -314,8 +307,7 @@ class PrioritizeLoad : public IRMutator {
     Stmt* body_new = body->accept_mutator(this);
     Stmt* body_with_loads = AddMemLoadsFromList(body_new);
     PopList();
-    if (var == var_new && value == value_new &&
-        body == body_with_loads) {
+    if (var == var_new && value == value_new && body == body_with_loads) {
       return (Stmt*)v;
     }
     return new LetStmt(var_new, value_new, body_with_loads);
@@ -387,7 +379,7 @@ class PrioritizeLoad : public IRMutator {
   // TODO: For now, we are not moving the loads with the IfThenElse.
   // Eventually, we should switch to a more generic structure like:
   // int v2 = IfThenElse(cond, true_v, false_v) + 2 ->
-  // 
+  //
   // int v;
   // if (cond) {
   //   v = true_v;
@@ -436,6 +428,10 @@ void CudaCodeGen::Initialize() {
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
   printer_.reset(new CudaPrinter(&oss_, has_random_));
+
+  os() << "#define NAN __int_as_float(0x7fffffff)\n"
+          "#define POS_INFINITY __int_as_float(0x7f800000)\n"
+          "#define NEG_INFINITY __int_as_float(0xff800000)\n";
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
@@ -459,8 +455,7 @@ void CudaCodeGen::Initialize() {
     const Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
 
-    os() << cudaDtypeCppString(dtype)
-         << (buffer_arg.isVar() ? " " : "* ")
+    os() << cudaDtypeCppString(dtype) << (buffer_arg.isVar() ? " " : "* ")
          << name_manager()->get_unique_name(var);
   }
   const Var* rand_seed;
@@ -494,8 +489,10 @@ void CudaCodeGen::Initialize() {
   os() << "}";
 
   // Check that all block extents had been set.
-  const std::vector<const Expr*>& gpu_block_extents = printer_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents = printer_->gpu_thread_extents();
+  const std::vector<const Expr*>& gpu_block_extents =
+      printer_->gpu_block_extents();
+  const std::vector<const Expr*>& gpu_thread_extents =
+      printer_->gpu_thread_extents();
   for (int i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
@@ -531,8 +528,10 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   CHECK_EQ(args.size(), buffer_args().size());
 
   // TODO: move as much of this into the constructors.
-  const std::vector<const Expr*>& gpu_block_extents = printer_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents = printer_->gpu_thread_extents();
+  const std::vector<const Expr*>& gpu_block_extents =
+      printer_->gpu_block_extents();
+  const std::vector<const Expr*>& gpu_thread_extents =
+      printer_->gpu_thread_extents();
   CHECK(gpu_block_extents.size() <= 3);
   CHECK(gpu_thread_extents.size() <= 3);
   std::vector<int> gpu_block_extents_v(3, 1);
@@ -620,7 +619,9 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(cuda_codegen_executed);
 }
 
-void CudaCodeGen::CompileToNVRTC(const std::string& code, const std::string& func_name) {
+void CudaCodeGen::CompileToNVRTC(
+    const std::string& code,
+    const std::string& func_name) {
   // Initializes driver's API context (if necessary)
   CUdevice device = 0;
   CUcontext pctx = 0;

@@ -22,13 +22,30 @@ template <typename Op>
 void visitBinaryOp(
     const BinaryOpNode<Op>* v,
     const std::string& op_str,
-    IRPrinter* printer) {
+    IRPrinter* printer,
+    bool parens = true) {
   std::ostream& os = printer->os();
-  os << "(";
+  int self_prec = getPrecedence(v->expr_type());
+  int lhs_prec = getPrecedence(v->lhs()->expr_type());
+  int rhs_prec = getPrecedence(v->rhs()->expr_type());
+
+  if (lhs_prec >= self_prec) {
+    os << "(";
+  }
   v->lhs()->accept(printer);
+  if (lhs_prec >= self_prec) {
+    os << ")";
+  }
+
   os << " " << op_str << " ";
+
+  if (rhs_prec >= self_prec) {
+    os << "(";
+  }
   v->rhs()->accept(printer);
-  os << ")";
+  if (rhs_prec >= self_prec) {
+    os << ")";
+  }
 }
 
 void IRPrinter::visit(const Add* v) {
@@ -95,8 +112,17 @@ void IRPrinter::visit(const Min* v) {
 
 void IRPrinter::visit(const CompareSelect* v) {
   CompareSelectOperation cmp_op = v->compare_select_op();
-  os() << "(";
+  int self_prec = getPrecedence(v->expr_type());
+  int lhs_prec = getPrecedence(v->lhs()->expr_type());
+  int rhs_prec = getPrecedence(v->rhs()->expr_type());
+
+  if (lhs_prec >= self_prec) {
+    os() << "(";
+  }
   v->lhs()->accept(this);
+  if (lhs_prec >= self_prec) {
+    os() << ")";
+  }
   switch (cmp_op) {
     case CompareSelectOperation::kEQ:
       os() << "==";
@@ -119,26 +145,49 @@ void IRPrinter::visit(const CompareSelect* v) {
     default:
       throw std::runtime_error("invalid compare select operator");
   }
+
+  if (rhs_prec >= self_prec) {
+    os() << "(";
+  }
   v->rhs()->accept(this);
-  os() << ")";
+  if (rhs_prec >= self_prec) {
+    os() << ")";
+  }
 }
 
+static void formatFPSuffix(std::ostream& os, double v) {
+  // No suffix for doubles.
+}
+
+template <typename T>
+static void formatFPSuffix(std::ostream& os, T v) {
+  os << (v == std::ceil(v) ? ".f" : "f");
+}
+
+template <
+    typename T,
+    std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
+static void formatImm(std::ostream& os, T v) {
+  if (std::isnan(v)) {
+    os << "NAN";
+  } else if (std::isinf(v)) {
+    os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
+  } else {
+    os << std::setprecision(16) << v;
+    formatFPSuffix(os, v);
+  }
+}
+
+template <
+    typename T,
+    std::enable_if_t<!std::is_floating_point<T>::value>* = nullptr>
+static void formatImm(std::ostream& os, T v) {
+  os << v;
+}
 
 #define IMM_PRINT_VISIT(Type, Name)           \
   void IRPrinter::visit(const Name##Imm* v) { \
-    if (v->dtype().is_floating_point()) {     \
-      std::ostringstream oss;                 \
-      oss << v->value();                      \
-      std::string s = oss.str();              \
-      if (s.find('.') == std::string::npos) { \
-        s += ".f";                            \
-      } else {                                \
-        s += "f";                             \
-      }                                       \
-      os() << s;                              \
-    } else {                                  \
-      os() << v->value();                     \
-    }                                         \
+    formatImm(os(), v->value());              \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
@@ -155,19 +204,36 @@ void IRPrinter::visit(const Var* v) {
 }
 
 void IRPrinter::visit(const Let* v) {
-  os() << "(let ";
+  int self_prec = getPrecedence(v->expr_type());
+  int value_prec = getPrecedence(v->value()->expr_type());
+  int body_prec = getPrecedence(v->body()->expr_type());
+  os() << "let ";
   v->var()->accept(this);
   os() << " = ";
+
+  if (value_prec >= self_prec) {
+    os() << "(";
+  }
   v->value()->accept(this);
+  if (value_prec >= self_prec) {
+    os() << ")";
+  }
+
   os() << " in ";
+
+  if (body_prec >= self_prec) {
+    os() << "(";
+  }
   v->body()->accept(this);
-  os() << ")";
+  if (body_prec >= self_prec) {
+    os() << ")";
+  }
 }
 
 void IRPrinter::visit(const LetStmt* v) {
   const Var* var = v->var();
-  os() << var->dtype().ToCppString() << " " << *var << " = " << *v->value() << "; "
-       << std::endl;
+  os() << var->dtype().ToCppString() << " " << *var << " = " << *v->value()
+       << "; " << std::endl;
   v->body()->accept(this);
 }
 
@@ -187,8 +253,8 @@ void IRPrinter::visit(const For* v) {
   VarHandle vv(var);
   emitIndent();
   os() << "for (" << var->dtype().ToCppString() << " " << vv << " = "
-       << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop()) << "; " << vv
-       << "++) {";
+       << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
+       << "; " << vv << "++) {";
   std::string loop_options_str = v->loop_options().ToString();
   if (!loop_options_str.empty()) {
     os() << " // " << loop_options_str;
@@ -204,7 +270,7 @@ void IRPrinter::visit(const For* v) {
 }
 
 void IRPrinter::visit(const Block* v) {
-  for (Stmt *s : v->stmts()) {
+  for (Stmt* s : v->stmts()) {
     os() << *s << std::endl;
   }
 }
@@ -212,7 +278,8 @@ void IRPrinter::visit(const Block* v) {
 void IRPrinter::visit(const Store* v) {
   // TODO: handle the mask
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value() << ";";
+  os() << *v->base_handle() << "[" << *v->index() << "] = " << *v->value()
+       << ";";
 }
 
 void IRPrinter::visit(const Broadcast* v) {

@@ -7,25 +7,51 @@
 
 #include "torch/csrc/jit/tensorexpr/ir_mutator.h"
 #include "torch/csrc/jit/tensorexpr/ir_visitor.h"
-#include "torch/csrc/jit/tensorexpr/types.h"
 #include "torch/csrc/jit/tensorexpr/mem_arena.h"
+#include "torch/csrc/jit/tensorexpr/types.h"
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+enum IRNodeType {
+  kPrimitive,
+  kAdd,
+  kSub,
+  kMul,
+  kDiv,
+  kMod,
+  kMax,
+  kMin,
+  kAnd,
+  kOr,
+  kLshift,
+  kRshift,
+  kXor,
+  kCompareSelect,
+  kLet,
+  kCast,
+  kNone
+};
+
 // The common base between all expression node.
 class Expr : public KernelScopedObject {
  public:
-  explicit Expr(Dtype dtype) : dtype_(dtype) {}
+  explicit Expr(Dtype dtype, IRNodeType expr_type = kNone)
+      : dtype_(dtype), expr_type_(expr_type) {}
   Dtype dtype() const {
     return dtype_;
   }
   TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
   virtual const Expr* accept_mutator(IRMutator* mutator) const = 0;
 
+  IRNodeType expr_type() const {
+    return expr_type_;
+  }
+
  private:
   Dtype dtype_;
+  IRNodeType expr_type_;
 };
 
 // A CRTP pattern to accept visitors for children class,
@@ -62,9 +88,8 @@ class TORCH_API ExprHandle {
     return base_expr_node_ == nullptr;
   }
 
-#define IMM_EXPR_DECLARE(Type, Name) \
-  ExprHandle(Type v);
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
+#define IMM_EXPR_DECLARE(Type, Name) ExprHandle(Type v);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_EXPR_DECLARE);
 #undef IMM_EXPR_DECLARE
 
   template <class Op>
@@ -121,7 +146,7 @@ class Var : public ExprNode<Var> {
   }
 
   Var(const std::string& name_hint, Dtype dtype)
-      : ExprNodeBase(dtype), name_hint_(name_hint) {}
+      : ExprNodeBase(dtype, kPrimitive), name_hint_(name_hint) {}
 
  private:
   std::string name_hint_;
@@ -196,8 +221,8 @@ TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
 
-TORCH_API ExprHandle ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
-
+TORCH_API ExprHandle
+ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
 
 } // namespace tensorexpr
 } // namespace jit

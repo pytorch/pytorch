@@ -148,8 +148,7 @@ const Expr* IRMutator::mutate(const Let* v) {
   const Expr* var_new = var->accept_mutator(this);
   const Expr* value_new = value->accept_mutator(this);
   const Expr* body_new = body->accept_mutator(this);
-  if ((var == var_new) && (value == value_new) &&
-      (body == body_new)) {
+  if ((var == var_new) && (value == value_new) && (body == body_new)) {
     return v;
   }
   return new Let(var_new, value_new, body_new);
@@ -165,8 +164,7 @@ Stmt* IRMutator::mutate(const LetStmt* v) {
   }
   const Expr* value_new = value->accept_mutator(this);
   Stmt* body_new = body->accept_mutator(this);
-  if ((var == var_new) && (value == value_new) &&
-      (body == body_new)) {
+  if ((var == var_new) && (value == value_new) && (body == body_new)) {
     return (Stmt*)v;
   }
   return new LetStmt(var_new, value_new, body_new);
@@ -216,8 +214,7 @@ const Expr* IRMutator::mutate(const IfThenElse* v) {
   const Expr* condition_new = condition->accept_mutator(this);
   const Expr* true_value_new = true_value->accept_mutator(this);
   const Expr* false_value_new = false_value->accept_mutator(this);
-  if (condition == condition_new &&
-      true_value == true_value_new &&
+  if (condition == condition_new && true_value == true_value_new &&
       false_value == false_value_new) {
     return v;
   }
@@ -266,8 +263,8 @@ Stmt* IRMutator::mutate(const For* v) {
   if (!body_new) {
     return nullptr;
   }
-  if (var == var_new && start == start_new &&
-      stop == stop_new && body == body_new) {
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
     return (Stmt*)v;
   }
   return new For(var_new, start_new, stop_new, body_new, loop_options);
@@ -330,7 +327,8 @@ Stmt* IRMutator::mutate(const Allocate* v) {
 
 Stmt* IRMutator::mutate(const Free* v) {
   const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new = dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  const Var* buffer_var_new =
+      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
   if (buffer_var_new == buffer_var_old) {
     return (Stmt*)v;
   }
@@ -347,14 +345,15 @@ Stmt* IRMutator::mutate(const Cond* v) {
   Stmt* true_new = true_old ? true_old->accept_mutator(this) : true_old;
   Stmt* false_new = false_old ? false_old->accept_mutator(this) : false_old;
 
-  if (cond_old == cond_new && true_old == true_new &&
-      false_old == false_new) {
+  if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
   return new Cond(cond_new, true_new, false_new);
 }
 
-const Expr* IRMutator::DefaultMutator(const BaseCallNode* v, std::vector<const Expr*>& params) {
+const Expr* IRMutator::DefaultMutator(
+    const BaseCallNode* v,
+    std::vector<const Expr*>& params) {
   return v->DefaultMutator(params);
 }
 

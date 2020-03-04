@@ -1,7 +1,7 @@
 #pragma once
 
+#include "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h"
 #include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/fuser/cuda/resource_strings.h"
 
 namespace torch {
 namespace jit {
@@ -24,7 +24,6 @@ class CudaHalfChecker : public IRVisitor {
  private:
   bool hasHalf_{false};
 };
-
 
 } // namespace tensorexpr
 } // namespace jit

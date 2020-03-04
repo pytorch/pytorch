@@ -21,8 +21,7 @@ class Lshift;
 class Rshift;
 class CompareSelect;
 
-#define IMM_DECLARE(Type, Name) \
-  class Name##Imm;
+#define IMM_DECLARE(Type, Name) class Name##Imm;
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 #undef IMM_DECLARE
 
@@ -65,7 +64,7 @@ class TORCH_API IRMutator {
   virtual const Expr* mutate(const CompareSelect* v);
 #define IMM_MUTATE_DECLARE(Type, Name) \
   virtual const Expr* mutate(const Name##Imm* v);
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
   virtual const Expr* mutate(const Cast* v);
   virtual const Expr* mutate(const Var* v);
@@ -94,8 +93,10 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
   virtual Stmt* mutate(const Free* v);
   virtual Stmt* mutate(const Cond* v);
 
-  protected:
-  const Expr* DefaultMutator(const BaseCallNode* v, std::vector<const Expr*>& params);
+ protected:
+  const Expr* DefaultMutator(
+      const BaseCallNode* v,
+      std::vector<const Expr*>& params);
 };
 
 } // namespace tensorexpr

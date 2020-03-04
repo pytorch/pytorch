@@ -10,22 +10,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-enum IRNodeType {
-  kAdd,
-  kSub,
-  kMul,
-  kDiv,
-  kMod,
-  kMax,
-  kMin,
-  kAnd,
-  kOr,
-  kLshift,
-  kRshift,
-  kXor,
-  kCompareSelect,
-};
-
 enum CompareSelectOperation {
   kEQ,
   kGT,
@@ -34,6 +18,41 @@ enum CompareSelectOperation {
   kLE,
   kNE,
 };
+
+inline int getPrecedence(IRNodeType ty) {
+  // Match C++ operator precedence rules, since some pretty-print expressions to
+  // C++. SEE: https://en.cppreference.com/w/cpp/language/operator_precedence
+  switch (ty) {
+    case kPrimitive:
+      return 0;
+    case kCast:
+      return 2;
+    case kAdd:
+    case kSub:
+      return 6;
+    case kMul:
+    case kDiv:
+    case kMod:
+      return 5;
+    case kMax:
+    case kMin:
+      return 99;
+    case kAnd:
+      return 11;
+    case kOr:
+      return 13;
+    case kLshift:
+    case kRshift:
+      return 7;
+    case kXor:
+      return 12;
+    case kCompareSelect:
+    case kLet:
+      return 16;
+    default:
+      return 99;
+  }
+}
 
 class Buffer;
 
@@ -46,7 +65,7 @@ class Cast : public ExprNode<Cast> {
     return ExprHandle(new Cast(dtype, src_value.node()));
   }
   Cast(Dtype dtype, const Expr* src_value)
-      : ExprNodeBase(dtype), src_value_(src_value) {}
+      : ExprNodeBase(dtype, kCast), src_value_(src_value) {}
 
  private:
   const Expr* src_value_;
@@ -68,9 +87,6 @@ class BinaryOpNode : public ExprNode<Op> {
   const Expr* rhs() const {
     return this->rhs_;
   }
-  IRNodeType expr_type() const {
-    return expr_type_;
-  }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) {
     return ExprHandle(new Op(lhs.node(), rhs.node()));
@@ -81,10 +97,11 @@ class BinaryOpNode : public ExprNode<Op> {
       const Expr* rhs_v,
       IRNodeType expr_type,
       ScalarType ret_type = ScalarType::None)
-      : ExprNode<Op>(BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type)),
+      : ExprNode<Op>(
+            BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
+            expr_type),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
-        rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())),
-        expr_type_(expr_type) {}
+        rhs_(CastIfNeeded(rhs_v, ExprNode<Op>::dtype())) {}
 
  private:
   static const Expr* CastIfNeeded(const Expr* expr, Dtype dst_dtype) {
@@ -96,7 +113,6 @@ class BinaryOpNode : public ExprNode<Op> {
 
   const Expr* lhs_;
   const Expr* rhs_;
-  IRNodeType expr_type_;
 };
 
 class Add : public BinaryOpNode<Add> {
@@ -188,7 +204,10 @@ class Max : public BinaryOpNode<Max> {
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) = delete;
-  static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs, bool propagate_nans) {
+  static ExprHandle make(
+      const ExprHandle& lhs,
+      const ExprHandle& rhs,
+      bool propagate_nans) {
     return ExprHandle(new Max(lhs.node(), rhs.node(), propagate_nans));
   }
 };
@@ -207,25 +226,29 @@ class Min : public BinaryOpNode<Min> {
   }
 
   static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs) = delete;
-  static ExprHandle make(const ExprHandle& lhs, const ExprHandle& rhs, bool propagate_nans) {
+  static ExprHandle make(
+      const ExprHandle& lhs,
+      const ExprHandle& rhs,
+      bool propagate_nans) {
     return ExprHandle(new Min(lhs.node(), rhs.node(), propagate_nans));
   }
 };
 
 // Encode typed immediate values e.g. IntImm, FloatImm.
-#define IMM_DECLARE(Type, Name)                                     \
-  class Name##Imm : public ExprNode<Name##Imm> {                    \
-   public:                                                          \
-    Name##Imm(Type value) : ExprNodeBase(k##Name), value_(value) {} \
-    Type value() const {                                            \
-      return value_;                                                \
-    }                                                               \
-    static ExprHandle make(Type value) {                            \
-      return ExprHandle(new Name##Imm(value));                      \
-    }                                                               \
-                                                                    \
-   private:                                                         \
-    Type value_;                                                    \
+#define IMM_DECLARE(Type, Name)                               \
+  class Name##Imm : public ExprNode<Name##Imm> {              \
+   public:                                                    \
+    Name##Imm(Type value)                                     \
+        : ExprNodeBase(k##Name, kPrimitive), value_(value) {} \
+    Type value() const {                                      \
+      return value_;                                          \
+    }                                                         \
+    static ExprHandle make(Type value) {                      \
+      return ExprHandle(new Name##Imm(value));                \
+    }                                                         \
+                                                              \
+   private:                                                   \
+    Type value_;                                              \
   };
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 #undef IMM_DECLARE
@@ -243,12 +266,18 @@ class Let : public ExprNode<Let> {
     return body_;
   }
 
-  static ExprHandle make(const ExprHandle& var, const ExprHandle& value, const ExprHandle& body) {
+  static ExprHandle make(
+      const ExprHandle& var,
+      const ExprHandle& value,
+      const ExprHandle& body) {
     return ExprHandle(new Let(var.node(), value.node(), body.node()));
   }
 
   Let(const Expr* var, const Expr* value, const Expr* body)
-      : ExprNodeBase(body->dtype()), var_(var), value_(value), body_(body) {}
+      : ExprNodeBase(body->dtype(), kLet),
+        var_(var),
+        value_(value),
+        body_(body) {}
 
  private:
   const Expr* var_;
@@ -266,7 +295,10 @@ class Ramp : public ExprNode<Ramp> {
   const Expr* stride() const {
     return stride_;
   }
-  static ExprHandle make(const ExprHandle& base, const ExprHandle& stride, int lanes) {
+  static ExprHandle make(
+      const ExprHandle& base,
+      const ExprHandle& stride,
+      int lanes) {
     return ExprHandle(new Ramp(base.node(), stride.node(), lanes));
   }
   int lanes() const {
@@ -298,7 +330,10 @@ class TORCH_API Load : public ExprNode<Load> {
   const Expr* mask() const {
     return mask_;
   }
-  static ExprHandle make(const Buffer& buffer, const ExprHandle& index, const ExprHandle& mask) {
+  static ExprHandle make(
+      const Buffer& buffer,
+      const ExprHandle& index,
+      const ExprHandle& mask) {
     return ExprHandle(new Load(buffer, index.node(), mask.node()));
   }
   static ExprHandle make(
@@ -306,7 +341,8 @@ class TORCH_API Load : public ExprNode<Load> {
       const VarHandle& base_handle,
       const ExprHandle& index,
       const ExprHandle& mask) {
-    return ExprHandle(new Load(dtype, base_handle.node(), index.node(), mask.node()));
+    return ExprHandle(
+        new Load(dtype, base_handle.node(), index.node(), mask.node()));
   }
 
   Load(const Buffer& buffer, const Expr* index, const Expr* mask);
@@ -359,7 +395,10 @@ class IfThenElse : public ExprNode<IfThenElse> {
     return false_;
   }
 
-  static ExprHandle make(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f) {
+  static ExprHandle make(
+      const ExprHandle& c,
+      const ExprHandle& t,
+      const ExprHandle& f) {
     return ExprHandle(new IfThenElse(c.node(), t.node(), f.node()));
   }
 
@@ -401,13 +440,17 @@ class BaseCallNode : public Expr {
   }
 
  protected:
-  BaseCallNode(Dtype dtype, CallType call_type, const std::vector<const Expr*>& params)
+  BaseCallNode(
+      Dtype dtype,
+      CallType call_type,
+      const std::vector<const Expr*>& params)
       : Expr(dtype), call_type_(call_type), params_(params) {}
 
  private:
   // The handler for the default ir_mutator to make a copy of this node with new
   // params.
-  virtual const Expr* DefaultMutator(const std::vector<const Expr*>& new_params) const = 0;
+  virtual const Expr* DefaultMutator(
+      const std::vector<const Expr*>& new_params) const = 0;
 
   template <class U, class B>
   friend class ExprNode;
@@ -527,11 +570,16 @@ class Intrinsics : public CallNode<Intrinsics> {
     return ExprHandle(new Intrinsics(op_type, v1.node()));
   }
 
-  static ExprHandle make(IntrinsicsOp op_type, const ExprHandle& v1, const ExprHandle& v2) {
+  static ExprHandle make(
+      IntrinsicsOp op_type,
+      const ExprHandle& v1,
+      const ExprHandle& v2) {
     return ExprHandle(new Intrinsics(op_type, v1.node(), v2.node()));
   }
 
-  static ExprHandle make(IntrinsicsOp op_type, const std::vector<ExprHandle>& params) {
+  static ExprHandle make(
+      IntrinsicsOp op_type,
+      const std::vector<ExprHandle>& params) {
     std::vector<const Expr*> params_nodes(params.size());
     for (size_t i = 0; i < params.size(); i++) {
       params_nodes[i] = params[i].node();
@@ -646,10 +694,10 @@ class Intrinsics : public CallNode<Intrinsics> {
   }
 
  private:
-
   TORCH_API static int OpArgCount(IntrinsicsOp op_type);
 
-  const Expr* DefaultMutator(const std::vector<const Expr*>& new_params) const override {
+  const Expr* DefaultMutator(
+      const std::vector<const Expr*>& new_params) const override {
     return new Intrinsics(this->op_type(), new_params);
   }
 
@@ -667,11 +715,14 @@ class Intrinsics : public CallNode<Intrinsics> {
 
 class FunctionCall;
 
-TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(const std::vector<ExprHandle>&);
-TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(const std::vector<const Expr*>&);
-TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>&);
-TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<const Var*>&);
-
+TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(
+    const std::vector<ExprHandle>&);
+TORCH_API std::vector<ExprHandle> ExprVectorToExprHandleVector(
+    const std::vector<const Expr*>&);
+TORCH_API std::vector<const Var*> VarHandleVectorToVarVector(
+    const std::vector<VarHandle>&);
+TORCH_API std::vector<VarHandle> VarVectorToVarHandleVector(
+    const std::vector<const Var*>&);
 
 } // namespace tensorexpr
 } // namespace jit

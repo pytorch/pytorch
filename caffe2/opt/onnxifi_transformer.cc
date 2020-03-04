@@ -587,7 +587,6 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
   }
 
   // Add the input/output
-  std::unordered_map<std::string, int> input_pos_map;
   int idx = 0;
   auto* input_names = op.add_arg();
   input_names->set_name("input_names");
@@ -595,7 +594,6 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     if (!initialization_list.count(input)) {
       op.add_input(input);
       input_names->add_strings(input);
-      input_pos_map.emplace(input, idx++);
     }
   }
   auto* output_names = op.add_arg();

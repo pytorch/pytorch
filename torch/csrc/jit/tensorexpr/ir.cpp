@@ -100,7 +100,8 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
   }
 }
 
-std::vector<const Expr*> ExprHandleVectorToExprVector(const std::vector<ExprHandle>& v) {
+std::vector<const Expr*> ExprHandleVectorToExprVector(
+    const std::vector<ExprHandle>& v) {
   std::vector<const Expr*> result(v.size());
   for (size_t i = 0; i < v.size(); i++) {
     result[i] = v[i].node();
@@ -108,7 +109,8 @@ std::vector<const Expr*> ExprHandleVectorToExprVector(const std::vector<ExprHand
   return result;
 }
 
-std::vector<ExprHandle> ExprVectorToExprHandleVector(const std::vector<const Expr*>& v) {
+std::vector<ExprHandle> ExprVectorToExprHandleVector(
+    const std::vector<const Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
   for (size_t i = 0; i < v.size(); i++) {
     result[i] = ExprHandle(v[i]);
@@ -116,7 +118,8 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(const std::vector<const Exp
   return result;
 }
 
-std::vector<const Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
+std::vector<const Var*> VarHandleVectorToVarVector(
+    const std::vector<VarHandle>& v) {
   std::vector<const Var*> result(v.size());
   for (size_t i = 0; i < v.size(); i++) {
     result[i] = v[i].node();
@@ -124,14 +127,14 @@ std::vector<const Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>&
   return result;
 }
 
-std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<const Var*>& v) {
+std::vector<VarHandle> VarVectorToVarHandleVector(
+    const std::vector<const Var*>& v) {
   std::vector<VarHandle> result(v.size());
   for (size_t i = 0; i < v.size(); i++) {
     result[i] = VarHandle(v[i]);
   }
   return result;
 }
-
 
 } // namespace tensorexpr
 } // namespace jit

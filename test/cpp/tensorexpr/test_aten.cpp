@@ -1,10 +1,10 @@
-#include "test/cpp/tensorexpr/test_base.h"
 #include <algorithm>
 #include <sstream>
 #include <stdexcept>
+#include "test/cpp/tensorexpr/test_base.h"
 
-#include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "test/cpp/tensorexpr/padded_buffer.h"
+#include "torch/csrc/jit/tensorexpr/ir_printer.h"
 
 namespace torch {
 namespace jit {

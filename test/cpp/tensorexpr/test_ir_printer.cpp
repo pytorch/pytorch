@@ -1,5 +1,5 @@
-#include "test/cpp/tensorexpr/test_base.h"
 #include <stdexcept>
+#include "test/cpp/tensorexpr/test_base.h"
 
 #include "torch/csrc/jit/tensorexpr/expr.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
@@ -18,7 +18,7 @@ void testIRPrinterBasicValueTest() {
 
   std::stringstream ss;
   ss << c;
-  EXPECT_EQ(ss.str(), "(2 + 3)");
+  EXPECT_EQ(ss.str(), "2 + 3");
 }
 
 void testIRPrinterBasicValueTest02() {
@@ -31,7 +31,7 @@ void testIRPrinterBasicValueTest02() {
 
   std::stringstream ss;
   ss << f;
-  EXPECT_EQ(ss.str(), "((2.f + 3.f) - (4.f + 5.f))");
+  EXPECT_EQ(ss.str(), "(2.f + 3.f) - (4.f + 5.f)");
 }
 
 void testIRPrinterLetTest01() {
@@ -43,7 +43,7 @@ void testIRPrinterLetTest01() {
 
   std::stringstream ss;
   ss << result;
-  EXPECT_EQ(ss.str(), "(let x = 3.f in (2.f + ((x * 3.f) + 4.f)))");
+  EXPECT_EQ(ss.str(), "let x = 3.f in 2.f + (x * 3.f + 4.f)");
 }
 
 void testIRPrinterLetTest02() {
@@ -51,14 +51,15 @@ void testIRPrinterLetTest02() {
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle value = ExprHandle(3.f);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
+  ExprHandle body =
+      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, ExprHandle(3.f), body);
   ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
 
   std::stringstream ss;
   ss << e2;
   EXPECT_EQ(
-      ss.str(), "(let y = 6.f in (let x = 3.f in (2.f + ((x * 3.f) + (4.f * y)))))");
+      ss.str(), "let y = 6.f in (let x = 3.f in 2.f + (x * 3.f + 4.f * y))");
 }
 
 void testIRPrinterCastTest() {
@@ -66,7 +67,8 @@ void testIRPrinterCastTest() {
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle value = ExprHandle(3.f);
-  ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
+  ExprHandle body =
+      ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   ExprHandle e1 = Let::make(x, Cast::make(kInt, ExprHandle(3.f)), body);
   ExprHandle e2 = Let::make(y, ExprHandle(6.f), e1);
 
@@ -74,7 +76,7 @@ void testIRPrinterCastTest() {
   ss << e2;
   EXPECT_EQ(
       ss.str(),
-      "(let y = 6.f in (let x = int(3.f) in (2.f + ((x * 3.f) + (4.f * y)))))");
+      "let y = 6.f in (let x = int(3.f) in 2.f + (x * 3.f + 4.f * y))");
 }
 } // namespace jit
 } // namespace torch

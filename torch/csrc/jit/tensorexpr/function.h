@@ -14,7 +14,8 @@ namespace tensorexpr {
 class Range {
  public:
   Range() {}
-  Range(const ExprHandle& start, const ExprHandle& stop) : start_(start), stop_(stop) {}
+  Range(const ExprHandle& start, const ExprHandle& stop)
+      : start_(start), stop_(stop) {}
   const ExprHandle& start() const {
     return start_;
   }
@@ -34,17 +35,23 @@ class Function : public KernelScopedObject {
       const std::vector<const Expr*>& dims,
       const std::vector<const Var*>& args,
       const Expr* body)
-      : func_vars_({VarHandle(func_name, kHandle).node()}), dims_(dims), args_(args), bodies_({body}) {}
+      : func_vars_({VarHandle(func_name, kHandle).node()}),
+        dims_(dims),
+        args_(args),
+        bodies_({body}) {}
   Function(
       const std::vector<std::string>& func_names,
       const std::vector<const Expr*>& dims,
       const std::vector<const Var*>& args,
       const std::vector<const Expr*>& bodies)
-      : func_vars_(func_names.size()), dims_(dims), args_(args), bodies_(bodies) {
-        for (size_t i = 0; i < func_names.size(); i++) {
-          func_vars_[i] = new Var(func_names[i], kHandle);
-        }
-      }
+      : func_vars_(func_names.size()),
+        dims_(dims),
+        args_(args),
+        bodies_(bodies) {
+    for (size_t i = 0; i < func_names.size(); i++) {
+      func_vars_[i] = new Var(func_names[i], kHandle);
+    }
+  }
 
   int ndim() const {
     return dims_.size();

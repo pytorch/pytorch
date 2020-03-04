@@ -185,6 +185,7 @@ option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_SYSTEM_EIGEN_INSTALL
     "Use system Eigen instead of the one under third_party" OFF)
 option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
+option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 cmake_dependent_option(
@@ -202,6 +203,7 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
+option(ONNX_ML "Enable traditional ONNX ML API." ON)
 
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" ON)
@@ -415,6 +417,10 @@ if(USE_PYTORCH_QNNPACK)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_PYTORCH_QNNPACK")
 endif()
 
+if(USE_XNNPACK)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_XNNPACK")
+endif()
+
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)
 
@@ -495,6 +501,10 @@ if(NOT MSVC)
   set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-math-errno")
   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-trapping-math")
+  check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
+  if (HAS_WERROR_FORMAT)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=format")
+  endif()
 endif()
 
 if (USE_ASAN)

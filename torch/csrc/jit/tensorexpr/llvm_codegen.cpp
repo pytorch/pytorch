@@ -60,7 +60,6 @@ LLVMCodeGen::LLVMCodeGen(
     : CodeGen(stmt, args),
       context_(std::make_unique<llvm::LLVMContext>()),
       irb_(getContext()) {
-
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -121,14 +120,14 @@ llvm::LLVMContext& LLVMCodeGen::getContext() {
 llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
   switch (dtype.scalar_type()) {
 #define TYPE_CASE(_1, n) \
-  case ScalarType::n: \
-      return n##Ty_; \
-      break;
+  case ScalarType::n:    \
+    return n##Ty_;       \
+    break;
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
-  default:
-    LOG(FATAL) << "Unhandled dtype: " << dtype;
+    default:
+      LOG(FATAL) << "Unhandled dtype: " << dtype;
   }
   return nullptr;
 }
@@ -206,16 +205,16 @@ static void* argToPtr(
 
   switch (bufferArg.dtype().scalar_type()) {
 #define TYPE_CASE(_1, Name) \
-    case ScalarType::Name: \
-        return callArg.Name##Ptr();
-        break;
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+    break;
 
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
 
     default:
-    LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
-             << "dtype=" << bufferArg.var()->dtype();
+      LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
+                 << "dtype=" << bufferArg.var()->dtype();
   }
   return nullptr;
 }
@@ -511,8 +510,8 @@ getFromType(llvm::Type* type, T value) {
   return llvm::ConstantFP::get(type, value);
 }
 
-#define IMM_VISIT_DECLARE(Type, Name) \
-  void LLVMCodeGen::visit(const Name##Imm* v) { \
+#define IMM_VISIT_DECLARE(Type, Name)                  \
+  void LLVMCodeGen::visit(const Name##Imm* v) {        \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
@@ -626,10 +625,10 @@ void LLVMCodeGen::visit(const Ramp* v) {
 
   llvm::Type* vecType = nullptr;
   switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-    case ScalarType::Name: \
-      vecType = llvm::VectorType::get(Name##Ty_, lanes); \
-      break;
+#define TYPE_CASE(_1, Name)                            \
+  case ScalarType::Name:                               \
+    vecType = llvm::VectorType::get(Name##Ty_, lanes); \
+    break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
@@ -699,10 +698,10 @@ void LLVMCodeGen::visit(const Load* v) {
   llvm::Type* loadType = nullptr;
 
   switch (v->dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-    case ScalarType::Name: \
-      loadType = llvm::VectorType::get(Name##Ty_, v->dtype().lanes()); \
-      break;
+#define TYPE_CASE(_1, Name)                                          \
+  case ScalarType::Name:                                             \
+    loadType = llvm::VectorType::get(Name##Ty_, v->dtype().lanes()); \
+    break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
@@ -751,38 +750,46 @@ void LLVMCodeGen::visit(const Load* v) {
 }
 
 void LLVMCodeGen::visit(const For* v) {
-  // Create "start" value.
+  // Create "start" and "stop" values.
   v->start()->accept(this);
   auto start = this->value_;
+  v->stop()->accept(this);
+  auto stop = this->value_;
 
-  // Create loop preheader and body.
+  // Create block for loop condition test.
   auto preheader = irb_.GetInsertBlock();
-  auto loop = llvm::BasicBlock::Create(getContext(), "loop", fn_);
-  irb_.CreateBr(loop);
-  irb_.SetInsertPoint(loop);
+  auto condBlock = llvm::BasicBlock::Create(getContext(), "cond", fn_);
+  irb_.CreateBr(condBlock);
+  irb_.SetInsertPoint(condBlock);
 
   // Set up phi node for index variable.
   auto idx = irb_.CreatePHI(IntTy_, 2);
   idx->addIncoming(start, preheader);
   varToVal_.emplace(v->var(), idx);
 
+  // Create the body and exit blocks.
+  auto body = llvm::BasicBlock::Create(getContext(), "body", fn_);
+  auto exit = llvm::BasicBlock::Create(getContext(), "exit", fn_);
+
+  // Create the stop condition.
+  auto cond = irb_.CreateICmpSLT(idx, stop);
+  irb_.CreateCondBr(cond, body, exit);
+
   // Codegen the body.
+  irb_.SetInsertPoint(body);
   if (v->body()) {
     v->body()->accept(this);
   }
+  // "Body" block may have changed if we generated nested control flow.
+  body = irb_.GetInsertBlock();
 
-  // Create the stop condition. and "after" block.
+  // Increment the index variable and branch back to loop test.
   auto inc = irb_.CreateAdd(idx, llvm::ConstantInt::getSigned(IntTy_, 1));
-  v->stop()->accept(this);
-  auto stop = this->value_;
-  auto cond = irb_.CreateICmpSLT(inc, stop);
+  irb_.CreateBr(condBlock);
+  idx->addIncoming(inc, body);
 
-  // Branch back to top of loop and finish phi for index variable.
-  auto end_loop = irb_.GetInsertBlock();
-  auto after = llvm::BasicBlock::Create(getContext(), "after", fn_);
-  irb_.CreateCondBr(cond, loop, after);
-  irb_.SetInsertPoint(after);
-  idx->addIncoming(inc, end_loop);
+  // Exit the loop.
+  irb_.SetInsertPoint(exit);
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
@@ -927,7 +934,9 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::ReadNone);
   f->addFnAttr(llvm::Attribute::NoFree);
   f->addFnAttr(llvm::Attribute::NoUnwind);
-  f->addFnAttr(llvm::Attribute::Speculatable);
+  // TODO: Adding this attr should be correct, but as of LLVM 9.0.1 adding it
+  // causes some math functions to incorrectly be turned into tail calls.
+  // f->addFnAttr(llvm::Attribute::Speculatable);
   f->addFnAttr(llvm::Attribute::WillReturn);
 }
 
@@ -939,7 +948,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \
-    v->params().front()->accept(this);                   \
+    v->params().front()->accept(this);                  \
     value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
     return;                                             \
   } break;
@@ -1011,7 +1020,7 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
     switch (v->op_type()) {
 #define UNARY_INTRIN_CASE(enum, intrin)                 \
   case enum: {                                          \
-    v->params().front()->accept(this);                   \
+    v->params().front()->accept(this);                  \
     value_ = irb_.CreateUnaryIntrinsic(intrin, value_); \
     return;                                             \
   } break;

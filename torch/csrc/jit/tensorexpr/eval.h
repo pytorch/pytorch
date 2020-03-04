@@ -30,13 +30,13 @@ class Value {
   Value(Type v) : dtype_(k##Name) { \
     Name##values.push_back(v);      \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_CTOR);
 #undef VALUE_CTOR
 
 #define VALUE_VEC_CTOR(Type, Name)  \
   Value(const std::vector<Type>& v) \
       : dtype_(Dtype(k##Name, v.size())), Name##values(v) {}
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
 #undef VALUE_VEC_CTOR
 
   template <typename T>
@@ -52,34 +52,29 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_VEC_CTOR);
  private:
   Dtype dtype_;
 
-#define VALUE_STORAGE(Type, Name) \
-  std::vector<Type> Name##values;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_STORAGE);
+#define VALUE_STORAGE(Type, Name) std::vector<Type> Name##values;
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_STORAGE);
 #undef VALUE_STORAGE
   void* ptr;
 };
-
 
 #define VALUE_AS_DISPATCH(Type, Name)             \
   template <>                                     \
   inline Type Value::as<Type>() const {           \
     CHECK_EQ(dtype_, k##Name) << "invalid dtype"; \
-    return Name##values[0];\
-}
+    return Name##values[0];                       \
+  }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_DISPATCH);
 #undef VALUE_AS_DISPATCH
 
-#define VALUE_AS_VEC_DISPATCH(Type, Name) \
-template <> \
-inline const std::vector<Type>& Value::as_vec<Type>() const { \
-  CHECK_EQ(dtype_.scalar_type(), ScalarType::Name) << "invalid dtype"; \
-  return Name##values; \
-}
+#define VALUE_AS_VEC_DISPATCH(Type, Name)                                \
+  template <>                                                            \
+  inline const std::vector<Type>& Value::as_vec<Type>() const {          \
+    CHECK_EQ(dtype_.scalar_type(), ScalarType::Name) << "invalid dtype"; \
+    return Name##values;                                                 \
+  }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, VALUE_AS_VEC_DISPATCH);
 #undef VALUE_AS_VEC_DISPATCH
-
-template <typename T>
-class PaddedBuffer;
 
 template <typename T>
 inline typename std::enable_if<std::is_integral<T>::value, T>::type mod_value(
@@ -124,11 +119,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     }
 
     switch (buf.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name) \
-      case ScalarType::Name: \
-        eval_context_[buf.var()] = data.Name##Data(); \
-        break;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#define TYPE_CASE(Type, Name)                     \
+  case ScalarType::Name:                          \
+    eval_context_[buf.var()] = data.Name##Data(); \
+    break;
+      AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
         LOG(FATAL) << "Unhandled dtype for argument " << buf.var()->name_hint()
@@ -332,11 +327,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
     }
 
     switch (lhs_v.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                              \
-      case ScalarType::Name:                               \
-        value_ = binary_op<Type>(lhs_v, rhs_v, expr_type); \
-        break;
-AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#define TYPE_CASE(Type, Name)                          \
+  case ScalarType::Name:                               \
+    value_ = binary_op<Type>(lhs_v, rhs_v, expr_type); \
+    break;
+      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
       case ScalarType::Bool:
         value_ = binary_op<unsigned char>(lhs_v, rhs_v, expr_type);
@@ -361,12 +356,12 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
     CHECK_EQ(lhs_v.dtype(), rhs_v.dtype());
     CHECK_EQ(ret_val1_v.dtype(), ret_val2_v.dtype());
 
-    switch (lhs_v.dtype().scalar_type())  {
-#define TYPE_CASE(Type, Name)                            \
-    case ScalarType::Name:                               \
-      value_ = compare_select_op<Type, int>(             \
-          lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
-      break;
+    switch (lhs_v.dtype().scalar_type()) {
+#define TYPE_CASE(Type, Name)                          \
+  case ScalarType::Name:                               \
+    value_ = compare_select_op<Type, int>(             \
+        lhs_v, rhs_v, ret_val1_v, ret_val2_v, cmp_op); \
+    break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
@@ -378,7 +373,7 @@ AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
   TORCH_API void visit(const Name##Imm* v) override { \
     value_ = Value(v->value());                       \
   }
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
   TORCH_API void visit(const Let* v) override {
@@ -436,10 +431,10 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
       const Dtype& dst_dtype,
       const Value& v) {
     switch (dst_dtype.scalar_type()) {
-#define DST_TYPE_CASE(Type, Name)                                    \
-    case ScalarType::Name:                                           \
-      this->value_ = Value(castValues<SrcType, Type>(src_dtype, v)); \
-      break;
+#define DST_TYPE_CASE(Type, Name)                                  \
+  case ScalarType::Name:                                           \
+    this->value_ = Value(castValues<SrcType, Type>(src_dtype, v)); \
+    break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DST_TYPE_CASE);
 #undef DST_TYPE_CASE
       default:
@@ -456,10 +451,10 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 
     if (src_dtype != dst_dtype) {
       switch (src_dtype.scalar_type()) {
-#define SRC_TYPE_CASE(Type, Name)                        \
-    case ScalarType::Name:                               \
-      doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
-      break;
+#define SRC_TYPE_CASE(Type, Name)                      \
+  case ScalarType::Name:                               \
+    doCastFromSrc<Type>(src_dtype, dst_dtype, value_); \
+    break;
         AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, SRC_TYPE_CASE);
 #undef SRC_TYPE_CASE
         default:
@@ -506,11 +501,11 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
     Value value = this->value();
     int lanes = v->lanes();
     switch (value.dtype().scalar_type()) {
-#define TYPE_CASE(Type, Name)                       \
-    case ScalarType::Name: {                        \
-      std::vector<Type> v(lanes, value.as<Type>()); \
-      value_ = Value(v);                            \
-    } break;
+#define TYPE_CASE(Type, Name)                     \
+  case ScalarType::Name: {                        \
+    std::vector<Type> v(lanes, value.as<Type>()); \
+    value_ = Value(v);                            \
+  } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
@@ -540,17 +535,17 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
     std::vector<int> mask = value().as_vec<int>();
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                     \
-    case ScalarType::Name: {                      \
-      Type* ptr##Name = static_cast<Type*>(ptr);  \
-      std::vector<Type> v(index.size());          \
-      for (size_t i = 0; i < index.size(); i++) { \
-        if (mask[i]) {                            \
-          v[i] = ptr##Name[index[i]];             \
-        }                                         \
-      }                                           \
-      value_ = Value(v);                          \
-    } break;
+#define TYPE_CASE(Type, Name)                   \
+  case ScalarType::Name: {                      \
+    Type* ptr##Name = static_cast<Type*>(ptr);  \
+    std::vector<Type> v(index.size());          \
+    for (size_t i = 0; i < index.size(); i++) { \
+      if (mask[i]) {                            \
+        v[i] = ptr##Name[index[i]];             \
+      }                                         \
+    }                                           \
+    value_ = Value(v);                          \
+  } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
@@ -572,18 +567,18 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
-#define TYPE_CASE(Type, Name)                                 \
-    case ScalarType::Name: {                                  \
-      v->value()->accept(this);                               \
-      std::vector<Type> value = this->value().as_vec<Type>(); \
-      CHECK_EQ(index.size(), value.size());                   \
-      Type* ptr##Name = static_cast<Type*>(ptr);              \
-      for (size_t i = 0; i < index.size(); i++) {             \
-        if (mask[i]) {                                        \
-          ptr##Name[index[i]] = value[i];                     \
-        }                                                     \
-      }                                                       \
-    } break;
+#define TYPE_CASE(Type, Name)                               \
+  case ScalarType::Name: {                                  \
+    v->value()->accept(this);                               \
+    std::vector<Type> value = this->value().as_vec<Type>(); \
+    CHECK_EQ(index.size(), value.size());                   \
+    Type* ptr##Name = static_cast<Type*>(ptr);              \
+    for (size_t i = 0; i < index.size(); i++) {             \
+      if (mask[i]) {                                        \
+        ptr##Name[index[i]] = value[i];                     \
+      }                                                     \
+    }                                                       \
+  } break;
       AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
       default:
@@ -788,7 +783,8 @@ class ExprEval {
   using CallArg = CodeGen::CallArg;
 
   template <typename... Ts>
-  ExprEval(const ExprHandle& expr, Ts... ts) : ExprEval(expr, {BufferArg(ts)...}) {}
+  ExprEval(const ExprHandle& expr, Ts... ts)
+      : ExprEval(expr, {BufferArg(ts)...}) {}
 
   ExprEval(const ExprHandle& expr, const std::vector<BufferArg>& buffer_args)
       : dtype_(expr.dtype()) {
@@ -816,21 +812,21 @@ class ExprEval {
   void call(const std::vector<CallArg>& call_args) {
     std::vector<CallArg> call_args_extended = call_args;
     switch (dtype_.scalar_type()) {
-#define TYPE_CASE(Type, Name)                             \
-    case ScalarType::Name: {                              \
-      std::vector<Type> ret_val_arg(1);                   \
-      call_args_extended.push_back(CallArg(ret_val_arg)); \
-      codegen_->call(call_args_extended);                 \
-      ret_value_ = Value(ret_val_arg[0]);                 \
-    } break;
+#define TYPE_CASE(Type, Name)                           \
+  case ScalarType::Name: {                              \
+    std::vector<Type> ret_val_arg(1);                   \
+    call_args_extended.push_back(CallArg(ret_val_arg)); \
+    codegen_->call(call_args_extended);                 \
+    ret_value_ = Value(ret_val_arg[0]);                 \
+  } break;
       AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
 #undef TYPE_CASE
-    case ScalarType::Bool: {
-      std::vector<unsigned char> ret_val_arg(1);
-      call_args_extended.push_back(CallArg(ret_val_arg.data()));
-      codegen_->call(call_args_extended);
-      ret_value_ = Value((bool)ret_val_arg[0]);
-     } break;
+      case ScalarType::Bool: {
+        std::vector<unsigned char> ret_val_arg(1);
+        call_args_extended.push_back(CallArg(ret_val_arg.data()));
+        codegen_->call(call_args_extended);
+        ret_value_ = Value((bool)ret_val_arg[0]);
+      } break;
       default:
         LOG(FATAL) << "Invalid Dtype " << dtype_ << "\n";
     }
@@ -842,7 +838,9 @@ class ExprEval {
     return ret_value_.as<T>();
   }
 
-  Dtype dtype() { return dtype_; }
+  Dtype dtype() {
+    return dtype_;
+  }
 
  private:
   Dtype dtype_;
