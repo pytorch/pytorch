@@ -8393,6 +8393,7 @@ a")
         self.assertFalse(test_all_bool_list([True, False]))
         self.assertFalse(test_all_bool_list([True, 0]))
         self.assertFalse(test_all_bool_list([False, 0]))
+        self.assertTrue(test_all_bool_list([]))
 
         @torch.jit.script
         def test_all_int_list(x: List[int]):
