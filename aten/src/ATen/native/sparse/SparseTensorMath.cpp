@@ -1207,7 +1207,7 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     Tensor grad_input_values;
     if (sum_sparse_dim) {
       // see NOTE [ sparse.sum() backward ]
-      grad_input_values = at::zeros_like(input_values, grad_values.options(), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      grad_input_values = at::zeros_like(input_values, grad_values.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
       // get flatten indices for grad and input
       auto grad_sparse_dim_to_keep_v = std::vector<int64_t>(grad_sparse_dim);

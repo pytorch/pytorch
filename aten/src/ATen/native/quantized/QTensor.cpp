@@ -71,8 +71,7 @@ Tensor int_repr_quant(const Tensor& self) {
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr", [&]() {
     dst = at::empty(
         self.sizes(),
-        self.options().dtype(UNDERLYING_TYPE),
-        self.suggest_memory_format());
+        self.options().dtype(UNDERLYING_TYPE).memory_format(self.suggest_memory_format()));
     auto iter = TensorIterator();
     iter.add_output(dst);
     iter.add_input(self);

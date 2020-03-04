@@ -91,7 +91,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");
 
-  auto result = at::empty_like(self, self.options(), memory_format);
+  auto result = at::empty_like(self, self.options().memory_format(memory_format));
   return result.copy_(self);
 }
 

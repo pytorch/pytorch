@@ -58,7 +58,7 @@ Tensor fake_quantize_per_channel_affine(
       axis >= 0 && axis <= self.dim(),
       "`axis` must be between 0 and number of dimensions of input");
 
-  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto Y = at::empty_like(self, self.options().memory_format(MemoryFormat::Preserve));
 
   std::vector<int64_t> expected_shape(self.dim(), 1);
   expected_shape[axis] = self.size(axis);
@@ -134,7 +134,7 @@ Tensor fake_quantize_per_channel_affine_backward(
     return X;
   }
 
-  auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dX = at::empty_like(X, X.options().memory_format(MemoryFormat::Preserve));
 
   std::vector<int64_t> expected_shape(X.dim(), 1);
   expected_shape[axis] = X.size(axis);

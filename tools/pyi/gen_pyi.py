@@ -278,7 +278,8 @@ def generate_type_hints(fname, decls, is_tensor=False):
             python_args += ["dtype: _dtype=None",
                             "layout: _layout=strided",
                             "device: Union[_device, str, None]=None",
-                            "requires_grad:_bool=False"]
+                            "requires_grad: _bool=False",
+                            "memory_format: Optional[memory_format]=None"]
 
         python_args_s = ', '.join(python_args)
         python_returns = [type_to_python(r['dynamic_type']) for r in decl['returns']]

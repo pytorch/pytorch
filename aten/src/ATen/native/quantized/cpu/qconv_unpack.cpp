@@ -104,8 +104,7 @@ class QConvUnpackWeightsInt8 final : public c10::OperatorKernel {
                 scales.toType(kDouble),
                 zero_points.toType(kLong),
                 0, /* The output channel axis is 0 */
-                device(kCPU).dtype(kQInt8),
-                MemoryFormat::ChannelsLast)
+                device(kCPU).dtype(kQInt8).memory_format(MemoryFormat::ChannelsLast))
           : fbgemm_utils::
                 MakeEmptyPerChannelAffineQuantizedChannelsLast3dTensor(
                     output_channels,

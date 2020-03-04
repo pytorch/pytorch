@@ -253,7 +253,7 @@ UNPACK_WITH_DEFAULT_METHODS = {
     'const Device &': 'deviceWithDefault',
 }
 
-def parsed_arg_expr(arg, arg_index):
+def parsed_arg_expr(op_name, arg, arg_index):
     # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'
     typename = arg['type']
 
@@ -279,7 +279,8 @@ def parsed_arg_expr(arg, arg_index):
 
     unpack = UNPACK_METHODS.get(typename)
     if unpack is None:
-        raise RuntimeError('type \'{}\' is not supported'.format(typename))
+        raise RuntimeError('type \'{}\' is not supported (found in {})'
+                           .format(typename, op_name))
 
     return '_r.{}({})'.format(unpack, arg_index)
 
@@ -296,9 +297,9 @@ def unpack_optional_dimname_list_hack(name, expr):
     return [line.strip() for line in result.split('\n')]
 
 
-def parse_arg(arg, arg_index, unpack_to_local=False):
+def parse_arg(op_name, arg, arg_index, unpack_to_local=False):
     # get parsed rhs
-    expr = parsed_arg_expr(arg, arg_index)
+    expr = parsed_arg_expr(op_name, arg, arg_index)
 
     # maybe unpack to local
     name = arg['name']
@@ -428,7 +429,8 @@ const auto ${name} = TensorOptions()
     .device(${device})
     .layout(${layout}.layout)
     .requires_grad(${requires_grad})
-    .pinned_memory(${pin_memory});
+    .pinned_memory(${pin_memory})
+    .memory_format(${memory_format});
 """)
 
 # addition to output-variant handler in which tensor options params
@@ -483,7 +485,7 @@ def emit_single_dispatch(declaration, is_python_method, output_gap=0):
 
     for i, arg in enumerate(args):
         unpack = is_scatter(arg) or (has_options and is_tensor_self(arg))
-        arg_expr, unpack_stmts = parse_arg(arg, i, unpack_to_local=unpack)
+        arg_expr, unpack_stmts = parse_arg(declaration['name'], arg, i, unpack_to_local=unpack)
         inits.extend(unpack_stmts)
         if is_scatter(arg):
             for j, elem in enumerate(arg['scatter_args']):
@@ -535,6 +537,7 @@ TENSOR_OPTIONS_FIELDS = {
     'layout': 'Layout',
     'pin_memory': 'bool',
     'requires_grad': 'bool',
+    'memory_format': 'MemoryFormat',
 }
 
 def handle_python_binding_args(declaration, output_gap):
@@ -563,7 +566,7 @@ def handle_python_binding_args(declaration, output_gap):
 
     def parse_binding_arg(name):
         binding_arg = python_binding_args[binding_arg_offsets[name]]
-        expr, _ = parse_arg(binding_arg, binding_arg_index(name))
+        expr, _ = parse_arg(declaration['name'], binding_arg, binding_arg_index(name))
         return expr
 
     has_output = len(pa['output_args']) == 1
@@ -598,6 +601,7 @@ def handle_python_binding_args(declaration, output_gap):
             'device': parse_binding_arg('device'),
             'requires_grad': parse_binding_arg('requires_grad'),
             'pin_memory': parse_binding_arg('pin_memory'),
+            'memory_format': parse_binding_arg('memory_format'),
         }))
         inits.append('torch::utils::maybe_initialize_cuda({});'.format(argname))
         # and add to op arg map
@@ -1391,6 +1395,15 @@ def make_python_binding_args(declaration):
             'simple_type': 'bool',
         }
         python_binding_arguments.append(pin_memory_arg)
+        memory_format_arg = {
+            'default': False,
+            'dynamic_type': 'MemoryFormat',
+            'kwarg_only': True,
+            'name': 'memory_format',
+            'type': 'MemoryFormat',
+            'simple_type': 'MemoryFormat',
+        }
+        python_binding_arguments.append(memory_format_arg)
 
     if is_factory_or_like_or_new_function:
         requires_grad_arg = {

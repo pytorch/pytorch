@@ -100,7 +100,7 @@ class QLinearUnpackWeightFp16 final : public c10::OperatorKernel {
     auto ncols = packed_weight_ptr->numCols();
 
     at::Tensor unpacked_weight =
-        at::empty({ncols, nrows}, at::kHalf, MemoryFormat::Contiguous);
+        at::empty({ncols, nrows}, at::dtype(at::kHalf).memory_format(MemoryFormat::Contiguous));
     packed_weight_ptr->unpack(
         static_cast<fbgemm::float16*>(unpacked_weight.data_ptr()),
         fbgemm::matrix_op_t::Transpose);
