@@ -31,100 +31,6 @@
 namespace at {
 namespace native {
 
-namespace {
-  enum class TypePromotionStrategy {
-    None,  // No implicit dtype promotion
-    IntBoolToFloats, // int8 - fp16, int16 - fp32, int32 - fp64, int64 - fp64, bool - fp16
-    IntBoolToFloat64, // (int8, int16, int32, int64, bool) - fp64
-    BoolToInt8, // bool - int8
-    BoolToFloat16  // bool - fp16
-  };
-
-  // promote* functions are helper functions to support input dtype to Float implicit promotions based on NumPy's conversion rules
-  // For discussion, check https://github.com/pytorch/pytorch/pull/33322 and https://github.com/pytorch/pytorch/issues/28703
-  // There are 4 type of dtype promotions in NumPy: (float16 is replaced by float32 for CPU devices)
-  // IntBoolToFloats: int8 - float16, int16 - float32, int32 - float64, int64 - float64, bool - float16
-  // IntBoolToFloat64: (int8, int16, int32, int64, bool) - float64
-  // BoolToInt8: bool - int8
-  // BoolToFloat16: bool - float16
-  static inline ScalarType promoteIntBoolToFloats(const Tensor& self) {
-    // This promotes dtype based on IntBoolToFloats strategy
-    switch(self.scalar_type()) {
-      case kChar:
-        return (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      case kShort:
-        return kFloat;
-      case kInt:
-        return kDouble;
-      case kLong:
-        return kDouble;
-      case kBool:
-        return (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      default:
-        return ScalarType::Undefined;
-    }
-  }
-
-  static inline ScalarType promoteIntBoolToFloat64(const Tensor& self) {
-    // This promotes dtype based on IntBoolToFloat64 strategy
-    switch(self.scalar_type()) {
-      case kChar:
-      case kShort:
-      case kInt:
-      case kLong:
-      case kBool:
-        return kDouble;
-      default:
-        return ScalarType::Undefined;
-    }
-  }
-
-  static inline ScalarType promoteBoolToInt8(const Tensor& self) {
-    // This promotes dtype based on BoolToInt8 strategy
-    switch(self.scalar_type()) {
-      case kBool:
-        return kChar;
-      default:
-        return ScalarType::Undefined;
-    }
-  }
-
-  static inline ScalarType promoteBoolToFloat16(const Tensor& self) {
-    // This promotes dtype based on BoolToFloat16 strategy
-    switch(self.scalar_type()) {
-      case kBool:
-        return (self.device().type() == DeviceType::CPU) ? kFloat : kHalf;
-      default:
-        return ScalarType::Undefined;
-    }
-  }
-
-  // This function returns the dtype to promote
-  // typeStrategy is the type of implicit dtype promotion
-  ScalarType get_promoted_dtype(const Tensor& self, TypePromotionStrategy typeStrategy) {
-    // typePromotionStrategy argument defaults to TypePromotionStrategy::None (no implicit dtype upcasting)
-    // and is set to TypePromotionStrategy::IntBoolToFloats/IntBoolToFloat64/BoolToInt8/BoolToFloat16 depending on the type of implicit
-    // dtype promotion
-    if (typeStrategy != TypePromotionStrategy::None) {
-      // This enables int-to-float implicit dtype conversions
-      switch(typeStrategy) {
-        case TypePromotionStrategy::IntBoolToFloats:
-          return promoteIntBoolToFloats(self);
-        case TypePromotionStrategy::IntBoolToFloat64:
-          return promoteIntBoolToFloat64(self);
-        case TypePromotionStrategy::BoolToInt8:
-          return promoteBoolToInt8(self);
-        case TypePromotionStrategy::BoolToFloat16:
-          return promoteBoolToFloat16(self);
-        default:
-          // dtype is set to Undefined if no dtype-to-float conversion
-          return ScalarType::Undefined;
-      }
-    }
-    return ScalarType::Undefined;
-  }
-} // end anonymous namespace
-
 // NOTE: These are helper functions that reduce redundant code in implementing the most typical kind of unary operators.
 // YOU ARE NOT OBLIGED TO USE THESE HELPERS---if you're writing something more specialized, please don't try to make
 // them work for your case, but just write something new instead. Here we use helper functions instead of a flat fat
@@ -142,16 +48,18 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 // otherwise it won't dispatch to out-of-source devices like XLA.
 // For example it must be at::bitwise_not_out instead of bitwise_not_out(which is at::native!).
 template <typename OutImpl>
-static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl, TypePromotionStrategy typeStrategy=TypePromotionStrategy::None) {
-  // Calculate the dtype for type promotion
-  ScalarType promoted_dtype = get_promoted_dtype(self, typeStrategy);
-  if (promoted_dtype != ScalarType::Undefined) {
-    Tensor result = at::empty({0}, self.options().dtype(promoted_dtype));
-    return out_impl(result, self.to(promoted_dtype));
-  } else {
-    Tensor result = at::empty({0}, self.options());
-    return out_impl(result, self);
-  }
+static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
+  Tensor result = at::empty({0}, self.options());
+  return out_impl(result, self);
+}
+
+// Implicitly promote all int and bool dtypes to default floating dtype
+// See PR #33322 for more discussion on this
+template <typename OutImpl>
+static inline Tensor unary_float_op_impl(const Tensor& self, OutImpl& out_impl) {
+  Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
+                  at::empty({0}, self.options());
+  return out_impl(result, self.to(result.scalar_type()));
 }
 
 template <typename OutImpl>
@@ -160,19 +68,19 @@ static inline Tensor& unary_op_impl_(Tensor& self, OutImpl& out_impl) {
 }
 
 Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
-Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor acos(const Tensor& self) { return unary_float_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
-Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor asin(const Tensor& self) { return unary_float_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 Tensor& abs_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, abs_stub); }
-Tensor abs(const Tensor& self) { return unary_op_impl(self, at::abs_out); }
+Tensor abs(const Tensor& self) { return unary_float_op_impl(self, at::abs_out); }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
 Tensor& angle_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, angle_stub); }
-Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out, TypePromotionStrategy::IntBoolToFloat64); }
+Tensor angle(const Tensor& self) { return unary_op_impl(self, at::angle_out); }
 
 Tensor& real_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, real_stub); }
 Tensor real(const Tensor& self) { return unary_op_impl(self, at::real_out); }
@@ -181,18 +89,18 @@ Tensor& imag_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor imag(const Tensor& self) { return unary_op_impl(self, at::imag_out); }
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
-Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out, TypePromotionStrategy::BoolToInt8); }
+Tensor conj(const Tensor& self) { return unary_float_op_impl(self, at::conj_out); }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
 Tensor& bitwise_not_(Tensor& self) { return unary_op_impl_(self, at::bitwise_not_out); }
 
 Tensor& ceil_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, ceil_stub); }
-Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out, TypePromotionStrategy::IntBoolToFloats); }
+Tensor ceil(const Tensor& self) { return unary_float_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
 Tensor& expm1_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, expm1_stub); }
-Tensor expm1(const Tensor& self) { return unary_op_impl(self, at::expm1_out); }
+Tensor expm1(const Tensor& self) { return unary_float_op_impl(self, at::expm1_out); }
 Tensor& expm1_(Tensor& self) { return unary_op_impl_(self, at::expm1_out); }
 
 Tensor& frac_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, frac_stub); }
@@ -200,27 +108,27 @@ Tensor frac(const Tensor& self) { return unary_op_impl(self, at::frac_out); }
 Tensor& frac_(Tensor& self) { return unary_op_impl_(self, at::frac_out); }
 
 Tensor& floor_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, floor_stub); }
-Tensor floor(const Tensor& self) { return unary_op_impl(self, at::floor_out); }
+Tensor floor(const Tensor& self) { return unary_float_op_impl(self, at::floor_out); }
 Tensor& floor_(Tensor& self) { return unary_op_impl_(self, at::floor_out); }
 
 Tensor& log_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log_stub); }
-Tensor log(const Tensor& self) { return unary_op_impl(self, at::log_out); }
+Tensor log(const Tensor& self) { return unary_float_op_impl(self, at::log_out); }
 Tensor& log_(Tensor& self) { return unary_op_impl_(self, at::log_out); }
 
 Tensor& log10_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log10_stub); }
-Tensor log10(const Tensor& self) { return unary_op_impl(self, at::log10_out); }
+Tensor log10(const Tensor& self) { return unary_float_op_impl(self, at::log10_out); }
 Tensor& log10_(Tensor& self) { return unary_op_impl_(self, at::log10_out); }
 
 Tensor& log1p_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log1p_stub); }
-Tensor log1p(const Tensor& self) { return unary_op_impl(self, at::log1p_out); }
+Tensor log1p(const Tensor& self) { return unary_float_op_impl(self, at::log1p_out); }
 Tensor& log1p_(Tensor& self) { return unary_op_impl_(self, at::log1p_out); }
 
 Tensor& log2_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, log2_stub); }
-Tensor log2(const Tensor& self) { return unary_op_impl(self, at::log2_out); }
+Tensor log2(const Tensor& self) { return unary_float_op_impl(self, at::log2_out); }
 Tensor& log2_(Tensor& self) { return unary_op_impl_(self, at::log2_out); }
 
 Tensor& round_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, round_stub); }
-Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out, TypePromotionStrategy::BoolToFloat16); }
+Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 
 Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
@@ -236,19 +144,19 @@ Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
-Tensor sign(const Tensor& self) { return unary_op_impl(self, at::sign_out); }
+Tensor sign(const Tensor& self) { return unary_float_op_impl(self, at::sign_out); }
 Tensor& sign_(Tensor& self) { return unary_op_impl_(self, at::sign_out); }
 
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
-Tensor sin(const Tensor& self) { return unary_op_impl(self, at::sin_out); }
+Tensor sin(const Tensor& self) { return unary_float_op_impl(self, at::sin_out); }
 Tensor& sin_(Tensor& self) { return unary_op_impl_(self, at::sin_out); }
 
 Tensor& sinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sinh_stub); }
-Tensor sinh(const Tensor& self) { return unary_op_impl(self, at::sinh_out); }
+Tensor sinh(const Tensor& self) { return unary_float_op_impl(self, at::sinh_out); }
 Tensor& sinh_(Tensor& self) { return unary_op_impl_(self, at::sinh_out); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
-Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
+Tensor sqrt(const Tensor& self) { return unary_float_op_impl(self, at::sqrt_out); }
 Tensor& sqrt_(Tensor& self) { return unary_op_impl_(self, at::sqrt_out); }
 
 Tensor square(const Tensor& self) { return at::pow(self, 2); }
@@ -259,7 +167,7 @@ Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out)
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
-Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
+Tensor trunc(const Tensor& self) { return unary_float_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
 Tensor& neg_out(Tensor& result, const Tensor& self) {
@@ -268,7 +176,7 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return unary_op_impl_out(result, self, neg_stub);
 }
-Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
+Tensor neg(const Tensor& self) { return unary_float_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
 Tensor logical_not(const Tensor& self) {
