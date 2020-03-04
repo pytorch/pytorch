@@ -403,32 +403,34 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
-        DCHECK(!PyGILState_Check());
+         const py::object& userCallable,
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict) {
+        DCHECK(PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
+        auto qualifiedNameStr = c10::QualifiedName(
+            py::cast<std::string>(py::module::import("torch.jit")
+                                      .attr("_qualified_name")(userCallable)));
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
                                   ->get_function(qualifiedName)
                                   .getSchema();
-        Stack stack;
-        // Acquire GIL for py::args and py::kwargs processing.
-        {
-          pybind11::gil_scoped_acquire ag;
-          stack = torch::jit::createStackForSchema(
-              functionSchema, args, kwargs, c10::nullopt);
-        }
+        Stack stack = torch::jit::createStackForSchema(
+            functionSchema,
+            argsTuple.cast<py::args>(),
+            kwargsDict.cast<py::kwargs>(),
+            c10::nullopt);
+        py::gil_scoped_release release;
         DCHECK(!PyGILState_Check());
-        auto fut =
+        c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
-      py::call_guard<py::gil_scoped_release>());
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_builtin",
