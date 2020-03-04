@@ -41,11 +41,11 @@ class GradScaler(object):
                 output = model(input)
                 loss = loss_fn(output, target)
 
-                # Scales the loss, and calls backward() on the scaled loss to create scaled gradients.
+                # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
                 scaler.scale(loss).backward()
 
-                # scaler.step() first unscales the gradients of the optimizer's assigned params.
-                # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+                # scaler.step() first unscales gradients of the optimizer's params.
+                # If gradients don't contain infs/NaNs, optimizer.step() is then called,
                 # otherwise, optimizer.step() is skipped.
                 scaler.step(optimizer)
 

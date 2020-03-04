@@ -20,19 +20,20 @@ class autocast(object):
 
         # Creates model and optimizer in default precision (float32)
         model = Net().cuda()
-        optimizer = optim.SGD(model.parameters, ...)
+        optimizer = optim.SGD(model.parameters(), ...)
 
         for input, target in data:
             optimizer.zero_grad()
 
+                # If gradients don't contain infs/NaNs, optimizer.step() is then called,
             # Enables autocasting for the forward pass (model + loss)
             with autocast():
                 output = model(input)
                 loss = loss_fn(output, target)
 
             # Exits the context manager before backward()
-            # Running backward() under autocast is not necessary or recommended.
-            # Backward ops run in the same precision that autocast used for corresponding forward ops.
+            # Backward passes under autocast are not necessary or recommended.
+            # Backward ops run in the same type that autocast used for corresponding forward ops.
             loss.backward()
             optimizer.step()
 
@@ -54,7 +55,7 @@ class autocast(object):
 
         with autocast():
             # torch.mm is on autocast's list of ops that should run in float16..
-            # Although inputs are float32, the op runs in float16 and produces float16 output.
+            # Inputs are float32, but the op runs in float16 and produces float16 output.
             # No manual casts are required.
             tmp_float16 = torch.mm(mat0, mat1)
 
