@@ -155,13 +155,13 @@ class IntrinsicQATModuleTest(TestCase):
                 running_var_actual = qat_op.running_var
                 num_batches_tracked_actual = qat_op.num_batches_tracked
                 precision = 1e-10
-                self.assertEqual(input_grad_ref, input_grad_actual, prec=precision)
-                self.assertEqual(weight_grad_ref, weight_grad_actual, prec=precision)
-                self.assertEqual(gamma_grad_ref, gamma_grad_actual, prec=precision)
-                self.assertEqual(beta_grad_ref, beta_grad_actual, prec=precision)
-                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, prec=precision)
-                self.assertEqual(running_mean_ref, running_mean_actual, prec=precision)
-                self.assertEqual(running_var_ref, running_var_actual, prec=precision)
+                self.assertEqual(input_grad_ref, input_grad_actual, atol=precision)
+                self.assertEqual(weight_grad_ref, weight_grad_actual, atol=precision)
+                self.assertEqual(gamma_grad_ref, gamma_grad_actual, atol=precision)
+                self.assertEqual(beta_grad_ref, beta_grad_actual, atol=precision)
+                self.assertEqual(num_batches_tracked_ref, num_batches_tracked_actual, atol=precision)
+                self.assertEqual(running_mean_ref, running_mean_actual, atol=precision)
+                self.assertEqual(running_var_ref, running_var_actual, atol=precision)
 
 
 if __name__ == '__main__':

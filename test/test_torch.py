@@ -360,7 +360,7 @@ class _TestTorchMixin(object):
             input = torch.empty(10).uniform_(d, 10)
             res_torch = torch.mvlgamma(input, d)
             res_scipy = multigammaln(input.numpy(), d)
-            self.assertEqual(res_torch.numpy(), res_scipy)
+            self.assertEqual(res_torch.numpy(), res_scipy, atol=1e-5)
 
     def test_mvlgamma_argcheck(self):
         def run_test(d):
@@ -791,7 +791,7 @@ class _TestTorchMixin(object):
             for i, j in iter_indices(m1):
                 res2[i] += m1[i][j] * v1[j]
 
-            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res2, atol=1e-5)
 
         _test_mv(torch.randn(100, 100, dtype=torch.float32), torch.randn(100, dtype=torch.float32))
         _test_mv(torch.randn(100, 100, dtype=torch.float64), torch.randn(100, dtype=torch.float64))
@@ -1799,7 +1799,7 @@ class _TestTorchMixin(object):
 
     def test_not_equal(self):
         ones = torch.ones(10, dtype=torch.int)
-        self.assertRaisesRegex(AssertionError, "0 not greater than or equal to",
+        self.assertRaisesRegex(AssertionError, "0 not greater than 0",
                                lambda: self.assertNotEqual(ones, ones))
 
     def assertIsOrdered(self, order, x, mxx, ixx, task):
@@ -2201,10 +2201,10 @@ class _TestTorchMixin(object):
             for normalized in (True, False):
                 res = x.fft(signal_ndim, normalized=normalized)
                 rec = res.ifft(signal_ndim, normalized=normalized)
-                self.assertEqual(x, rec, 1e-8, 'fft and ifft')
+                self.assertEqual(x, rec, atol=1e-8, message='fft and ifft')
                 res = x.ifft(signal_ndim, normalized=normalized)
                 rec = res.fft(signal_ndim, normalized=normalized)
-                self.assertEqual(x, rec, 1e-8, 'ifft and fft')
+                self.assertEqual(x, rec, atol=1e-8, message='ifft and fft')
 
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(torch.randn(*sizes, dtype=dtype, device=device))
@@ -2237,11 +2237,11 @@ class _TestTorchMixin(object):
                 test_input_signal_sizes = [signal_sizes]
                 rec = res.irfft(signal_ndim, normalized=normalized,
                                 onesided=onesided, signal_sizes=signal_sizes)
-                self.assertEqual(x, rec, 1e-8, 'rfft and irfft')
+                self.assertEqual(x, rec, atol=1e-8, message='rfft and irfft')
                 if not onesided:  # check that we can use C2C ifft
                     rec = res.ifft(signal_ndim, normalized=normalized)
-                    self.assertEqual(x, rec.select(-1, 0), 1e-8, 'twosided rfft and ifft real')
-                    self.assertEqual(rec.select(-1, 1).abs().mean(), 0, 1e-8, 'twosided rfft and ifft imaginary')
+                    self.assertEqual(x, rec.select(-1, 0), atol=1e-8, message='twosided rfft and ifft real')
+                    self.assertEqual(rec.select(-1, 1).abs().mean(), 0, atol=1e-8, message='twosided rfft and ifft imaginary')
 
         # contiguous case
         _test_real((100,), 1)
@@ -2303,10 +2303,10 @@ class _TestTorchMixin(object):
         imvx2 = torch.xcorr2(x, ki, 'V')
         imfx = torch.xcorr2(x, ki, 'F')
 
-        self.assertEqual(imvc, imvc2, 0, 'torch.conv2')
-        self.assertEqual(imvc, imvx, 0, 'torch.conv2')
-        self.assertEqual(imvc, imvx2, 0, 'torch.conv2')
-        self.assertEqual(imfc, imfx, 0, 'torch.conv2')
+        self.assertEqual(imvc, imvc2, atol=0, message='torch.conv2')
+        self.assertEqual(imvc, imvx, atol=0, message='torch.conv2')
+        self.assertEqual(imvc, imvx2, atol=0, message='torch.conv2')
+        self.assertEqual(imfc, imfx, atol=0, message='torch.conv2')
         self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr2(x, x)[0][0]), 1e-10, 'torch.conv2')
 
         xx = torch.Tensor(2, x.size(1), x.size(2))
@@ -2320,11 +2320,11 @@ class _TestTorchMixin(object):
         immvc2 = torch.conv2(xx, kk, 'V')
         immfc = torch.conv2(xx, kk, 'F')
 
-        self.assertEqual(immvc[0], immvc[1], 0, 'torch.conv2')
-        self.assertEqual(immvc[0], imvc, 0, 'torch.conv2')
-        self.assertEqual(immvc2[0], imvc2, 0, 'torch.conv2')
-        self.assertEqual(immfc[0], immfc[1], 0, 'torch.conv2')
-        self.assertEqual(immfc[0], imfc, 0, 'torch.conv2')
+        self.assertEqual(immvc[0], immvc[1], atol=0, message='torch.conv2')
+        self.assertEqual(immvc[0], imvc, atol=0, message='torch.conv2')
+        self.assertEqual(immvc2[0], imvc2, atol=0, message='torch.conv2')
+        self.assertEqual(immfc[0], immfc[1], atol=0, message='torch.conv2')
+        self.assertEqual(immfc[0], imfc, atol=0, message='torch.conv2')
 
     @unittest.skip("Not implemented yet")
     def test_conv3(self):
@@ -2347,10 +2347,10 @@ class _TestTorchMixin(object):
         imvx2 = torch.xcorr3(x, ki, 'V')
         imfx = torch.xcorr3(x, ki, 'F')
 
-        self.assertEqual(imvc, imvc2, 0, 'torch.conv3')
-        self.assertEqual(imvc, imvx, 0, 'torch.conv3')
-        self.assertEqual(imvc, imvx2, 0, 'torch.conv3')
-        self.assertEqual(imfc, imfx, 0, 'torch.conv3')
+        self.assertEqual(imvc, imvc2, atol=0, message='torch.conv3')
+        self.assertEqual(imvc, imvx, atol=0, message='torch.conv3')
+        self.assertEqual(imvc, imvx2, atol=0, message='torch.conv3')
+        self.assertEqual(imfc, imfx, atol=0, message='torch.conv3')
         self.assertLessEqual(math.abs(x.dot(x) - torch.xcorr3(x, x)[0][0][0]), 4e-10, 'torch.conv3')
 
         xx = torch.Tensor(2, x.size(1), x.size(2), x.size(3))
@@ -2364,11 +2364,11 @@ class _TestTorchMixin(object):
         immvc2 = torch.conv3(xx, kk, 'V')
         immfc = torch.conv3(xx, kk, 'F')
 
-        self.assertEqual(immvc[0], immvc[1], 0, 'torch.conv3')
-        self.assertEqual(immvc[0], imvc, 0, 'torch.conv3')
-        self.assertEqual(immvc2[0], imvc2, 0, 'torch.conv3')
-        self.assertEqual(immfc[0], immfc[1], 0, 'torch.conv3')
-        self.assertEqual(immfc[0], imfc, 0, 'torch.conv3')
+        self.assertEqual(immvc[0], immvc[1], atol=0, message='torch.conv3')
+        self.assertEqual(immvc[0], imvc, atol=0, message='torch.conv3')
+        self.assertEqual(immvc2[0], imvc2, atol=0, message='torch.conv3')
+        self.assertEqual(immfc[0], immfc[1], atol=0, message='torch.conv3')
+        self.assertEqual(immfc[0], imfc, atol=0, message='torch.conv3')
 
     @unittest.skip("Not implemented yet")
     def _test_conv_corr_eq(self, fn, fn_2_to_3):
@@ -2468,7 +2468,7 @@ class _TestTorchMixin(object):
         # Dramatically alter the internal state of the main generator
         _ = torch.rand(100000)
         forked_value = torch.rand(1000, generator=gen)
-        self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
+        self.assertEqual(target_value, forked_value, atol=0, message="RNG has not forked correctly.")
 
     def test_RNG_after_pickle(self):
         torch.random.manual_seed(100)
@@ -2492,10 +2492,10 @@ class _TestTorchMixin(object):
         repeat_midstream = torch.randn(odd_number)
         torch.manual_seed(123)
         reseeded = torch.randn(odd_number)
-        self.assertEqual(midstream, repeat_midstream, 0,
-                         'get_rng_state/set_rng_state not generating same sequence of normally distributed numbers')
-        self.assertEqual(seeded, reseeded, 0,
-                         'repeated calls to manual_seed not generating same sequence of normally distributed numbers')
+        self.assertEqual(midstream, repeat_midstream, atol=0,
+                         message='get_rng_state/set_rng_state not generating same sequence of normally distributed numbers')
+        self.assertEqual(seeded, reseeded, atol=0,
+                         message='repeated calls to manual_seed not generating same sequence of normally distributed numbers')
 
     def test_manual_seed(self):
         rng_state = torch.get_rng_state()
@@ -2993,7 +2993,7 @@ class _TestTorchMixin(object):
         rec = torch.randn(2, 2, 3, 7, 6, 2).type(torch.float64).clamp(0, 1)
         val1 = rec.select(-1, -1)[0][0][0].sum()
         val2 = rec.select(-1, -1).abs()[0][0][0].sum()
-        self.assertEqual(val1, val2, 1e-8, 'absolute value')
+        self.assertEqual(val1, val2, atol=1e-8, message='absolute value')
 
         # Both abs(0.0) and abs(-0.0) should result in 0.0
         for dtype in (torch.float, torch.double):
@@ -3825,7 +3825,7 @@ class _TestTorchMixin(object):
         expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
                        0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
         actual_1d = engine_1d.draw(10)
-        self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d))
+        self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d), atol=1e-5)
         self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
         # make sure random seed if chosen if none is provided
         engine_1d_a = torch.quasirandom.SobolEngine(1, scramble=True)
@@ -4976,19 +4976,19 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         float_tensor = torch.FloatTensor([1.0, tiny_float])
         double_tensor = torch.DoubleTensor([1.0, tiny_float, tiny_double])
 
-        self.assertEqual(float_tensor[0], 1.0, prec=0.0)
-        self.assertEqual(float_tensor[1], tiny_float, prec=tiny_float / 16)
-        self.assertEqual(double_tensor[0], 1.0, prec=0.0)
-        self.assertEqual(double_tensor[1], tiny_float, prec=0.0)
-        self.assertEqual(double_tensor[2], tiny_double, prec=0.0)
+        self.assertEqual(float_tensor[0], 1.0, atol=0.0)
+        self.assertEqual(float_tensor[1], tiny_float, atol=tiny_float / 16)
+        self.assertEqual(double_tensor[0], 1.0, atol=0.0)
+        self.assertEqual(double_tensor[1], tiny_float, atol=0.0)
+        self.assertEqual(double_tensor[2], tiny_double, atol=0.0)
 
         torch.set_flush_denormal(True)
-        self.assertEqual(float_tensor[0], 1.0, prec=0.0)
-        self.assertEqual(float_tensor[1], 0.0, prec=0.0)  # tiny_float to zero
-        self.assertEqual(double_tensor[0], 1.0, prec=0.0)
+        self.assertEqual(float_tensor[0], 1.0, atol=0.0)
+        self.assertEqual(float_tensor[1], 0.0, atol=0.0)  # tiny_float to zero
+        self.assertEqual(double_tensor[0], 1.0, atol=0.0)
         # tiny_float is not converted to zero in double type
-        self.assertEqual(double_tensor[1], tiny_float, prec=0.0)
-        self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
+        self.assertEqual(double_tensor[1], tiny_float, atol=0.0)
+        self.assertEqual(double_tensor[2], 0.0, atol=0.0)  # tiny_double to zero
         torch.set_flush_denormal(False)
 
     def test_show_config(self):
@@ -6105,16 +6105,17 @@ class TestTorchDeviceType(TestCase):
         # no batches: 2-D tensors
         matrix = random_fullrank_matrix_distinct_singular_value(5).to(device)
         matrix_inverse = torch.inverse(matrix)
+
         identity = torch.eye(5, dtype=torch.float64, device=device)
-        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), 1e-8, 'inverse value')
-        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), 1e-8, 'inverse value')
+        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, message='inverse value')
+        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, message='inverse value')
 
         matrix_inverse_out = torch.empty(5, 5, dtype=torch.float64, device=device)
         torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, message='inverse value in-place')
         # second call, now that matrix_inverse_out is transposed
         torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, 0, 'inverse value in-place')
+        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, message='inverse value in-place')
 
         # one batch
         matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)
@@ -6574,10 +6575,10 @@ class TestTorchDeviceType(TestCase):
             # Testing against definition for pseudo-inverses
             MPI = torch.pinverse(M)
             if M.numel() > 0:
-                self.assertEqual(M, M.matmul(MPI).matmul(M), 1e-8, 'pseudo-inverse condition 1')
-                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI), 1e-8, 'pseudo-inverse condition 2')
-                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 3')
-                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1), 1e-8, 'pseudo-inverse condition 4')
+                self.assertEqual(M, M.matmul(MPI).matmul(M), atol=1e-8, message='pseudo-inverse condition 1')
+                self.assertEqual(MPI, MPI.matmul(M).matmul(MPI), atol=1e-8, message='pseudo-inverse condition 2')
+                self.assertEqual(M.matmul(MPI), (M.matmul(MPI)).transpose(-2, -1), atol=1e-8, message='pseudo-inverse condition 3')
+                self.assertEqual(MPI.matmul(M), (MPI.matmul(M)).transpose(-2, -1), atol=1e-8, message='pseudo-inverse condition 4')
             else:
                 self.assertEqual(M.shape, MPI.shape[:-2] + (MPI.shape[-1], MPI.shape[-2]))
         for sizes in [(5, 5), (3, 5, 5), (3, 7, 5, 5),  # square matrices
@@ -6593,7 +6594,7 @@ class TestTorchDeviceType(TestCase):
             batchdims = sizes[:-2]
             M = fullrank(matsize, *batchdims, dtype=dtype, device=device)
             self.assertEqual(torch.eye(matsize, dtype=dtype, device=device).expand(sizes), M.pinverse().matmul(M),
-                             1e-7, 'pseudo-inverse for invertible matrix')
+                             atol=1e-7, message='pseudo-inverse for invertible matrix')
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -6728,12 +6729,12 @@ class TestTorchDeviceType(TestCase):
             sdet, logabsdet = M.slogdet()
 
             # Test det
-            self.assertEqual(det, target_sdet * target_logabsdet.exp(), 1e-7, '{} (det)'.format(desc))
+            self.assertEqual(det, target_sdet * target_logabsdet.exp(), atol=1e-7, message='{} (det)'.format(desc))
 
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
-            self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(), 1e-7, '{} (slogdet)'.format(desc))
+            self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(), atol=1e-7, message='{} (slogdet)'.format(desc))
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -6743,7 +6744,7 @@ class TestTorchDeviceType(TestCase):
             if sdet.item() < 0:
                 self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
             else:
-                self.assertEqual(logdet.exp(), target_logabsdet.exp(), 1e-7, '{} (logdet non-negative case)'.format(desc))
+                self.assertEqual(logdet.exp(), target_logabsdet.exp(), atol=1e-7, message='{} (logdet non-negative case)'.format(desc))
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')
@@ -7178,12 +7179,12 @@ class TestTorchDeviceType(TestCase):
         # test Upper Triangular
         U = torch.cholesky(A, True)
         B = torch.mm(U.t(), U)
-        self.assertEqual(A, B, 1e-14, 'cholesky (upper) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-14, message='cholesky (upper) did not allow rebuilding the original matrix')
 
         # test Lower Triangular
         L = torch.cholesky(A, False)
         B = torch.mm(L, L.t())
-        self.assertEqual(A, B, 1e-14, 'cholesky (lower) did not allow rebuilding the original matrix')
+        self.assertEqual(A, B, atol=1e-14, message='cholesky (lower) did not allow rebuilding the original matrix')
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
@@ -8639,7 +8640,7 @@ class TestTorchDeviceType(TestCase):
 
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(outv, torch.diag_embed(oute)), outv.transpose(-2, -1))
-                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, oute, 'Eigenvalues mismatch')
@@ -8658,7 +8659,7 @@ class TestTorchDeviceType(TestCase):
             rese, resv = torch.symeig(x, eigenvectors=eigenvectors, upper=upper)
             if eigenvectors:
                 x_recon = torch.matmul(torch.matmul(resv, torch.diag_embed(rese)), resv.transpose(-2, -1))
-                self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using V @ diag(e) @ V.T')
+                self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using V @ diag(e) @ V.T')
             else:
                 eigvals, _ = torch.symeig(x, eigenvectors=True, upper=upper)
                 self.assertEqual(eigvals, rese, 'Eigenvalues mismatch')
@@ -8682,12 +8683,12 @@ class TestTorchDeviceType(TestCase):
             if compute_uv:
                 if some:
                     x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using U @ diag(S) @ V.T')
+                    self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = outu[..., :min(*dims[-2:])]
                     narrow_v = outv[..., :min(*dims[-2:])]
                     x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using U @ diag(S) @ V.T')
+                    self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
                 self.assertEqual(singvals, outs, 'Singular values mismatch')
@@ -8709,12 +8710,12 @@ class TestTorchDeviceType(TestCase):
             if compute_uv:
                 if some:
                     x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using U @ diag(S) @ V.T')
+                    self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
                     narrow_u = resu[..., :min(*dims[-2:])]
                     narrow_v = resv[..., :min(*dims[-2:])]
                     x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, 1e-8, 'Incorrect reconstruction using U @ diag(S) @ V.T')
+                    self.assertEqual(x, x_recon, atol=1e-8, message='Incorrect reconstruction using U @ diag(S) @ V.T')
             else:
                 _, singvals, _ = torch.svd(x, compute_uv=True)
                 self.assertEqual(singvals, ress, 'Singular values mismatch')
@@ -8790,7 +8791,7 @@ class TestTorchDeviceType(TestCase):
         for p in [0, 1, 2, 3, 4, inf, -inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
-            self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
+            self.assertEqual(res, expected, atol=1e-5, message="full reduction failed for {}-norm".format(p))
 
         # one dimension
         x = torch.randn(25, 25, device=device)
@@ -13349,12 +13350,12 @@ class TestTorchDeviceType(TestCase):
         v = torch.zeros(4, 4, dtype=dtype, device=device)
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+        self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
-        self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+        self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
 
         # test non-contiguous
@@ -13366,7 +13367,7 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.eig(X, True, out=(e, v))
         Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
-        self.assertEqual(X, Xhat, 1e-8, 'VeV\' wrong')
+        self.assertEqual(X, Xhat, atol=1e-8, message='VeV\' wrong')
 
     @slowTest
     @onlyCPU
@@ -14271,7 +14272,7 @@ class TestDevicePrecision(TestCase):
     def _test_linspace(self, device, dtype, steps):
         a = torch.linspace(0, 10, steps=steps, dtype=dtype, device=device)
         b = torch.linspace(0, 10, steps=steps)
-        self.assertEqual(a, b, exact_dtype=False)
+        self.assertEqual(a, b, atol=self.precision, exact_dtype=False)
 
     # See NOTE [Linspace+Logspace precision override]
     @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
@@ -14289,12 +14290,12 @@ class TestDevicePrecision(TestCase):
     def _test_logspace(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps)
-        self.assertEqual(a, b, exact_dtype=False)
+        self.assertEqual(a, b, atol=self.precision, exact_dtype=False)
 
     def _test_logspace_base2(self, device, dtype, steps):
         a = torch.logspace(1, 1.1, steps=steps, base=2, dtype=dtype, device=device)
         b = torch.logspace(1, 1.1, steps=steps, base=2)
-        self.assertEqual(a, b, exact_dtype=False)
+        self.assertEqual(a, b, atol=self.precision, exact_dtype=False)
 
     # See NOTE [Linspace+Logspace precision override]
     @precisionOverride({torch.half: 0.0157 + LINSPACE_LOGSPACE_EXTRA_EPS})
@@ -15385,9 +15386,9 @@ def generate_test_function(cls,
         # Compares CPU and device inputs and outputs
         precision = dtype2precision.get(dtype, float_precision)
 
-        self.assertEqual(cpu_tensor, device_tensor, prec=precision, exact_dtype=False)
-        self.assertEqual(cpu_args, device_args, prec=precision, exact_dtype=False)
-        self.assertEqual(cpu_result, device_result, prec=precision, exact_dtype=False)
+        self.assertEqual(cpu_tensor, device_tensor, atol=precision, exact_dtype=False)
+        self.assertEqual(cpu_args, device_args, atol=precision, exact_dtype=False)
+        self.assertEqual(cpu_result, device_result, atol=precision, exact_dtype=False)
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
@@ -15496,7 +15497,7 @@ class TestTensorDeviceOps(TestCase):
         #   then the corresponding column of the V has to be changed.
         # Thus here we only compare result[..., :m].abs() from CPU and device.
         for x, y in zip(cpu_result, device_result):
-            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), prec=1e-5)
+            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5)
 
     @skipCUDAIfNoMagma
     @dtypes(*_float_types_no_half)
