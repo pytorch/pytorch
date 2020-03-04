@@ -37,13 +37,6 @@ static int ceilDiv(const int a, const int b) {
 
 } // namespace
 
-static std::shared_ptr<Graph> normalizeGraphForCache(
-    const std::shared_ptr<Graph>& graph) {
-  auto result = Canonicalize(graph, /*keep_unique_names=*/false);
-  EraseShapeInformation(result);
-  return result;
-}
-
 struct KernelCache {
 
   struct KernelEntry {

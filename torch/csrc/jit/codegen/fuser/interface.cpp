@@ -136,6 +136,10 @@ int fuse(const Node* const node) {
 }
 
 void compileFusion(Node* fusion) {
+  const auto device_type = c10::kCUDA;
+  assert(getFusionBackendsEx().count(device_type) > 0);
+  return getFusionBackendsEx()[device_type]->compileFusion(fusion);
+  /*
   const auto device_type = getFusionDeviceType(fusion);
 
   switch (device_type) {
@@ -149,6 +153,7 @@ void compileFusion(Node* fusion) {
   }
 
   TORCH_CHECK(false, "End of function should not be reached!");
+   */
 }
 
 // Acquires inputs, allocates outputs, and calls fusion

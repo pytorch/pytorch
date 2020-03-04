@@ -2033,6 +2033,17 @@ struct GraphFuser {
   }
 };
 
+void compileFusionRecursive(Block* block) {
+  for (auto node : block->nodes()) {
+    if (node->kind() == prim::FusionGroup) {
+      compileFusion(node);
+    }
+    for (Block* sub_block : node->blocks()) {
+      compileFusionRecursive(sub_block);
+    }
+  }
+}
+
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
@@ -2040,14 +2051,17 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   EliminateDeadCode(graph);
-  // TODO: review the following -- remove it?
-  // PeepholeOptimizeShapeExpressions(graph->block());
+  std::cout << "----dead code" << std::endl;
+  // Improve the quality of shape propagation code that was left
+  PeepholeOptimizeShapeExpressions(graph->block());
+  std::cout << "----finished fusion" << std::endl;
+  std::cout << (*graph) << std::endl;
 
-  #if FUSER_DEBUG
-    std::cout << std::endl;
-    std::cout << "post-fusion graph: " << std::endl;
-    std::cout << *graph << std::endl;
-  #endif // FUSER_DEBUG
+  // compile graph now;
+  compileFusionRecursive(graph->block());
+
+  std::cout << "----compiled fusion" << std::endl;
+  std::cout << (*graph) << std::endl;
 }
 
 void CustomFuseGraph(
