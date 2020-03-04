@@ -25,7 +25,6 @@ class autocast(object):
         for input, target in data:
             optimizer.zero_grad()
 
-                # If gradients don't contain infs/NaNs, optimizer.step() is then called,
             # Enables autocasting for the forward pass (model + loss)
             with autocast():
                 output = model(input)
