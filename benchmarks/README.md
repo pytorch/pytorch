@@ -19,6 +19,10 @@ python setup.py build develop
 
 # Check the pytorch installation version
 python -c "import torch; print(torch.__version__)"
+
+# If you are running operator benchmarks, install cpp_extension
+cd $PYTORCH_HOME/benchmarks/operator_benchmark/pt_extension
+python setup.py install
 ```
 
 ## Benchmark List
