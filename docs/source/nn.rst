@@ -497,7 +497,7 @@ Recurrent layers
 ----------------------------------
 
 :hidden:`RNNBase`
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 .. autoclass:: RNNBase
     :members:
