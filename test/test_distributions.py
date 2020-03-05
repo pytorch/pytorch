@@ -3439,10 +3439,7 @@ class TestKL(TestCase):
             (uniform_real, normal),
             (uniform_pareto, pareto),
             (continuous_bernoulli, continuous_bernoulli),
-            (continuous_bernoulli, beta),
-            (continuous_bernoulli, chi2),
             (continuous_bernoulli, exponential),
-            (continuous_bernoulli, gamma),
             (continuous_bernoulli, normal),
             (beta, continuous_bernoulli)
         ]
@@ -3504,7 +3501,6 @@ class TestKL(TestCase):
             (ContinuousBernoulli(0.25), Uniform(0, 0.75)),
             (ContinuousBernoulli(0.25), Uniform(0.25, 0.75)),
             (ContinuousBernoulli(0.25), Pareto(1, 2)),
-            (Chi2(1), ContinuousBernoulli(0.75)),
             (Exponential(1), ContinuousBernoulli(0.75)),
             (Gamma(1, 2), ContinuousBernoulli(0.75)),
             (Gumbel(-1, 2), ContinuousBernoulli(0.75)),
