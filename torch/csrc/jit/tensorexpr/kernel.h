@@ -106,42 +106,42 @@ class TensorExprKernel {
   Tensor* ComputeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&)> inner_expr);
+      const std::function<ExprHandle(const ExprHandle&)>& inner_expr);
 
   Tensor* ComputeTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>
+      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
           inner_expr);
 
   Tensor* ComputeTwoOperandWithAlpha(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>
+      const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
           inner_expr);
 
   Tensor* ComputeThreeOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<
-          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>
+      const std::function<
+          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
           inner_expr);
 
   Tensor* ComputeConditionWithTwoOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<
-          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>
+      const std::function<
+          ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
           inner_expr);
 
   Tensor* ComputeFourOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      std::function<ExprHandle(
+      const std::function<ExprHandle(
           const ExprHandle&,
           const ExprHandle&,
           const ExprHandle&,
-          const ExprHandle&)> inner_expr);
+          const ExprHandle&)>& inner_expr);
 
   Tensor* ComputeValue(const torch::jit::Value* v);
 
