@@ -5,7 +5,7 @@ from functools import wraps
 import warnings
 import weakref
 from collections import Counter
-from bisect import bisect_right
+from itertools import chain
 
 from .optimizer import Optimizer
 
@@ -386,7 +386,8 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        self.milestones = Counter(milestones)
+        # Sort needed but only for closed form
+        self.milestones = Counter(sorted(milestones))
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
@@ -401,9 +402,9 @@ class MultiStepLR(_LRScheduler):
                 for group in self.optimizer.param_groups]
 
     def _get_closed_form_lr(self):
-        milestones = [e for e in sorted(self.milestones.elements())]
-        return [base_lr * self.gamma ** bisect_right(milestones, self.last_epoch)
-                for base_lr in self.base_lrs]
+        milestones = enumerate(chain(self.milestones.elements(), [self.last_epoch + 1]))
+        exponent = next(x[0] for x in filter(lambda x: x > self.last_epoch, milestones))
+        return [base_lr * self.gamma ** exponent for base_lr in self.base_lrs]
 
 
 class ExponentialLR(_LRScheduler):
