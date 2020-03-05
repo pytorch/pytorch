@@ -681,6 +681,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
     def test_broadcast_full_group(self):
         group, group_id, rank = self._init_full_group_test()
+        print("========== BACKEDN is ", BACKEND, "---", group)
         self._test_broadcast_helper(group, group_id, rank)
 
     # REDUCE
@@ -2177,6 +2178,8 @@ if BACKEND == "gloo" or BACKEND == "nccl":
 elif BACKEND == "mpi":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
     dist.init_process_group(init_method=INIT_METHOD, backend="mpi")
+
+    print("===== in TestMPI")
 
     class TestMPI(TestCase, _DistTestBase):
         pass
