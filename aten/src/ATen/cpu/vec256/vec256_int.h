@@ -85,8 +85,9 @@ struct Vec256<int64_t> : public Vec256i {
   }
   static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
     __at_align32__ int64_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0;
     }
@@ -197,8 +198,9 @@ struct Vec256<int32_t> : public Vec256i {
   }
   static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
     __at_align32__ int32_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0;
     }
@@ -407,8 +409,9 @@ struct Vec256<int16_t> : public Vec256i {
   }
   static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
     __at_align32__ int16_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0;
     }
