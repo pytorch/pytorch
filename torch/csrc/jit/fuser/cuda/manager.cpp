@@ -1,11 +1,10 @@
 #include <torch/csrc/jit/fuser/cuda/manager.h>
 #include <torch/csrc/jit/fuser/cuda/parser.h>
+#include <torch/csrc/jit/fuser/cuda/kernel.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
-
-#include <ATen/cuda/CUDAContext.h>
 
 #include <unordered_map>
 
@@ -15,16 +14,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-struct CudaKernelEntry {
-  int16_t device_;
-  CUmodule module_;
-  CUfunction function_;
-
-  // TODO: we don't need to keep the whole Fusion around after compilation.
-  Fusion fusion_;
-
-};
 
 // The reason for two unordered_map here is to cache `torch::jit::Graph` lowering
 class CudaFusionManager {
@@ -53,12 +42,15 @@ public:
 
       graph_cache_[repr] = kernel_id;
 
-      // default constructor via accessing empty key;
+      Fusion fusion;
       // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      parseJitIR(graph, kernel_cache_[kernel_id].fusion_);
+      parseJitIR(graph, fusion);
+      std::cout << "compiling cached kernel: " << kernel_id << std::endl <<
+          &fusion << std::endl;
 
+      // default constructor via accessing empty key;
       // TODO: compile and blablabla;
-      //compileJitIR(fusion, kernel_cache_[kernel_id]);
+      compileKernel(fusion, kernel_cache_[kernel_id]);
 
       return kernel_id;
     } else {
@@ -73,10 +65,8 @@ public:
       std::vector<at::Tensor> outputs) {
     assert(kernel_cache_.count(kernel_id) != 0);
 
-    CudaKernelEntry& cuda_kernel_entry = kernel_cache_[kernel_id];
-    const Fusion& fusion = cuda_kernel_entry.fusion_;
-    std::cout << "executing cached kernel: " << kernel_id << std::endl <<
-        &fusion << std::endl;
+    CudaKernel& cuda_kernel_entry = kernel_cache_[kernel_id];
+    std::cout << "executing cached kernel: " << kernel_id << std::endl;
 
     for (auto& output : outputs) {
       output.fill_(kernel_id+0.1234);
@@ -99,7 +89,7 @@ protected:
   };
 
   std::unordered_map<std::string, int32_t> graph_cache_;
-  std::unordered_map<int64_t, CudaKernelEntry> kernel_cache_;
+  std::unordered_map<int64_t, CudaKernel> kernel_cache_;
 
 private:
 
