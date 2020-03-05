@@ -24,8 +24,8 @@ public:
     }
   }
 
-  OperatorRegistrar(OperatorRegistrar&& rhs) noexcept = default;
-  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) noexcept = default;
+  OperatorRegistrar(OperatorRegistrar&& rhs) = default;
+  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) = default;
 
   // not needed and would break RAII if defaulted.
   OperatorRegistrar(const OperatorRegistrar& rhs) = delete;
