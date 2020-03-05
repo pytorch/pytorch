@@ -78,8 +78,6 @@ std::tuple<Tensor, Tensor> split_rnn_hidden(const Tensor& hx) {
   return std::make_tuple(std::move(h_fwd), std::move(h_bwd));
 }
 
-
-
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -1042,16 +1040,16 @@ std::tuple<Tensor, Tensor> NAME##_miopen_type1(                                \
 }                                                                              \
                                                                                \
 std::tuple<Tensor, Tensor> NAME##_packed_cudnn_type1(                          \
-      const Tensor& data, \
-      const Tensor& batch_sizes, \
-      TensorList hx, \
-      TensorList _params, \
-      bool has_biases, \
-      int64_t num_layers, \
-      double dropout_p, \
-      bool train, \
-      bool bidirectional, \
-      bool type_2) {                                                           \
+    const Tensor& data, \
+    const Tensor& batch_sizes, \
+    const Tensor& hx, \
+    TensorList _params, \
+    bool has_biases, \
+    int64_t num_layers, \
+    double dropout_p, \
+    bool train, \
+    bool bidirectional, \
+    bool type_2) {  \
   Tensor _fwd_hx;                                                              \
   Tensor _bwd_hx;                                                              \
   std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                           \
@@ -1079,14 +1077,14 @@ std::tuple<Tensor, Tensor> NAME##_packed_cudnn_type1(                          \
 std::tuple<Tensor, Tensor> NAME##_packed_miopen_type1(                         \
       const Tensor& data, \
       const Tensor& batch_sizes, \
-      TensorList hx, \
+      const Tensor& hx, \
       TensorList _params, \
       bool has_biases, \
       int64_t num_layers, \
       double dropout_p, \
       bool train, \
       bool bidirectional, \
-      bool type_2) {                                                           \
+      bool type_2) {  \
   Tensor _fwd_hx;                                                              \
   Tensor _bwd_hx;                                                              \
   std::tie(_fwd_hx, _bwd_hx) = split_rnn_hidden(hx);                           \
