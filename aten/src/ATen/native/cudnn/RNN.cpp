@@ -1241,7 +1241,7 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
         static_cast<int>(mode),
         hidden_size,
         num_layers,
-        /*batch_first=*/batch_first,
+        /*batch_first=*/false,
         /*bidirectional=*/bidirectional,
         /*type_2=*/type_2);
   }
