@@ -24,6 +24,11 @@ struct TensorView;
 
 struct TensorContiguity;
 
+
+struct Split;
+struct Merge;
+struct Reorder;
+
 struct IterDomain;
 
 struct Float;
