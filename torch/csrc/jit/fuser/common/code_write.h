@@ -49,7 +49,7 @@ struct TORCH_API CodeWrite : public Printer {
  private:
   bool isTVOp(const Expr* expr);
 
-  void print_indices(const std::vector<Int*>&);
+  void printIndexInto(std::vector<Int*> indices, const TensorView* const);
   bool print_predicate(const TensorView* const);
 
   // Print lhs of uop/bop, returns if predicate was needed
@@ -106,11 +106,13 @@ struct TORCH_API CodeWrite : public Printer {
     overrides[const_cast<const Val* const>(val)] = str;
   }
 
+  void header();
+
  public:
   CodeWrite(std::ostream& _os) : Printer(_os) {}
 
   void traverse(
-      const Fusion* const fusion,
+      Fusion* fusion,
       bool from_outputs_only = false,
       bool breadth_first = false,
       std::unordered_set<ValType> val_types = {});

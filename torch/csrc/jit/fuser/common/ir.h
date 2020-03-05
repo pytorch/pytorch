@@ -259,6 +259,22 @@ struct TORCH_API IRInputOutput {
   std::deque<Val*>::size_type nInputs() const noexcept { return inputs_.size(); }
   std::deque<Val*>::size_type nOutputs() const noexcept { return outputs_.size(); }
 
+  bool isInput(const Val* v) const{
+    for(Val* in : inputs())
+      if(v == in)
+        return true;
+    return false;
+  }
+
+  bool isOutput(const Val* v) const{
+    for(Val* out : outputs())
+      if(v == out)
+        return true;
+    return false;
+  }
+
+
+
 protected:
   std::deque<Val*> inputs_;
   std::deque<Val*> outputs_;

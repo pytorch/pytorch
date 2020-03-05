@@ -18,12 +18,25 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
   return inds;
 }
 
-void CodeWrite::print_indices(const std::vector<Int*>& indices) {
+void CodeWrite::printIndexInto(std::vector<Int*> indices, const TensorView* const tv){
+   
+  TensorDomain* root = TransformReplay::getRoot(tv->domain());
+
+  bool inpOrOut
+     = FusionGuard::getCurFusion()->isInput(tv)
+    || FusionGuard::getCurFusion()->isOutput(tv);
+
   os << "[";
-  for (const auto& ind : indices) {
-    print_inline(ind);
-    if (ind != *(indices.end() - 1))
-      os << ", ";
+  for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
+    print_inline(indices[i]);
+    os << " * ";
+    if(inpOrOut)
+      os << "TV" << tv->name() << "->stride(" << i << ")";
+    else
+      print_inline(root->axis(i)->size());
+
+    if (i != (indices.size() - 1) )
+      os << " + ";
   }
   os << "]";
 }
@@ -43,64 +56,56 @@ void CodeWrite::print(const TensorView* const tv) {
     throw std::runtime_error(
         "Could not find consumer for producer in CodeWrite.");
   }
-
-  if (tv2->tensor() != nullptr) {
-    os << "T" << tv2->tensor()->name();
-  } else {
-    os << "TV" << tv2->name();
-  }
+  os << "TV" << tv2->name();
 
   std::vector<Int*> indices =
-      IndexCompute::computeIndices(tv2, getLoopIndices());
+    IndexCompute::computeIndices(tv2, getLoopIndices());
 
-  print_indices(indices);
+  printIndexInto(indices, tv);
 }
 
 void CodeWrite::print(const Val* const val) {
   if (*(val->getValType()) == ValType::TensorView)
     print(static_cast<const TensorView* const>(val));
-  else if(overrides.find(val) != overrides.end())
+  else if (overrides.find(val) != overrides.end())
     os << overrides[val];
   else
-   Printer::print(val);
+    Printer::print(val);
 }
 
-bool CodeWrite::print_predicate(const TensorView* const pred_tv) {  
+bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
   std::vector<Int*> indices =
-    IndexCompute::computeIndices(pred_tv, getLoopIndices());
+      IndexCompute::computeIndices(pred_tv, getLoopIndices());
 
-  std::vector<Int*> preds = PredicateCompute::computePredicates (pred_tv, indices);
+  std::vector<Int*> preds =
+      PredicateCompute::computePredicates(pred_tv, indices);
 
-  if(preds.size() == 0)
+  if (preds.size() == 0)
     return false;
-  
+
   bool first_pred = true;
   os << "if( ";
-  for(decltype(preds.size()) i{0}; i < preds.size(); i++){
-    if(preds[i]->same_as(new Int(1.0)))
+  for (decltype(preds.size()) i{0}; i < preds.size(); i++) {
+    if (preds[i]->same_as(new Int(1.0)))
       continue;
-    if(!first_pred)
+    if (!first_pred)
       os << " && ";
 
     print_inline(preds[i]);
 
     first_pred = false;
-    
   }
-  os  << " ) {\n";
+  os << " ) {\n";
   ++indent_size;
   indent();
   return true;
-  
-
-
 }
 
-bool CodeWrite::print_lhs(TensorView* tv){
+bool CodeWrite::print_lhs(TensorView* tv) {
   updateView(tv);
   indent();
 
-  //Print predicates, first need to find predicate.
+  // Print predicates, first need to find predicate.
   bool predicated = print_predicate(tv);
 
   print(tv);
@@ -112,10 +117,10 @@ bool CodeWrite::print_lhs(TensorView* tv){
   return predicated;
 }
 
-//Already filtered so output is a TensorView
+// Already filtered so output is a TensorView
 void CodeWrite::print(const UnaryOp* const uop) {
-  if(!isTVOp(uop)){
-    if(print_inline_)
+  if (!isTVOp(uop)) {
+    if (print_inline_)
       Printer::print(uop);
     return;
   }
@@ -136,18 +141,16 @@ void CodeWrite::print(const UnaryOp* const uop) {
 
   os << ";\n";
 
-  if(predicated){
+  if (predicated) {
     --indent_size;
     indent();
     os << "}\n";
   }
-
 }
 
 void CodeWrite::print(const BinaryOp* const bop) {
-
-  if(!isTVOp(bop)){
-    if(print_inline_)
+  if (!isTVOp(bop)) {
+    if (print_inline_)
       Printer::print(bop);
     return;
   }
@@ -171,12 +174,11 @@ void CodeWrite::print(const BinaryOp* const bop) {
 
   os << ";\n";
 
-  if(predicated){
+  if (predicated) {
     --indent_size;
     indent();
     os << "}\n";
   }
-
 }
 
 void CodeWrite::indent() {
@@ -188,60 +190,60 @@ void CodeWrite::closeFor() {
   IterDomain* id = fors.back().second;
   Val* iterator = fors.back().first;
   fors.pop_back();
-  if(id->parallel_method() != ParallelType::Serial){
+  if (id->parallel_method() != ParallelType::Serial) {
     auto it = overrides_find(iterator);
-    if(it != overrides.end())
+    if (it != overrides.end())
       overrides.erase(it);
     return;
   }
-  
+
   indent_size--;
   indent();
   os << "}" << std::endl;
 }
 
-void CodeWrite::bind(IterDomain* id, Val* iterator){
-  switch(id->parallel_method()){
-    case(ParallelType::BIDz):
+void CodeWrite::bind(IterDomain* id, Val* iterator) {
+  switch (id->parallel_method()) {
+    case (ParallelType::BIDz):
       overrides_emplace(iterator, "blockIdx.z");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::BIDy):
+    case (ParallelType::BIDy):
       overrides_emplace(iterator, "blockIdx.y");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::BIDx):
+    case (ParallelType::BIDx):
       overrides_emplace(iterator, "blockIdx.x");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::TIDz):
+    case (ParallelType::TIDz):
       overrides_emplace(iterator, "threadIdx.z");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::TIDy):
+    case (ParallelType::TIDy):
       overrides_emplace(iterator, "threadIdx.y");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::TIDx):
+    case (ParallelType::TIDx):
       overrides_emplace(iterator, "threadIdx.x");
       bound_iters.emplace(id);
       break;
-    case(ParallelType::Vectorize):
-    case(ParallelType::Unroll):
-      throw std::runtime_error("Unroll and Vectorize are not yet implemented for code generation.");
-    case(ParallelType::Serial):
+    case (ParallelType::Vectorize):
+    case (ParallelType::Unroll):
+      throw std::runtime_error(
+          "Unroll and Vectorize are not yet implemented for code generation.");
+    case (ParallelType::Serial):
       break;
   }
 }
 
 void CodeWrite::openFor(IterDomain* id) {
-  
   fors.push_back({new Int(), id});
-  
-  if(id->parallel_method() != ParallelType::Serial){
+
+  if (id->parallel_method() != ParallelType::Serial) {
     bind(id, fors.back().first);
     return;
-  }    
+  }
 
   indent();
   indent_size++;
@@ -270,10 +272,8 @@ void CodeWrite::resetFors() {
   clearActiveView();
 }
 
-
 // Update fors based on tv.
 void CodeWrite::updateView(TensorView* tv) {
-
   // If previous tv flaged that fors need to be reset, clear them all
   if (reset_fors)
     resetFors();
@@ -282,7 +282,7 @@ void CodeWrite::updateView(TensorView* tv) {
   // loops down to the previous compute_at axis, then need to put my remaining
   // for loops on there. Also need to set reset_fors flag.
 
-  // tv is not part of a computeAt structure, or it's the final tv in a 
+  // tv is not part of a computeAt structure, or it's the final tv in a
   // computeAt structure.
   if (!tv->hasComputeAt()) {
     // If we're the last computeAt of a block of computeAt TVs.
@@ -291,11 +291,11 @@ void CodeWrite::updateView(TensorView* tv) {
       // reduce down to previous active view_axis
       for (int i = active_view_axis; i < depth; i++)
         closeFor();
-      //Remove the active view
+      // Remove the active view
       clearActiveView();
     } else {
-    // I'm not the final computeAt of a block, I'm independent.
-    // Reset the loop structure
+      // I'm not the final computeAt of a block, I'm independent.
+      // Reset the loop structure
       resetFors();
     }
     for (int i = fors.size(); i < tv->domain()->size(); i++)
@@ -313,44 +313,84 @@ void CodeWrite::updateView(TensorView* tv) {
   }
 }
 
-bool CodeWrite::isTVOp(const Expr* expr){
-  if(expr->nOutputs() == 1 && expr->output(0)->getValType().value() == ValType::TensorView)
-    if(expr->getExprType().value() == ExprType::BinaryOp
-    || expr->getExprType().value() == ExprType::UnaryOp)
+bool CodeWrite::isTVOp(const Expr* expr) {
+  if (expr->nOutputs() == 1 &&
+      expr->output(0)->getValType().value() == ValType::TensorView)
+    if (expr->getExprType().value() == ExprType::BinaryOp ||
+        expr->getExprType().value() == ExprType::UnaryOp)
       return true;
   return false;
 }
 
-void CodeWrite::setupOverrides(){
+void CodeWrite::setupOverrides() {
   std::set<Val*> used_vals = FindUsedVals::find();
-  for(Val* val : used_vals){
-    if(val->getValType().value() == ValType::TensorView){
+  for (Val* val : used_vals) {
+    if (val->getValType().value() == ValType::TensorView) {
       TensorView* tv = static_cast<TensorView*>(val);
       TensorDomain* td = tv->domain();
-      if(tv->tensor() == nullptr)
+      if (tv->tensor() == nullptr)
         continue;
 
       TensorDomain* root = TransformIter::getRoot(tv->domain());
-      for(decltype(root->size())i{0}; i<root->size(); i++){
-        if(overrides_find(root->axis(i)->size()) == overrides.end()){
+      for (decltype(root->size()) i{0}; i < root->size(); i++) {
+        if (overrides_find(root->axis(i)->size()) == overrides.end()) {
           std::stringstream ss;
-          ss << "T" << tv->tensor()->name() << "->size( " << i << " )";
+          ss << "TV" << tv->name() << "->size(" << i << ")";
           overrides_emplace(root->axis(i)->size(), ss.str());
         }
       }
     }
-
   }
 }
 
+void CodeWrite::header() {
+  os << "__global__ void kernel(";
+
+  std::deque<Val*> vals;
+  Fusion* fusion = FusionGuard::getCurFusion();
+  for (decltype(fusion->nInputs()) i{0}; i < fusion->nInputs(); i++)
+    vals.push_back(fusion->input(i));
+  for (decltype(fusion->nOutputs()) i{0}; i < fusion->nOutputs(); i++)
+    vals.push_back(fusion->output(i));
+
+  for (Val* val : vals) {
+    switch (val->getValType().value()) {
+      case (ValType::TensorView):
+        os << "TensorView* TV";
+        break;
+      case (ValType::Scalar):
+        switch (val->getDataType().value()) {
+          case (DataType::Float):
+            os << "float f";
+            break;
+          case (DataType::Int):
+            os << "int i";
+            break;
+          default:
+            throw std::runtime_error(
+                "Could not figure out data type for CodeWrite::header().");
+        }
+      default:
+        throw std::runtime_error(
+            "Could not figure out value type for CodeWrite::header().");
+    }
+
+    os << val->name();
+    if (val != vals.back())
+      os << ", ";
+  }
+
+  os << "){\n";
+  indent_size++;
+}
+
 void CodeWrite::traverse(
-    const Fusion* const fusion,
+    Fusion* fusion,
     bool from_outputs_only,
     bool breadth_first,
     std::unordered_set<ValType> val_types) {
-
-
-  //reset state.
+  FusionGuard fg(fusion);
+  // reset state.
   producer = false;
   consumer = nullptr;
 
@@ -364,12 +404,15 @@ void CodeWrite::traverse(
   std::map<const Val* const, std::string> overrides;
 
   setupOverrides();
-  //IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
+  // IterVisitor::traverse(fusion, from_outputs_only, breadth_first, val_types);
   std::vector<Expr*> exprs = FusionGuard::getCurFusion()->exprs();
 
-  for(auto* expr : exprs)
+  header();
+  for (auto* expr : exprs)
     Printer::print(expr);
   resetFors();
+  os << "}\n";
+  indent_size--;
 }
 
 } // namespace fuser
