@@ -62,7 +62,7 @@ When running on the CuDNN backend, two further options must be set::
     batches trained per second) may be lower than when the model functions
     nondeterministically. However, even though single-run speed may be
     slower, depending on your application determinism may save time by
-    facilitating experimentation, debugging, and anti-regression testing.
+    facilitating experimentation, debugging, and regression testing.
 
 Numpy
 .....
