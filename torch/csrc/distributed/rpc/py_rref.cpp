@@ -66,29 +66,32 @@ TypePtr tryTypePyObjToTypePtr(const py::object& type_value) {
 }
 
 TypePtr decidePyObjJitType(const py::object& value, TypePtr type_hint_ptr) {
+  // If the py::object to be contained by the RRef is a ScripModule, we enforce
+  // users to specify its ModuleInterface type.
+  c10::optional<jit::script::Module> module(jit::script::as_module(value));
+  if (module.has_value()) {
+    TORCH_CHECK(
+        type_hint_ptr != nullptr &&
+            type_hint_ptr->kind() == TypeKind::InterfaceType,
+        "The RRef being created contains a ScriptModule, "
+        "must provide its ModuleInterface type hint. ");
+    TORCH_CHECK(
+        module.value().type()->isSubtypeOf(type_hint_ptr),
+        module.value().type()->python_str(),
+        " is not a subtype of ",
+        type_hint_ptr->python_str());
+    return type_hint_ptr;
+  } else {
+    TORCH_CHECK(
+        type_hint_ptr == nullptr,
+        "type_hint can only be specified when the RRef being created contains a ScriptModule.", )
+  }
+
   jit::InferredType type_inferred = jit::tryToInferType(value);
   if (type_inferred.success()) {
     // If we could infer the type from the pyobject, we create
     // the RRef with the IValue of that type.
     return type_inferred.type();
-  }
-  // If the py::object contains a ScripModule, we enforce users
-  // to specify it's ModuleInterface type.
-  c10::optional<jit::script::Module> module(jit::script::as_module(value));
-  if (module.has_value()) {
-    TORCH_CHECK(
-        type_hint_ptr != nullptr,
-        "The RRef being created contains a ScriptModule, must provide it's ModuleInterface type hint.");
-    TORCH_CHECK(
-        type_hint_ptr->kind() == TypeKind::InterfaceType,
-        "The RRef being created contains a ScriptModule, must provide it's ModuleInterface type hint");
-    TORCH_CHECK(
-        module.value().type()->isSubtypeOf(type_hint_ptr),
-        "The ScriptModule of type: ",
-        module.value().type()->python_str(),
-        ", is not subtype of type hint: ",
-        type_hint_ptr->python_str());
-    return type_hint_ptr;
   }
 
   // Otherwise it's a pure pyobject, create the RRef
@@ -108,14 +111,6 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint_py)
     : PyRRef([&value, &type_hint_py]() {
         TypePtr type_hint_ptr = tryTypePyObjToTypePtr(type_hint_py);
         TypePtr elem_type = decidePyObjJitType(value, type_hint_ptr);
-        if (type_hint_ptr != nullptr) {
-          TORCH_CHECK(
-              elem_type->isSubtypeOf(type_hint_ptr),
-              "The specificied type hint is ",
-              type_hint_ptr->python_str(),
-              "The decided type is ",
-              elem_type->python_str());
-        }
         auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
         IValue ivalue = jit::toIValue(std::move(copy), elem_type);
