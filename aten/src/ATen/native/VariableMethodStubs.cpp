@@ -36,5 +36,9 @@ Tensor& requires_grad_(Tensor& self, bool _requires_grad) {
   AT_ERROR("requires_grad_ is not implemented for Tensor");
 }
 
+void retain_grad(const Tensor& self) {
+  AT_ERROR("retain_grad is not implemented for Tensor");
+}
+
 } // namespace native
 } // namespace at

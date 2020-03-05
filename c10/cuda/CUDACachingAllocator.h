@@ -11,6 +11,10 @@
 
 namespace c10 {
 
+class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
+  using Error::Error;
+};
+
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
@@ -102,6 +106,7 @@ struct SegmentInfo {
 };
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
+C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
 
 C10_CUDA_API Allocator* get();
