@@ -717,7 +717,7 @@ void Value::inferTypeFrom(const at::Tensor& output) {
 }
 
 bool Value::mustBeNone() const {
-  return node_->mustBeNone();
+  return type()->cast<NoneType>() || node_->mustBeNone();
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
