@@ -31,8 +31,9 @@ Data type                  dtype                                         Tensor 
 Boolean                    ``torch.bool``                                ``torch.*.BoolTensor``
 ========================   ===========================================   ===========================
 
-To find out if a :class:`torch.dtype` is a floating point data type, the property :attr:`is_floating_point`
-can be used, which returns ``True`` if the data type is a floating point data type.
+Properties :attr:`is_floating_point`, :attr:`is_signed`, :attr:`is_integral`, :attr:`is_quantized`, and
+:attr:`is_complex` can be used to find information about the data type represented
+by a :class:`torch.dtype`.
 
 .. _type-promotion-doc:
 

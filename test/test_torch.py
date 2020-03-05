@@ -2439,13 +2439,25 @@ class _TestTorchMixin(object):
         x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.tensor([False, True, False]))
 
-    def test_dtype_is_signed(self):
-        for dtype in torch.testing.get_all_dtypes():
-            self.assertEqual(dtype.is_signed, torch.is_signed(torch.tensor(0, dtype=dtype)))
+    def test_dtype_attributes(self):
+        qtypes = [torch.quint8, torch.qint8, torch.qint32]
+        for t in qtypes:
+            self.assertEqual(t.is_quantized, True)
 
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.quint8.is_signed)
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint8.is_signed)
         self.assertRaisesRegex(RuntimeError, 'not supported for quantized', lambda: torch.qint32.is_signed)
+
+        for dtype in torch.testing.get_all_dtypes():
+            example = torch.tensor(0, dtype=dtype)
+            self.assertEqual(dtype.is_signed, torch.is_signed(example))
+            # There are currently no quantized or complex types in get_all_dtypes.
+            self.assertEqual(dtype.is_quantized, False)
+            self.assertEqual(dtype.is_complex, False)
+            if dtype==torch.bool:
+                self.assertEqual(dtype.is_integral, False)
+            else:
+                self.assertEqual(dtype.is_floating_point, not dtype.is_integral)
 
     def test_RNGState(self):
         state = torch.get_rng_state()

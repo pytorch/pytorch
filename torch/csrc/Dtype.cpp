@@ -31,6 +31,24 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
   }
 }
 
+PyObject *THPDtype_is_integral(THPDtype *self, PyObject *noargs)
+{
+  if (at::isIntegralType(self->scalar_type, /* include_bool=*/false)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+PyObject *THPDtype_is_quantized(THPDtype *self, PyObject *noargs)
+{
+  if (at::isQIntType(self->scalar_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 PyObject *THPDtype_is_complex(THPDtype *self, PyObject *noargs)
 {
   if (at::isComplexType(self->scalar_type)) {
@@ -64,6 +82,8 @@ typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
+  {"is_quantized", (getter)THPDtype_is_quantized, nullptr, nullptr, nullptr},
+  {"is_integral", (getter)THPDtype_is_integral, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
   {"is_signed", (getter)THPDtype_is_signed, nullptr, nullptr, nullptr},
   {nullptr}
