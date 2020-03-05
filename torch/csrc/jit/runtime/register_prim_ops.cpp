@@ -300,6 +300,17 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::CudaFusionGroup,
+         [](const Node* node) -> Operation {
+           const auto key = registerFusion(node);
+           return [key](Stack& stack) {
+             RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
+             runFusion(key, stack);
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
@@ -644,6 +655,19 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_quantized());
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::name(Tensor a) -> str?",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           if (a.name() == "") {
+             push(stack, IValue());
+           } else {
+             push(stack, a.name());
+           }
            return 0;
          },
          aliasAnalysisFromSchema()),
