@@ -10498,37 +10498,37 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output[0, 0, 0, 0], float("-inf"), allow_inf=True)
         self.assertEqual(indices[0, 0, 0, 0], 0)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_MaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool1d_indices(self, device, dtype):
         self._test_maxpool_indices(1, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool2d_indices(self, device, dtype):
         self._test_maxpool_indices(2, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_max_pool_nan(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
@@ -10539,7 +10539,7 @@ class TestNNDeviceType(NNTestCase):
                 res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -10553,7 +10553,7 @@ class TestNNDeviceType(NNTestCase):
                 # check if the output shape was still computed correctly
                 self.assertEqual(x.shape[2], res.shape[2])
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(*ALL_TENSORTYPES2)
     @dtypes(torch.float)
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
@@ -10741,6 +10741,33 @@ class TestNNDeviceType(NNTestCase):
         test(torch.nn.Softshrink())
         test(torch.nn.LeakyReLU())
 
+    @onlyCUDA
+    @skipCUDAIfNotRocm
+    def test_pooling_bfloat16(self, device):
+        def test(pool_func, inp_dims):
+            # fp32 compute
+            input1 = torch.randn(inp_dims, dtype=torch.float32, device=device, requires_grad=True)
+            out1 = pool_func(input1)
+            grad_input1 = torch.randn_like(out1, device=device)
+            out1.backward(grad_input1)
+
+            # bfloat16 compute
+            pool_func2 = pool_func.bfloat16()
+            input2 = input1.detach().bfloat16().requires_grad_()
+            grad_input2 = grad_input1.bfloat16()
+            out2 = pool_func(input2)
+            out2.backward(grad_input2)
+
+            self.assertEqual(out1, out2, prec=0.05)
+            self.assertEqual(input1.grad.data, input2.grad.data, prec=0.05)
+
+        test(torch.nn.AvgPool1d(3, stride=2), inp_dims=(8, 4, 16))
+        test(torch.nn.AvgPool2d(3, stride=2), inp_dims=(8, 4, 16, 16))
+        test(torch.nn.AvgPool3d(3, stride=2), inp_dims=(8, 4, 16, 16, 16))
+        test(torch.nn.AdaptiveAvgPool1d(3), inp_dims=(8, 4, 16))
+        test(torch.nn.AdaptiveAvgPool2d((3, 5)), inp_dims=(8, 4, 16, 16))
+        test(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), inp_dims=(8, 4, 16, 16, 16))
+
     @onlyCUDA    
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
@@ -10834,6 +10861,22 @@ class TestNNDeviceType(NNTestCase):
         for n, c, h, w, k, filter_size in configs:
             self._test_conv_cudnn_nhwc_nchw(nn.Conv2d, n, c, h, w, k, filter_size, device)
             self._test_conv_cudnn_nhwc_nchw(nn.ConvTranspose2d, n, c, h, w, k, filter_size, device)
+
+    # torch.half is erroring out on Windows with CUDA 10.1 + cuDNN 7.6.4
+    # returning CUDNN_STATUS_BAD_PARAM
+    # Disabling that specific test for now [see issue # 33918]
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float, torch.double)
+    def test_conv_cudnn_nhwc_support(self, device, dtype):
+        input = torch.randn((1, 16, 1, 1), dtype=dtype, device="cuda", requires_grad=True)
+        weight = torch.randn((8, 16, 3, 3), dtype=dtype, device="cuda", requires_grad=True)
+        weight = weight.to(memory_format=torch.channels_last)
+        o = torch.conv2d(input, weight, None, (2, 1), (1, 1), (1, 1), 1)
+        self.assertTrue(o.is_contiguous(memory_format=torch.channels_last))
+        o.sum().backward()
+
 
     @onlyCUDA
     @skipCUDAIfRocm

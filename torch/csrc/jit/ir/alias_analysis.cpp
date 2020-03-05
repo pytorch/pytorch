@@ -63,7 +63,8 @@ bool AliasDb::isContainerType(const TypePtr& type) {
 
 AliasDb::~AliasDb() = default;
 
-AliasDb::AliasDb(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
+AliasDb::AliasDb(std::shared_ptr<Graph> graph, bool isFrozen)
+    : graph_(std::move(graph)), isFrozen_(isFrozen) {
   memoryDAG_ = torch::make_unique<MemoryDAG>();
   analyze(graph_);
   GRAPH_DEBUG(toString());
@@ -325,12 +326,15 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Loop:
       return analyzeLoop(node);
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
     case prim::DifferentiableGraph:
       return analyzeSubgraph(node);
     case prim::fork:
       return analyzeFork(node);
     case aten::wait:
       return analyzeWait(node);
+    case prim::rpc_async:
+      return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
     case prim::Constant:
@@ -355,6 +359,8 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
+      if (isFrozen_ && node->kind() == prim::GetAttr)
+        return analyzeCreator(node);
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -675,6 +681,17 @@ void AliasDb::analyzeWait(Node* node) {
   // for safety we just register a write to every wildcard.
   for (const auto& pr : wildcardIndex_) {
     registerWrite(pr.second, node);
+  }
+}
+
+void AliasDb::analyzeRpcAsync(Node* node) {
+  for (const auto input : node->inputs()) {
+    setWildcard(input);
+  }
+
+  // Give the future that the rpc_async emits a fresh value
+  for (const auto output : node->outputs()) {
+    giveFreshAlias(output);
   }
 }
 
