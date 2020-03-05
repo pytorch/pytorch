@@ -48,6 +48,8 @@ class Expr : public KernelScopedObject {
   IRNodeType expr_type() const {
     return expr_type_;
   }
+  // Is this a fixed (constant) immediate value.
+  virtual bool isConstant() const { return false; }
 
  private:
   Dtype dtype_;

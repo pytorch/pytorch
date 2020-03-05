@@ -240,6 +240,7 @@ class Min : public BinaryOpNode<Min> {
    public:                                                    \
     Name##Imm(Type value)                                     \
         : ExprNodeBase(k##Name, kPrimitive), value_(value) {} \
+    bool isConstant() const override { return true; }               \
     Type value() const {                                      \
       return value_;                                          \
     }                                                         \
@@ -252,6 +253,21 @@ class Min : public BinaryOpNode<Min> {
   };
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
 #undef IMM_DECLARE
+
+// Get immediate by ScalarType.
+template <typename T>
+ExprHandle getImmediateByType(ScalarType immType, T initialVal) {
+  switch (immType) {
+#define TYPE_CASE(Type, Name) \
+  case ScalarType::Name:      \
+    return Name##Imm::make(initialVal);
+    AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+    default:
+      LOG(FATAL) << "Unsupported datatype: " << immType;
+  }
+  return ExprHandle();
+}
 
 // Bind the value to the var and evaluate the body.
 class Let : public ExprNode<Let> {

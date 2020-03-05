@@ -121,6 +121,7 @@ const Expr* IRMutator::mutate(const CompareSelect* v) {
       .node();
 }
 
+// NOLINTNEXTLINE
 #define IMM_MUTATE_DEFINE(_1, Name)                   \
   const Expr* IRMutator::mutate(const Name##Imm* v) { \
     return v;                                         \
@@ -241,7 +242,7 @@ const Expr* IRMutator::mutate(const BaseCallNode* v) {
     if (value != value_new) {
       any_change = true;
     }
-    params[i] = std::move(value_new);
+    params[i] = value_new;
   }
   if (!any_change) {
     return v;

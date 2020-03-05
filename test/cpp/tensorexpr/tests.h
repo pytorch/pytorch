@@ -1,5 +1,6 @@
 #pragma once
 
+
 /**
  * See README.md for instructions on how to add a new test.
  */
@@ -84,7 +85,16 @@ namespace jit {
   _(ATengeInt)                  \
   _(ATengtInt)                  \
   _(ATenleInt)                  \
-  _(ATenltInt)
+  _(ATenltInt)                  \
+  _(ConstantFoldSimple)         \
+  _(ConstantFoldTwoLayer)       \
+  _(ConstantFoldShifts)         \
+  _(ConstantFoldBitwise)        \
+  _(ConstantFoldMultiOp)        \
+  _(ConstantFoldMinMax)         \
+  _(ConstantFoldIntrinsics)     \
+  _(ConstantFoldWithVar)        \
+  _(UnFoldableExpr)
 
 #define TH_FORALL_TESTS_LLVM(_) \
   _(LLVMByteImmTest)            \
@@ -140,6 +150,26 @@ namespace jit {
   _(LLVMBlockTest)              \
   _(LLVMLoadStoreTest)          \
   _(LLVMVecLoadStoreTest)       \
+  _(LLVMVecLoadStoreacosLane4Test)   \
+  _(LLVMVecLoadStoreasinLane4Test)   \
+  _(LLVMVecLoadStoreatanLane4Test)   \
+  _(LLVMVecLoadStorecoshLane4Test)   \
+  _(LLVMVecLoadStoresinhLane4Test)   \
+  _(LLVMVecLoadStoretanhLane4Test)   \
+  _(LLVMVecLoadStoreerfLane4Test)    \
+  _(LLVMVecLoadStoreerfcLane4Test)   \
+  _(LLVMVecLoadStoreexpm1Lane4Test)  \
+  _(LLVMVecLoadStorelgammaLane4Test) \
+  _(LLVMVecLoadStoreacosLane8Test)   \
+  _(LLVMVecLoadStoreasinLane8Test)   \
+  _(LLVMVecLoadStoreatanLane8Test)   \
+  _(LLVMVecLoadStorecoshLane8Test)   \
+  _(LLVMVecLoadStoresinhLane8Test)   \
+  _(LLVMVecLoadStoretanhLane8Test)   \
+  _(LLVMVecLoadStoreerfLane8Test)    \
+  _(LLVMVecLoadStoreerfcLane8Test)   \
+  _(LLVMVecLoadStoreexpm1Lane8Test)  \
+  _(LLVMVecLoadStorelgammaLane8Test) \
   _(LLVMMemcpyTest)             \
   _(LLVMBzeroTest)              \
   _(LLVMElemwiseAdd)            \

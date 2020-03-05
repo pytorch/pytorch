@@ -39,6 +39,7 @@ Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
 }
 
+// NOLINTNEXTLINE
 #define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
@@ -50,6 +51,7 @@ TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
 
 Dtype ToDtype(ScalarType type) {
   switch (type) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
     return k##n;
@@ -79,6 +81,7 @@ TORCH_API std::ostream& operator<<(
     std::ostream& stream,
     const ScalarType& type) {
   switch (type) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(ttt, Name) \
   case ScalarType::Name:     \
     stream << #ttt;          \
@@ -108,6 +111,7 @@ TORCH_API std::ostream& operator<<(
 int Dtype::byte_size() const {
   int scalar_size = -1;
   switch (scalar_type_) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name)   \
   case ScalarType::Name:        \
     scalar_size = sizeof(Type); \
@@ -124,6 +128,7 @@ int Dtype::byte_size() const {
 
 std::string Dtype::ToCppString() const {
   switch (scalar_type_) {
+// NOLINTNEXTLINE
 #define TYPE_CASE(t, n) \
   case ScalarType::n:   \
     return #t;
@@ -132,9 +137,10 @@ std::string Dtype::ToCppString() const {
     case ScalarType::Half:
       return "half";
     default:
-      throw std::runtime_error(
-          "Invalid dtype: " + std::to_string(scalar_type_));
+      LOG(FATAL) << "ToCppString Invalid dtype: "
+                 << std::to_string(scalar_type_);
   }
+  return "invalid";
 }
 
 } // namespace tensorexpr

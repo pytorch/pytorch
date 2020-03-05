@@ -83,29 +83,30 @@ class DimArg {
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&)> body_func);
+    const std::function<ExprHandle(const VarHandle&)>& body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const VarHandle&, const VarHandle&)> body_func);
-TORCH_API Tensor* Compute(
-    const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
-    std::function<
-        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>
+    const std::function<ExprHandle(const VarHandle&, const VarHandle&)>&
         body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(
-        const VarHandle&,
-        const VarHandle&,
-        const VarHandle&,
-        const VarHandle&)> body_func);
+    const std::function<
+        ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
+        body_func);
 TORCH_API Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
-    std::function<ExprHandle(const std::vector<VarHandle>&)> body_func);
+    const std::function<ExprHandle(
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&,
+        const VarHandle&)>& body_func);
+TORCH_API Tensor* Compute(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 
 class FunctionCall : public CallNode<FunctionCall> {
  public:
