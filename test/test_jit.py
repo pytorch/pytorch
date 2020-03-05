@@ -1960,7 +1960,7 @@ graph(%input, %weight):
         FileCheck().check("aten::linear") \
                    .check_not("CallFunction") \
                    .run(m.graph)
-        res = get_forward(m._c)(x, weight, bias)
+        res = m(x, weight, bias)
         self.assertEqual(res, ref_res)
 
     def test_pattern_based_rewrite(self):
