@@ -59,9 +59,11 @@ default_set = set([
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
     'pytorch-ios-11.2.1-arm64_custom_build',
-    # PyTorch Mobile builds
+    # PyTorch Mobile builds (host toolchain + mobile CMake build options)
     'pytorch-linux-xenial-py3-clang5-mobile-build',
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-static',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic',
+    'pytorch-linux-xenial-py3-clang5-mobile-code-analysis',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',
