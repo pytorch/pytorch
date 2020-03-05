@@ -1,0 +1,95 @@
+# Determine if this is building from within FB or not, and load appropriate
+# files accordingly
+if len(glob(['fb/*'])) > 0:
+    path = "@fbsource//xplat/caffe2/c10/fb:fb_internal_definitions.bzl"
+    definitions_path = "@fbsource//xplat/caffe2/buck_files/fb:fb_internal_definitions.bzl"
+else:
+    path = "//c10:oss_definitions.bzl"
+    definitions_path = "//buck_files:oss_definitions.bzl"
+
+# generic shims for dispatching between OSS buck rules and FB internal buck rules
+load(
+    definitions_path,
+    "pytorch_cxx_library",
+    "pytorch_cxx_test",
+    "unified_subdir_glob",
+    "third_party",
+    "is_fb_internal",
+)
+
+# c10/ specific flags / build rules
+load(
+    path,
+    "fb_internal_c10_args",
+    "c10_default_exported_preprocessor_flags",
+    "define_fb_internal_targets",
+    "fb_internal_test_c10_args",
+)
+
+
+pytorch_cxx_library(
+    name = "c10",
+    srcs = glob(
+        ["**/*.cpp"],
+        excludes = [
+            "test/**/*.cpp",
+            "benchmark/**/*.cpp",
+            "cuda/**/*.cpp",
+        ],
+    ),
+    header_namespace = "c10",
+    exported_headers = subdir_glob(
+        [
+            ("", "**/*.h"),
+        ],
+        excludes = [
+            "test/**/*.h",
+            "benchmark/**/*.h",
+            "cuda/**/*.h",
+        ],
+    ),
+    compiler_flags = [
+        "-Werror",
+        # Due to the use of global constructors (like registry), C10 will
+        # need to be built without global constructor set as error.
+        "-Wno-global-constructors",
+        "-DDISABLE_NAMEDTENSOR",
+    ],
+    exported_preprocessor_flags = c10_default_exported_preprocessor_flags(),
+    link_whole = True,
+    preprocessor_flags = [
+        # This does not have effect when we build static libs in fbcode,
+        # but the flag is to keep consistency between cmake and buck.
+        # Note: this flags should NOT be in propagated pp flags.
+        "-DC10_BUILD_MAIN_LIB",
+    ],
+    visibility = ["PUBLIC"],
+    **fb_internal_c10_args(),
+)
+
+
+test_deps = [":c10"]
+if is_fb_internal():
+    test_deps += [third_party('gmock:gmock')]
+else:
+    test_deps += [
+        third_party('pthread'),
+        third_party('gmock'),
+        third_party('gtest'),
+        third_party('gtest_main')
+    ]
+
+pytorch_cxx_test(
+    name = "c10_test",
+    srcs = glob(
+        ["test/**/*.cpp"],
+    ),
+    compiler_flags = [
+        "-Wno-error",
+    ],
+    deps = test_deps,
+    **fb_internal_test_c10_args(),
+)
+
+
+define_fb_internal_targets()

@@ -249,3 +249,5 @@ TAGS
 
 # ccls file
 .ccls-cache/
+buck-out/
+.buckd/

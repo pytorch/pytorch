@@ -1,0 +1,2 @@
+[build]
+  delete_temporaries = false

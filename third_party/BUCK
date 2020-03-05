@@ -1,0 +1,165 @@
+# Stolen from buckaroo
+# https://github.com/LoopPerfect/buckaroo/wiki/Building-CMake-Projects
+def extract(rule, path):
+    name = 'extract-' + (
+        rule.replace(':','').replace('//', '') + '-' +
+        path
+            .replace('/','-')
+            .replace('.','-'))
+
+    if not native.rule_exists(':'+name):
+        filename = path.split('/')[-1]
+    native.genrule(
+        name = name,
+        out = filename,
+        cmd = 'cp $(location '+rule+')/'+ path +' $OUT')
+
+    return ':' + name
+
+
+def cmake_args(args):
+    # type: (Dict[str, str])
+    args = ['-D{}={}'.format(name, "1" if value else "0") for name, value in args.items()]
+    return ' '.join(args)
+
+
+def cmake(name, base_dir='', srcs = [], options = [], targets = [], out = 'build', prefix = 'ROOT', jobs = 1, args = {}):
+    jobs = str(jobs)
+    make_cmd = 'make -j{}'.format(jobs)
+    cmake = [
+        'cd {}'.format(base_dir),
+        'mkdir build',
+        'cd build',
+        'cmake .. {}'.format(cmake_args(args)),
+        make_cmd,
+        'cd ../../..',
+        'cp -r {}__srcs/{}/build {}'.format(name, base_dir, name)
+    ]
+    native.genrule(
+        name = name,
+        srcs = srcs,
+        out = out,
+        cmd = ' && '.join(cmake)
+    )
+
+
+prebuilt_cxx_library(
+    name = 'pthread',
+    header_only = True,
+    exported_linker_flags = [
+        '-lpthread',
+    ],
+    visibility = ["PUBLIC"],
+)
+
+
+cmake(
+    name = 'googletest_cmake',
+    base_dir = 'googletest',
+    args = {
+        "BUILD_GMOCK": False,
+    },
+    srcs = glob([
+        "googletest/**/*"
+    ])
+)
+
+cmake(
+    name = 'googlemock_cmake',
+    base_dir = 'googletest',
+    args = {
+        "BUILD_GMOCK": True,
+    },
+    srcs = glob([
+        "googletest/**/*"
+    ])
+)
+
+
+prebuilt_cxx_library(
+    name = 'gtest',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':googletest_cmake', 'googletest/libgtest.a'),
+    header_dirs = [
+        'googletest/googletest/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'gtest_main',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':googletest_cmake', 'googletest/libgtest_main.a'),
+    header_dirs = [
+        'googletest/googletest/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'gmock',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':googlemock_cmake', 'googlemock/libgmock.a'),
+    header_dirs = [
+        'googletest/googlemock/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'gmock_main',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':googlemock_cmake', 'googlemock/libgmock_main.a'),
+    header_dirs = [
+        'googletest/googlemock/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'clog',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':cmake', 'deps/clog/libclog.a'),
+    header_dirs = [
+        'deps/clog/include'
+    ],
+)
+
+prebuilt_cxx_library(
+    name = 'cpuinfo',
+    visibility = ["PUBLIC"],
+    header_namespace = '',
+    static_lib = extract(':cmake', 'libcpuinfo.a'),
+    header_dirs = [
+        'include'
+    ],
+    exported_deps = [
+        ':clog',
+        ':pthread'
+    ]
+)
+
+prebuilt_cxx_library(
+    name = "FP16",
+    header_only = True,
+    header_dirs = ['include'],
+    visibility = [ "PUBLIC" ]
+)
+
+prebuilt_cxx_library(
+    name = "FXdiv",
+    header_only = True,
+    header_dirs = ['include'],
+    visibility = [ "PUBLIC" ]
+)
+
+
+cxx_library(
+    name = "psimd",
+    header_namespace = "",
+    headers = ['include/psimd.h'],
+    exported_headers = {'psimd.h': 'include/psimd.h'},
+    srcs = [],
+    visibility = [ "PUBLIC" ]
+)
