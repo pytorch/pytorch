@@ -516,9 +516,9 @@ def _kl_continuous_bernoulli_exponential(p, q):
 
 @register_kl(ContinuousBernoulli, Normal)
 def _kl_continuous_bernoulli_normal(p, q):
-    t1 = -p.entroy()
-    t2 = 0.5 * math.log(2. * math.pi) + torch.log(q.scale) + torch.square(q.loc) / q.scale
-    t3 = (p.variance + 2. * torch.square(p.mean)) / q.scale - 2. * q.loc * p.mean / q.scale
+    t1 = -p.entropy()
+    t2 = 0.5 * (math.log(2. * math.pi) + torch.square(q.loc) / q.scale) + torch.log(q.scale)
+    t3 = (p.variance + torch.square(p.mean) - 2. * q.loc * p.mean) / (2.0 * q.scale)
     return t1 + t2 + t3
 
 
@@ -568,7 +568,7 @@ def _kl_exponential_normal(p, q):
 
 
 @register_kl(Gamma, Beta)
-@register_kl(Gamma, ComtinuousBernoulli)
+@register_kl(Gamma, ContinuousBernoulli)
 @register_kl(Gamma, Pareto)
 @register_kl(Gamma, Uniform)
 def _kl_gamma_infinity(p, q):
