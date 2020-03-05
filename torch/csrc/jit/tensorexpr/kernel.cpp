@@ -1001,7 +1001,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
       sizeArgs.emplace_back(n - i, v);
       size = v;
     } else {
-      size = IntImm::make(sizeVal);
+      size = IntImm::make(static_cast<int32_t>(sizeVal));
     }
 
     index = index + axes[n - i] * stride;
