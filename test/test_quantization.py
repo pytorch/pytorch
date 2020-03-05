@@ -23,7 +23,7 @@ from torch.quantization import default_per_channel_weight_observer
 from torch.quantization import default_per_channel_qconfig
 from torch.quantization._quantize_script import quantize_script
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_UBSAN, IS_WINDOWS
 from torch.testing._internal.common_quantization import QuantizationTestCase, \
     AnnotatedSingleLayerLinearModel, SingleLayerLinearModel, \
     AnnotatedConvModel, ConvModel, \
@@ -310,6 +310,44 @@ class EagerModePostTrainingQuantTest(QuantizationTestCase):
             test_only_eval_fn(model, self.img_data)
 
         checkQuantized(model)
+
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_save_load_state_dict(self, qengine):
+        r"""Test PTQ flow of creating a model and quantizing it and saving the quantized state_dict
+        Load the quantized state_dict for eval and compare results against original model
+        """
+        if qengine == 'qnnpack':
+            if IS_WINDOWS or TEST_WITH_UBSAN:
+                return
+        with override_quantized_engine(qengine):
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+
+            model = prepare(model)
+            # calibrate
+            test_only_eval_fn(model, self.calib_data)
+            model = convert(model)
+            x = torch.rand(2, 5, dtype=torch.float)
+            ref = model(x)
+
+            quant_state_dict = model.state_dict()
+
+            # Create model again for eval
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+            model = prepare(model)
+            model = convert(model)
+            new_state_dict = model.state_dict()
+
+            # Check to make sure the state dict keys match original model after convert.
+            self.assertEqual(set(new_state_dict.keys()), set(quant_state_dict.keys()))
+
+            model.load_state_dict(quant_state_dict)
+
+            out = model(x)
+            self.assertEqual(ref, out)
 
 @unittest.skipUnless('fbgemm' in torch.backends.quantized.supported_engines,
                      " Quantized operations require FBGEMM. FBGEMM is only optimized for CPUs"
@@ -793,6 +831,59 @@ class EagerModeQuantizationAwareTrainingTest(QuantizationTestCase):
         model = quantize_qat(model, test_only_train_fn, self.img_data)
         checkQuantized(model)
 
+    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    def test_train_save_load_eval(self, qengine):
+        r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
+        During eval, we first call prepare_qat and conver on the model and then load the state_dict
+        and compare results against original model
+        """
+        if qengine == 'qnnpack':
+            if IS_WINDOWS or TEST_WITH_UBSAN:
+                return
+        with override_quantized_engine(qengine):
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+            model = prepare_qat(model)
+
+            fq_state_dict = model.state_dict()
+
+            test_only_train_fn(model, self.train_data)
+            model = convert(model)
+
+            quant_state_dict = model.state_dict()
+
+            x = torch.rand(2, 5, dtype=torch.float)
+            ref = model(x)
+
+            # Create model again for eval. Check result using quantized state_dict
+            model = TwoLayerLinearModel()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+            torch.quantization.prepare_qat(model, inplace=True)
+            new_state_dict = model.state_dict()
+
+            # Check to make sure the model after prepare_qat has the same state_dict as original.
+            self.assertEqual(set(fq_state_dict.keys()), set(new_state_dict.keys()))
+
+            torch.quantization.convert(model, inplace=True)
+            model.eval()
+            model.load_state_dict(quant_state_dict)
+            out = model(x)
+            self.assertEqual(ref, out)
+
+            # Check model created using prepare has same state dict as quantized state_dict
+            model = TwoLayerLinearModel()
+            model.eval()
+            model = torch.quantization.QuantWrapper(model)
+            model.qconfig = torch.quantization.get_default_qconfig(qengine)
+            torch.quantization.prepare(model, inplace=True)
+            torch.quantization.convert(model, inplace=True)
+            self.assertEqual(set(model.state_dict().keys()), set(quant_state_dict.keys()))
+            model.eval()
+            model.load_state_dict(quant_state_dict)
+            out = model(x)
+            self.assertEqual(ref, out)
 
 @unittest.skipUnless(
     'fbgemm' in torch.backends.quantized.supported_engines,
@@ -1406,9 +1497,10 @@ class RecordHistogramObserverTest(QuantizationTestCase):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
         qparams = myobs.calculate_qparams()
-        x = torch.tensor([2.0, 3.0, 4.0, 5.0])
+        x = torch.tensor([2.0, 3.0, 4.0, 5.0], requires_grad=True)
         y = torch.tensor([5.0, 6.0, 7.0, 8.0])
-        myobs(x)
+        out_x = myobs(x)
+        self.assertTrue(out_x.requires_grad)
         myobs(y)
         self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)

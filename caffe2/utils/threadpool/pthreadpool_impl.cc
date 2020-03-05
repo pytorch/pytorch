@@ -28,20 +28,19 @@ void pthreadpool_compute_1d(
 }
 
 size_t pthreadpool_get_threads_count(pthreadpool_t threadpool) {
-  if (threadpool) {
-    // This will have to change somehow if we keep maintaining two different threadpools.
-    // Old C2 and new one for XNNPACK.
-    // Issue is new XNNPACK uses old interface of pthreadpool_get_threads_count during op setup,
-    // while using new _parallelize_ interface for for actual work.
-    // Thus if pthreadpool_get_threads_count is getting called from XNNPACK we cannot
-    // reinterpret_cast it to ThreadPool. It will seg fault or worse will have unedfined behavior.
-    // Good new is that pthreadpool_get_threads_count is used only by (besides in bench/test)
-    // XNNPACK and not by NNPACK and QNNPACK.
-    // So we do : return pthreadpool_get_threads_count_xnnpack(threadpool) as a hacky
-    // solution for short term until unification.
-    return reinterpret_cast<caffe2::ThreadPool*>(threadpool)->getNumThreads();
+  // The current fix only useful when XNNPACK calls pthreadpool_get_threads_count with nullptr.
+  if (threadpool == nullptr) {
+    return 1;
   }
-  return 1;
+  return reinterpret_cast<caffe2::ThreadPool*>(threadpool)->getNumThreads();
+  // TODO: Future fix: If we keep maintaining two different threadpools.
+  // Old C2 and new one for XNNPACK, then the we have two different pthreadpool pointer
+  // types. One is caffe2::Thredpool*, the other is pthreadpool* (pthreadpool_new_if_impl.c)
+  // XNNPACK calls pthreadpool_get_threads_count during op setup using pthreadpool*, and
+  // uses _parallelize_ interface for for actual work.
+  // While NNPACK uses caffe2::Threadpool*.
+  // Thus if pthreadpool_get_threads_count is getting called from XNNPACK we cannot
+  // reinterpret_cast it to ThreadPool. It will seg fault or worse will have unedfined behavior.
 }
 
 pthreadpool_t pthreadpool_create(size_t threads_count) {
