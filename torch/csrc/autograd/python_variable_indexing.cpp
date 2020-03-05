@@ -10,15 +10,15 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_new.h>
-#include <torch/csrc/jit/tracer.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <c10/core/TensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/native/TensorIndexing.h>
 
 #include <vector>
 #include <tuple>
@@ -126,7 +126,7 @@ static inline Variable applySlicing(
   int64_t dim = 0;
   int64_t specified_dims = count_specified_dimensions(index);
 
-  if (specified_dims > self_sizes.size()) {
+  if (specified_dims > (int64_t)self_sizes.size()) {
     throw IndexError("too many indices for tensor of dimension %d", (int)(self_sizes.size()));
   }
 

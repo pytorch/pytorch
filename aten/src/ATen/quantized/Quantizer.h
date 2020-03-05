@@ -53,7 +53,7 @@ struct CAFFE2_API Quantizer : public c10::intrusive_ptr_target {
   explicit Quantizer(ScalarType scalar_type) : scalar_type_(scalar_type) {}
   virtual ~Quantizer();
 
-  // Copied from torch/csrc/jit/scope.h
+  // Copied from torch/csrc/jit/ir/scope.h
   QuantizerPtr intrusive_from_this() {
     c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
                                            // from a raw `this` pointer
@@ -263,7 +263,6 @@ CAFFE2_API QuantizerPtr make_per_channel_affine_quantizer(
 CAFFE2_API Tensor new_qtensor_cpu(
     IntArrayRef sizes,
     const TensorOptions& options,
-    QuantizerPtr quantizer,
-    MemoryFormat memory_format);
+    QuantizerPtr quantizer);
 
 } // namespace at
