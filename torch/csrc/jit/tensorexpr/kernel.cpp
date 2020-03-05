@@ -993,7 +993,7 @@ ExprHandle TensorExprKernel::createInputIndexExpr(
 
     // If size is dynamic (indicated by negative value) create a size param.
     ExprHandle size;
-    auto sizeVal = *sizes[n - i];
+    int64_t sizeVal = *sizes[n - i];
     if (sizeVal < 0) {
       auto it = sizeVars.find(sizeVal);
       TORCH_CHECK(it != sizeVars.end());
