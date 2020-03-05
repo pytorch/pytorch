@@ -92,7 +92,7 @@ TORCH_API script::Module InsertQuantDeQuant(
 TORCH_API void SwapFunctionalLinear(std::shared_ptr<Graph>& graph);
 /** Swap all functional linear CallFunctions in module
  */
-TORCH_API void SwapFunctionalLinearInModule(script::Module& module);
+TORCH_API void SwapFunctionalLinear(script::Module& module);
 
 /** Replicate dequantize node for each use, so that we can match
  *  quantization patterns
