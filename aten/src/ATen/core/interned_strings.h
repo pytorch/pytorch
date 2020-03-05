@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CudaFusionGroup)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
@@ -128,6 +129,7 @@ namespace c10 {
   _(prim, TracedModuleForward)       \
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
+  _(prim, rpc_async)                 \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
