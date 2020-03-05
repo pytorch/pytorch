@@ -3,7 +3,7 @@ from .adadelta import Adadelta
 from .adagrad import Adagrad
 from .adam import Adam as Adam
 from .adamax import Adamax
-from .adamw import AdamW
+from .adamw import AdamW as AdamW
 from .asgd import ASGD
 from .lbfgs import LBFGS
 from .optimizer import Optimizer
