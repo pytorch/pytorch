@@ -30,6 +30,11 @@ from collections import defaultdict
 from .utils import YamlLoader, split_name_params
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
+# If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
+# you **MUST** also update the public list of view ops accordingly in
+# docs/source/tensor_view.rst. Note not all ATen functions are exposed to public,
+# e.g alias & sparse_coo_tensor_with_dims_and_tensors.
+#
 # A map: function name => name of the argument that all outputs are view of
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -184,7 +189,7 @@ def load_deprecated_signatures(aten_decls, deprecated_path):
     return declarations
 
 
-def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
+def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False, disable_trace=False):
     aten_decls = load_aten_declarations(aten_path)
 
     # Parse and load derivatives.yaml
@@ -197,7 +202,7 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     # Generate VariableType.h/cpp
     if not disable_autograd:
         from .gen_variable_type import gen_variable_type
-        gen_variable_type(out, aten_decls, template_path)
+        gen_variable_type(out, aten_decls, template_path, disable_trace)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
@@ -207,7 +212,8 @@ def gen_autograd(aten_path, out, autograd_dir, disable_autograd=False):
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
     gen_variable_factories(
-        out, aten_decls, template_path, disable_autograd=disable_autograd)
+        out, aten_decls, template_path, disable_autograd=disable_autograd,
+        disable_trace=disable_trace)
 
 
 def gen_autograd_python(aten_path, out, autograd_dir):

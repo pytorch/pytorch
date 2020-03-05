@@ -89,6 +89,7 @@ class reverse_iterator
   constexpr reverse_iterator& operator=(
       const reverse_iterator& rhs) noexcept {
     current = rhs.current;
+    return current;
   }
 
   template <typename _Iter>
