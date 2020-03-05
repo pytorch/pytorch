@@ -28,8 +28,8 @@ bool is_cast_legal(const DataType& t1, const DataType& t2) {
 }
 
 static std::unordered_map<DataType, std::string> data_type_string_map {
-  {DataType::Float, "Float"},
-  {DataType::Int,   "Int"}
+  {DataType::Float, "float"},
+  {DataType::Int,   "size_t"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
   {ValType::Tensor,       "Tensor"},

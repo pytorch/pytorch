@@ -53,7 +53,8 @@ struct TORCH_API CodeWrite : public IRPrinter {
   bool print_predicate(const TensorView* const);
 
   // Print lhs of uop/bop, returns if predicate was needed
-  bool print_lhs(TensorView*);
+  void printAlloc(TensorView*);
+  bool printLHS(TensorView*);
   void print(const TensorView* const);
   void print(const Val* const);
   void print(const UnaryOp* const);
