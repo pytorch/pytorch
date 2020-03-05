@@ -57,7 +57,7 @@ if __name__ == "__main__":
         description='Util to produce transitive dependencies for custom build')
     parser.add_argument(
         '--op-dependency',
-        help='input yaml file of op dependency graph ' \
+        help='input yaml file of op dependency graph '
              '- can be omitted for custom build with static dispatch')
     parser.add_argument(
         '--root-ops',
