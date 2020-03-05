@@ -40,8 +40,8 @@ class CudaPrinter : public IRPrinter {
     os() << ")";
   }
 
-  void visit(const Intrinsics* v);
-  void visit(const For* v);
+  void visit(const Intrinsics* v) override;
+  void visit(const For* v) override;
 
   void visit(const Load* v) override;
   void visit(const Store* v) override;
@@ -86,7 +86,7 @@ class TORCH_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override {}
 
-  TORCH_API void call(const std::vector<CallArg>& args) override;
+  void call(const std::vector<CallArg>& args) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {
@@ -94,7 +94,7 @@ class TORCH_API CudaCodeGen : public CodeGen {
   }
 
  private:
-  TORCH_API void Initialize();
+  void Initialize();
 
   void CompileToNVRTC(const std::string& code, const std::string& func_name);
 
