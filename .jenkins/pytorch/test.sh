@@ -130,23 +130,28 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
+if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+  DETERMINE_FROM=$(mktemp)
+  file_diff_from_base "$DETERMINE_FROM"
+fi
+
 test_python_nn() {
-  time python test/run_test.py --include test_nn --verbose
+  time python test/run_test.py --include test_nn --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_simple() {
-  time python test/run_test.py --include test_jit_simple --verbose
+  time python test/run_test.py --include test_jit_simple --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods
+  time python test/run_test.py --exclude test_nn test_jit_simple test_jit_legacy test_jit_fuser_legacy --verbose --bring-to-front test_quantization test_quantized test_quantized_tensor test_quantized_nn_mods --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -220,8 +225,10 @@ test_xla() {
   echo "Running Python Tests"
   ./test/run_tests.sh
 
-  echo "Running MNIST Test"
-  python test/test_train_mnist.py --tidy
+  # Disable MNIST test to avoid HTTP error from http://yann.lecun.com/exdb/mnist/
+  # Please add this test back after torchvision dataset is switched to S3 mirror
+  # echo "Running MNIST Test"
+  # python test/test_train_mnist.py --tidy
 
   echo "Running C++ Tests"
   pushd test/cpp

@@ -229,28 +229,30 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideH = input.stride(1);
     int64_t istrideW = input.stride(2);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_cuda",
       [&] {
-        output.resize_({sizeD, osizeH, osizeW});
-        indices.resize_({sizeD, osizeH, osizeW});
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool2d_cuda", [&] {
+          output.resize_({sizeD, osizeH, osizeW});
+          indices.resize_({sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input.data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+          scalar_t *input_data = input.data_ptr<scalar_t>();
+          scalar_t *output_data = output.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeD, blocksH);
-        dim3 threads(32, 8);
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeD, blocksH);
+          dim3 threads(32, 8);
 
-        // run maxpool kernel
-        adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                   input_data, output_data,
-                                   indices_data,
-                                   isizeH, isizeW, osizeH, osizeW,
-                                   istrideD, istrideH, istrideW);
+          // run maxpool kernel
+          adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                     input_data, output_data,
+                                     indices_data,
+                                     isizeH, isizeW, osizeH, osizeW,
+                                     istrideD, istrideH, istrideW);
+        });
       }
     );
     THCudaCheck(cudaGetLastError());
@@ -266,28 +268,30 @@ void adaptive_max_pool2d_out_cuda_template(
     int64_t istrideH = input_.stride(2);
     int64_t istrideW = input_.stride(3);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input_.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_.scalar_type(),
       "adaptive_max_pool2d_cuda",
       [&] {
-        output.resize_({sizeB, sizeD, osizeH, osizeW});
-        indices.resize_({sizeB, sizeD, osizeH, osizeW});
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool2d_cuda", [&] {
+          output.resize_({sizeB, sizeD, osizeH, osizeW});
+          indices.resize_({sizeB, sizeD, osizeH, osizeW});
 
-        scalar_t *input_data = input_.data_ptr<scalar_t>();
-        scalar_t *output_data = output.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+          scalar_t *input_data = input_.data_ptr<scalar_t>();
+          scalar_t *output_data = output.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeB*sizeD, blocksH);
-        dim3 threads(32, 8);
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeB*sizeD, blocksH);
+          dim3 threads(32, 8);
 
-        // run maxpool kernel
-        adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                   input_data, output_data,
-                                   indices_data,
-                                   isizeH, isizeW, osizeH, osizeW,
-                                   istrideD, istrideH, istrideW);
+          // run maxpool kernel
+          adaptivemaxpool <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                     input_data, output_data,
+                                     indices_data,
+                                     isizeH, isizeW, osizeH, osizeW,
+                                     istrideD, istrideH, istrideW);
+        });
       }
     );
     THCudaCheck(cudaGetLastError());
@@ -326,35 +330,37 @@ void adaptive_max_pool2d_backward_out_cuda_template(
     gradInput.resize_as_(input);
     gradInput.zero_();
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool2d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeD, blocksH);
-        dim3 threads(32, 8);
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeD, blocksH);
+          dim3 threads(32, 8);
 
-        if(atomic)
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-        }
-        else
-        {
-          // run updateGradInput kernel
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-        }
+          if(atomic)
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                                gradInput_data, gradOutput_data,
+                                                indices_data,
+                                                isizeH, isizeW, osizeH, osizeW);
+          }
+          else
+          {
+            // run updateGradInput kernel
+            atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                                gradInput_data, gradOutput_data,
+                                                indices_data,
+                                                isizeH, isizeW, osizeH, osizeW);
+          }
+        });
       }
     );
     THCudaCheck(cudaGetLastError());
@@ -372,35 +378,37 @@ void adaptive_max_pool2d_backward_out_cuda_template(
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool2d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool2d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        // cuda blocks & threads:
-        int blocksH = (int)(16L / sizeD);
-        blocksH = blocksH < 1 ? 1 : blocksH;
-        dim3 blocks(sizeB*sizeD, blocksH);
-        dim3 threads(32, 8);
+          // cuda blocks & threads:
+          int blocksH = (int)(16L / sizeD);
+          blocksH = blocksH < 1 ? 1 : blocksH;
+          dim3 blocks(sizeB*sizeD, blocksH);
+          dim3 threads(32, 8);
 
-        if(atomic)
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-        }
-        else
-        {
-          // run updateGradInput kernel, accumulate gradients atomically
-          adaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
-                                              gradInput_data, gradOutput_data,
-                                              indices_data,
-                                              isizeH, isizeW, osizeH, osizeW);
-        }
+          if(atomic)
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            atomicadaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                                gradInput_data, gradOutput_data,
+                                                indices_data,
+                                                isizeH, isizeW, osizeH, osizeW);
+          }
+          else
+          {
+            // run updateGradInput kernel, accumulate gradients atomically
+            adaptivemaxgradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
+                                                gradInput_data, gradOutput_data,
+                                                indices_data,
+                                                isizeH, isizeW, osizeH, osizeW);
+          }
+        });
       }
     );
     THCudaCheck(cudaGetLastError());
