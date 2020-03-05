@@ -386,7 +386,7 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        self.milestones = Counter(milestones)
+        self.milestones = dict(Counter(milestones))
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
