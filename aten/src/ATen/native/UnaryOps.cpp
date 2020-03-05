@@ -39,7 +39,7 @@ namespace native {
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
+    /*check_mem_overlap=*/ true);
   stub(iter.device_type(), iter);
   return result;
 }
@@ -53,11 +53,14 @@ static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
   return out_impl(result, self);
 }
 
-// Implicitly promote all int and bool dtypes to default floating dtype
-// See PR #33322 for more discussion on this
+// This helper function ensures the output type of the unary op is a floating point value.
+// Note that this function is only appropriate for functions like sin() which (mathematically speaking)
+// produces non-integral values. Implementers should continue to use the other unary functions, like unary_op_impl_,
+// since they explicitly specify the output type.
 template <typename OutImpl>
 static inline Tensor unary_float_op_impl(const Tensor& self, OutImpl& out_impl) {
-  Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
+  Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? \
+                  at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
                   at::empty({0}, self.options());
   return out_impl(result, self.to(result.scalar_type()));
 }
@@ -319,12 +322,15 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return result;                                                     \
   }
 
-// IMPLEMENT_UNARY_FLOATING_OP_* macros are used for ops which support 
-// implicit type promotion (integral and boolean inputs to default floating type)
-// Check PR #33322 for more details on this
+// This macro ensures the output type of the unary op is a floating point value
+// This is only appropriate for unary ops like tan() which (mathematically speaking)
+// produce non-integral values. For the other ops which do not need this type promotion,
+// implementers should continue to use the other macros like IMPLEMENT_UNARY_OP_CORE
 #define IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                           \
   Tensor op(const Tensor& self) {                                      \
-    Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : at::empty({0}, self.options()); \
+    Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? \
+      at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
+      at::empty({0}, self.options()); \
     at::op##_out(result, self.to(result.scalar_type()));               \
     return result;                                                     \
   }
@@ -351,6 +357,8 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
+// These macros ensure the unary ops (which support upcasting integral/boolean inputs
+// to default floating type) pass through IMPLEMENT_UNARY_FLOATING_OP_CORE macro
 #define IMPLEMENT_UNARY_FLOATING_OP_VEC(op)                            \
   IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                                 \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
@@ -358,7 +366,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 #define IMPLEMENT_UNARY_FLOATING_OP_VEC_CUDA(op)                       \
   IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                                 \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CUDA)              
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CUDA)
 
 IMPLEMENT_UNARY_FLOATING_OP_VEC(atan)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(cos)
