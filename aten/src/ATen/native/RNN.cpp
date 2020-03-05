@@ -1058,11 +1058,11 @@ std::tuple<Tensor, Tensor> NAME##_packed_cudnn_type1(                          \
   std::vector<Tensor> bwd_params;                                              \
   std::tie(fwd_params, bwd_params) = split_params(_params);                    \
   Tensor fwd_output, f_hy;                                                     \
-  NAME##_packed_cudnn_stub(data.device().type(), output, f_hy, data,           \
+  NAME##_packed_cudnn_stub(data.device().type(), fwd_output, f_hy, data,       \
                            batch_sizes, _fwd_hx, _params, has_biases,          \
                            num_layers, dropout_p, train, bidirectional, type_2); \
   Tensor bwd_output, b_hy;                                                     \
-  NAME##_packed_cudnn_stub(data.device().type(), output, b_hy, bwd_data,       \
+  NAME##_packed_cudnn_stub(data.device().type(), bwd_output, b_hy, bwd_data,   \
                            batch_sizes, _bwd_hx, _params, has_biases,          \
                            num_layers, dropout_p, train, bidirectional, type_2); \
   auto bwd_rev_output = reverse(bwd_output);                                   \
@@ -1093,11 +1093,11 @@ std::tuple<Tensor, Tensor> NAME##_packed_miopen_type1(                         \
   std::vector<Tensor> bwd_params;                                              \
   std::tie(fwd_params, bwd_params) = split_params(_params);                    \
   Tensor fwd_output, f_hy;                                                     \
-  NAME##_packed_miopen_stub(data.device().type(), output, f_hy, data,          \
+  NAME##_packed_miopen_stub(data.device().type(), fwd_output, f_hy, data,      \
                             batch_sizes, _fwd_hx, _params, has_biases,         \
                             num_layers, dropout_p, train, bidirectional, type_2); \
   Tensor bwd_output, b_hy;                                                     \
-  NAME##_packed_miopen_stub(data.device().type(), output, b_hy, bwd_data,      \
+  NAME##_packed_miopen_stub(data.device().type(), bwd_output, b_hy, bwd_data,  \
                            batch_sizes, _bwd_hx, _params, has_biases,          \
                            num_layers, dropout_p, train, bidirectional, type_2); \
   auto bwd_rev_output = reverse(bwd_output);                                   \
@@ -1167,7 +1167,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (at::cudnn_is_acceptable(data)) {                                         \
     if(bidirectional && !type_2) {                                             \
       return NAME##_packed_cudnn_type1(data, batch_sizes, hx, _params, has_biases,    \
-                    num_layers, dropout_p, train, bidirectional, type_2)       \
+                    num_layers, dropout_p, train, bidirectional, type_2);      \
     } else {                                                                   \
       Tensor output, hy;                                                         \
       NAME##_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
@@ -1178,7 +1178,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (use_miopen(data, dropout_p)) {                                           \
     if(bidirectional && !type_2) {                                             \
       return NAME##_packed_miopen_type1(data, batch_sizes, hx, _params, has_biases,    \
-                    num_layers, dropout_p, train, bidirectional, type_2)       \
+                    num_layers, dropout_p, train, bidirectional, type_2);      \
     } else {                                                                   \
       Tensor output, hy;                                                         \
       NAME##_packed_miopen_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
@@ -1242,7 +1242,7 @@ std::tuple<Tensor, Tensor> NAME(                                               \
   if (at::cudnn_is_acceptable(data)) {                                         \
     if(bidirectional && !type_2) {                                             \
       return gru_packed_cudnn_type1(data, batch_sizes, hx, _params, has_biases,    \
-                                    num_layers, dropout_p, train, bidirectional, type_2)       \
+                                    num_layers, dropout_p, train, bidirectional, type_2); \
     } else {                                                                   \
       Tensor output, hy;                                                         \
       gru_packed_cudnn_stub(data.device().type(), output, hy, data, batch_sizes, hx, \
