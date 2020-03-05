@@ -41,7 +41,7 @@ static IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) 
 c10::IValue getFunctionTuple(const Function& func) {
   auto graph = func.graph()->copy();
   Inline(*graph);
-  torch::jit::Code code(graph);
+  torch::jit::Code code(graph, func.name());
 
   // operator names
   std::vector<c10::OperatorName> opnames;
