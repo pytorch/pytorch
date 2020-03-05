@@ -101,7 +101,7 @@ bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
   return true;
 }
 
-bool CodeWrite::print_lhs(TensorView* tv) {
+bool CodeWrite::printLHS(TensorView* tv) {
   updateView(tv);
   indent();
 
@@ -125,7 +125,7 @@ void CodeWrite::print(const UnaryOp* const uop) {
     return;
   }
 
-  bool predicated = print_lhs(static_cast<TensorView*>(uop->out()));
+  bool predicated = printLHS(static_cast<TensorView*>(uop->out()));
 
   if (auto inline_uop = inline_op_str(uop->type())) {
     os << inline_uop.value();
@@ -155,7 +155,7 @@ void CodeWrite::print(const BinaryOp* const bop) {
     return;
   }
 
-  bool predicated = print_lhs(static_cast<TensorView*>(bop->out()));
+  bool predicated = printLHS(static_cast<TensorView*>(bop->out()));
 
   if (auto inline_bop = inline_op_str(bop->type())) {
     print(bop->lhs());
@@ -272,6 +272,21 @@ void CodeWrite::resetFors() {
   clearActiveView();
 }
 
+void CodeWrite::printAlloc(TensorView* tv){
+  if(FusionGuard::getCurFusion()->isInput(tv)
+  || FusionGuard::getCurFusion()->isOutput(tv))
+    return;
+
+  Int* size = new Int(1);
+  for(auto i = tv->getComputeAtAxis(); i < tv->domain()->size(); i++){
+    size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
+  }
+  indent();
+  os << tv->getDataType().value() << "* TV" << tv->name() << "[";
+  print_inline(size);
+  os << "];" << std::endl;
+}
+
 // Update fors based on tv.
 void CodeWrite::updateView(TensorView* tv) {
   // If previous tv flaged that fors need to be reset, clear them all
@@ -298,16 +313,23 @@ void CodeWrite::updateView(TensorView* tv) {
       // Reset the loop structure
       resetFors();
     }
+    //All active fors have been closed
+    printAlloc(tv);
+
     for (int i = fors.size(); i < tv->domain()->size(); i++)
       openFor(tv->getAxis(i));
     reset_fors = true;
+
   } else {
+
     active_view_axis = tv->getComputeAtAxis();
     active_view = tv->getComputeAtView();
 
     int depth = fors.size();
     for (int i = active_view_axis; i < depth; i++)
       closeFor();
+    //Allocate tv if not input/output
+    printAlloc(tv);
     for (int i = fors.size(); i < tv->domain()->size(); i++)
       openFor(tv->getAxis(i));
   }
