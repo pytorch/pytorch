@@ -708,7 +708,7 @@ bool FullyConnectedDNNLowPOp<T, ReluFused>::GetQuantizationParameters_() {
           assert(false);
         }
         if (!reason.empty()) {
-          LOG(WARNING) << "Conv with weight " << this->debug_def().input(1)
+          LOG(WARNING) << "FC with weight " << this->debug_def().input(1)
                        << " falls back to slow path because " << reason;
         }
       }
