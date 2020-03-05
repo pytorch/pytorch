@@ -540,6 +540,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
@@ -561,6 +562,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/partition.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/fuser/cuda/manager.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
