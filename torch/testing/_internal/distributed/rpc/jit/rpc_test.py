@@ -86,20 +86,30 @@ class MyScriptModule(torch.jit.ScriptModule):
         return self.a
 
 
+def owner_create_rref_my_script_class(a):
+    return rpc.RRef(MyScriptClass(a))
+
+
 def owner_create_rref_my_script_module(a):
     return rpc.RRef(MyScriptModule(a), MyModuleInterface)
 
 
 @torch.jit.script
-def script_run_forward_rref_my_script_module_2(rref):
-    # type: (RRef[MyModuleInterface2]) -> int
-    return rref.to_here().forward(1)
+def script_run_get_value_rref_my_script_class(rref):
+    # type: (RRef[MyScriptClass]) -> int
+    return rref.to_here().get_value()
 
 
 @torch.jit.script
 def script_run_forward_rref_my_script_module(rref):
     # type: (RRef[MyModuleInterface]) -> Tensor
     return rref.to_here().forward()
+
+
+@torch.jit.script
+def script_run_forward_rref_my_script_module_2(rref):
+    # type: (RRef[MyModuleInterface2]) -> int
+    return rref.to_here().forward(1)
 
 
 @torch.jit.script
@@ -147,7 +157,7 @@ def rref_script_annotation(rref_var):
 
 class LocalRRefTest(RpcAgentTestFixture):
     @dist_init
-    def test_create_local_script_class_rref(self):
+    def test_create_local_script_class_rref_in_py(self):
         if self.rank != 0:
             return
 
@@ -157,7 +167,7 @@ class LocalRRefTest(RpcAgentTestFixture):
         self.assertEqual(ret, self.rank)
 
     @dist_init
-    def test_create_local_script_module_rref(self):
+    def test_create_local_script_module_rref_in_py(self):
         if self.rank != 0:
             return
 
@@ -170,10 +180,25 @@ class LocalRRefTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(
             RuntimeError, (
                 "The RRef being created contains a ScriptModule, "
-                "must provide it's ModuleInterface type hint."
+                "must provide its ModuleInterface type hint."
             )
         ):
             rref_script_module = rpc.RRef(MyScriptModule(self.rank))
+
+    @dist_init
+    def test_return_local_script_class_rref_in_py_and_use_in_script(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Create a local RRef<MyScripClass> remotely in Python.
+        rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_class, args=(self.rank,))
+        # Use RRef<MyScripClass> remotely in Script.
+        ret = rpc.rpc_sync(
+            rref.owner(), script_run_get_value_rref_my_script_class, args=(rref,)
+        )
+        self.assertEqual(ret, self.rank)
 
     @dist_init
     def test_return_local_script_module_rref_in_py_and_use_in_script(self):
@@ -182,7 +207,7 @@ class LocalRRefTest(RpcAgentTestFixture):
 
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
 
-        # Create a local RRef<MyModuleInterface> in Python
+        # Create a local RRef<MyModuleInterface> remotely in Python.
         rref = rpc.rpc_sync(dst_worker_name, owner_create_rref_my_script_module, args=(self.rank,))
         # Use RRef<MyModuleInterface> remotely in Script.
         ret = rpc.rpc_sync(
@@ -190,7 +215,8 @@ class LocalRRefTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, torch.ones(self.rank))
 
-        # Use RRef<MyModuleInterface> remotely in Script with wrong argument type hint.
+        # Use RRef<MyModuleInterface> remotely in Script with incorrect function argument type hint.
+        # Expect failure at run time.
         fut = rpc.rpc_async(
             rref.owner(), script_run_forward_rref_my_script_module_2, args=(rref,)
         )
