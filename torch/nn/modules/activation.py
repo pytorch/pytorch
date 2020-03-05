@@ -456,6 +456,7 @@ class GELU(Module):
 
     .. math::
         \text{GELU}(x) = x * \Phi(x)
+
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     Shape:
