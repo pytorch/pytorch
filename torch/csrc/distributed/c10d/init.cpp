@@ -95,7 +95,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
+      .def_readwrite("inplace", &::c10d::AllgatherOptions::inplace);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -110,7 +111,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
+      .def_readwrite("inplace", &::c10d::ReduceScatterOptions::inplace);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())

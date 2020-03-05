@@ -11,6 +11,7 @@ from . import (
     AllreduceOptions,
     BroadcastOptions,
     GatherOptions,
+    AllgatherOptions,
     ReduceOptions,
     ReduceScatterOptions,
     ScatterOptions,
@@ -1072,7 +1073,8 @@ def all_gather_multigpu(output_tensor_lists,
 def all_gather(tensor_list,
                tensor,
                group=group.WORLD,
-               async_op=False):
+               async_op=False,
+               inplace=False):
     """
     Gathers tensors from the whole group in a list.
 
@@ -1082,6 +1084,7 @@ def all_gather(tensor_list,
         tensor (Tensor): Tensor to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on
         async_op (bool, optional): Whether this op should be an async op
+        inplace (bool, optional): Whether this op allows inplace calls
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -1093,11 +1096,14 @@ def all_gather(tensor_list,
     if _rank_not_in_group(group):
         return
 
+    opts = AllgatherOptions()
+    opts.inplace = inplace
+
     if group == GroupMember.WORLD:
         _check_default_pg()
-        work = _default_pg.allgather([tensor_list], [tensor])
+        work = _default_pg.allgather([tensor_list], [tensor], opts)
     else:
-        work = group.allgather([tensor_list], [tensor])
+        work = group.allgather([tensor_list], [tensor], opts)
 
     if async_op:
         return work
@@ -1299,7 +1305,8 @@ def reduce_scatter(output,
                    input_list,
                    op=ReduceOp.SUM,
                    group=group.WORLD,
-                   async_op=False):
+                   async_op=False,
+                   inplace=False):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
 
@@ -1308,6 +1315,7 @@ def reduce_scatter(output,
         input_list (list[Tensor]): List of tensors to reduce and scatter.
         group (ProcessGroup, optional): The process group to work on.
         async_op (bool, optional): Whether this op should be an async op.
+        inplace (bool, optional): Whether this op allows inplace calls.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -1321,6 +1329,7 @@ def reduce_scatter(output,
 
     opts = ReduceScatterOptions()
     opts.reduceOp = op
+    opts.inplace = inplace
 
     if group == GroupMember.WORLD:
         _check_default_pg()

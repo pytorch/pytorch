@@ -35,6 +35,7 @@ struct ReduceOptions {
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool inplace = false;
 };
 
 struct GatherOptions {
@@ -50,6 +51,7 @@ struct ScatterOptions {
 struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool inplace = false;
 };
 
 struct BarrierOptions {
