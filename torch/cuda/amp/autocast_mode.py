@@ -59,14 +59,14 @@ class autocast(object):
             tmp_float16 = torch.mm(mat0, mat1)
 
             with autocast(enabled=False):
-                # Here torch.mm behaves normally.
+                # Here torch.mm does not autocast.
                 # To force float32 execution, ensure the inputs are float32.
                 # The output type matches the input types.
                 tmp_float32 = torch.mm(tmp_float16.float(), mat2)
 
             # No manual casts are required when re-entering the autocast-enabled region.
             # torch.mm again runs in float16 and produces float16 output, regardless of input types.
-            # Note that mismatched input types are transparently handled.
+            # Note that mixed input dtypes are transparently handled.
             float16_result = torch.mm(tmp_float32, mat3_float16)
 
     Arguments:
@@ -91,8 +91,8 @@ class autocast(object):
 
     .. note::
         Currently, autocast only affects out-of-place operations.  In-place ops still work in autocast-enabled
-        regions, but won't be autocasted (e.g., ``a.addmm(b)`` is guaranteed to run in ``float16``, but
-        ``a.addmm_(b)` may not).  For best performance and accuracy, prefer out-of-place ops if possible.
+        regions, but won't be autocasted (e.g., ``a.addmm(b, c)`` is guaranteed to run in ``float16``, but
+        ``a.addmm_(b, c)`` may not).  For best performance and stability, prefer out-of-place ops if possible.
     """
     def __init__(self, enabled=True):
         if enabled and not torch.cuda.is_available():
@@ -154,7 +154,7 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
     Arguments:
         cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
             floating-point Tensors to the target dtype and causes ``forward`` to execute with autocast disabled.
-            If ``None``, inputs are not cast and ``forward`` executes with whatever autocast state surrounds the
+            If ``None``, ``forward``'s internal ops execute with whatever autocast state surrounds the
             point-of-use.
     """
     if fwd is None:
@@ -173,8 +173,8 @@ def custom_fwd(fwd=None, *, cast_inputs=None):
 
 
 # Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
-# cast_inputs_to argument on custom_bwd is unnecessary and could cause errors if it doesn't match
-# cast_inputs_to supplied to custom_fwd.
+# cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
+# cast_inputs supplied to custom_fwd.
 def custom_bwd(bwd):
     """
     Helper decorator for backward methods of custom autograd functions (subclasses of

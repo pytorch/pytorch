@@ -232,7 +232,7 @@ to a multiple-optimizer model, please file an issue.
 Working with Multiple GPUs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The gotchas described here only affect :class:`autocast`.  Use :class:`GradScaler` normally.
+The gotchas described here only affect :class:`autocast`.  :class:`GradScaler`\ 's usage is unchanged.
 
 .. _amp-dataparallel:
 
@@ -267,7 +267,8 @@ The fix is simple.  Enable autocast as part of ``MyModel.forward``::
             with autocast():
                 ...
 
-The following now autocasts in ``dp_model``'s side threads and the main thread::
+The following now autocasts in ``dp_model``'s side threads (which execute ``forward``) and the main thread
+(which executes ``loss_fn``)::
 
     model = MyModel()
     dp_model = nn.DataParallel(model)
@@ -280,7 +281,7 @@ DistributedDataParallel, one GPU per process
 --------------------------------------------
 
 :class:`torch.nn.parallel.DistributedDataParallel`'s documentation recommends one GPU per process for best
-performance.  In this case, use :class:`autocast` and :class:`GradScaler` normally.
+performance.  In this case, usages of :class:`autocast` and :class:`GradScaler` are not affected.
 No gotchas (side-thread-related or otherwise) apply.
 
 DistributedDataParallel, multiple GPUs per process
@@ -296,8 +297,9 @@ Autocast and Custom Autograd Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your network uses :ref:`custom autograd functions<extending-autograd>`
-(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may just work.
-If you observe errors, see the appropriate case below.
+(subclasses of :class:`torch.autograd.Function`), :class:`autocast` may work out of the box,
+depending what internal operations your function(s) execute.
+However, you should double-check if they match one of the special cases below.
 
 Functions that should allow autocasting
 ---------------------------------------
@@ -321,7 +323,8 @@ ensure that ``forward`` executes with whatever autocast state surrounds the poin
 Functions that need a particular datatype
 -----------------------------------------
 
-If a function has limited datatype support, you may not want it to allow autocasting.
+If you know your function requires a certain precision, or if it wraps a backend with limited datatype support,
+you may want it to disallow autocasting.
 
 Consider a custom autograd function wrapping
 `CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
@@ -329,6 +332,7 @@ that were only compiled for ``float32``.  You can force the function to run in `
 as you would for any explicitly ``float32`` subregion::
 
     with autocast():
+        ...
         with autocast(enabled=False):
             output = float32_function(input.float())
 
@@ -353,4 +357,5 @@ Now ``Float32Function`` can be invoked anywhere, without disabling autocast at t
     func = Float32Function.apply
 
     with autocast():
+        # func will run in float32, regardless of the surrounding autocast state
         output = func(input)
