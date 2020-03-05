@@ -284,9 +284,10 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_double(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
@@ -301,14 +302,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_short(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)
@@ -318,14 +321,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_char(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
@@ -335,14 +340,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_int64_promotion(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
@@ -996,6 +1003,7 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_bitwise_ops(self):
         devices = ["cpu"]
+
         def run_and(x, y):
             return x & (x & y)
 
