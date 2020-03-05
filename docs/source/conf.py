@@ -28,6 +28,8 @@ try:
 except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
+    # Suppress further autodoc import warnings.
+    suppress_warnings = ['autodoc.import_object']
 
 RELEASE = os.environ.get('RELEASE', False)
 
@@ -85,7 +87,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2019, Torch Contributors'
+copyright = '2020, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
