@@ -80,7 +80,6 @@ if PY33:
         'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/jit/test_rpc_spawn',
         'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
@@ -88,6 +87,7 @@ if PY33:
 if PY36:
     TESTS.extend([
         'test_jit_py3',
+        'distributed/rpc/jit/test_rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
