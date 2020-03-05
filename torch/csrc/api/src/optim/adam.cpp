@@ -40,21 +40,18 @@ void AdamOptions::serialize(torch::serialize::InputArchive& archive) {
 }
 
 bool operator==(const AdamParamState& lhs, const AdamParamState& rhs) {
-  bool is_max_exp_avg_sq_defined_and_equal = !(lhs.max_exp_avg_sq().defined() ^ rhs.max_exp_avg_sq().defined());
-  if(!is_max_exp_avg_sq_defined_and_equal) {
-    is_max_exp_avg_sq_defined_and_equal = torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq());
-  }
   return (lhs.step() == rhs.step()) &&
           torch::equal(lhs.exp_avg(), rhs.exp_avg()) &&
           torch::equal(lhs.exp_avg_sq(), rhs.exp_avg_sq()) &&
-          is_max_exp_avg_sq_defined_and_equal;
+          ((!lhs.max_exp_avg_sq().defined() && !rhs.max_exp_avg_sq().defined()) ||
+           (lhs.max_exp_avg_sq().defined() && rhs.max_exp_avg_sq().defined() && torch::equal(lhs.max_exp_avg_sq(), rhs.max_exp_avg_sq())));
 }
 
 void AdamParamState::serialize(torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(exp_avg);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(exp_avg_sq);
-  _TORCH_OPTIM_SERIALIZE_TORCH_ARG_IF_DEFINED(max_exp_avg_sq);
+  _TORCH_OPTIM_SERIALIZE_TORCH_ARG(max_exp_avg_sq);
 }
 
 void AdamParamState::serialize(torch::serialize::InputArchive& archive) {
