@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -349,6 +350,8 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+      .def(
+          "_jit_register_cuda_fuser", &registerCudaFuseGraph)
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
