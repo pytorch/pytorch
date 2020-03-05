@@ -48,45 +48,50 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
   return RRefForkData(ownerId, rrefId, forkId, parent, typeStr);
 }
 
-c10::optional<TypePtr> tryTypePyObjToTypePtr(const py::object& type_value) {
+TypePtr tryTypePyObjToTypePtr(const py::object& type_value) {
   if (type_value.is(py::none())) {
-    return c10::nullopt;
+    return nullptr;
   }
-  c10::QualifiedName type_value_str = c10::QualifiedName(py::cast<std::string>(
-      py::module::import("torch.jit").attr("_qualified_name")(type_value)));
-  return jit::get_python_cu()->get_type(type_value_str);
+  c10::QualifiedName type_qualified_name =
+      c10::QualifiedName(py::cast<std::string>(
+          py::module::import("torch.jit").attr("_qualified_name")(type_value)));
+  TypePtr type_ptr = jit::get_python_cu()->get_type(type_qualified_name);
+  TORCH_CHECK(
+      type_ptr != nullptr,
+      "Type, ",
+      type_qualified_name.qualifiedName(),
+      ", has not been registered in JIT CompilationUnit yet. "
+      "Please script the type to register it before using it.");
+  return type_ptr;
 }
 
-TypePtr decidePyObjJitType(
-    const py::object& value,
-    c10::optional<TypePtr> type_hint) {
+TypePtr decidePyObjJitType(const py::object& value, TypePtr type_hint_ptr) {
   jit::InferredType type_inferred = jit::tryToInferType(value);
   if (type_inferred.success()) {
     // If we could infer the type from the pyobject, we create
     // the RRef with the IValue of that type.
     return type_inferred.type();
   }
-
   // If the py::object contains a ScripModule, we enforce users
   // to specify it's ModuleInterface type.
   c10::optional<jit::script::Module> module = jit::script::as_module(value);
   if (module.has_value()) {
     TORCH_CHECK(
-        type_hint.has_value(),
-        "If the RRef being created contains a ScriptModule, user must provide it's ModuleInterface type.");
+        type_hint_ptr != nullptr,
+        "The RRef being created contains a ScriptModule, must provide it's ModuleInterface type hint.");
     TORCH_CHECK(
-        type_hint.value()->kind() == TypeKind::InterfaceType,
-        "The py::object is a Module, type hint must be a ModuleInterface");
+        type_hint_ptr->kind() == TypeKind::InterfaceType,
+        "The RRef being created contains a ScriptModule, must provide it's ModuleInterface type hint");
     TORCH_CHECK(
-        module.value().type()->isSubtypeOf(type_hint.value()),
-        "The Module type: ",
+        module.value().type()->isSubtypeOf(type_hint_ptr),
+        "The ScriptModule of type: ",
         module.value().type()->python_str(),
         ", is not subtype of type hint: ",
-        type_hint.value()->python_str());
-    return type_hint.value();
+        type_hint_ptr->python_str());
+    return type_hint_ptr;
   }
 
-  // Otherwise it's a spure pyobject, create the RRef
+  // Otherwise it's a pure pyobject, create the RRef
   // that holds an IValue of an pyobject
   return PyObjectType::get();
 }
@@ -99,16 +104,15 @@ PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref) : rref_(std::move(rref)) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
 }
 
-PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
-    : PyRRef([&value, &type_hint]() {
-        c10::optional<TypePtr> optional_type_ptr =
-            tryTypePyObjToTypePtr(type_hint);
-        TypePtr elem_type = decidePyObjJitType(value, optional_type_ptr);
-        if (optional_type_ptr.has_value()) {
+PyRRef::PyRRef(const py::object& value, const py::object& type_hint_py)
+    : PyRRef([&value, &type_hint_py]() {
+        TypePtr type_hint_ptr = tryTypePyObjToTypePtr(type_hint_py);
+        TypePtr elem_type = decidePyObjJitType(value, type_hint_ptr);
+        if (type_hint_ptr != nullptr) {
           TORCH_CHECK(
-              elem_type->isSubtypeOf(optional_type_ptr.value()),
+              elem_type->isSubtypeOf(type_hint_ptr),
               "The specificied type hint is ",
-              optional_type_ptr.value()->python_str(),
+              type_hint_ptr->python_str(),
               "The decided type is ",
               elem_type->python_str());
         }
