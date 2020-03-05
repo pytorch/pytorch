@@ -70,7 +70,7 @@ void CodeWrite::print(const Val* const val) {
   else if (overrides.find(val) != overrides.end())
     os << overrides[val];
   else
-    Printer::print(val);
+    IRPrinter::print(val);
 }
 
 bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
@@ -121,7 +121,7 @@ bool CodeWrite::print_lhs(TensorView* tv) {
 void CodeWrite::print(const UnaryOp* const uop) {
   if (!isTVOp(uop)) {
     if (print_inline_)
-      Printer::print(uop);
+      IRPrinter::print(uop);
     return;
   }
 
@@ -151,7 +151,7 @@ void CodeWrite::print(const UnaryOp* const uop) {
 void CodeWrite::print(const BinaryOp* const bop) {
   if (!isTVOp(bop)) {
     if (print_inline_)
-      Printer::print(bop);
+      IRPrinter::print(bop);
     return;
   }
 
@@ -409,7 +409,7 @@ void CodeWrite::traverse(
 
   header();
   for (auto* expr : exprs)
-    Printer::print(expr);
+    IRPrinter::print(expr);
   resetFors();
   os << "}\n";
   indent_size--;

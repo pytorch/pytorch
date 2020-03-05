@@ -9,13 +9,13 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-void Printer::print(Fusion* fusion) {
+void IRPrinter::print(Fusion* fusion) {
   for (const Expr* expr : fusion->exprs()) {
     print(expr);
   }
 }
 
-void Printer::print(const Statement* const stmt) {
+void IRPrinter::print(const Statement* const stmt) {
   if (stmt->isVal()){
     print(static_cast<const Val*>(stmt));
     return;
@@ -26,7 +26,7 @@ void Printer::print(const Statement* const stmt) {
   throw std::runtime_error("Unkown statment type found in os << Statement.");
 }
 
-void Printer::print(const Val* const val) {
+void IRPrinter::print(const Val* const val) {
   switch (*(val->getValType())) {
     case ValType::Tensor:
       print(static_cast<const Tensor* const>(val)); return;
@@ -52,7 +52,7 @@ void Printer::print(const Val* const val) {
   throw std::runtime_error("Unknown ValType in os << Val.");
 }
 
-void Printer::print(const Expr* const expr) {
+void IRPrinter::print(const Expr* const expr) {
   switch (*(expr->getExprType())) {
     case ExprType::UnaryOp:
       print(static_cast<const UnaryOp* const>(expr)); return;
@@ -72,7 +72,7 @@ void Printer::print(const Expr* const expr) {
   throw std::runtime_error("Unknown ExprType in os << Expr.");
 }
 
-TORCH_API void Printer::print(const TensorDomain* const td) {
+TORCH_API void IRPrinter::print(const TensorDomain* const td) {
   os << "[ ";
   for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {
     print(td->axis(i));
@@ -82,7 +82,7 @@ TORCH_API void Printer::print(const TensorDomain* const td) {
   os << " ]";
 }
 
-TORCH_API void Printer::print(const TensorView* const tv) {
+TORCH_API void IRPrinter::print(const TensorView* const tv) {
   if (tv->tensor() != nullptr){
     os << "T" << tv->tensor()->name();
     print(tv->domain());
@@ -100,7 +100,7 @@ TORCH_API void Printer::print(const TensorView* const tv) {
   }
 }
 
-TORCH_API void Printer::print(const IterDomain* const id) {
+TORCH_API void IRPrinter::print(const IterDomain* const id) {
   if (id->isReduction())
     os << "r";
   else
@@ -123,7 +123,7 @@ TORCH_API void Printer::print(const IterDomain* const id) {
   os << "}";
 }
 
-void Printer::print(const Tensor* const t) {
+void IRPrinter::print(const Tensor* const t) {
   os << "T" << t->name();
   if (t->getDataType().has_value())
     os << " scalar_type: " << *(t->getDataType());
@@ -133,11 +133,11 @@ void Printer::print(const Tensor* const t) {
     os << " " << &t->getContiguityInfo().value();
 }
 
-void Printer::print(const TensorContiguity* const t) {
+void IRPrinter::print(const TensorContiguity* const t) {
   os << "format_tag: " << t->getContiguityTag();
 }
 
-void Printer::print(const Float* const f) {
+void IRPrinter::print(const Float* const f) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";
     print(FusionGuard::getCurFusion()->origin(f));
@@ -152,7 +152,7 @@ void Printer::print(const Float* const f) {
   }
 }
 
-void Printer::print(const Int* const i) {
+void IRPrinter::print(const Int* const i) {
   if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
     os << "( ";
     print(FusionGuard::getCurFusion()->origin(i));
@@ -175,7 +175,7 @@ void check_inlineable(const IRInputOutput* const irio) {
 }
 }
 
-void Printer::print(const UnaryOp* const uop) {
+void IRPrinter::print(const UnaryOp* const uop) {
   if (print_inline_)
     check_inlineable(uop);
 
@@ -194,7 +194,7 @@ void Printer::print(const UnaryOp* const uop) {
     os<<"\n";
 }
 
-void Printer::print(const BinaryOp* const bop) {
+void IRPrinter::print(const BinaryOp* const bop) {
   if (print_inline_)
     check_inlineable(bop);
 
@@ -216,14 +216,14 @@ void Printer::print(const BinaryOp* const bop) {
     os<<"\n";
 }
 
-void Printer::print(const ForLoop* const fl) {
+void IRPrinter::print(const ForLoop* const fl) {
   os << "ForLoop: " << fl->index() << " index " << fl->begin() << " begin " << fl->end() << " end \n";
   for(auto &expr : fl->body()) {
     os << "\t";
     print(expr);	
   }
 }
-void Printer::print(const IfThenElse* const ite) {
+void IRPrinter::print(const IfThenElse* const ite) {
   os << "IfThenElse: if " << ite->cond() << " \n";
   for(auto &expr : ite->if_body()) {
     os << "\t";
@@ -238,7 +238,7 @@ void Printer::print(const IfThenElse* const ite) {
   }
 }
 
-void Printer::print(const Split* const s) {
+void IRPrinter::print(const Split* const s) {
   os << "Split: ";
   print( s->in() );
   os << " axis " << s->axis() << " by factor "
@@ -247,14 +247,14 @@ void Printer::print(const Split* const s) {
   os<< "\n";
 }
 
-void Printer::print(const Merge* const m) {
+void IRPrinter::print(const Merge* const m) {
   os << "Merge: " << m->in() << " axis " << m->axis()
      << " with the following -> ";
   print( m->out() );
   os << "\n";
 }
 
-void Printer::print(const Reorder* const ro) {
+void IRPrinter::print(const Reorder* const ro) {
   os << "Reorder: ";
   print( ro->in() );
   os << " -> ";
@@ -263,13 +263,13 @@ void Printer::print(const Reorder* const ro) {
 }
 
 std::ostream& operator<< (std::ostream& os, const Statement* const stmt){
-  Printer p(os);
+  IRPrinter p(os);
   p.print(stmt);
   return os;
 }
 
 std::ostream& operator<< (std::ostream& os, Fusion* f){
-  Printer p(os);
+  IRPrinter p(os);
   p.print(f);
   return os;
 }

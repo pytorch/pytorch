@@ -85,8 +85,7 @@ public:
   void traverse(
       Fusion* const fusion
     , bool from_outputs_only = false
-    , bool breadth_first = false
-    , std::unordered_set<ValType> val_types = {});
+    , bool breadth_first = false);
 
   // Starts at from, traverses backwards through DAG, calls handle on nodes
   // in depth first topological sorted order.

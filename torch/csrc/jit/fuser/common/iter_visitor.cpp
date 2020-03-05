@@ -88,8 +88,7 @@ void IterVisitor::traverseFrom(
 void IterVisitor::traverse(
       Fusion* const fusion
     , bool from_outputs_only
-    , bool breadth_first
-    , std::unordered_set<ValType> val_types) {
+    , bool breadth_first) {
   FusionGuard fg(fusion);
 
   if (breadth_first)
@@ -101,30 +100,15 @@ void IterVisitor::traverse(
 
   if (from_outputs_only) {
     for (Val* out : fusion->outputs()) {
-	  // Traverse from All Values
-      if (val_types.size() == 0) {
-      	outputs_to_visit.push_back(out);
-	  // Traverse from Specific Value Types
-      } else {
-        if(val_types.find(out->getValType().value()) != val_types.end()) {
-          outputs_to_visit.push_back(out);
-        }
-      }
+      outputs_to_visit.push_back(out);
     }
   // Search for Vals with no uses (output edges)
   } else
     for (Val* it : fusion->vals()) {
       const std::set<Expr*>& uses = fusion->uses(it);
       if (uses.empty()) {
-	    // Traverse from All Values
-        if (val_types.size() == 0) {
-        	outputs_to_visit.push_back(it);
+        outputs_to_visit.push_back(it);
 	    // Traverse from Specific Value Types
-        } else {
-          if(val_types.find(it->getValType().value()) != val_types.end()) {
-            outputs_to_visit.push_back(it);
-          }
-        }
       }
     }
 

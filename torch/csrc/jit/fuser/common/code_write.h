@@ -19,7 +19,7 @@ namespace fuser {
 std::ostream& operator<<(std::ostream& os, std::vector<Int*> vec) {
   os << "<";
   for (int i = 0; i < vec.size(); i++) {
-    Printer(os).print_inline(vec[i]);
+    IRPrinter(os).print_inline(vec[i]);
     if (i == vec.size() - 1)
       os << ">";
     else
@@ -45,7 +45,7 @@ struct FindUsedVals : public IterVisitor {
 
 };
 
-struct TORCH_API CodeWrite : public Printer {
+struct TORCH_API CodeWrite : public IRPrinter {
  private:
   bool isTVOp(const Expr* expr);
 
@@ -109,7 +109,7 @@ struct TORCH_API CodeWrite : public Printer {
   void header();
 
  public:
-  CodeWrite(std::ostream& _os) : Printer(_os) {}
+  CodeWrite(std::ostream& _os) : IRPrinter(_os) {}
 
   void traverse(
       Fusion* fusion,
