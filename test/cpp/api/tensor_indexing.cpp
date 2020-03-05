@@ -558,7 +558,7 @@ TEST(TensorIndexingTest, TestVariableSlicing) {
   auto indices = torch::tensor({0, 1}, torch::kInt);
   int i = indices[0].item<int>();
   int j = indices[1].item<int>();
-  assert_tensor_equal(x.index({{i, j}}), x.index({{0, 1}}));
+  assert_tensor_equal(x.index({Slice(i, j)}), x.index({Slice(0, 1)}));
 }
 
 TEST(TensorIndexingTest, TestEllipsisTensor) {
@@ -692,7 +692,7 @@ TEST(NumpyTests, TestSingleBoolIndex) {
                    {7, 8, 9}});
 
   assert_tensor_equal(a.index({true}), a.index({None}));
-  assert_tensor_equal(a.index({false}), a.index({None}).index({{0, 0}}));
+  assert_tensor_equal(a.index({false}), a.index({None}).index({Slice(0, 0)}));
 }
 
 TEST(NumpyTests, TestBooleanShapeMismatch) {
@@ -738,7 +738,7 @@ TEST(NumpyTests, TestBooleanAssignmentValueMismatch) {
 
   ASSERT_THROWS_WITH(f(a, {}), "shape mismatch");
   ASSERT_THROWS_WITH(f(a, {1, 2, 3}), "shape mismatch");
-  ASSERT_THROWS_WITH(f(a.index({{None, 1}}), {1, 2, 3}), "shape mismatch");
+  ASSERT_THROWS_WITH(f(a.index({Slice(None, 1)}), {1, 2, 3}), "shape mismatch");
 }
 
 TEST(NumpyTests, TestBooleanIndexingTwodim) {
