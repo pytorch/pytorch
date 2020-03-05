@@ -378,6 +378,8 @@ inline dim3 getApplyBlock() {
   return dim3(AT_APPLY_THREADS_PER_BLOCK);
 }
 
+} // namespace
+
 template <typename scalar1, typename scalar2, int step, typename Op>
 inline bool CUDA_tensor_apply2(at::Tensor a,
                                at::Tensor b,
