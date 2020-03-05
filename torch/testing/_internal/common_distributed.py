@@ -259,6 +259,7 @@ class MultiProcessTestCase(TestCase):
                     for ac in active_children:
                         ac.terminate()
                     subprocess_error = True
+                    break
             if subprocess_error:
                 break
             # All processes have joined cleanly if they all a valid exitcode
