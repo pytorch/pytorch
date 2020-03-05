@@ -74,7 +74,7 @@ TypePtr decidePyObjJitType(const py::object& value, TypePtr type_hint_ptr) {
   }
   // If the py::object contains a ScripModule, we enforce users
   // to specify it's ModuleInterface type.
-  c10::optional<jit::script::Module> module = jit::script::as_module(value);
+  c10::optional<jit::script::Module> module(jit::script::as_module(value));
   if (module.has_value()) {
     TORCH_CHECK(
         type_hint_ptr != nullptr,
