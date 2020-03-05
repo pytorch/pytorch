@@ -119,7 +119,9 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
   }
 }
 
-c10::intrusive_ptr<UserRRef> RRefContext::createUserRRef(worker_id_t ownerId, const TypePtr& type) {
+c10::intrusive_ptr<UserRRef> RRefContext::createUserRRef(
+    worker_id_t ownerId,
+    const TypePtr& type) {
   TORCH_CHECK(ownerId != getWorkerId(), "Cannot create UserRRef on owner.");
   // Explicitly creating rrefId before forkId to make sure the order is
   // deterministic, as the argument evaluation order is system and compiler
@@ -192,7 +194,7 @@ c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType
     // information on other workers because it's only information only.
-    if(type == TensorType::get()) {
+    if (type == TensorType::get()) {
       TORCH_INTERNAL_ASSERT(ownerRRef->type()->isSubtypeOf(TensorType::get()));
     } else {
       TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
@@ -213,25 +215,27 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     //
     // NB: cannot use make_shared here as the constructor of OwnerRRef is
     // private.
-    auto rref =
-        c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
+    auto rref = c10::make_intrusive<OwnerRRef>(getWorkerId(), rrefId, type);
     owners_[rref->rrefId()] = rref;
     ownerCV_.notify_all();
     return rref;
   } else {
     // Scenario (2) retrieving an existing RRef
-    auto ownerRRef = c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
+    auto ownerRRef =
+        c10::static_intrusive_pointer_cast<OwnerRRef>(iter->second);
     TORCH_INTERNAL_ASSERT(ownerRRef->type() == type);
     return ownerRRef;
   }
 }
 
-c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(const TypePtr& type) {
+c10::intrusive_ptr<OwnerRRef> RRefContext::createOwnerRRef(
+    const TypePtr& type) {
   // Don't add this OnwerRRef to the owners_ map yet, otherwise
   // it will never be removed from there. Instead, only add it to the
   // map in prepareChildFork, in case this local RRef is being passed
   // to another worker.
-  return c10::make_intrusive<OwnerRRef>(getWorkerId(), genGloballyUniqueId(), type);
+  return c10::make_intrusive<OwnerRRef>(
+      getWorkerId(), genGloballyUniqueId(), type);
 }
 
 c10::intrusive_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
@@ -247,7 +251,8 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOwnerRRef(const RRefId& rrefId) {
   }
 }
 
-RRefForkData RRefContext::prepareChildFork(const c10::intrusive_ptr<RRef>& rref) {
+RRefForkData RRefContext::prepareChildFork(
+    const c10::intrusive_ptr<RRef>& rref) {
   auto rrefForkData = rref->fork();
   if (rref->isOwner()) {
     // Note [Early Fork Registration]
