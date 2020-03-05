@@ -65,6 +65,6 @@ if __name__ == "__main__":
         help='input yaml file of root (directly used) operators')
     args = parser.parse_args()
 
-    deps = load_op_dep_graph(args.op_dependency) if args.op_dependency or {}
+    deps = load_op_dep_graph(args.op_dependency) if args.op_dependency else {}
     root_ops = load_root_ops(args.root_ops)
     print(gen_transitive_closure(deps, root_ops))
