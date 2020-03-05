@@ -147,7 +147,7 @@ class EventList(list):
                     f.write('{"name": "%s", '
                             '"ph": "f", '
                             '"ts": %s, '
-                            'tid": %s, '
+                            '"tid": %s, '
                             '"pid": "CUDA functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
