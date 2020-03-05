@@ -50,6 +50,8 @@ class TestUtilityFuns(TestCase):
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
         assert len(messages) == 2
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
@@ -69,6 +71,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
             def forward(self, x):
@@ -88,6 +92,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
             def forward(self, x):
@@ -108,6 +114,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
             def forward(self, x):
@@ -127,6 +135,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
@@ -146,6 +156,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
             def forward(self, x):
@@ -182,6 +194,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 2
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
             def __init__(self):
@@ -203,6 +217,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Unsqueeze"
         assert len(list(graph.nodes())) == 3
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
             def __init__(self):
@@ -223,6 +239,8 @@ class TestUtilityFuns(TestCase):
 
     # TODO we need to figure out the root cause and fix the problem
     @skip("causing segmentation fault")
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_reshape(self):
         class ReshapeModule(torch.nn.Module):
             def __init__(self, ):
@@ -241,6 +259,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Reshape"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_div(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -259,6 +279,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Div"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_mul(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
@@ -277,6 +299,8 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Mul"
         assert len(list(graph.nodes())) == 1
 
+    # TODO : enable when constant folding is enabled for opset 12
+    @skipIfUnsupportedOpsetVersion([12])
     def test_constant_fold_sqrt(self):
         class Module(torch.nn.Module):
             def __init__(self, ):
