@@ -11,7 +11,6 @@ namespace {
 
 using namespace at;
 
-template<typename scalar_t>
 void binary_cross_entropy_backward_out_kernel(Tensor& grad_input, const Tensor& grad, const Tensor& input, const Tensor& target) {
   at::TensorIterator iter;
   iter.add_output(grad_input);
