@@ -71,7 +71,7 @@ void remainder_kernel_cuda(TensorIterator& iter) {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(thrust_t a, thrust_t b) -> thrust_t {
         CUDA_KERNEL_ASSERT(b != 0);
         thrust_t r = a % b;
-        if ((a != 0) && ((a < 0) != (b < 0))) {
+        if ((r != 0) && ((r < 0) != (b < 0))) {
           r += b;
         }
         return r;

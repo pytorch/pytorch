@@ -100,7 +100,7 @@ void remainder_kernel(TensorIterator& iter) {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         scalar_t r = a % b;
-        if ((a != 0) && (a < 0) != (b < 0)) {
+        if ((r != 0) && ((r < 0) != (b < 0))) {
           r += b;
         }
         return r;
