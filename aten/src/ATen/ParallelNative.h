@@ -73,13 +73,12 @@ inline scalar_t parallel_reduce(
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
   std::vector<scalar_t> results(num_tasks);
-  scalar_t* results_data = results.data();
   internal::_parallel_run(
       begin,
       end,
       grain_size,
-      [f, ident, results_data](int64_t start, int64_t end, size_t task_id) {
-        results_data[task_id] = f(start, end, ident);
+      [f, ident, results](int64_t start, int64_t end, size_t task_id) {
+        results[task_id] = f(start, end, ident);
       }
   );
   scalar_t result = ident;
