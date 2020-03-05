@@ -11,6 +11,8 @@ namespace jit {
 
 namespace {
 
+#ifdef USE_XNNPACK
+
 void insertXNNPACKLinearOp(std::shared_ptr<Graph>& graph) {
   std::string linear_before_inline = R"(
     graph(%linear, %input, %weight, %bias):
@@ -90,5 +92,17 @@ void insertXNNPACKOps(script::Module& module) {
     insertXNNPACKOps(m);
   }
 }
+
+#else
+
+void insertXNNPACKOps(std::shared_ptr<Graph>& graph) {
+  TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+}
+
+void insertXNNPACKOps(script::Module& module) {
+  TORCH_INTERNAL_ASSERT("XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+}
+
+#endif
 } // namespace jit
 } // namespace torch
