@@ -2,9 +2,9 @@ Environment variables control the disabling of certain explicit SIMD optimizatio
 
 ```
 x64 options:
-TH_NO_AVX2=1 # disable AVX2 codepaths
-TH_NO_AVX=1  # disable AVX codepaths
-TH_NO_SSE=1  # disable SSE codepaths
+ATEN_CPU_CAPABILITY=avx2    # Force AVX2 codepaths to be used
+ATEN_CPU_CAPABILITY=avx     # Force AVX codepaths to be used
+ATEN_CPU_CAPABILITY=default # Use oldest supported vector instruction set
 
 ppc64le options:
 TH_NO_VSX=1  # disable VSX codepaths
