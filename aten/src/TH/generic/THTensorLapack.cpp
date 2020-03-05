@@ -297,7 +297,7 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, bool upper)
   char uplo = upper ? 'U' : 'L';
   if (a == NULL) a = ra_;
   THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(!a->is_empty(), 1, "A should not be empty")
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
   THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int n, lda, info;
