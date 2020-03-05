@@ -6734,7 +6734,8 @@ class TestTorchDeviceType(TestCase):
             # Test slogdet
             # Compare the overall value rather than individual parts because of
             # precision issues when det is near zero.
-            self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(), atol=1e-7, message='{} (slogdet)'.format(desc))
+            self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
+                             atol=1e-7, message='{} (slogdet)'.format(desc))
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -6744,7 +6745,8 @@ class TestTorchDeviceType(TestCase):
             if sdet.item() < 0:
                 self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
             else:
-                self.assertEqual(logdet.exp(), target_logabsdet.exp(), atol=1e-7, message='{} (logdet non-negative case)'.format(desc))
+                self.assertEqual(logdet.exp(), target_logabsdet.exp(),
+                                 atol=1e-7, message='{} (logdet non-negative case)'.format(desc))
 
         eye = torch.eye(5, dtype=dtype, device=device)
         test_single_det(eye, (torch.ones((), dtype=dtype, device=device), torch.zeros((), dtype=dtype, device=device)), 'identity')

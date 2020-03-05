@@ -52,7 +52,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True, msg=
     count = (~close).long().sum()
     if msg == '' or msg is None:
         msg = ('Not within tolerance rtol={} atol={} at input{} ({} vs. {}) and {}'
-            ' other locations ({:2.2f}%)')
+               ' other locations ({:2.2f}%)')
         msg = msg.format(
             rtol, atol, list(index), actual[index].item(), expected[index].item(),
             count - 1, 100 * count / actual.numel())

@@ -802,7 +802,7 @@ class TestCase(expecttest.TestCase):
             return torch.int
 
 
-    def assertEqual(self, x, y, message='', *, rtol=None, atol=None, allow_inf=False, exact_dtype=None):
+    def assertEqual(self, x, y, message='', rtol=None, atol=None, allow_inf=False, exact_dtype=None):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
         if isinstance(message, Number):
             self.assertIsNone(atol, "don't combine positional prec and atol")
@@ -863,8 +863,10 @@ class TestCase(expecttest.TestCase):
                         if a.is_complex():
                             # todo: assert_allclose should handle complex types directly.
                             float_dtype = torch.float if a.dtype == torch.complex64 else torch.double
-                            self.assertEqual(a.real().to(torch.float), b.real().to(float_dtype), atol=atol, rtol=rtol, message=message)
-                            self.assertEqual(a.imag().to(torch.float), b.imag().to(float_dtype), atol=atol, rtol=rtol, message=message)
+                            self.assertEqual(a.real().to(torch.float), b.real().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
+                            self.assertEqual(a.imag().to(torch.float), b.imag().to(float_dtype),
+                                             atol=atol, rtol=rtol, message=message)
                         elif a.is_floating_point():
                             torch.testing.assert_allclose(a, b, atol=atol, rtol=rtol, equal_nan=True, msg=message)
                         else:
