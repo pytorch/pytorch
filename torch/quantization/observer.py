@@ -145,8 +145,7 @@ class _ObserverBase(ObserverBase):
             return torch.tensor([1.0]), torch.tensor([0])
 
         diff = min_vals <= max_vals
-        for i in range(len(diff)):
-            assert (diff[i]), "min should be less than max for index {}".format(i)
+        assert (torch.sum(diff) == len(diff)), "min_vals should be less than max_vals for indices."
 
         scales = torch.empty(min_vals.size(), dtype=torch.float32)
         zero_points = torch.empty(min_vals.size(), dtype=torch.int64)
@@ -836,7 +835,7 @@ class HistogramObserver(_ObserverBase):
             self.histogram = combined_histogram
             self.min_val = combined_min
             self.max_val = combined_max
-        return x
+        return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
