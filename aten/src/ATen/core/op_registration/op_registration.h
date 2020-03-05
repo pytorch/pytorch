@@ -582,15 +582,8 @@ private:
   static c10::FunctionSchema inferSchemaFromKernels_(const OperatorName& opNameStr, const Options& options);
   void checkNoDuplicateKernels_(const Options& options);
   void registerOp_(Options&& options);
-  void registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& config);
-  void registerSchemaOnly_(FunctionSchema&& schema);
 
-  class OperatorRegistrar;
-
-  std::vector<OperatorRegistrar> registrars_;
-
-  static_assert(std::is_nothrow_move_constructible<std::vector<OperatorRegistrar>>::value, "");
-  static_assert(std::is_nothrow_move_assignable<std::vector<OperatorRegistrar>>::value, "");
+  std::vector<RegistrationHandleRAII> registrars_;
 };
 
 // --------------------------------------------------------------------------

@@ -59,7 +59,7 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
 
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
-OperatorHandle Dispatcher::findOrRegisterWithSchema_(FunctionSchema&& schema) {
+OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
   const auto found = findSchema(schema.operator_name());
   if (found != c10::nullopt) {
     if (found->schema() != schema) {
@@ -90,7 +90,7 @@ OperatorHandle Dispatcher::findOrRegisterWithSchema_(FunctionSchema&& schema) {
 
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
-OperatorHandle Dispatcher::findOrRegisterWithName_(const OperatorName& op_name) {
+OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findSchema(op_name);
   if (found != c10::nullopt) {
     return *found;
@@ -112,11 +112,11 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
 
   OperatorName op_name = schema.operator_name();
 
-  auto op = findOrRegisterWithSchema_(std::move(schema));
+  auto op = findOrRegisterSchema_(std::move(schema));
 
-  ++op.operatorIterator_->refcount;
-  ++op.operatorIterator_->weak_refcount;
-  if (1 == op.operatorIterator_->refcount) {
+  ++op.operatorIterator_->def_count;
+  ++op.operatorIterator_->def_and_impl_count;
+  if (1 == op.operatorIterator_->def_count) {
     // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
     listeners_->callOnOperatorRegistered(op);
   }
@@ -132,18 +132,18 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
 
   TORCH_INTERNAL_ASSERT(op.schema().operator_name() == op_name);
 
-  // reduce refcount and actually deregister if no references left
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->refcount > 0);
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->weak_refcount > 0);
-  --op.operatorIterator_->refcount;
-  --op.operatorIterator_->weak_refcount;
-  if (0 == op.operatorIterator_->refcount) {
+  // reduce def_count and actually deregister if no references left
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_count > 0);
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+  --op.operatorIterator_->def_count;
+  --op.operatorIterator_->def_and_impl_count;
+  if (0 == op.operatorIterator_->def_count) {
     // note: call listeners *before* operator is removed, i.e. dispatcher is still valid for removed op
     // TODO: check that listeners are not relying on prepareForDeregistration()
     // invariant
     listeners_->callOnOperatorDeregistered(op);
   }
-  if (0 == op.operatorIterator_->weak_refcount) {
+  if (0 == op.operatorIterator_->def_and_impl_count) {
     // TODO: rename this to "assert deregistration invariants"
     op.operatorIterator_->op.prepareForDeregistration();
     operators_.erase(op.operatorIterator_);
@@ -156,11 +156,11 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
 RegistrationHandleRAII Dispatcher::registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  auto op = findOrRegisterWithName_(op_name);
+  auto op = findOrRegisterName_(op_name);
 
   auto kernel_handle = op.operatorIterator_->op.registerKernel(dispatch_key, std::move(kernel));
 
-  ++op.operatorIterator_->weak_refcount;
+  ++op.operatorIterator_->def_and_impl_count;
 
   return RegistrationHandleRAII([this, op, op_name, dispatch_key, kernel_handle] {
     op.operatorIterator_->op.deregisterKernel_(dispatch_key, kernel_handle);
@@ -175,9 +175,9 @@ void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& o
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
 
-  TORCH_INTERNAL_ASSERT(op.operatorIterator_->weak_refcount > 0);
-  --op.operatorIterator_->weak_refcount;
-  if (0 == op.operatorIterator_->weak_refcount) {
+  TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count > 0);
+  --op.operatorIterator_->def_and_impl_count;
+  if (0 == op.operatorIterator_->def_and_impl_count) {
     // TODO: rename this to "assert deregistration invariants"
     op.operatorIterator_->op.prepareForDeregistration();
     operators_.erase(op.operatorIterator_);

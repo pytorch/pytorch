@@ -8,35 +8,6 @@ namespace c10 {
 static_assert(std::is_nothrow_move_constructible<c10::optional<RegistrationHandleRAII>>::value, "");
 static_assert(std::is_nothrow_move_assignable<c10::optional<RegistrationHandleRAII>>::value, "");
 
-// OperatorRegistrar in its constructor registers an operator in the dispatch
-// table deregisters it in the destructor.
-//
-// TODO: just use the RAII returned by dispatcher directly, stop indirecting
-// here
-class RegisterOperators::OperatorRegistrar final {
-public:
-  explicit OperatorRegistrar(FunctionSchema&& schema, c10::optional<DispatchKey> dispatch_key, c10::optional<KernelFunction> kernel)
-  : operator_name_(schema.operator_name())
-  , op_(Dispatcher::singleton().registerDef(std::move(schema))), kernel_registration_handle_(c10::nullopt) {
-    if (kernel.has_value()) {
-      TORCH_INTERNAL_ASSERT(kernel->isValid());
-      kernel_registration_handle_ = Dispatcher::singleton().registerImpl(operator_name_, dispatch_key, std::move(*kernel));
-    }
-  }
-
-  OperatorRegistrar(OperatorRegistrar&& rhs) = default;
-  OperatorRegistrar& operator=(OperatorRegistrar&& rhs) = default;
-
-  // not needed and would break RAII if defaulted.
-  OperatorRegistrar(const OperatorRegistrar& rhs) = delete;
-  OperatorRegistrar& operator=(const OperatorRegistrar& rhs) = delete;
-
-private:
-  OperatorName operator_name_;
-  RegistrationHandleRAII op_;
-  c10::optional<RegistrationHandleRAII> kernel_registration_handle_;
-};
-
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(options.schemaOrName_.has_value(), "In operator registration: Tried to register an operator without specifying a schema or operator name.");
   if (options.schemaOrName_->is_right()) {
@@ -137,25 +108,15 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   OperatorName op_name = schema.operator_name();
 
-  if (0 == options.kernels.size()) {
-    registerSchemaOnly_(std::move(schema));
-  } else {
-    for (auto& kernel : options.kernels) {
-      registerSchemaAndKernel_(schema, std::move(kernel));
-    }
+  registrars_.emplace_back(
+    Dispatcher::singleton().registerDef(std::move(schema))
+  );
+
+  for (auto& kernel : options.kernels) {
+    registrars_.emplace_back(
+      Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func))
+    );
   }
-
-  TORCH_INTERNAL_ASSERT(c10::Dispatcher::singleton().findSchema(op_name).has_value());
-}
-
-void RegisterOperators::registerSchemaAndKernel_(FunctionSchema schema, Options::KernelRegistrationConfig&& kernel) {
-  TORCH_INTERNAL_ASSERT(kernel.func.isValid(), "Kernel must be set");
-
-  registrars_.emplace_back(std::move(schema), kernel.dispatch_key, std::move(kernel.func));
-}
-
-void RegisterOperators::registerSchemaOnly_(FunctionSchema&& schema) {
-  registrars_.emplace_back(std::move(schema), c10::nullopt, c10::nullopt);
 }
 
 RegisterOperators::RegisterOperators() = default;

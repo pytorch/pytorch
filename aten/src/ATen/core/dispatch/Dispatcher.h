@@ -48,19 +48,18 @@ private:
 
     impl::OperatorEntry op;
 
-    // These are not "true" refcounts in the traditional sense; instead
-    // they refer to the number of outstanding RegistrationHandleRAII
-    // for this operator.  Refcount reflects only def() registrations
+    // These refer to the number of outstanding RegistrationHandleRAII
+    // for this operator.  def_count reflects only def() registrations
     // (in the new world, this should only ever be 1, but old style
     // registrations may register the schema multiple times, which
-    // will increase this count).  Weak refcount reflects the number
-    // of impl() registrations.  When a def() gets unregistered,
-    // we must immediately call the Deregistered listeners, but we
-    // must not actually delete the handle as there are other outstanding
-    // RAII destructors which will try to destruct and they had better
-    // still have a working operator handle in this case
-    size_t refcount = 0;
-    size_t weak_refcount = 0;
+    // will increase this count).  def_and_impl_count reflects the number
+    // of combined def() and impl() registrations.  When a def() gets
+    // unregistered, we must immediately call the Deregistered listeners, but we
+    // must not actually delete the handle as there are other outstanding RAII
+    // destructors which will try to destruct and they had better still have a
+    // working operator handle in this case
+    size_t def_count = 0;
+    size_t def_and_impl_count = 0;
   };
   friend class OperatorHandle;
 
@@ -166,8 +165,8 @@ public:
 private:
   Dispatcher();
 
-  OperatorHandle findOrRegisterWithSchema_(FunctionSchema&& schema);
-  OperatorHandle findOrRegisterWithName_(const OperatorName& op_name);
+  OperatorHandle findOrRegisterSchema_(FunctionSchema&& schema);
+  OperatorHandle findOrRegisterName_(const OperatorName& op_name);
 
   void deregisterDef_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name);
