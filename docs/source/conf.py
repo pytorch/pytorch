@@ -31,6 +31,12 @@ except ImportError:
     # Suppress further autodoc import warnings.
     suppress_warnings = ['autodoc.import_object']
 
+try:
+    from torch.distributed import init_process_group
+except ImportError:
+    # Suppress further autodoc import warnings.
+    suppress_warnings = ['autodoc.import_object']
+
 RELEASE = os.environ.get('RELEASE', False)
 
 import pytorch_sphinx_theme
