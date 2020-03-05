@@ -53,7 +53,7 @@ if [[ -x ./cuda_tensor_interop_test ]]; then
 fi
 if [ "$VALGRIND" == "ON" ]
 then
-  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic "[cpu]"
+  valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./basic --gtest_filter='-*CUDA'
   valgrind --suppressions="$VALGRIND_SUP" --error-exitcode=1 ./tensor_interop_test
 fi
 
