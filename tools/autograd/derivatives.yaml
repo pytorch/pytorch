@@ -205,7 +205,7 @@
 - name: bernoulli_.float(Tensor(a!) self, float p=0.5, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
-- name: bmm(Tensor self, Tensor mat2, *, bool? deterministic=False) -> Tensor
+- name: bmm(Tensor self, Tensor mat2) -> Tensor
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 

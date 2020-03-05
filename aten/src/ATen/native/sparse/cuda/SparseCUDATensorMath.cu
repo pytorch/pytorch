@@ -722,9 +722,14 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 }
 
-Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
+Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
-  return bmm_out_sparse_cuda(result, self, mat2, deterministic_opt);
+  return _bmm_out_sparse_cuda(result, self, mat2, false);
+}
+
+Tensor _bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2, bool deterministic) {
+  Tensor result = at::empty({self.size(0), mat2.size(2), self.size(1)}, mat2.options(), at::MemoryFormat::Contiguous);
+  return _bmm_out_sparse_cuda(result, self, mat2, deterministic);
 }
 
 // Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
@@ -812,10 +817,11 @@ cudaDataType getTensorCudaDataType(Tensor self) {
 //   return bmm_out_sparse_cuda(result, self, mat2, false);
 // }
 
-Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, c10::optional<bool> deterministic_opt) {
+Tensor& bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2) {
+  return _bmm_out_sparse_cuda(result, self, mat2, false);
+}
 
-  bool deterministic = deterministic_opt.has_value() ? deterministic_opt.value() : false;
-
+Tensor& _bmm_out_sparse_cuda(Tensor& result, const SparseTensor& self, const Tensor& mat2, bool deterministic) {
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
