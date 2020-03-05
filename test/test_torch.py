@@ -2454,7 +2454,7 @@ class _TestTorchMixin(object):
             # There are currently no quantized or complex types in get_all_dtypes.
             self.assertEqual(dtype.is_quantized, False)
             self.assertEqual(dtype.is_complex, False)
-            if dtype==torch.bool:
+            if dtype == torch.bool:
                 self.assertEqual(dtype.is_integral, False)
             else:
                 self.assertEqual(dtype.is_floating_point, not dtype.is_integral)
