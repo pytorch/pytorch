@@ -17,7 +17,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
-        >>> m = Poisson(torch.tensor([4]))
+        >>> m = Poisson(torch.tensor([4.]))
         >>> m.sample()
         tensor([ 3.])
 
