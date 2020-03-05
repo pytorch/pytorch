@@ -28,6 +28,7 @@ if _cudnn is not None:
             compile_major, compile_minor, _ = compile_version
             # Different major versions are always incompatible
             # Starting with cuDNN 7, minor versions are backwards-compatible
+            # Not sure about MIOpen (ROCm), so always do a strict check
             if runtime_major != compile_major:
                 cudnn_compatible = False
             elif runtime_major < 7 or not _cudnn.is_cuda:

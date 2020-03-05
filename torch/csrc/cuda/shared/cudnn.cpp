@@ -77,6 +77,7 @@ void initCudnnBindings(PyObject* module) {
     .value("lstm", CUDNN_LSTM)
     .value("gru", CUDNN_GRU);
 
+  // The runtime version check in python needs to distinguish cudnn from miopen
 #ifdef USE_CUDNN
   cudnn.attr("is_cuda") = true;
 #else
