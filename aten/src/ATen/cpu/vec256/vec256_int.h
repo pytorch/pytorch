@@ -88,7 +88,7 @@ struct Vec256<int64_t> : public Vec256i {
     // Ensure uninitialized memory does not change the output value
     // See https://github.com/pytorch/pytorch/issues/32502 for more details
     for (auto i = 0; i < size(); ++i) {
-      tmp_values[i] = 0.0;
+      tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
@@ -196,9 +196,12 @@ struct Vec256<int32_t> : public Vec256i {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
+    __at_align32__ int32_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value
     // See https://github.com/pytorch/pytorch/issues/32502 for more details
-    __at_align32__ int32_t tmp_values[size()] = {0};
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
   }
@@ -403,9 +406,12 @@ struct Vec256<int16_t> : public Vec256i {
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
+    __at_align32__ int16_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value
     // See https://github.com/pytorch/pytorch/issues/32502 for more details
-    __at_align32__ int16_t tmp_values[size()] = {0};
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
