@@ -328,9 +328,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
 // to the output Variables if present.
 struct DifferentiableGraphOp {
   DifferentiableGraphOp(Gradient grad)
-      : f(grad.f),
+      : f(grad.f, "<foward op>"),
         grad(std::move(grad)),
-        grad_executor(this->grad.df),
+        grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
         num_outputs(this->grad.f->outputs().size()) {}
 
@@ -489,8 +489,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
 struct GraphExecutorImpl : public GraphExecutorImplBase {
-  GraphExecutorImpl(const std::shared_ptr<Graph>& graph)
-      : GraphExecutorImplBase(graph), arg_spec_creator_(*graph) {
+  GraphExecutorImpl(const std::shared_ptr<Graph>& graph, std::string function_name)
+      : GraphExecutorImplBase(graph, std::move(function_name)), arg_spec_creator_(*graph) {
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
@@ -521,7 +521,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     if (!fallback) {
       auto graph_ = graph->copy();
       runRequiredPasses(graph_);
-      fallback = ExecutionPlan(graph_);
+      fallback = ExecutionPlan(graph_, function_name_);
     }
     return fallback;
   }
@@ -608,7 +608,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     }
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
-    return ExecutionPlan(opt_graph);
+    return ExecutionPlan(opt_graph, function_name_);
   }
 
   ~GraphExecutorImpl() override = default;
@@ -623,12 +623,12 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name)
     : pImpl(
           getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
-                                  new ProfilingGraphExecutorImpl(graph))
+                                  new ProfilingGraphExecutorImpl(graph, std::move(function_name)))
                             : dynamic_cast<GraphExecutorImplBase*>(
-                                  new GraphExecutorImpl(graph))) {}
+                                  new GraphExecutorImpl(graph, std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
@@ -739,7 +739,7 @@ void runNondiffOptimization(
   }
 }
 
-void runOptimization(std::shared_ptr<Graph>& graph) {
+void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
   // Basic graph preprocessing to eliminate noise.
   EliminateDeadCode(graph);
   EliminateCommonSubexpression(graph);
@@ -750,7 +750,8 @@ void runOptimization(std::shared_ptr<Graph>& graph) {
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  UnrollLoops(graph);
+  if (unroll)
+    UnrollLoops(graph);
   EliminateCommonSubexpression(graph);
 
   CheckInplace(graph);
