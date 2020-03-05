@@ -165,7 +165,8 @@ namespace impl {
     meta->grad_fn_ = std::move(edge.function);
     meta->output_nr_ = edge.input_nr;
     // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
-    // This logic is only relevant for differentiable views created in no_grad mode
+    // in the VariableHooks::grad_fn below.
+    // This logic is only relevant for differentiable views created in no_grad mode.
     if (self.is_view()) {
       // NB: is_view() ==> get_autograd_meta()
       auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
