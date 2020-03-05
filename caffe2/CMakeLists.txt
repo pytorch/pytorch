@@ -449,7 +449,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iriostream.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iter_visitor.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir_printer.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/management.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/mutator.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/tensor.cpp
