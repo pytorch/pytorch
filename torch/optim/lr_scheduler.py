@@ -4,7 +4,7 @@ from torch._six import inf
 from functools import wraps
 import warnings
 import weakref
-from collections import Counter
+from collections import Counter, OrderedDict
 from bisect import bisect_right
 
 from .optimizer import Optimizer
@@ -386,7 +386,7 @@ class MultiStepLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1):
-        self.milestones = dict(Counter(milestones))
+        self.milestones = OrderedDict(Counter(sorted(milestones)))
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch)
 
