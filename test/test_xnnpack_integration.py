@@ -1,6 +1,9 @@
 from __future__ import division
 
+import unittest
+
 import torch
+import torch.backends.xnnpack
 from torch.nn import functional as F
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -9,6 +12,9 @@ from hypothesis import strategies as st
 import io
 
 
+@unittest.skipUnless(torch.backends.xnnpack.enabled,
+                     " XNNPACK must be enabled for these tests."
+                     " Please build with USE_XNNPACK=1.")
 class TestXNNPACKOps(TestCase):
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
@@ -81,6 +87,9 @@ class TestXNNPACKOps(TestCase):
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
 
+@unittest.skipUnless(torch.backends.xnnpack.enabled,
+                     " XNNPACK must be enabled for these tests."
+                     " Please build with USE_XNNPACK=1.")
 class TestXNNPACKSerDes(TestCase):
     @given(batch_size=st.integers(0, 3),
            data_shape=hu.array_shapes(1, 3, 2, 64),
