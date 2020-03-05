@@ -12151,16 +12151,25 @@ class TestTorchDeviceType(TestCase):
         b = torch.randn(1, device=device)
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
-    # Test for (some of the) unary funcs' implicit dtype promotion
-    # Check https://github.com/pytorch/pytorch/pull/33322 for more details
+    # Test for unary ops appropriate for floating-type output from integral and boolean inputs
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_intbool_to_float_upcasting(self, device, dtype):
-        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log2", "sin", "cos", "sinh", "sqrt", "trunc"]
-        for op_name in op_list:
-            x = torch.tensor([2], dtype=dtype, device=device)
-            out = getattr(torch, op_name)(x)
-            # Assert all int and bool dtypes are promoted to default floating dtype
-            self.assertIs(out.dtype, torch.get_default_dtype())
+        # Not all the functions are appropriate for this upcasting, so only test for the list below
+        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log10", "log1p", \
+                   "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "cosh", "exp", "tan", \
+                   "tanh"]
+        # Make sure that the ops promote to floating default types
+        # Test both float32 and double (float64) dtypes
+        saved_dtype = torch.get_default_dtype()
+        default_floating_types = [torch.float32, torch.float64]
+        for default_floating_type in default_floating_types:
+            torch.set_default_dtype(default_floating_type)
+            for op_name in op_list:
+                x = torch.tensor([2], dtype=dtype, device=device)
+                out = getattr(torch, op_name)(x)
+                # Assert all int and bool dtypes are promoted to default floating dtype
+                self.assertIs(out.dtype, torch.get_default_dtype())
+        torch.set_default_dtype(saved_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self, device):
