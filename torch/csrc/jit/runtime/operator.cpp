@@ -158,6 +158,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
+      prim::rpc_async,
   };
 
   // WARNING: by adding a value to this set, you are asserting that your
@@ -241,6 +242,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::isinstance,
       prim::unchecked_cast,
       prim::tolist,
+      prim::rpc_async,
   };
 
   // Operators that should not be used by alias analysis

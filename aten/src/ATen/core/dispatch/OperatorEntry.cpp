@@ -4,7 +4,16 @@ namespace c10 {
 namespace impl {
 
 namespace {
-  std::string listAllDispatchKeys(const ska::flat_hash_map<DispatchKey, std::list<KernelFunction>>& kernels) {
+
+  std::string toString(c10::optional<DispatchKey> k) {
+    if (k.has_value()) {
+      return toString(*k);
+    } else {
+      return "(catch all)";
+    }
+  }
+
+  std::string listAllDispatchKeys(const ska::flat_hash_map<c10::optional<DispatchKey>, std::list<KernelFunction>>& kernels) {
     if (kernels.size() == 0) {
       return "";
     }
@@ -21,7 +30,6 @@ OperatorEntry::OperatorEntry(FunctionSchema&& schema, OperatorOptions&& options)
 : schema_(std::move(schema))
 , dispatchTable_(schema_)
 , kernels_()
-, catchAllKernels_()
 , options_(std::move(options)) {
 }
 
@@ -30,10 +38,9 @@ void OperatorEntry::prepareForDeregistration() {
      TORCH_INTERNAL_ASSERT(false, "Tried to deregister op schema for an operator that still has kernels registered. The operator schema is ", toString(schema_), ". Registered kernels for dispatch keys: ", dispatchTable_.listAllDispatchKeys());
   }
   TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator schema is ", toString(schema_));
-  TORCH_INTERNAL_ASSERT(catchAllKernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have catch-all kernel. The operator schema is ", toString(schema_));
 }
 
-RegistrationHandleRAII OperatorEntry::registerKernel(DispatchKey dispatch_key, KernelFunction kernel) {
+RegistrationHandleRAII OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   // Add the kernel to the kernels list,
@@ -52,25 +59,7 @@ RegistrationHandleRAII OperatorEntry::registerKernel(DispatchKey dispatch_key, K
   });
 }
 
-RegistrationHandleRAII OperatorEntry::registerCatchallKernel(KernelFunction kernel) {
-  std::unique_lock<std::mutex> lock(kernelsMutex_);
-
-  // Add the kernel to the kernels list,
-  // possibly creating the list if this is the first kernel.
-  catchAllKernels_.push_front(std::move(kernel));
-  std::list<KernelFunction>::iterator inserted = catchAllKernels_.begin();
-  // update the dispatch table, i.e. re-establish the invariant
-  // that the dispatch table points to the newest kernel
-  updateCatchallDispatchTable_();
-
-  return RegistrationHandleRAII([this, inserted] {
-    // list iterators stay valid even if the list changes,
-    // so we can use the iterator to deregister the kernel from the list
-    deregisterCatchallKernel_(inserted);
-  });
-}
-
-void OperatorEntry::deregisterKernel_(DispatchKey dispatch_key, std::list<KernelFunction>::iterator kernel) {
+void OperatorEntry::deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 
   auto found = kernels_.find(dispatch_key);
@@ -85,33 +74,22 @@ void OperatorEntry::deregisterKernel_(DispatchKey dispatch_key, std::list<Kernel
   updateDispatchTable_(dispatch_key);
 }
 
-void OperatorEntry::deregisterCatchallKernel_(std::list<KernelFunction>::iterator kernel) {
-  std::unique_lock<std::mutex> lock(kernelsMutex_);
-
-  catchAllKernels_.erase(kernel);
-
-  updateCatchallDispatchTable_();
-}
-
-void OperatorEntry::updateDispatchTable_(DispatchKey dispatch_key) {
+void OperatorEntry::updateDispatchTable_(c10::optional<DispatchKey> dispatch_key) {
   // precondition: kernelsMutex_ is locked
 
   auto k = kernels_.find(dispatch_key);
-
-  if (k == kernels_.end()) {
-    dispatchTable_.removeKernelIfExists(dispatch_key);
+  if (dispatch_key.has_value()) {
+    if (k == kernels_.end()) {
+      dispatchTable_.removeKernelIfExists(*dispatch_key);
+    } else {
+      dispatchTable_.setKernel(*dispatch_key, k->second.front());
+    }
   } else {
-    dispatchTable_.setKernel(dispatch_key, k->second.front());
-  }
-}
-
-void OperatorEntry::updateCatchallDispatchTable_() {
-  // precondition: kernelsMutex_ is locked
-
-  if (catchAllKernels_.size() == 0) {
-    dispatchTable_.removeCatchallKernel();
-  } else {
-    dispatchTable_.setCatchallKernel(catchAllKernels_.front());
+    if (k == kernels_.end()) {
+      dispatchTable_.removeCatchallKernel();
+    } else {
+      dispatchTable_.setCatchallKernel(k->second.front());
+    }
   }
 }
 

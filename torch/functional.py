@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from ._overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
+from torch._six import PY2
 
 Tensor = torch.Tensor
 from torch import _VF
@@ -821,8 +822,12 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         if type(input) is not Tensor and has_torch_function((input,)):
             return handle_torch_function(
                 norm, (input,), input, p=p, dim=dim, keepdim=keepdim, out=out, dtype=dtype)
+        # py2 considers isinstance(unicodestr, str) == False
+        if PY2 and isinstance(p, unicode):
+            p = str(p)
 
     ndim = input.dim()
+
 
     # catch default case
     if dim is None and out is None and dtype is None and p is not None:

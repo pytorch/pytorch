@@ -4,7 +4,9 @@
 #include <random>
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #endif
 #include <ATen/ATen.h>
