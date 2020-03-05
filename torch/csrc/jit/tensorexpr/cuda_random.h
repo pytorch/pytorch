@@ -9,8 +9,8 @@ constexpr auto philox_random_string = R"(
 class Philox {
 public:
   __device__ inline Philox(unsigned long long seed,
-			   unsigned long long subsequence,
-			   unsigned long long offset) {
+                           unsigned long long subsequence,
+                           unsigned long long offset) {
     key.x = (unsigned int)seed;
     key.y = (unsigned int)(seed >> 32);
     counter = make_uint4(0, 0, 0, 0);
@@ -25,8 +25,8 @@ public:
       uint4 counter_ = counter;
       uint2 key_ = key;
       for(int i = 0; i < 9; i++) {
-	counter_ = single_round(counter_, key_);
-	key_.x += (kPhilox10A); key_.y += (kPhilox10B);
+        counter_ = single_round(counter_, key_);
+        key_.x += (kPhilox10A); key_.y += (kPhilox10B);
       }
       output = single_round(counter_, key_);
       incr();
@@ -70,7 +70,7 @@ private:
     ++counter.w;
   }
   __device__ unsigned int mulhilo32(unsigned int a, unsigned int b,
-				    unsigned int *result_high) {
+                                    unsigned int *result_high) {
     *result_high = __umulhi(a, b);
     return a*b;
   }
