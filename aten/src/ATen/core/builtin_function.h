@@ -60,8 +60,8 @@ struct BuiltinOpFunction : public Function {
   }
 
   const c10::FunctionSchema& getSchema() const override {
+    std::unique_lock<std::mutex> lk(adapted_schema_mutex_);
     if (!adapted_schema_) {
-      std::unique_lock<std::mutex> lk(adapted_schema_mutex_);
       if (schema_.returns().size() == 0) {
         adapted_schema_ = schema_.cloneWithReturns(
             {c10::Argument("", c10::NoneType::get())});

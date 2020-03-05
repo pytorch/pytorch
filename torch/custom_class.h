@@ -174,6 +174,9 @@ class class_ {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchema<Func>(std::move(name), "");
     auto wrapped_func = [func = std::move(func)](Stack& stack) mutable -> void {
+      // TODO: we need to figure out how to profile calls to custom functions
+      // like this! Currently can't do it because the profiler stuff is in
+      // libtorch and not ATen
       using RetType =
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);

@@ -432,6 +432,7 @@ void Node::lint() const {
       // longer.
       break;
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
@@ -719,7 +720,7 @@ void Value::inferTypeFrom(const at::Tensor& output) {
 }
 
 bool Value::mustBeNone() const {
-  return node_->mustBeNone();
+  return type()->cast<NoneType>() || node_->mustBeNone();
 }
 bool Value::mustNotBeNone() const {
   return node_->kind() != prim::AutogradAdd && type() != NoneType::get() &&
