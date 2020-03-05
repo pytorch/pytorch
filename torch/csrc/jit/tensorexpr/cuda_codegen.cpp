@@ -35,16 +35,14 @@ class ScopedVarName {
       const std::string& name)
       : ScopedVarName(&manager->unique_name_mapping_, var, name) {}
 
+  ScopedVarName(const ScopedVarName&) = delete;
+  ScopedVarName& operator=(const ScopedVarName&) = delete;
+
   ~ScopedVarName() noexcept(false) {
-    auto iter = mapping_->find(var_);
-    TORCH_CHECK(iter != mapping_->end(), "Invalid var entry");
     mapping_->erase(var_);
   }
 
  private:
-  ScopedVarName(const ScopedVarName&) = delete;
-  ScopedVarName& operator=(const ScopedVarName&) = delete;
-
   VarNameMap* mapping_ = nullptr;
   const Var* var_ = nullptr;
 };
@@ -367,9 +365,9 @@ class PrioritizeLoad : public IRMutator {
   Stmt* AddMemLoadsFromList(Stmt* stmt) {
     MemLoadList& load_list = load_stack_.back();
     Stmt* stmt_v = stmt;
-    for (int i = load_list.size() - 1; i >= 0; i--) {
-      const MemLoadEntry& entry = load_list[i];
-      Var* var_ptr = const_cast<Var*>(entry.first);
+    for (auto iter = load_list.rbegin(); iter != load_list.rend(); iter++) {
+      const MemLoadEntry& entry = *iter;
+      const Var* var_ptr = entry.first;
       stmt_v = new LetStmt(var_ptr, entry.second, stmt_v);
     }
     return stmt_v;
@@ -427,7 +425,7 @@ void CudaCodeGen::Initialize() {
   // TODO: call nvrtc.
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
-  printer_.reset(new CudaPrinter(&oss_, has_random_));
+  printer_ = std::make_unique<CudaPrinter>(&oss_, has_random_);
 
   os() << "#define NAN __int_as_float(0x7fffffff)\n"
           "#define POS_INFINITY __int_as_float(0x7f800000)\n"
