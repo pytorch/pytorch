@@ -312,17 +312,17 @@ ENDIF(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable.
-if (ANDROID OR IOS)
+# Setting `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can
+# force it to do mobile build with host toolchain - which is useful for testing
+# purpose.
+if (ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
-  # Disable developing mobile interpreter for actual mobile build. Enable it elsewhere to capture build error.
-  set(INTERN_DISABLE_MOBILE_INTERP ON)
-endif()
 
-# Setting `PYTORCH_BUILD_MOBILE` environment variable can force it to do mobile
-# build with host toolchain.
-if (DEFINED ENV{PYTORCH_BUILD_MOBILE})
-  set(INTERN_BUILD_MOBILE ON)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+  if (DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
+    # C10_MOBILE is derived from Android/iOS toolchain macros in
+    # c10/macros/Macros.h, so it needs to be explicitly set here.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_MOBILE")
+  endif()
 endif()
 
 # INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
@@ -351,6 +351,9 @@ if (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(INTERN_DISABLE_ONNX ON)
   set(INTERN_DISABLE_AUTOGRAD ON)
   set(INTERN_USE_EIGEN_BLAS ON)
+  # Disable developing mobile interpreter for actual mobile build.
+  # Enable it elsewhere to capture build error.
+  set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
 # ---[ Utils
