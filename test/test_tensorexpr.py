@@ -379,9 +379,10 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_double(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
@@ -396,14 +397,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_short(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int16)
@@ -413,14 +416,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_char(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.uint8)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
@@ -430,14 +435,16 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_int64_promotion(self):
         TENSOR_LEN = 8
+
         def easy(x, y):
             aaa = torch.add(x, y)
-            bbb = torch.mul(aaa, y);
+            bbb = torch.mul(aaa, y)
             return bbb
 
         traced = torch.jit.trace(
             easy,
-            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8), torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)),
+            (torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8),
+             torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int64)),
         )
 
         a = torch.randint(TENSOR_LEN, (TENSOR_LEN,), dtype=torch.int8)
@@ -1162,7 +1169,7 @@ class TestTensorExprFuser(BaseTestClass):
             # assert cuda.elapsed_value() == 1
 
     @unittest.skip("guarding on static shapes is not working")
-    def test_guard_fails():
+    def test_guard_fails(self):
         @torch.jit.script
         def test(x, y, z):
             return x * y * z
@@ -1179,6 +1186,7 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_bitwise_ops(self):
         devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
         def run_and(x, y):
             return x & (x & y)
 
