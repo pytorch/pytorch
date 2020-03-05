@@ -908,8 +908,9 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
   std::vector<Tensor*> tensor_outputs(tensor_outputs_);
 
   if (backend_type == BackendType::kCudaCodeGen) {
-    for (int i = 0; i < tensor_outputs_.size(); i++) {
-      Tensor* tensor = tensor_outputs_[i];
+    for (size_t tensor_idx = 0; tensor_idx < tensor_outputs_.size();
+         tensor_idx++) {
+      Tensor* tensor = tensor_outputs_[tensor_idx];
       ExprHandle total_count = ExprHandle(tensor->dim(0));
       for (int i = 1; i < tensor->ndim(); i++) {
         const IntImm* total_count_i = total_count.AsNode<IntImm>();
@@ -942,7 +943,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
             std::reverse(dims.begin(), dims.end());
             return tensor->call(dims);
           });
-      tensor_outputs[i] = new_out;
+      tensor_outputs[tensor_idx] = new_out;
     }
   }
 
@@ -953,7 +954,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
     l.ComputeInline(l.getLoopBodyFor(p.second));
   }
   if (backend_type == kCudaCodeGen) {
-    for (int i = 0; i < tensor_outputs_.size(); i++) {
+    for (size_t i = 0; i < tensor_outputs_.size(); i++) {
       l.ComputeInline(l.getLoopBodyFor(tensor_outputs_[i]));
 
       Tensor* tensor = tensor_outputs[i];
@@ -967,7 +968,7 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
       if (loop_levels == 2) {
         Stmt* outer;
         Stmt* inner;
-        int kDefaultBlockSize = 512;
+        const int kDefaultBlockSize = 512;
         if (block_size < 0) {
           block_size = kDefaultBlockSize;
         }
