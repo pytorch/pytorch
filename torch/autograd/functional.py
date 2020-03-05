@@ -238,7 +238,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            such that all the outputs are independent of it. If ``False``, we return zeros as the jvp for
             said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
@@ -268,6 +268,11 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         >>> jvp(adder, inputs, v)
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
+
+    Note::
+
+        The jvp is currently computed using the double backward trick as we don't have support for
+        forward mode AD in pytorch at the moment.
     """
 
     tuple_inputs, inputs = _as_tuple(inputs, "inputs", "jvp")
@@ -285,6 +290,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     outputs = func(*inputs)
     tuple_outputs, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
     _check_requires_grad(outputs, "outputs", strict=strict)
+    # The backward is linear so the value of grad_outputs is not important as it won't appear in the double
+    # backward graph. We only need to ensure that it does not contain inf or nan.
     grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
 
     grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
@@ -325,7 +332,7 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            such that all the outputs are independent of it. If ``False``, we return zeros as the jacobian for
             said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
@@ -414,7 +421,7 @@ def hessian(func, inputs, create_graph=False, strict=False):
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            such that all the outputs are independent of it. If ``False``, we return zeros as the hessian for
             said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
@@ -515,7 +522,7 @@ def vhp(func, inputs, v=None, create_graph=False, strict=False):
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            such that all the outputs are independent of it. If ``False``, we return zeros as the vhp for
             said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
@@ -615,7 +622,7 @@ def hvp(func, inputs, v=None, create_graph=False, strict=False):
             require gradients or be disconnected from the inputs.
             Defaults to ``False``.
         strict (bool, optional): If ``True``, an error will be raised when we detect that there exists an input
-            such that all the outputs are independent of it. If ``False``, we return zeros as the vjp for
+            such that all the outputs are independent of it. If ``False``, we return zeros as the hvp for
             said inputs, which is the expected mathematical value.
             Defaults to ``False``.
 
