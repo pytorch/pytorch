@@ -237,9 +237,7 @@ class ScriptModuleSerializer {
 
   void writeByteCode(const script::Module& module) {
     std::vector<c10::IValue> elements;
-
     moduleMethodsTuple(module, elements);
-
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
   }
