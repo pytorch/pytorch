@@ -144,6 +144,8 @@ class Pickler {
 
  private:
   void pushIValueImpl(const IValue& ivalue);
+  void startTypeTag();
+  void endTypeTag(const IValue& value);
   void pushBool(bool value);
   void pushDouble(double value);
   void pushGenericList(const IValue& ivalue);
@@ -163,10 +165,6 @@ class Pickler {
   void pushStorageOfTensor(const at::Tensor& tensor);
 
   void pushBinGet(uint32_t memo_id);
-  void pushSpecializedList(
-      const IValue& ivalue,
-      const char* list_name,
-      const std::function<void(const IValue&)>& item_pusher);
   void pushGlobal(
       const std::string& module_name,
       const std::string& class_name);

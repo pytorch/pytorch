@@ -1,15 +1,27 @@
 import unittest
+from typing import Dict, Tuple
 
 import torch
 import torch.distributed.rpc as rpc
+from torch import Tensor
 from torch.testing._internal.dist_utils import dist_init
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
 
+def python_function():
+    return 0
+
+
 def rpc_return_rref(dst):
     return rpc.remote(dst, torch.add, args=(torch.ones(2, 2), 1))
+
+
+# Define Script functions on both client and server sides.
+@torch.jit.script
+def no_arg():
+    return 0
 
 
 @torch.jit.script
@@ -101,10 +113,347 @@ def rref_script_annotation(rref_var):
     return rref_python_annotation(rref_var).to_here()
 
 
+@torch.jit.script
+def two_args_two_kwargs(
+    first_arg,
+    second_arg,
+    first_kwarg=torch.tensor([3, 3]),
+    second_kwarg=torch.tensor([4, 4]),
+):
+    return first_arg + second_arg + first_kwarg + second_kwarg
+
+
+@torch.jit.script
+def assorted_types_args_kwargs(
+    tensor_arg: Tensor,  # noqa: E999
+    str_arg: str,
+    int_arg: int,
+    tensor_kwarg: Tensor = torch.tensor([2, 2]),
+    str_kwarg: str = "str_kwarg",
+    int_kwarg: int = 2,
+):
+    return tensor_arg + tensor_kwarg, str_arg + str_kwarg, int_arg + int_kwarg
+
+
+@torch.jit.script
+def raise_script():
+    raise RuntimeError("Expected error")
+    return 0
+
+
+@torch.jit.script
+def rpc_async_call_remote_torchscript_in_torchscript(
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+):
+    fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+    ret = fut.wait()
+    return ret
+
+
+class JitRpcAsyncOpTest:
+    # Call functions remotely from Script.
+    @dist_init
+    def test_all_kwargs_are_populated_by_defaults(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        kwargs = {}
+        ret = rpc_async_call_remote_torchscript_in_torchscript(
+            dst_worker_name, args, kwargs
+        )
+        self.assertEqual(ret, torch.tensor([10, 10]))
+
+    @dist_init
+    def test_some_kwargs_are_populated_by_defaults(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        kwargs = {"first_kwarg": torch.tensor([2, 2])}
+        ret = rpc_async_call_remote_torchscript_in_torchscript(
+            dst_worker_name, args, kwargs
+        )
+        self.assertEqual(ret, torch.tensor([9, 9]))
+
+    @dist_init
+    def test_no_kwargs_are_populated_by_defaults(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+        kwargs = {
+            "first_kwarg": torch.tensor([2, 2]),
+            "second_kwarg": torch.tensor([3, 3]),
+        }
+        ret = rpc_async_call_remote_torchscript_in_torchscript(
+            dst_worker_name, args, kwargs
+        )
+        self.assertEqual(ret, torch.tensor([8, 8]))
+
+    @dist_init
+    def test_kwargs_in_the_front_can_be_specified_by_extra_args(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_with_extra_arg(
+            dst_worker_name: str,  # noqa: E999
+        ):
+            args = (
+                torch.tensor([1, 1]),
+                torch.tensor([2, 2]),
+                # This extra arg will be fed to the first kwarg.
+                torch.tensor([2, 2]),
+            )
+            kwargs = {"second_kwarg": torch.tensor([3, 3])}
+            fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_with_extra_arg(
+            dst_worker_name
+        )
+        self.assertEqual(ret, torch.tensor([8, 8]))
+
+    @dist_init
+    def test_args_and_kwargs_contain_different_types(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_with_assorted_types(
+            dst_worker_name: str
+        ):
+            args = (torch.tensor([1, 1]), "str_arg", 1)
+            # Must annotate the value type as `Any`, because JIT type inference
+            # does not support multiple types when defining a Dict.
+            # The error JIT gives is,
+            # "Dict values must contain only a single type, "
+            # "expected: Tensor but found str instead."
+            kwargs: Dict[str, Any] = {
+                "tensor_kwarg": torch.tensor([3, 3]),
+                "str_kwarg": "_str_kwarg",
+                "int_kwarg": 3,
+            }
+            fut = rpc.rpc_async(
+                dst_worker_name, assorted_types_args_kwargs, args, kwargs
+            )
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_with_assorted_types(
+            dst_worker_name
+        )
+        self.assertEqual(ret, (torch.tensor([4, 4]), "str_arg_str_kwarg", 4))
+
+    @dist_init
+    def test_kwargs_not_passed(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
+            dst_worker_name: str
+        ):
+            args = ()
+            fut = rpc.rpc_async(dst_worker_name, no_arg, args)
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_without_kwargs_passed(
+            dst_worker_name
+        )
+        self.assertEqual(ret, 0)
+
+    @dist_init
+    def test_args_kwargs_are_neither_passed(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
+            dst_worker_name: str
+        ):
+            fut = rpc.rpc_async(dst_worker_name, no_arg)
+            ret = fut.wait()
+            return ret
+
+        ret = rpc_async_call_remote_torchscript_in_torchscript_without_args_kwargs_passed(
+            dst_worker_name
+        )
+        self.assertEqual(ret, 0)
+
+    @dist_init
+    def test_less_than_needed_args_are_specified(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Notice, args matching happens during scripting.
+        with self.assertRaisesRegex(RuntimeError, "Argument second_arg not provided"):
+
+            @torch.jit.script
+            def rpc_async_call_remote_torchscript_in_torchscript_with_less_args(
+                dst_worker_name: str,  # noqa: E999
+            ):
+                args = (torch.tensor([1, 1]),)
+                kwargs = {}
+                fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+                ret = fut.wait()
+                return ret
+
+    @dist_init
+    def test_more_than_needed_args_are_specified(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Notice, args matching happens during scripting.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected at most 4 arguments but found 5 positional arguments",
+        ):
+
+            @torch.jit.script
+            def rpc_async_call_remote_torchscript_in_torchscript_with_more_args(
+                dst_worker_name: str,
+            ):
+                args = (
+                    torch.tensor([1, 1]),
+                    torch.tensor([2, 2]),
+                    torch.tensor([3, 3]),
+                    torch.tensor([4, 4]),
+                    torch.tensor([5, 5]),
+                )
+                kwargs = {}
+                fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+                ret = fut.wait()
+                return ret
+
+    @dist_init
+    def test_unexepected_kwarg_is_specified(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Notice, kwargs matching happens during execution.
+        @torch.jit.script
+        def rpc_async_call_remote_torchscript_in_torchscript_with_unexpected_kwarg(
+            dst_worker_name: str,  # noqa: E999
+        ):
+            args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
+            kwargs = {"third_kwarg": torch.tensor([1, 1])}
+            fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Unknown keyword argument 'third_kwarg'"
+        ):
+            ret = rpc_async_call_remote_torchscript_in_torchscript_with_unexpected_kwarg(
+                dst_worker_name
+            )
+            self.assertEqual(ret, 0)
+
+    @dist_init
+    def test_call_python_function_remotely_from_script_not_supported(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def rpc_async_call_remote_py_function_in_torchscript(dst_worker_name: str):
+            args = ()
+            kwargs = {}
+            fut = rpc.rpc_async(dst_worker_name, python_function, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        with self.assertRaisesRegex(
+            RuntimeError, "attempted to get undefined function"
+        ):
+            ret = rpc_async_call_remote_py_function_in_torchscript(dst_worker_name)
+            self.assertEqual(ret, 0)
+
+    @dist_init
+    def test_call_script_function_that_raises_remotely_from_script(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        # Notice, TorchScript always translates(emits) Python `raise` statement,
+        # as the exception message string, "Exception",
+        # no matter what exception type and excetpion message are in the statement,
+        @torch.jit.script
+        def rpc_async_call_remote_raising_torchscript_in_torchscript(
+            dst_worker_name: str
+        ):
+            args = ()
+            kwargs = {}
+            fut = rpc.rpc_async(dst_worker_name, raise_script, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        with self.assertRaisesRegex(RuntimeError, "Exception"):
+            ret = rpc_async_call_remote_raising_torchscript_in_torchscript(
+                dst_worker_name
+            )
+            self.assertEqual(ret, 0)
+
+    @dist_init
+    def test_call_script_function_that_not_exists_remotely_from_script(self):
+        if self.rank != 0:
+            return
+
+        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+
+        @torch.jit.script
+        def nonexisting_script():
+            return 0
+
+        @torch.jit.script
+        def rpc_async_call_remote_nonexisting_torchscript_in_torchscript(
+            dst_worker_name: str
+        ):
+            args = ()
+            kwargs = {}
+            fut = rpc.rpc_async(dst_worker_name, nonexisting_script, args, kwargs)
+            ret = fut.wait()
+            return ret
+
+        with self.assertRaisesRegex(
+            RuntimeError, "attempted to get undefined function nonexisting_script"
+        ):
+            ret = rpc_async_call_remote_nonexisting_torchscript_in_torchscript(
+                dst_worker_name
+            )
+            self.assertEqual(ret, 0)
+
+
 @unittest.skipIf(
     not torch._six.PY3, "Pytorch distributed rpc package does not support python2"
 )
-class JitRpcTest(RpcAgentTestFixture):
+class JitRpcTest(JitRpcAsyncOpTest, RpcAgentTestFixture):
     @dist_init
     def test_torchscript_function(self):
         dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
@@ -142,9 +491,7 @@ class JitRpcTest(RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank),
-                torch.jit._qualified_name(MyScriptClass),
-                args=(),
+                "worker{}".format(dst_rank), MyScriptClass, args=()
             )
         ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
 
@@ -152,18 +499,14 @@ class JitRpcTest(RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank),
-                torch.jit._qualified_name(MyScriptModule),
-                args=(self.rank,),
+                "worker{}".format(dst_rank), MyScriptModule, args=(self.rank,)
             )
 
         with self.assertRaisesRegex(
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank),
-                torch.jit._qualified_name(MyScriptModule(self.rank).forward),
-                args=(),
+                "worker{}".format(dst_rank), MyScriptModule(self.rank).forward, args=()
             )
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
