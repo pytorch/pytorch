@@ -56,21 +56,6 @@ void adagrad_fp16_update_prefetch__base(
   internal::adagrad_update_base_inlined(N, w, g, h, nw, nh, 1.0f, epsilon, lr);
 }
 
-void rowwise_adagrad_update__base(
-    int N,
-    float* w,
-    float* w_n, // prefetch ptr
-
-    const float* g,
-
-    float* h,
-    float* h_n, // prefetch ptr
-
-    float epsilon,
-    float lr) {
-  internal::rowwise_adagrad_update_inlined(N, w, w_n, g, h, h_n, epsilon, lr);
-}
-
 // version without prefetching
 decltype(adagrad_update__base) adagrad_update__avx_f16c;
 void adagrad_update(
@@ -179,111 +164,6 @@ void adagrad_fp16_update_prefetch(
       nw_n,
       nh,
       nh_n,
-      epsilon,
-      lr);
-}
-
-decltype(rowwise_adagrad_update__base) rowwise_adagrad_update__avx_f16c;
-void rowwise_adagrad_update(
-    int N,
-    float* w,
-    float* w_n, // prefetch ptr
-
-    const float* g,
-
-    float* h,
-    float* h_n, // prefetch ptr
-
-    float epsilon,
-    float lr) {
-  AVX_F16C_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
-  BASE_DO(rowwise_adagrad_update, N, w, w_n, g, h, h_n, epsilon, lr);
-}
-
-SPARSE_ADAGRAD_SPECIALIZATION(int32_t, base);
-
-decltype(sparse_adagrad_int32_t__base) sparse_adagrad_int32_t__avx_f16c;
-template <>
-int sparse_adagrad(
-    int num_rows,
-    int block_size,
-    uint64_t param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const int32_t* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr) {
-  AVX_F16C_DO(
-      sparse_adagrad_int32_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr);
-  BASE_DO(
-      sparse_adagrad_int32_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr);
-}
-
-SPARSE_ADAGRAD_SPECIALIZATION(int64_t, base);
-
-decltype(sparse_adagrad_int64_t__base) sparse_adagrad_int64_t__avx_f16c;
-template <>
-int sparse_adagrad(
-    int num_rows,
-    int block_size,
-    uint64_t param_size,
-    const float* w,
-    const float* g,
-    const float* h,
-    const int64_t* indices,
-    float* nw,
-    float* nh,
-    float epsilon,
-    float lr) {
-  AVX_F16C_DO(
-      sparse_adagrad_int64_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
-      epsilon,
-      lr);
-  BASE_DO(
-      sparse_adagrad_int64_t,
-      num_rows,
-      block_size,
-      param_size,
-      w,
-      g,
-      h,
-      indices,
-      nw,
-      nh,
       epsilon,
       lr);
 }

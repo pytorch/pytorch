@@ -48,14 +48,13 @@ void THTensor_setStorageNd(THTensor *self, THStorage *storage, ptrdiff_t storage
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto data_type = THTensor_getStoragePtr(self)->dtype();
     if(storage)
     {
       c10::raw::intrusive_ptr::incref(storage);
       THTensor_stealAndSetStoragePtr(self, storage);
     }
     else {
-      THTensor_stealAndSetStoragePtr(self, THStorage_new(data_type));
+      THError("Tensor: invalid new null storage");
     }
   }
 

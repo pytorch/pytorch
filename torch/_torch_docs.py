@@ -2593,6 +2593,17 @@ Args:
     input (Tensor): the PyTorch tensor to test
 """)
 
+add_docstr(torch.is_complex,
+           r"""
+is_complex(input) -> (bool)
+
+Returns True if the data type of :attr:`input` is a floating point data type i.e.,
+one of ``torch.complex64``, and ``torch.float128``.
+
+Args:
+    input (Tensor): the PyTorch tensor to test
+""")
+
 add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
@@ -5618,7 +5629,7 @@ Example::
     >>> x
     tensor([ 2.4320, -0.4608,  0.7702])
     >>> torch.t(x)
-    tensor([.2.4320,.-0.4608,..0.7702])
+    tensor([ 2.4320, -0.4608,  0.7702])
     >>> x = torch.randn(2, 3)
     >>> x
     tensor([[ 0.4875,  0.9158, -0.5872],
