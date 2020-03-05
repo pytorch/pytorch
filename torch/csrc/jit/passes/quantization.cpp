@@ -1997,14 +1997,13 @@ void FoldQuantNodesIntoInputsOutputs(std::shared_ptr<Graph>& graph) {
   throw std::runtime_error("Pass not implemented yet!");
 }
 
-void SwapFunctionalLinearInModule(
-    script::Module& module) {
+void SwapFunctionalLinear(script::Module& module) {
   for (auto& method : module.get_methods()) {
     std::shared_ptr<Graph> g = method.graph();
     SwapFunctionalLinear(g);
   }
   for (script::Module m : module.children()) {
-    SwapFunctionalLinearInModule(m);
+    SwapFunctionalLinear(m);
   }
 }
 
@@ -2027,7 +2026,7 @@ graph(%linear, %input, %weight, %bias):
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(functional_linear, aten_linear);
   // TODO: runOnGraph takes const ref?
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter);
 }
 
 void ReplicateDeQuant(std::shared_ptr<Graph>& graph) {
@@ -2391,7 +2390,7 @@ void DedupModuleUses(script::Module& module) {
 }
 
 script::Module Finalize(script::Module& module) {
-  SwapFunctionalLinearInModule(module);
+  SwapFunctionalLinear(module);
   auto graph = module.get_method("forward").graph();
   Inline(*graph);
   ReplicateDeQuant(graph);
