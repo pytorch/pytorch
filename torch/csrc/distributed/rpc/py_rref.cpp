@@ -75,7 +75,7 @@ TypePtr tryInferTypeWithTypeHint(
         "The RRef being created contains a ScriptModule, "
         "must provide its ModuleInterface type hint. ",
         module.value().type()->python_str(),
-        " must be a subtype of type_hint. Now the specified type_hind is ",
+        " must be a subtype of type_hint. Now the specified type_hint is ",
         type_hint_ptr != nullptr ? type_hint_ptr->python_str() : "None");
     return type_hint_ptr;
   } else {
