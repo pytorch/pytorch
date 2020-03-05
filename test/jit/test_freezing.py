@@ -69,7 +69,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(m._c.hasattr('e'))
         self.assertFalse(m._c.hasattr('f'))
         self.assertFalse(m._c.hasattr('g'))
-        self.assertTrue(m._c.hasattr('h'))
+        self.assertFalse(m._c.hasattr('h'))
         self.assertFalse(m._c.hasattr('t'))
         self.assertFalse(m._c.hasattr('ts'))
         self.assertTrue(m._c.hasattr('tt'))
