@@ -947,7 +947,7 @@ class TestCase(expecttest.TestCase):
             prec = 10**(-places)
         self.assertEqual(x, y, msg, atol=prec, allow_inf=allow_inf)
 
-    def assertNotEqual(self, x, y, message='', *, atol=None):
+    def assertNotEqual(self, x, y, message='', atol=None):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
         if atol is None:
