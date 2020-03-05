@@ -59,36 +59,6 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushDict(ivalue);
   } else if (ivalue.isNone()) {
     push<PickleOpCode>(PickleOpCode::NONE);
-  } else if (ivalue.isIntList()) {
-    pushSpecializedList(
-        ivalue, "build_intlist", [=](const IValue& ivalue) {
-          for (const int64_t item : ivalue.toIntVector()) {
-            pushInt(item);
-          }
-        });
-  } else if (ivalue.isTensorList()) {
-    pushSpecializedList(
-        ivalue, "build_tensorlist", [=](const IValue& ivalue) {
-          for (const at::Tensor& item : ivalue.toTensorVector()) {
-            pushIValue(item);
-          }
-        });
-  } else if (ivalue.isDoubleList()) {
-    pushSpecializedList(
-        ivalue, "build_doublelist", [=](const IValue& ivalue) {
-          for (double item : ivalue.toDoubleVector()) {
-            pushDouble(item);
-          }
-        });
-  } else if (ivalue.isBoolList()) {
-    pushSpecializedList(
-        ivalue, "build_boollist", [=](const IValue& ivalue) {
-          for (bool item : ivalue.toBoolList()) {
-            pushBool(item);
-          }
-        });
-  // note: isList must be after isIntList and friends because
-  // isList is true for all lists.
   } else if (ivalue.isList()) {
     pushGenericList(ivalue);
   } else if (ivalue.isObject()) {
@@ -413,33 +383,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushSpecializedList(
-    const IValue& ivalue,
-    const char* list_name,
-    const std::function<void(const IValue&)>& item_pusher) {
-  pushGlobal("torch.jit._pickle", list_name);
-
-  // Reduce arguments are spread (e.g. `*args`) before calling the global,
-  // so wrap in a tuple
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-  // Mark list
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Add all items
-  item_pusher(ivalue);
-
-  // Finish list
-  push<PickleOpCode>(PickleOpCode::APPENDS);
-
-  // Finish tuple
-  push<PickleOpCode>(PickleOpCode::TUPLE);
-
-  // Call reduce
-  push<PickleOpCode>(PickleOpCode::REDUCE);
-}
-
 static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped;
@@ -480,25 +423,49 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-void Pickler::pushEmptyDict() {
-  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+// startTypeTag() and endTypeTag() must be called in a pair, with 1 argument
+// pushed on the stack in between them. They will add the type of a container
+// ivalue to the stack as a string so we can preserve type tags across
+// serialization
+void Pickler::startTypeTag() {
+  pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
+
+// See startTypeTag
+void Pickler::endTypeTag(const IValue& ivalue) {
+  TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
+
+  // Push the dict type
+  TORCH_INTERNAL_ASSERT(ivalue.type());
+  pushString(ivalue.type()->python_str());
+
+  // Pop the dict and type into a tuple
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+
+  // Call function via reduce
+  push<PickleOpCode>(PickleOpCode::REDUCE);
+}
+
 void Pickler::pushDict(const IValue& ivalue) {
-  pushEmptyDict();
   auto dict_items = iterationOrder(ivalue.toGenericDict());
-  if (dict_items.size() == 0) {
-    return;
+
+  startTypeTag();
+
+  push<PickleOpCode>(PickleOpCode::EMPTY_DICT);
+
+  if (dict_items.size() >= 0) {
+    push<PickleOpCode>(PickleOpCode::MARK);
+
+    // Sort the dict for deterministic keys
+    for (const auto& pair : dict_items) {
+      pushIValue(pair.first);
+      pushIValue(pair.second);
+    }
+
+    push<PickleOpCode>(PickleOpCode::SETITEMS);
   }
 
-  push<PickleOpCode>(PickleOpCode::MARK);
-
-  // Sort the dict for deterministic keys
-  for (const auto& pair : dict_items) {
-    pushIValue(pair.first);
-    pushIValue(pair.second);
-  }
-
-  push<PickleOpCode>(PickleOpCode::SETITEMS);
+  endTypeTag(ivalue);
 }
 
 size_t Pickler::pushNextBinPut() {
@@ -517,15 +484,17 @@ size_t Pickler::pushNextBinPut() {
 
 void Pickler::pushGenericList(const IValue& ivalue) {
   auto list = ivalue.toListRef();
+  startTypeTag();
+
+  // Push the list items
   push<PickleOpCode>(PickleOpCode::EMPTY_LIST);
-
   push<PickleOpCode>(PickleOpCode::MARK);
-
   for (const IValue& item : list) {
     pushIValue(item);
   }
-
   push<PickleOpCode>(PickleOpCode::APPENDS);
+
+  endTypeTag(ivalue);
 }
 
 void Pickler::pushTuple(const IValue& ivalue) {

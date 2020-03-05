@@ -361,6 +361,7 @@ struct CodeImpl {
   size_t n_outputs;
   size_t n_inputs;
   TypePtr return_type_;
+  std::string function_name_;
 
   // We MUST hold onto graph here because some Operators stored in the
   // instruction lists have dependencies on meta-data stored in the graph
@@ -388,8 +389,12 @@ struct CodeImpl {
   std::vector<std::unique_ptr<Function>> bailout_functions_;
   size_t remaining_bailout_depth_;
 
-  CodeImpl(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
-      : preprocess_(*graph),
+  CodeImpl(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      size_t remaining_bailout_depth)
+      : function_name_(std::move(function_name)),
+        preprocess_(*graph),
         current_node_(preprocess_.graph->return_node()),
         remaining_bailout_depth_(remaining_bailout_depth) {
     graph_ = preprocess_.graph;
@@ -746,7 +751,7 @@ struct CodeImpl {
 
   void emitFork(Node* node) {
     emitLoadInputs(node->inputs());
-    code_table_.emplace_back(node->g(attr::Subgraph));
+    code_table_.emplace_back(Code(node->g(attr::Subgraph), "<forked function>"));
     insertInstruction(FORK, code_table_.size() - 1, node->inputs().size());
   }
 
@@ -1279,39 +1284,34 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   void formatStackTrace(std::ostream& out) {
-    std::string previous_fn_name = "";
-    for (int64_t i = frames.size() - 1; i >= 0; i--) {
-      const Frame& frame = frames[frames.size() - 1 - i];
-      size_t pc = (i == 0) ? frame.pc
-                           : frame.pc -
-              1; // make sure we report the call node, not the node after it
+    std::vector<StackEntry> entries;
+    for (size_t i = 0; i < frames.size(); ++i) {
+      const Frame& frame = frames[i];
+      std::string previous_fn_name = frame.function->function_name_;
+      size_t pc = frame.pc;
+      // CALL nodes have already advanced the pc, so 
+      // undo that to report the call node
+      if (i + 1 < frames.size()) {
+        --pc;
+      }
+
       Node* node = frame.function->instructions_source_[pc];
       if (node->callstack()) {
         for (const auto& p : (*node->callstack())->vec()) {
-          p.second.print_with_context(
-              out, /*context=*/3, /*highlight=*/true, previous_fn_name);
+          entries.emplace_back(StackEntry {previous_fn_name, p.second});
           previous_fn_name = p.first->name();
         }
       }
-      node->sourceRange().print_with_context(
-          out, /*context=*/3, /*highlight=*/true, previous_fn_name);
-      if (node->kind() == prim::CallFunction) {
-        previous_fn_name = node->inputs()
-                               .at(0)
-                               ->type()
-                               ->expect<FunctionType>()
-                               ->function()
-                               ->name();
-      }
+      entries.emplace_back(StackEntry {previous_fn_name, node->sourceRange()});
     }
+    format_stack_trace(out, entries);
   }
 
   void handleError(const ExceptionMessage& msg, bool is_jit_exception) {
     std::stringstream ss;
-    ss << msg << "\n";
-    ss << "The above operation failed in interpreter.\n";
-    ss << "Traceback (most recent call last):\n";
+    ss << "The following operation failed in the TorchScript interpreter.\n";
     formatStackTrace(ss);
+    ss << "RuntimeError: " << msg << "\n";
     if (future_) {
       future_->markCompleted(Future::FutureError(ss.str()));
     } else if (is_jit_exception) {
@@ -1359,8 +1359,8 @@ std::ostream& operator<<(std::ostream& out, const Code& code) {
   return out;
 }
 
-Code::Code(const std::shared_ptr<Graph>& graph, size_t remaining_bailout_depth)
-    : pImpl(new CodeImpl(graph, remaining_bailout_depth)) {}
+Code::Code(const std::shared_ptr<Graph>& graph, std::string function_name, size_t remaining_bailout_depth)
+    : pImpl(new CodeImpl(graph, std::move(function_name), remaining_bailout_depth)) {}
 Code::~Code() = default;
 
 const std::vector<GraphExecutor*>& Code::grad_executors() {
