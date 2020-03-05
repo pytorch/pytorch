@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <THCUNN/THCUNN.h>
 #include <TH/THHalf.h>
 #include <THC/THCNumerics.cuh>
@@ -126,7 +128,7 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
 {
   if (nElement == 0) {
     // Mean reduction on empty tensors produces NaN
-    *output = ::nan("");
+    *output = std::numeric_limits<double>::quiet_NaN();
   }
   if (*total_weight != 0) {
     *output = THCNumerics<T>::div(*output, *total_weight);
