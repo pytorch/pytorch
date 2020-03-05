@@ -29,7 +29,8 @@ class TreeConfigNode(ConfigNode):
 
     def is_build_only(self):
         if str(self.find_prop("language_version")) == "onnx_main_py3.6" or \
-                str(self.find_prop("language_version")) == "onnx_py2":
+                str(self.find_prop("language_version")) == "onnx_ort1_py3.6" or \
+                str(self.find_prop("language_version")) == "onnx_ort2_py3.6":
             return False
         return set(str(c) for c in self.find_prop("compiler_version")).intersection({
             "clang3.8",
@@ -38,10 +39,9 @@ class TreeConfigNode(ConfigNode):
             "android",
         }) or self.find_prop("distro_version").name == "macos"
 
-    def is_test(self):
+    def is_test_only(self):
         if str(self.find_prop("language_version")) == "onnx_ort1_py3.6" or \
-                str(self.find_prop("language_version")) == "onnx_ort2_py3.6" or \
-                str(self.find_prop("language_version")) == "onnx_py2":
+                str(self.find_prop("language_version")) == "onnx_ort2_py3.6":
             return True
         return False
 
@@ -77,6 +77,7 @@ class LanguageConfigNode(TreeConfigNode):
     def init2(self, node_name):
         self.props["language_version"] = node_name
         self.props["build_only"] = self.is_build_only()
+        self.props["test_only"] = self.is_test_only()
 
     def child_constructor(self):
         return ImportantConfigNode

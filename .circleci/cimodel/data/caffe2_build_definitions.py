@@ -23,6 +23,7 @@ class Conf:
     # for gpu files and host compiler (gcc/clang) for cpu files)
     compilers: [Ver]
     build_only: bool
+    test_only: bool
     is_important: bool
 
     @property
@@ -149,6 +150,7 @@ def instantiate_configs():
             distro=fc.find_prop("distro_version"),
             compilers=fc.find_prop("compiler_version"),
             build_only=fc.find_prop("build_only"),
+            test_only=fc.find_prop("test_only"),
             is_important=fc.find_prop("important"),
         )
 
@@ -163,11 +165,11 @@ def get_workflow_jobs():
 
     x = []
     for conf_options in configs:
-
-        if conf_options.build_only:
-            phases = ["test"]
-        else:
+        phases = ["build"]
+        if not conf_options.build_only:
             phases = dimensions.PHASES
+        if conf_options.test_only:
+            phases = ["test"]
 
         for phase in phases:
             x.append(conf_options.gen_workflow_job(phase))

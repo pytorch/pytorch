@@ -2346,7 +2346,6 @@ workflows:
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
-          build_only: "1"
           resource_class: large
       - caffe2_linux_test:
           name: caffe2_onnx_ort2_py3_6_clang7_ubuntu16_04_test
@@ -2355,7 +2354,6 @@ workflows:
             - caffe2_onnx_main_py3_6_clang7_ubuntu16_04_build
           build_environment: "caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/py3.6-clang7-ubuntu16.04:345"
-          build_only: "1"
           resource_class: large
       # Binary builds (subset, to smoke test that they'll work)
       #
