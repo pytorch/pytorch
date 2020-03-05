@@ -197,7 +197,15 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
           const c10::optional<torch::utils::FutureError>& error) {
         if (error) {
           // Don't accumulate gradients if we receive an error.
-          accumulateGradFuture->setError(error->what());
+          // We must add the node information here since DistEngine::execute
+          // waits on accumulateGradFuture and will throw an exception once we
+          // set the error below.
+          std::string errorMsg = c10::str(
+              "Error on Node ",
+              DistAutogradContainer::getInstance().getWorkerId(),
+              ": ",
+              error->what());
+          accumulateGradFuture->setError(errorMsg);
           return;
         }
 
