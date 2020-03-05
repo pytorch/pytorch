@@ -67,8 +67,7 @@ PyRRef::PyRRef(const py::object& value)
           // that holds an IValue of an pyobject
           elem_type = PyObjectType::get();
         }
-        auto rref =
-            RRefContext::getInstance().createOwnerRRef(elem_type);
+        auto rref = RRefContext::getInstance().createOwnerRRef(elem_type);
         py::object copy(value); // increases refcount
         IValue ivalue = jit::toIValue(std::move(copy), elem_type);
         rref->setValue(std::move(ivalue));
@@ -95,8 +94,7 @@ py::object PyRRef::toHere() {
       // python_rpc_handler deserialization will acquires GIL.
       auto rfr_values = value.toTuple()->elements();
       return PythonRpcHandler::getInstance().deserialize(
-        SerializedPyObj::fromIValues(rfr_values)
-      );
+          SerializedPyObj::fromIValues(rfr_values));
     } else {
       // acquiring GIL as torch::jit::toPyObject creates new py::object
       // without grabbing the GIL.
@@ -131,8 +129,7 @@ std::string PyRRef::str() const {
     ss << "OwnerRRef(" << rref_->rrefId() << ")";
   } else {
     ss << "UserRRef(RRefId = " << rref_->rrefId() << ", ForkId = "
-       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId()
-       << ")";
+       << c10::static_intrusive_pointer_cast<UserRRef>(rref_)->forkId() << ")";
   }
   return ss.str();
 }
@@ -163,7 +160,6 @@ c10::IValue PyRRef::toIValue() {
   auto rrefPtr = c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref_);
   return IValue(rrefPtr);
 }
-
 
 } // namespace rpc
 } // namespace distributed
