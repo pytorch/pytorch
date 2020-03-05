@@ -5,7 +5,6 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.parallel as dp
-import torch.optim as optim
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
