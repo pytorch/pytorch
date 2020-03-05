@@ -131,7 +131,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
   }
 
   NoGradGuard no_grad;
-  if (torch::_use_cudnn_rnn_flatten_weight(flat_weights_)) {
+  if (torch::_use_cudnn_rnn_flatten_weight()) {
     torch::_cudnn_rnn_flatten_weight(
         flat_weights_,
         /*weight_stride0=*/options.with_bias() ? 4 : 2,

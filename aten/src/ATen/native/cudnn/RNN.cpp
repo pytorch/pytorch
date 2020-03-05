@@ -16,7 +16,7 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-bool _use_cudnn_rnn_flatten_weight(TensorList weight_arr) {
+bool _use_cudnn_rnn_flatten_weight() {
   return false;
 }
 
@@ -619,7 +619,7 @@ namespace {
 
 } // anonymous namespace
 
-bool _use_cudnn_rnn_flatten_weight(TensorList weight_arr) {
+bool _use_cudnn_rnn_flatten_weight() {
   return true;
 }
 
