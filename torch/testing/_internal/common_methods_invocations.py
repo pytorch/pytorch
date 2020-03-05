@@ -952,13 +952,13 @@ def _compare_trilu_indices(
 
     else:
         self.assertEqual(
-            torch.ones(row, col, dtype=dtype, device='cpu')
-                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.ones(row, col, device='cpu')
+                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
         self.assertEqual(
-            torch.ones(row, col, dtype=dtype, device='cpu')
-                 .tril(offset).nonzero().transpose(0, 1).to(device),
+            torch.ones(row, col, device='cpu')
+                 .tril(offset).nonzero().to(dtype).transpose(0, 1),
             torch.tril_indices(row, col, offset, dtype=dtype, device=device))
 
 
