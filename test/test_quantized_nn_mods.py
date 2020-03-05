@@ -399,7 +399,7 @@ class ModuleAPITest(QuantizationTestCase):
 
             qlinear.set_weight_bias(W_q, B)
             # Simple round-trip test to ensure weight()/set_weight() API
-            self.assertEqual(qlinear.weight(), W_q)
+            self.assertEqual(qlinear.weight(), W_q, atol=1e-5)
             W_pack = qlinear._packed_params._packed_params
 
             qlinear.scale = float(scale)
