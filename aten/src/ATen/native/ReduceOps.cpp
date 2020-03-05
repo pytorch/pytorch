@@ -718,7 +718,7 @@ Tensor min_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
     Tensor result = at::empty({0}, self.options());
     ScalarType dtype = get_dtype(result, self, {}, true);
     auto iter = make_reduction("min_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "operation does not have an identity.");
+    TORCH_CHECK(iter.numel() > 0, "min_values on a tensor with no elements is not defined.");
     min_values_stub(iter.device_type(), iter);
     return result;
   }
@@ -731,7 +731,7 @@ Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
     Tensor result = at::empty({0}, self.options());
     ScalarType dtype = get_dtype(result, self, {}, true);
     auto iter = make_reduction("max_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "operation does not have an identity.");
+    TORCH_CHECK(iter.numel() > 0, "max_values on a tensor with no elements is not defined.");
     max_values_stub(iter.device_type(), iter);
     return result;
   }
@@ -745,14 +745,6 @@ Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
 Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
   TORCH_CHECK(false, "NYI: max_values with names");
   return at::max_values(self, dimnames_to_positions(self, dims), keepdim);
-}
-
-Tensor min(const Tensor &self) {
-  return at::min_values(self, std::vector<int64_t>{}, false);
-}
-
-Tensor max(const Tensor &self) {
-  return at::max_values(self, std::vector<int64_t>{}, false);
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {

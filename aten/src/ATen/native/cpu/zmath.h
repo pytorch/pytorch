@@ -200,7 +200,7 @@ inline std::complex<double> trunc_impl (std::complex<double> z) {
 
 template <typename TYPE>
 inline TYPE max_impl (TYPE a, TYPE b) {
-  if (std::isnan(a) || std::isnan(b)) {
+  if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
   } else {
     return std::max(a, b);
@@ -227,7 +227,7 @@ inline std::complex<double> max_impl (std::complex<double> a, std::complex<doubl
 
 template <typename TYPE>
 inline TYPE min_impl (TYPE a, TYPE b) {
-  if (std::isnan(a) || std::isnan(b)) {
+  if (_isnan<TYPE>(a) || _isnan<TYPE>(b)) {
     return std::numeric_limits<TYPE>::quiet_NaN();
   } else {
     return std::min(a, b);

@@ -1,6 +1,31 @@
 #pragma once
 
+#include <limits>
+
 namespace at { namespace native {
+
+// Maximum and minimum possible scalar values, including infinities
+template <typename scalar_t>
+constexpr scalar_t upper_bound() {
+  using lim = std::numeric_limits<scalar_t>;
+  return lim::has_infinity ? lim::infinity() : lim::max();
+}
+
+template <>
+constexpr bool upper_bound() {
+  return true;
+}
+
+template <typename scalar_t>
+constexpr scalar_t lower_bound() {
+  using lim = std::numeric_limits<scalar_t>;
+  return lim::has_infinity ? -lim::infinity() : lim::lowest();
+}
+
+template <>
+constexpr bool lower_bound() {
+  return false;
+}
 
 static inline int64_t ensure_nonempty_dim(int64_t dim) {
   return std::max<int64_t>(dim, 1);

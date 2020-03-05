@@ -72,14 +72,13 @@ inline scalar_t parallel_reduce(
   } else {
     const int64_t num_results = divup((end - begin), grain_size);
     std::vector<scalar_t> results(num_results);
-    scalar_t* results_data = results.data();
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
 #pragma omp parallel for if ((end - begin) >= grain_size)
     for (int64_t id = 0; id < num_results; id++) {
       int64_t i = begin + id * grain_size;
       try {
-        results_data[id] = f(i, i + std::min(end - i, grain_size), ident);
+        results[id] = f(i, i + std::min(end - i, grain_size), ident);
       } catch (...) {
         if (!err_flag.test_and_set()) {
           eptr = std::current_exception();
