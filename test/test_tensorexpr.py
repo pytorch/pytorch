@@ -1174,13 +1174,13 @@ class TestTensorExprFuser(BaseTestClass):
         def test(x, y, z):
             return x * y * z
         cuda = CudaCodeGenExecuted()
-        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        r1 = test(*[torch.rand(4).cuda() for _ in range(3)])
         assert cuda.elapsed_value() == 0
-        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        r2 = test(*[torch.rand(4).cuda() for _ in range(3)])
         assert cuda.elapsed_value() == 1
-        _ = test(*[torch.rand(4).cuda() for _ in range(3)])
+        r3 = test(*[torch.rand(4).cuda() for _ in range(3)])
         assert cuda.elapsed_value() == 2
-        _ = test(*[torch.rand(7).cuda() for _ in range(3)])
+        r4 = test(*[torch.rand(7).cuda() for _ in range(3)])
         print(test.graph_for(*[torch.rand(7).cuda() for _ in range(3)]))
         assert cuda.elapsed_value() == 2
 
