@@ -9,6 +9,8 @@ from torch._six import PY2
 from torch._C._jit_tree_views import *
 from torch._utils_internal import get_source_lines_and_file
 
+from torch._jit_internal import SourceContext
+
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
@@ -169,14 +171,6 @@ def get_jit_def(fn, self_name=None):
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, _uses_true_division(fn))
     return build_def(ctx, py_ast.body[0], type_line, self_name)
-
-
-# Thin wrapper around SourceRangeFactory to store extra metadata
-# about the function-to-be-compiled.
-class SourceContext(SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
-        self.uses_true_division = uses_true_division
 
 
 class Builder(object):
