@@ -8,7 +8,7 @@
 
 set -e
 
-export PYTORCH_BUILD_MOBILE=1
+export BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN=1
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
 echo "Bash: $(/bin/bash --version | head -1)"

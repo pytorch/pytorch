@@ -300,6 +300,17 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::CudaFusionGroup,
+         [](const Node* node) -> Operation {
+           const auto key = registerFusion(node);
+           return [key](Stack& stack) {
+             RECORD_FUNCTION("CudaFusionGroup", std::vector<c10::IValue>());
+             runFusion(key, stack);
+             return 0;
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
