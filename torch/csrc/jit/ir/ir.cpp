@@ -430,6 +430,7 @@ void Node::lint() const {
       // longer.
       break;
     case prim::FusionGroup:
+    case prim::CudaFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
