@@ -33,7 +33,7 @@ PyObject *THPDtype_is_floating_point(THPDtype *self, PyObject *noargs)
 
 PyObject *THPDtype_is_integral(THPDtype *self, PyObject *noargs)
 {
-  if (at::isIntegralType(self->scalar_type, /* include_bool=*/false)) {
+  if (at::isIntegralType(self->scalar_type, /* includeBool=*/false)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
