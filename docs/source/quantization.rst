@@ -76,8 +76,9 @@ to quantized values.
 
 The mapping is performed by converting the floating point tensors using
 
-.. image:: math-quantizer-equation.png
-   :width: 40%
+.. math::
+    Q(x, \text{scale}, \text{zero\_point}) 
+        = \text{round}\left(\frac{x}{\text{scale}} + \text{zero\_point}\right)
 
 Note that, we ensure that zero in floating point is represented with no error after quantization,
 thereby ensuring that operations like padding do not cause additional quantization error.
