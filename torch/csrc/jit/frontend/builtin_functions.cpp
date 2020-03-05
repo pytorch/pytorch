@@ -48,7 +48,7 @@ def ndim(a : Tensor) -> int:
   return a.dim()
 def T(a : Tensor) -> Tensor:
   return a.numpy_T()
-def shape(a : Tensor) -> int[]:
+def shape(a : Tensor) -> List[int]:
   return a.size()
 )SCRIPT";
 
