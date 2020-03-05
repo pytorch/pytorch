@@ -64,39 +64,33 @@ at::Tensor& random_impl(at::Tensor& self, at::Generator* generator) {
   return self;
 }
 
-#define show_out_of_bounds_warning(name) \
-  TORCH_WARN(name, " is out of bounds for ", dtype, ". This warning will become an error in version 1.6 release, please fix the code in advance")
+#define CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(var, name, min, max, dtype) \
+  if (var < min || var > max) { \
+    TORCH_WARN(name , " is out of bounds for ", dtype, ". This warning will become an error in version 1.6 release, please fix the code in advance"); \
+  }
 
-static void check_from_to(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
+static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
   const auto scalar_type = typeMetaToScalarType(dtype);
   if (isFloatingType(scalar_type)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "check_random_fp_bounds", [&] {
       const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
-      if (from < min || from > max) {
-        show_out_of_bounds_warning("from");
-      }
-      if (to_inc < min || to_inc > max) {
-        show_out_of_bounds_warning("to - 1");
-      }
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", min, max, dtype);
     });
   } else if (isIntegralType(scalar_type, /*includeBool=*/true)) {
     AT_DISPATCH_INTEGRAL_TYPES_AND(at::ScalarType::Bool, scalar_type, "check_random_integral_bounds", [&]() {
       const auto min = static_cast<int64_t>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<int64_t>(std::numeric_limits<scalar_t>::max());
-      if (from < min || from > max) {
-        show_out_of_bounds_warning("from");
-      }
-      if (to_inc < min || to_inc > max) {
-        show_out_of_bounds_warning("to - 1");
-      }
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(from, "from", min, max, dtype);
+      CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING(to_inc, "to - 1", min, max, dtype);
     });
   } else {
     TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
   }
 }
 
-#undef show_out_of_bounds_warning
+#undef CHECK_OUT_OF_BOUNDS_AND_SHOW_WARNING
 
 template<template<typename> class random_from_to_kernel, typename RNG>
 at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<int64_t> to_opt, at::Generator* generator) {
@@ -114,7 +108,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
         TORCH_CHECK(from < to, "random_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=", from, " >= to=", to);
       });
     }
-    check_from_to(from, to - 1, self.dtype());
+    check_from_to_in_range(from, to - 1, self.dtype());
     range = static_cast<uint64_t>(to) - static_cast<uint64_t>(from);
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
@@ -137,7 +131,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
     } else {
       TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
     }
-    check_from_to(from, to_inc, self.dtype());
+    check_from_to_in_range(from, to_inc, self.dtype());
     range = static_cast<uint64_t>(to_inc) - static_cast<uint64_t>(from) + 1;
     random_from_to_kernel<RNG>()(iter, range, from, gen);
   } else {

@@ -156,12 +156,6 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
   fi
 fi
 
-# TODO: Related to a memory leak found in CUDA 10.2, remove this after that is resolved
-#       For context https://github.com/pytorch/pytorch/pull/33471#issuecomment-591777657
-if [[ "$BUILD_ENVIRONMENT" == *cuda10.2* ]]; then
-  export VALGRIND="OFF"
-fi
-
 function pip_install() {
   # retry 3 times
   # old versions of pip don't have the "--progress-bar" flag
@@ -184,4 +178,12 @@ function get_exit_code() {
   retcode=$?
   set -e
   return $retcode
+}
+
+function file_diff_from_base() {
+  # The fetch may fail on Docker hosts, but it's not always necessary.
+  set +e
+  git fetch origin master --quiet
+  set -e
+  git diff --name-only "$(git merge-base origin master HEAD)" > "$1"
 }
