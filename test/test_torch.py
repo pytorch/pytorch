@@ -12155,8 +12155,8 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_intbool_to_float_upcasting(self, device, dtype):
         # Not all the functions are appropriate for this upcasting, so only test for the list below
-        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log10", "log1p", \
-                   "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "cosh", "exp", "tan", \
+        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log10", "log1p",
+                   "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "cosh", "exp", "tan",
                    "tanh"]
         # Make sure that the ops promote to floating default types
         # Test both float32 and double (float64) dtypes
