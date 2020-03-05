@@ -132,18 +132,18 @@ TEST(TensorIndexingTest, TestNone) {
 
 TEST(TensorIndexingTest, TestStep) {
   auto v = torch::arange(10);
-  assert_tensor_equal(v.index({{None, None, 1}}), v);
-  assert_tensor_equal(v.index({{None, None, 2}}), torch::tensor({0, 2, 4, 6, 8}));
-  assert_tensor_equal(v.index({{None, None, 3}}), torch::tensor({0, 3, 6, 9}));
-  assert_tensor_equal(v.index({{None, None, 11}}), torch::tensor({0}));
-  assert_tensor_equal(v.index({{1, 6, 2}}), torch::tensor({1, 3, 5}));
+  assert_tensor_equal(v.index({Slice(None, None, 1)}), v);
+  assert_tensor_equal(v.index({Slice(None, None, 2)}), torch::tensor({0, 2, 4, 6, 8}));
+  assert_tensor_equal(v.index({Slice(None, None, 3)}), torch::tensor({0, 3, 6, 9}));
+  assert_tensor_equal(v.index({Slice(None, None, 11)}), torch::tensor({0}));
+  assert_tensor_equal(v.index({Slice(1, 6, 2)}), torch::tensor({1, 3, 5}));
 }
 
 TEST(TensorIndexingTest, TestStepAssignment) {
   auto v = torch::zeros({4, 4});
   v.index_put_({0, Slice(1, None, 2)}, torch::tensor({3., 4.}));
   assert_tensor_equal(v.index({0}), torch::tensor({0., 3., 0., 4.}));
-  assert_tensor_equal(v.index({{1, None}}).sum(), torch::tensor(0));
+  assert_tensor_equal(v.index({Slice(1, None)}).sum(), torch::tensor(0));
 }
 
 TEST(TensorIndexingTest, TestBoolIndices) {
@@ -184,7 +184,7 @@ TEST(TensorIndexingTest, TestMultipleBoolIndices) {
   // note: these broadcast together and are transposed to the first dim
   auto mask1 = torch::tensor({1, 0, 1, 1, 0}, torch::kBool);
   auto mask2 = torch::tensor({1, 1, 1}, torch::kBool);
-  ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
+  ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 }
 
 TEST(TensorIndexingTest, TestByteMask) {
@@ -230,7 +230,7 @@ TEST(TensorIndexingTest, TestMultipleByteMask) {
     std::stringstream buffer;
     CerrRedirect cerr_redirect(buffer.rdbuf());
 
-    ASSERT_EQ(v.index({mask1, {}, mask2}).sizes(), torch::IntArrayRef({3, 7}));
+    ASSERT_EQ(v.index({mask1, Slice(), mask2}).sizes(), torch::IntArrayRef({3, 7}));
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
@@ -247,8 +247,8 @@ TEST(TensorIndexingTest, TestByteMask2d) {
 TEST(TensorIndexingTest, TestIntIndices) {
   auto v = torch::randn({5, 7, 3});
   ASSERT_EQ(v.index({torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({3, 7, 3}));
-  ASSERT_EQ(v.index({{}, torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
-  ASSERT_EQ(v.index({{}, torch::tensor({{0, 1}, {4, 3}})}).sizes(), torch::IntArrayRef({5, 2, 2, 3}));
+  ASSERT_EQ(v.index({Slice(), torch::tensor({0, 4, 2})}).sizes(), torch::IntArrayRef({5, 3, 3}));
+  ASSERT_EQ(v.index({Slice(), torch::tensor({{0, 1}, {4, 3}})}).sizes(), torch::IntArrayRef({5, 2, 2, 3}));
 }
 
 
@@ -296,13 +296,13 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex) {
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
       torch::empty({2, 0, 6, 4, 5}, device),
-      x.index({{}, torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
+      x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
   {
     auto x = torch::empty({10, 0});
     ASSERT_EQ(x.index({torch::tensor({1, 2})}).sizes(), torch::IntArrayRef({2, 0}));
     ASSERT_EQ(x.index({torch::tensor({}, torch::kLong), torch::tensor({}, torch::kLong)}).sizes(), torch::IntArrayRef({0}));
-    ASSERT_THROWS_WITH(x.index({{}, torch::tensor({0, 1})}), "for dimension with size 0");
+    ASSERT_THROWS_WITH(x.index({Slice(), torch::tensor({0, 1})}), "for dimension with size 0");
   }
 }
 
@@ -318,7 +318,7 @@ TEST(TensorIndexingTest, TestEmptyNdimIndex_CUDA) {
     auto x = torch::randn({2, 3, 4, 5}, device);
     assert_tensor_equal(
       torch::empty({2, 0, 6, 4, 5}, device),
-      x.index({{}, torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
+      x.index({Slice(), torch::empty({0, 6}, torch::TensorOptions(torch::kInt64).device(device))}));
   }
 }
 
@@ -404,7 +404,7 @@ TEST(TensorIndexingTest, TestIndexSetitemBoolsSlices) {
     a.index_put_({"..."}, neg_ones_expanded * 4);
     assert_tensor_equal(a, neg_ones * 4);
     if (a.dim() == 0) {
-      ASSERT_THROW(a.index_put_({{}}, neg_ones_expanded * 5), c10::Error);
+      ASSERT_THROW(a.index_put_({Slice()}, neg_ones_expanded * 5), c10::Error);
     }
   }
 }
@@ -492,7 +492,7 @@ TEST(TensorIndexingTest, TestSetitemScalars) {
 
   // scalar indexed with scalars
   auto r = torch::randn({});
-  ASSERT_THROW(r.index_put_({{}}, 8.8), c10::Error);
+  ASSERT_THROW(r.index_put_({Slice()}, 8.8), c10::Error);
   ASSERT_THROW(r.index_put_({zero}, 8.8), c10::Error);
   r.index_put_({"..."}, 9.9);
   ASSERT_TRUE(r.allclose(torch::tensor(9.9)));
@@ -710,7 +710,7 @@ TEST(NumpyTests, TestBooleanShapeMismatch) {
 
     index = torch::empty({4, 4}, torch::kByte).zero_();
     ASSERT_THROWS_WITH(arr.index({index}), "mask");
-    ASSERT_THROWS_WITH(arr.index({{}, index}), "mask");
+    ASSERT_THROWS_WITH(arr.index({Slice(), index}), "mask");
 
     ASSERT_EQ(count_substr_occurrences(buffer.str(), "indexing with dtype torch.uint8 is now deprecated"), 2);
   }
