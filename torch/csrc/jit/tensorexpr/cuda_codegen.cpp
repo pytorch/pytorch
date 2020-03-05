@@ -401,7 +401,7 @@ class HasRand : public IRVisitor {
   }
 
  private:
-  virtual void visit(const Intrinsics* v) {
+  void visit(const Intrinsics* v) override {
     if (v->op_type() == IntrinsicsOp::kRand) {
       has_rand_ = true;
     } else {
@@ -447,7 +447,7 @@ void CudaCodeGen::Initialize() {
   std::string func_name = GetUniqueFuncName("func");
   os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
-  for (int i = 0; i < buffer_args.size(); i++) {
+  for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
       os() << ", ";
     }
@@ -493,7 +493,7 @@ void CudaCodeGen::Initialize() {
       printer_->gpu_block_extents();
   const std::vector<const Expr*>& gpu_thread_extents =
       printer_->gpu_thread_extents();
-  for (int i = 0; i < gpu_block_extents.size(); i++) {
+  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
     }
@@ -503,14 +503,14 @@ void CudaCodeGen::Initialize() {
   std::cout << "stmt: " << std::endl;
   std::cout << oss_.str() << std::endl;
   std::cout << "block(";
-  for (int i = 0; i < gpu_block_extents.size(); i++) {
+  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (i > 0) {
       std::cout << ", ";
     }
     std::cout << *gpu_block_extents[i];
   }
   std::cout << "), thread(";
-  for (int i = 0; i < gpu_thread_extents.size(); i++) {
+  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     if (i > 0) {
       std::cout << ", ";
     }
@@ -539,12 +539,12 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
-  for (int i = 0; i < gpu_block_extents.size(); i++) {
+  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
-  for (int i = 0; i < gpu_thread_extents.size(); i++) {
+  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args());
     gpu_thread_extents_v[i] = eval.value<int>(args);
@@ -567,7 +567,7 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   std::vector<void*> ptr_to_args(ptr_count);
   uint64_t rand_seed = uint64_t(-1);
   uint64_t rand_offset = uint64_t(-1);
-  for (int i = 0; i < buffer_args.size(); i++) {
+  for (size_t i = 0; i < buffer_args.size(); i++) {
     auto const& bufferArg = buffer_args[i];
     if (bufferArg.isVar()) {
       auto stype = bufferArg.dtype().scalar_type();
