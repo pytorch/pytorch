@@ -53,34 +53,30 @@ TypePtr tryInferTypeWithTypeHint(
     const py::object& type_hint) {
   // If the py::object to be contained by the RRef is a ScripModule, we enforce
   // users to specify its ModuleInterface type.
-  c10::optional<jit::script::Module> module(jit::script::as_module(value));
-  if (module.has_value()) {
-    TypePtr type_hint_ptr;
-    if (!type_hint.is(py::none())) {
-      c10::QualifiedName type_qualified_name = c10::QualifiedName(
-          py::cast<std::string>(py::module::import("torch.jit")
-                                    .attr("_qualified_name")(type_hint)));
-      type_hint_ptr = jit::get_python_cu()->get_type(type_qualified_name);
-      TORCH_CHECK(
-          type_hint_ptr != nullptr,
-          "type_hint, ",
-          type_qualified_name.qualifiedName(),
-          ", could not be found, did you pass a valid interface type?");
-    }
-
+  if (auto module = jit::script::as_module(value)) {
     TORCH_CHECK(
-        type_hint_ptr != nullptr &&
-            type_hint_ptr->kind() == TypeKind::InterfaceType &&
-            module.value().type()->isSubtypeOf(type_hint_ptr),
+        !type_hint.is_none(),
         "The RRef being created contains a ScriptModule, "
-        "must provide its ModuleInterface type hint. ",
+        "must provide its ModuleInterface type hint. ");
+    c10::QualifiedName type_qualified_name = c10::QualifiedName(
+        py::cast<std::string>(py::module::import("torch.jit")
+                                  .attr("_qualified_name")(type_hint)));
+    TypePtr type_hint_ptr =
+        jit::get_python_cu()->get_interface(type_qualified_name);
+    TORCH_CHECK(
+        type_hint_ptr != nullptr,
+        "type_hint, ",
+        type_qualified_name.qualifiedName(),
+        ", could not be found, did you pass a valid interface type?");
+    TORCH_CHECK(
+        module.value().type()->isSubtypeOf(type_hint_ptr),
         module.value().type()->python_str(),
-        " must be a subtype of type_hint. Now the specified type_hint is ",
-        type_hint_ptr != nullptr ? type_hint_ptr->python_str() : "None");
+        " is not a subtype of ",
+        type_hint_ptr->python_str());
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
-        type_hint.is(py::none()),
+        type_hint.is_none(),
         "type_hint should only be specified when the RRef being created contains a ScriptModule.");
   }
 
@@ -96,7 +92,7 @@ TypePtr tryInferTypeWithTypeHint(
   // Otherwise it's a pure pyobject, create the RRef
   // that holds an IValue of an pyobject.
   return PyObjectType::get();
-}
+} // namespace
 
 } // namespace
 

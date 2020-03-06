@@ -52,10 +52,6 @@ class MyScriptClass:
         # type: (int)
         self.a = a
 
-    def increment_value(self, increment):
-        # type: (int)
-        self.a = self.a + increment
-
     def get_value(self):
         # type: () -> int
         return self.a
@@ -65,13 +61,6 @@ class MyScriptClass:
 class MyModuleInterface(torch.nn.Module):
     def forward(self):
         # type: () -> Tensor
-        pass
-
-
-@torch.jit.interface
-class MyModuleInterface2(torch.nn.Module):
-    def forward(self, v):
-        # type: (int) -> int
         pass
 
 
@@ -104,12 +93,6 @@ def script_run_get_value_rref_my_script_class(rref):
 def script_run_forward_rref_my_script_module(rref):
     # type: (RRef[MyModuleInterface]) -> Tensor
     return rref.to_here().forward()
-
-
-@torch.jit.script
-def script_run_forward_rref_my_script_module_2(rref):
-    # type: (RRef[MyModuleInterface2]) -> int
-    return rref.to_here().forward(1)
 
 
 @torch.jit.script
@@ -215,15 +198,6 @@ class LocalRRefTest(RpcAgentTestFixture):
         )
         self.assertEqual(ret, torch.ones(self.rank))
 
-        # Use RRef<MyModuleInterface> remotely in Script with incorrect function argument type hint.
-        # Expect failure at run time.
-        fut = rpc.rpc_async(
-            rref.owner(), script_run_forward_rref_my_script_module_2, args=(rref,)
-        )
-        with self.assertRaisesRegex(
-            RuntimeError, "The following operation failed in the TorchScript interpreter"
-        ):
-            fut.wait()
 
 
 @torch.jit.script
