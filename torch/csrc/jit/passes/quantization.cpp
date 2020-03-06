@@ -195,7 +195,8 @@ bool nodeQuantizable(Node* n) {
       "relu",
       "addmm",
       "matmul",
-      "add_"
+      "add_",
+      "cat",
     });
 }
 
