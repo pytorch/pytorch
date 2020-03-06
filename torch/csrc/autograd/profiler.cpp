@@ -161,8 +161,9 @@ void enableProfiler(ProfilerConfig config) {
         }
       },
       [](const RecordFunction& fn) {
-        if (fn.getThreadId() != RecordFunction::getCurrentThreadId()) {
-          // If we've not in a thread that ran start callbacks, then find
+        if (fn.getStartCallbacksThreadId() !=
+                RecordFunction::getCurrentThreadId()) {
+          // If we're not in a thread that ran start callbacks, then find
           // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
           // the correct list, instead of to a new list. This should only run
@@ -172,17 +173,17 @@ void enableProfiler(ProfilerConfig config) {
           } else {
             std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
             const auto& eventListIter =
-                all_event_lists_map.find(fn.getThreadId());
+                all_event_lists_map.find(fn.getStartCallbacksThreadId());
             TORCH_INTERNAL_ASSERT(
                 eventListIter != all_event_lists_map.end(),
                 "Did not find thread_id matching ",
-                fn.getThreadId());
+                fn.getStartCallbacksThreadId());
 
             auto& eventList = eventListIter->second;
             eventList->record(
                       EventKind::PopRange,
                       StringView(""),
-                      fn.getThreadId(),
+                      fn.getStartCallbacksThreadId(),
                       state == ProfilerState::CUDA);
           }
         } else {

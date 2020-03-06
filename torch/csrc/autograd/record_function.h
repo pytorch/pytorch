@@ -111,14 +111,14 @@ struct TORCH_API RecordFunction {
   // Executes end callbacks
   void end();
 
-  // Retrieves the thread_id that this RecordFunction was created with. Useful
-  // if we need to access Events created by the original thread in a different
-  // thread.
-  inline uint16_t getThreadId() const {
+  // Retrieves the thread_id that this RecordFunction ran start callbacks with.
+  // Useful for writing thread safe end callbacks that may be potentially
+  // executed in a different thread (async ops)
+  inline uint16_t getStartCallbacksThreadId() const {
     return threadId_;
   }
 
-  // Get thread_id for the current thread
+  // Get logical thread_id for the current thread
   static uint16_t getCurrentThreadId();
 
  private:
@@ -134,8 +134,14 @@ struct TORCH_API RecordFunction {
 
   bool initialized_ = false;
   bool run_sampled_ = false;
+
+  // is_current_ true means that this record function updates thread local
+  // current record function pointer;
+  // true only in case of scope-based record functions, i.e.
+  // RECORD_FUNCTION macro
   bool is_current_ = false;
-  // The thread_id that this RecordFunction was created with.
+
+  // The logical thread_id that this RecordFunction was created with.
   uint16_t threadId_ = 0;
 };
 
