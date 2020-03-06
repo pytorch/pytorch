@@ -313,6 +313,12 @@ static auto registry =
                 DispatchKey::QuantizedCPUTensorId))
         .op("quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> __torch__.torch.classes.LinearPackedParamsBase W_prepack",
             c10::RegisterOperators::options().kernel<QLinearPackWeightFp16>(
+                DispatchKey::CPUTensorId))
+        .op("_quantized::linear_prepack(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options().kernel<QLinearPackWeightInt8>(
+                DispatchKey::QuantizedCPUTensorId))
+        .op("_quantized::linear_prepack_fp16(Tensor W, Tensor? B=None) -> Tensor W_prepack",
+            c10::RegisterOperators::options().kernel<QLinearPackWeightFp16>(
                 DispatchKey::CPUTensorId));
 
 } // namespace
