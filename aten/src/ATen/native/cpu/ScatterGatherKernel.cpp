@@ -1,24 +1,7 @@
 
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/Parallel.h>
-
-// #define CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(operation) cpu_scatter_gather_base_kernel( \
-//   self, dim, index, src, \
-//   method_name, [&] (                                                    \
-//     auto* self_data, auto self_dim_stride,                              \
-//     const auto* index_data, auto index_dim_stride,                      \
-//     const auto* src_data, auto src_dim_stride) {                        \
-//       for (int64_t i = 0; i < index_dim_size; ++i) {                    \
-//         int64_t idx_dim = index_data[i * index_dim_stride];             \
-//         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,            \
-//                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim, \
-//                     " with size ", self_dim_size);                      \
-//         self_data[idx_dim * self_dim_stride] operation src_data[i * src_dim_stride]; \
-//       }                                                                 \
-//    },                                                                   \
-//   /*serial_exec=*/false);                                               \
-  
+#include <ATen/Parallel.h>  
 
 namespace at { namespace native {
 
@@ -335,41 +318,34 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
   dim = maybe_wrap_dim(dim, self.dim());
   
   scatter_shape_check(self, dim, index, src);
-
   int64_t index_dim_size = ensure_nonempty_size(index, dim);
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
-
   std::string method_name = "scatter_" + reduce + "_";
-  std::function<void(const int64_t&, const int64_t&)> op;
 
-    cpu_scatter_gather_base_kernel(
+  cpu_scatter_gather_base_kernel(
     self, dim, index, src,
     method_name, [&] (
       auto* self_data, auto self_dim_stride,
       const auto* index_data, auto index_dim_stride,
       const auto* src_data, auto src_dim_stride
     ) {
-      if (reduce == "add") {
-        op = [&](const int64_t& idx_dim, const int64_t& i) {
-               self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
-             };
-      }
-      else if (reduce == "subtract") {
-        op = [&](const int64_t& idx_dim, const int64_t& i) {
-               self_data[idx_dim * self_dim_stride] -= src_data[i * src_dim_stride];
-             };
-      }
-      else if (reduce == "multiply") {
-        op = [&](const int64_t& idx_dim, const int64_t& i) {
-               self_data[idx_dim * self_dim_stride] *= src_data[i * src_dim_stride];
-             };
-      }
-      else if (reduce == "divide") {
-        op = [&](const int64_t& idx_dim, const int64_t& i) {
-               self_data[idx_dim * self_dim_stride] /= src_data[i * src_dim_stride];
-             };
-      }
-      
+    std::map<
+    std::string,
+    std::function<void(const int64_t&, const int64_t&)> > reduce_func_map = {
+      {"add", [&](const int64_t& idx_dim, const int64_t& i) {
+                self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+              }},
+      {"subtract", [&](const int64_t& idx_dim, const int64_t& i) {
+                     self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+                   }},
+      {"multiply", [&](const int64_t& idx_dim, const int64_t& i) {
+                     self_data[idx_dim * self_dim_stride] *= src_data[i * src_dim_stride];
+                   }},
+      {"divide", [&](const int64_t& idx_dim, const int64_t& i) {
+                   self_data[idx_dim * self_dim_stride] /= src_data[i * src_dim_stride];
+                 }}
+    };
+                   
       for (int64_t i = 0; i < index_dim_size; ++i) {
         int64_t idx_dim = index_data[i * index_dim_stride];
         // we are not putting idx_dim in the error message because it disables
@@ -377,7 +353,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        op(idx_dim, i);
+        reduce_func_map[reduce](idx_dim, i);
       }
     },
     /*serial_exec=*/false);

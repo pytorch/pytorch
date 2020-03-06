@@ -10816,6 +10816,8 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
+    def test_scatter_reduce_scalar_tensor(self, device):
+        pass
     # TODO: remove this after scatter_add_ is deprecated.
     def test_scatter_add_non_unique_index(self, device):
         height = 2
