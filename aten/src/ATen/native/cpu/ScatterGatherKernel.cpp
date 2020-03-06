@@ -340,7 +340,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   std::string method_name = "scatter_" + reduce + "_";
-  std::function<void(int)> op;
+  std::function<void(const int64_t&, const int64_t&)> op;
 
     cpu_scatter_gather_base_kernel(
     self, dim, index, src,
@@ -350,23 +350,23 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
       const auto* src_data, auto src_dim_stride
     ) {
       if (reduce == "add") {
-        op = [&](int idx_dim) {
+        op = [&](const int64_t& idx_dim, const int64_t& i) {
                self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
              };
       }
       else if (reduce == "subtract") {
-        op = [&](int idx_dim) {
+        op = [&](const int64_t& idx_dim, const int64_t& i) {
                self_data[idx_dim * self_dim_stride] -= src_data[i * src_dim_stride];
              };
       }
       else if (reduce == "multiply") {
-        op = [&](int idx_dim) {
+        op = [&](const int64_t& idx_dim, const int64_t& i) {
                self_data[idx_dim * self_dim_stride] *= src_data[i * src_dim_stride];
              };
       }
       else if (reduce == "divide") {
-        op = [&](int idx_dim) {
-               self_data[idx_dim * self_dim_stride] \= src_data[i * src_dim_stride];
+        op = [&](const int64_t& idx_dim, const int64_t& i) {
+               self_data[idx_dim * self_dim_stride] /= src_data[i * src_dim_stride];
              };
       }
       
@@ -377,7 +377,7 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        op(idx_dim);
+        op(idx_dim, i);
       }
     },
     /*serial_exec=*/false);
