@@ -153,6 +153,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
     "__upsample",
     "__upsample_bilinear",
     "__upsample_nearest",
+    "dropout",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",
@@ -172,6 +173,12 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
                  /* call_funcs = */ {},
                  /* aten_funcs = */ single_input_aten_funcs)) {
     return {0};
+  } else if (n->kind() == prim::ListConstruct) {
+    std::vector<size_t> indexes;
+    for (auto i = 0; i < n->inputs().size(); ++i) {
+      indexes.push_back(i);
+    }
+    return indexes;
   }
   return {};
 }
@@ -189,7 +196,8 @@ bool nodeQuantizable(Node* n) {
       "relu",
       "addmm",
       "matmul",
-      "add_"
+      "add_",
+      "cat",
     });
 }
 
@@ -1134,7 +1142,8 @@ void insertDeQuantCall(Graph* graph,
     Node* dequant =
       graph->create(Symbol::aten("dequantize"), {quantized_val});
     dequant->output()->setDebugName(
-        original_val->debugName() + ".dequant." + c10::guts::to_string(i));
+        original_val->debugName() + ".dequant." + c10::guts::to_string(i))
+      ->setType(original_val->type());
     uses[i].user->replaceInputWith(original_val, dequant->output());
     graph->insertNode(dequant);
   }
