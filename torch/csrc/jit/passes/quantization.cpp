@@ -1142,7 +1142,8 @@ void insertDeQuantCall(Graph* graph,
     Node* dequant =
       graph->create(Symbol::aten("dequantize"), {quantized_val});
     dequant->output()->setDebugName(
-        original_val->debugName() + ".dequant." + c10::guts::to_string(i));
+        original_val->debugName() + ".dequant." + c10::guts::to_string(i))
+      ->setType(original_val->type());
     uses[i].user->replaceInputWith(original_val, dequant->output());
     graph->insertNode(dequant);
   }
