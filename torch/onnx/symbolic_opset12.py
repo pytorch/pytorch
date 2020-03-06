@@ -16,8 +16,7 @@ def einsum(g, equation, tensor_list):
 def broadcast_tensors(g, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     if (tensors[0].type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
-        return _unimplemented("broadcast_tensors", "cannot broadcast")
-    #out = [g.op("Expand", t, shape) for t in tensors]
+        return _unimplemented("broadcast_tensors", "broadcast for tensors is only implemented in case when there are 2 tensors of the same size")
     return g.op("prim::ListConstruct", *tensors)
 
 def mse_loss(g, input, target, reduction):
