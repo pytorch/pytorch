@@ -37,6 +37,26 @@
   use_c10_dispatcher: full
   variants: function
 
+# TODO: we can probably pybind all of the batched tensor specific functions
+# for a completely out-of-tree implementation but I was lazy
+- func: _make_batched(Tensor self, int? batch_dim, int level) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _unwrap_batched(Tensor self, int level) -> Tensor
+  use_c10_dispatcher: full
+
+# TODO: these should be fast
+- func: _batch_dim(Tensor self) -> int
+  use_c10_dispatcher: full
+
+- func: _is_batched(Tensor self) -> bool
+  use_c10_dispatcher: full
+
+# TODO: just testing
+- func: _get_undefined(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+
+
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: backward(Tensor self, Tensor? gradient=None, bool keep_graph=False, bool create_graph=False) -> ()
   manual_kernel_registration: True
@@ -125,6 +145,8 @@
   variants: method
   supports_named_tensor: True
 
+- func: unflatten.using_sizes(Tensor self, int dim, int[] sizes) -> Tensor
+  variants: method
 
 - func: _use_cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
   dispatch:
