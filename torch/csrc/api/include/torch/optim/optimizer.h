@@ -114,19 +114,24 @@ class TORCH_API OptimizerBase {
   /// Adds the given vector of parameters to the optimizer's parameter list.
   virtual void add_parameters(const std::vector<Tensor>& parameters);
 
+  virtual void _add_parameters_new_design(const std::vector<Tensor>& parameters);
+
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();
 
   /// Provides a const reference to the parameters this optimizer holds.
   virtual const std::vector<Tensor>& parameters() const noexcept;
 
+  virtual const std::vector<Tensor>& _parameters_new_design() const noexcept;
+
   /// Provides a reference to the parameters this optimizer holds.
   virtual std::vector<Tensor>& parameters() noexcept;
+
+  virtual std::vector<Tensor>& _parameters_new_design() noexcept;
 
   /// Returns the number of parameters referenced by the optimizer.
   virtual size_t size() const noexcept;
 
-  /// Returns the number of parameters referenced by the optimizer.
   virtual size_t _size_new_design() const noexcept;
 
   OptimizerOptions& defaults() noexcept;
