@@ -2,6 +2,8 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
+#include <torch/csrc/jit/fuser/common/dispatch.h>
+
 #include <vector>
 #include <stack>
 
@@ -13,25 +15,11 @@ struct Statement;
 struct Val;
 struct Expr;
 
-struct TensorDomain;
-struct TensorView;
-struct IterDomain;
-struct Tensor;
-struct Float;
-struct Int;
-
-struct UnaryOp;
-struct BinaryOp;
-struct Split;
-struct Merge;
-struct Reorder;
-
-struct FusionGurad;
 struct Fusion;
 
 enum class ValType;
 
-struct TORCH_API IterVisitor {
+struct TORCH_API IterVisitor : public OptOutDispatch{
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -50,26 +38,10 @@ struct TORCH_API IterVisitor {
   std::vector<Statement*> next(Expr* expr);
   std::vector<Statement*> next(Val* v);
 
-  //Hierarchal dispatch functions for handle
-  virtual void handle(Statement* s);
-  virtual void handle(Expr* e);
-  virtual void handle(Val* v);
+  void handle(Statement* s) { OptOutDispatch::handle(s); }
+  void handle(Expr* e) { OptOutDispatch::handle(e); }
+  void handle(Val* v) { OptOutDispatch::handle(v); }
 
-  //Handle functions to be over written by inheriting classes. These functions
-  //Will be called on nodes in topological order
-  virtual void handle(TensorDomain*) {}
-  virtual void handle(TensorView*) {}
-  virtual void handle(IterDomain*) {}
-  virtual void handle(Tensor*) {}
-
-  virtual void handle(Float*) {}
-  virtual void handle(Int*) {}
-
-  virtual void handle(UnaryOp*) {}
-  virtual void handle(BinaryOp*) {}
-  virtual void handle(Split*) {}
-  virtual void handle(Merge*) {}
-  virtual void handle(Reorder*) {}
 
   //Stop condition allows users to stop iteration if a certain condition is met
   virtual bool stopCondition() { return false; }

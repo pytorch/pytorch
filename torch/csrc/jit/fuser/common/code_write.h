@@ -55,19 +55,16 @@ struct TORCH_API CodeWrite : public IRPrinter {
   // Print lhs of uop/bop, returns if predicate was needed
   void printAlloc(TensorView*);
   bool printLHS(TensorView*);
-  void print(const TensorView* const);
-  void print(const Val* const);
-  void print(const UnaryOp* const);
-  void print(const BinaryOp* const);
+  void handle(const TensorView* const);
+  void handle(const Val* const);
+  void handle(const UnaryOp* const);
+  void handle(const BinaryOp* const);
 
-  void print(const Split* const) {}
-  void print(const Merge* const) {}
-  void print(const Reorder* const) {}
+  void handle(const Split* const) {}
+  void handle(const Merge* const) {}
+  void handle(const Reorder* const) {}
 
   void indent();
-  void handle(Expr*);
-  void handle(UnaryOp*);
-  void handle(BinaryOp*);
 
   void updateView(TensorView*);
 

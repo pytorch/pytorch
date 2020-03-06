@@ -1,3 +1,4 @@
+/*
 #include <torch/csrc/jit/fuser/common/fusion.h>
 #include <torch/csrc/jit/fuser/common/mutator.h>
 
@@ -67,7 +68,7 @@ void BaseMutator::mutate(Fusion* fusion) {
    * previously was the output of another expresion, that older expresion will be removed
    * as we can only assign a Val once due to our SSA restriction. Therefore we don't need
    * to manually track what expressions stayed constant or were changed.
-   */
+   * /
 
   for( Statement* stmt : orig_exprs)
     mutate(stmt);
@@ -76,7 +77,7 @@ void BaseMutator::mutate(Fusion* fusion) {
 
 /*
  * TODO: Test the below mutator functions
- */
+ * /
 
  Statement* BaseMutator::mutate( TensorDomain*  td) {
   
@@ -192,3 +193,4 @@ void ReplaceAll::instancesOf( Val*  instance,  Val*  with){
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+*/

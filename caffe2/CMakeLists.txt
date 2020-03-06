@@ -445,6 +445,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/fuser/interface.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/arith.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/code_write.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/fuser/common/dispatch.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/fusion.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/ir.cpp
     ${TORCH_SRC_DIR}/csrc/jit/fuser/common/iriostream.cpp
