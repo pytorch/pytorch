@@ -290,7 +290,7 @@ Examples::
     return _VF.einsum(equation, operands)
 
 
-def meshgrid(*tensors, **kwargs):
+def meshgrid(*tensors):
     r"""Take :math:`N` tensors, each of which can be either scalar or 1-dimensional
 vector, and create :math:`N` N-dimensional grids, where the :math:`i` :sup:`th` grid is defined by
 expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
@@ -321,9 +321,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     """
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
-            return handle_torch_function(meshgrid, tensors, *tensors, **kwargs)
-    if kwargs:
-        raise TypeError("meshgrid() got an unexpected keyword argument '%s'" % (list(kwargs)[0],))
+            return handle_torch_function(meshgrid, tensors, *tensors)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]
