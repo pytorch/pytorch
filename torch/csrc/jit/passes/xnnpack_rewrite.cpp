@@ -26,16 +26,6 @@ bool nodeMatchesPackingOps(Node* n) {
       n->kind() == Symbol::fromQualString("xnnpack::conv2d_prepack"));
 }
 
-TypePtr getCustomType(Node* n) {
-  if(n->kind() == Symbol::fromQualString("xnnpack::linear_prepack")) {
-    return c10::getTypePtr<c10::intrusive_ptr<XNNPackLinearOpContext>>();
-  }
-  if(n->kind() == Symbol::fromQualString("xnnpack::conv2d_prepack")) {
-    return c10::getTypePtr<c10::intrusive_ptr<XNNPackConv2dOpContext>>();
-  }
-  TORCH_INTERNAL_ASSERT(false, "Custom type could not be found.");
-}
-
 // Must run this pass after constant folding.
 void removePrePackingOps_(script::Module& m) {
   auto method = m.get_method("forward");
@@ -55,12 +45,12 @@ void removePrePackingOps_(script::Module& m) {
           auto outputs = optional_outputs.value();
           TORCH_CHECK(outputs.size() == 1, "Prepack ops have single output");
           auto attr_name = attr_name_base + c10::to_string(uid++);
-          m.register_attribute(attr_name, getCustomType(n), outputs[0]);
+          m.register_attribute(attr_name, n->outputs()[0]->type(), outputs[0]);
           Value* prepack_op_value = n->outputs()[0];
           WithInsertPoint ins(prepack_op_value->node());
           Value* packed_weight_attr =
             graph->insertGetAttr(graph->inputs()[0], attr_name)
-                  ->setType(getCustomType(n));
+                  ->setType(n->outputs()[0]->type());
           prepack_op_value->replaceAllUsesWith(packed_weight_attr);
           //n->removeAllInputs(); //Cannot do this for conv because it will remove constant nodes?
           nodes_to_delete.insert(n);
