@@ -3870,58 +3870,55 @@ class TestNumericalStability(TestCase):
     def test_continuous_bernoulli_gradient(self):
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
             self._test_pdf_score(dist_class=ContinuousBernoulli,
-                                 probs=tensor_type([0]),
-                                 x=tensor_type([0]),
-                                 expected_value=tensor_type([0]),
-                                 expected_gradient=tensor_type([0]))
+                                 probs=tensor_type([0.1]),
+                                 x=tensor_type([0.1]),
+                                 expected_value=tensor_type([0.685256]),
+                                 expected_gradient=tensor_type([-2.55688]))
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
-                                 probs=tensor_type([0]),
-                                 x=tensor_type([1]),
-                                 expected_value=tensor_type([torch.finfo(tensor_type([]).dtype).eps]).log(),
-                                 expected_gradient=tensor_type([0]))
+                                 probs=tensor_type([0.1]),
+                                 x=tensor_type([1.]),
+                                 expected_value=tensor_type([-1.29225]),
+                                 expected_gradient=tensor_type([7.44312]))
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1e-4]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([math.log(1e-4)]),
-                                 expected_gradient=tensor_type([10000]))
+                                 expected_value=tensor_type([-6.98982]),
+                                 expected_gradient=tensor_type([8916.1436]),
+                                 prec=1e-3)
 
-            # Lower precision due to:
-            # >>> 1 / (1 - torch.FloatTensor([0.9999]))
-            # 9998.3408
-            # [torch.FloatTensor of size 1]
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  probs=tensor_type([1 - 1e-4]),
-                                 x=tensor_type([0]),
-                                 expected_value=tensor_type([math.log(1e-4)]),
-                                 expected_gradient=tensor_type([-10000]),
+                                 x=tensor_type([0.1]),
+                                 expected_value=tensor_type([-6.0688]),
+                                 expected_gradient=tensor_type([-7916.04]),
                                  prec=2)
 
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([math.log(9999)]),
                                  x=tensor_type([0]),
-                                 expected_value=tensor_type([math.log(1e-4)]),
-                                 expected_gradient=tensor_type([-1]),
+                                 expected_value=tensor_type([-6.98982]),
+                                 expected_gradient=tensor_type([-0.8915]),
                                  prec=1e-3)
 
     def test_continuous_bernoulli_with_logits_underflow(self):
-        for tensor_type, lim in ([(torch.FloatTensor, -1e38),
-                                  (torch.DoubleTensor, -1e308)]):
+        for tensor_type, lim, expected in ([(torch.FloatTensor, -1e38, 2.76898),
+                                            (torch.DoubleTensor, -1e308, 3.58473)]):
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([lim]),
                                  x=tensor_type([0]),
-                                 expected_value=tensor_type([0]),
-                                 expected_gradient=tensor_type([0]))
+                                 expected_value=tensor_type([expected]),
+                                 expected_gradient=tensor_type([0.]))
 
     def test_continuous_bernoulli_with_logits_overflow(self):
-        for tensor_type, lim in ([(torch.FloatTensor, 1e38),
-                                  (torch.DoubleTensor, 1e308)]):
+        for tensor_type, lim, expected in ([(torch.FloatTensor, 1e38, 2.76898),
+                                            (torch.DoubleTensor, 1e308, 3.58473)]):
             self._test_pdf_score(dist_class=ContinuousBernoulli,
                                  logits=tensor_type([lim]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([0]),
-                                 expected_gradient=tensor_type([0]))
+                                 expected_value=tensor_type([expected]),
+                                 expected_gradient=tensor_type([0.]))
 
 
 class TestLazyLogitsInitialization(TestCase):
