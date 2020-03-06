@@ -2617,7 +2617,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4)
         self.run_test(EinsumModelTranspose(), input=(x,))
 
-
+    @unittest.skip("Enable this once ORT version is updated")
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_mse_loss(self):
         class MSELossNone(torch.nn.Module):
             def forward(self, input, target):
@@ -2626,8 +2627,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5)
         y = torch.randn(3, 5)
-        trace = torch.jit.trace(MSELossNone(), (x, y))
-        print(trace.graph)
         self.run_test(MSELossNone(), input=(x, y))
 
         class MSELossSum(torch.nn.Module):
@@ -2637,8 +2636,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(3, 5, requires_grad=True)
         y = torch.randn(3, 5, requires_grad=True)
-        trace = torch.jit.trace(MSELossSum(), (x, y))
-        print(trace.graph)
         self.run_test(MSELossSum(), input=(x, y))
 
         class MSELossMean(torch.nn.Module):
