@@ -1209,6 +1209,26 @@ class _TestTorchMixin(object):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
 
+    def test_make_subclass(self):
+        class SubTensor(torch.Tensor):
+            pass
+
+        t0 = torch.Tensor(0)
+        t1 = torch.Tensor([1, 2])
+        t2 = torch.Tensor([[3, 4], [5, 6]])
+
+        s0 = torch.Tensor.make_subclass(SubTensor, t0)
+        s1 = torch.Tensor.make_subclass(SubTensor, t1)
+        s2 = torch.Tensor.make_subclass(SubTensor, t2)
+
+        self.assertTrue(type(s0) is SubTensor)
+        self.assertTrue(type(s1) is SubTensor)
+        self.assertTrue(type(s2) is SubTensor)
+
+        self.assertEqual(t0, s0)
+        self.assertEqual(t1, s1)
+        self.assertEqual(t2, s2)
+
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
         self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())

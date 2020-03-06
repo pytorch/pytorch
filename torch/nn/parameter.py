@@ -23,7 +23,7 @@ class Parameter(torch.Tensor):
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.Tensor()
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        return torch.Tensor.make_subclass(cls, data, requires_grad)
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
