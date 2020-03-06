@@ -32,6 +32,7 @@ static std::unordered_map<DataType, std::string> data_type_string_map {
   {DataType::Int,   "size_t"}
 };
 static std::unordered_map<ValType, std::string> val_type_string_map {
+  {ValType::TensorIndex,  "TensorIndex"},
   {ValType::Tensor,       "Tensor"},
   {ValType::TensorView,   "TensorView"},
   {ValType::TensorDomain, "TensorDomain"},
