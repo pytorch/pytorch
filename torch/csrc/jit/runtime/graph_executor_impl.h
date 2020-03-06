@@ -31,7 +31,7 @@ namespace jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
-void runOptimization(std::shared_ptr<Graph>& graph);
+void runOptimization(std::shared_ptr<Graph>& graph, bool unroll = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
@@ -56,8 +56,9 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph)
+  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, std::string function_name)
       : graph(prepareGraph(graph)),
+        function_name_(std::move(function_name)),
         num_inputs(this->graph->inputs().size()),
         num_outputs(this->graph->outputs().size()) {}
 
@@ -77,6 +78,7 @@ struct GraphExecutorImplBase {
   // can't make it so because Graph::copy() is not const (and making it const is
   // not that easy at this point).
   std::shared_ptr<Graph> graph;
+  std::string function_name_;
 
   // If false, we'll run the graph as we get it, without any optimizations.
   // Useful for debugging.

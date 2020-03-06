@@ -252,43 +252,31 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
     value_ = std::move(value);
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
+    fireCallbacks();
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
   }
 
   void markCompleted() {
     markCompleted(IValue {});
   }
 
-  void markCompleted(FutureError&& error) {
+  void markCompleted(FutureError&& error_) {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(!completed());
     completed_ = true;
-    has_error_ = true;
-    error_ = std::move(error);
+    has_error = true;
+    error = std::move(error_);
 
-    std::vector<std::function<void(void)>> cbs;
-    cbs.swap(callbacks_);
-    lock.unlock();
-
+    fireCallbacks();
     finished_cv_.notify_all();
-    for (auto& callback : cbs) {
-      callback();
-    }
   }
 
   // Get the result of the current future.
   IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (has_error_) {
-      throw error_;
+    if (has_error) {
+      throw error;
     }
     return value_;
   }
@@ -306,7 +294,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       callback();
       return;
     }
-    callbacks_.push_back(callback);
+    callbacks.push_back(callback);
   }
 
   // Check if the current future has completed
@@ -323,15 +311,25 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
  private:
+  void fireCallbacks() {
+    AT_ASSERT(completed());
+    // There is no need to protect callbacks with the lock.
+    // Once completed_ is set to true, no one can add new callback to the list.
+    for (auto& callback : callbacks) {
+      callback();
+    }
+    callbacks.clear();
+  }
+
   std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
 
   IValue value_; // when finished the value
   TypePtr type_;
-  std::vector<std::function<void(void)>> callbacks_;
-  bool has_error_ = false;
-  FutureError error_;
+  std::vector<std::function<void(void)>> callbacks;
+  bool has_error = false;
+  FutureError error;
 };
 
 // User-defined object.

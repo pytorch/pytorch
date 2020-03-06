@@ -25,6 +25,14 @@ public:
   }
 };
 
+#else
+
+struct Vec256i {};  // dummy definition to make Vec256i always defined
+
+#endif // __AVX2__
+
+#ifdef __AVX2__
+
 template <>
 struct Vec256<int64_t> : public Vec256i {
   using value_type = int64_t;
@@ -77,10 +85,11 @@ struct Vec256<int64_t> : public Vec256i {
   }
   static Vec256<int64_t> loadu(const void* ptr, int64_t count) {
     __at_align32__ int64_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
-      tmp_values[i] = 0.0;
+      tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
     return loadu(tmp_values);
@@ -189,6 +198,12 @@ struct Vec256<int32_t> : public Vec256i {
   }
   static Vec256<int32_t> loadu(const void* ptr, int32_t count) {
     __at_align32__ int32_t tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
     return loadu(tmp_values);
   }
@@ -394,6 +409,12 @@ struct Vec256<int16_t> : public Vec256i {
   }
   static Vec256<int16_t> loadu(const void* ptr, int16_t count) {
     __at_align32__ int16_t tmp_values[size()];
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
+    for (auto i = 0; i < size(); ++i) {
+      tmp_values[i] = 0;
+    }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
     return loadu(tmp_values);
   }
@@ -657,27 +678,55 @@ Vec256<T> inline intdiv_256(const Vec256<T>& a, const Vec256<T>& b) {
   return Vec256<T>::loadu(values_a);
 }
 
-#define DEFINE_INTEGER_BINARY_OP(op, func)                                                \
-template <>                                                                               \
-Vec256<int64_t> inline operator op(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {  \
-  return func(a, b);                                                                      \
-}                                                                                         \
-template <>                                                                               \
-Vec256<int32_t> inline operator op(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {  \
-  return func(a, b);                                                                      \
-}                                                                                         \
-template <>                                                                               \
-Vec256<int16_t> inline operator op(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {  \
-  return func(a, b);                                                                      \
+template <>
+Vec256<int64_t> inline operator/(const Vec256<int64_t>& a, const Vec256<int64_t>& b) {
+  return intdiv_256(a, b);
+}
+template <>
+Vec256<int32_t> inline operator/(const Vec256<int32_t>& a, const Vec256<int32_t>& b) {
+  return intdiv_256(a, b);
+}
+template <>
+Vec256<int16_t> inline operator/(const Vec256<int16_t>& a, const Vec256<int16_t>& b) {
+  return intdiv_256(a, b);
 }
 
-DEFINE_INTEGER_BINARY_OP(/, intdiv_256)
-DEFINE_INTEGER_BINARY_OP(&, _mm256_and_si256)
-DEFINE_INTEGER_BINARY_OP(|, _mm256_or_si256)
-DEFINE_INTEGER_BINARY_OP(^, _mm256_xor_si256)
-
-#undef DEFINE_INTEGER_BINARY_OP
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+  return _mm256_and_si256(a, b);
+}
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+  return _mm256_or_si256(a, b);
+}
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+  return _mm256_xor_si256(a, b);
+}
 
 #endif
+
+template <class T, typename Op,
+          typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+static inline Vec256<T> bitwise_binary_op(const Vec256<T> &a, const Vec256<T> &b, Op op) {
+  Vec256<T> res;
+  for (int i = 0; i < Vec256<T>::size(); ++ i) {
+    res[i] = op(a[i], b[i]);
+  }
+  return res;
+}
+
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator&(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_and<T>());
+}
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator|(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_or<T>());
+}
+template<class T, typename std::enable_if_t<std::is_integral<T>::value && !std::is_base_of<Vec256i, Vec256<T>>::value, int> = 0>
+inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
+  return bitwise_binary_op(a, b, std::bit_xor<T>());
+}
 
 }}}
