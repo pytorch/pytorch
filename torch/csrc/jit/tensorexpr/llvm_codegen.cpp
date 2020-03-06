@@ -1,11 +1,14 @@
 #ifdef ENABLE_LLVM
 
 #include "torch/csrc/jit/tensorexpr/llvm_codegen.h"
+#include "torch/csrc/jit/tensorexpr/llvm_jit.h"
 
 #include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
+#include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/TargetSelect.h>
@@ -18,10 +21,104 @@
 #include "torch/csrc/jit/tensorexpr/ir_printer.h"
 #include "torch/csrc/jit/tensorexpr/types.h"
 
+#define DEBUG_PRINT 0
+
 using namespace torch::jit::tensorexpr;
 
 DEFINE_TRIGGER(llvm_codegen_created);
 DEFINE_TRIGGER(llvm_codegen_executed);
+
+namespace torch {
+namespace jit {
+namespace tensorexpr {
+class LLVMCodeGenImpl : public IRVisitor {
+ private:
+  llvm::orc::ThreadSafeContext context_;
+  llvm::IRBuilder<> irb_;
+  std::unique_ptr<llvm::TargetMachine> TM_;
+  std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
+  std::unique_ptr<llvm::Module> module_;
+  llvm::Function* fn_;
+  llvm::BasicBlock* bb_;
+  llvm::Value* value_;
+  llvm::JITTargetAddress kernelAddress_;
+
+#define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
+#undef LLVM_TYPE_DECLARE
+
+  std::unordered_map<const Var*, int> varToArg_;
+  std::unordered_map<const Var*, llvm::Value*> varToVal_;
+
+ private:
+  llvm::LLVMContext& getContext();
+  llvm::Type* dtypeToLLVM(Dtype dtype);
+  llvm::Type* dtypeToLLVMPtr(Dtype dtype);
+  void emitWrapper(const std::vector<llvm::Type*>& params);
+  void emitKernel(Stmt* stmt, const std::vector<llvm::Type*>& params);
+
+ public:
+  LLVMCodeGenImpl(
+      Stmt* stmt,
+      const std::vector<CodeGen::BufferArg>& args,
+      Dtype dtype);
+  ~LLVMCodeGenImpl() = default;
+
+  llvm::JITTargetAddress getKernelAddress() const;
+
+  void visit(const Add* v) override;
+  void visit(const Sub* v) override;
+  void visit(const Mul* v) override;
+  void visit(const Div* v) override;
+  void visit(const Mod* v) override;
+  void visit(const Max* v) override;
+  void visit(const Min* v) override;
+  void visit(const And* v) override;
+  void visit(const Or* v) override;
+  void visit(const Xor* v) override;
+  void visit(const Lshift* v) override;
+  void visit(const Rshift* v) override;
+  void visit(const CompareSelect* v) override;
+
+#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##Imm* v) override;
+  AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
+#undef IMM_VISIT_DECLARE
+
+  void visit(const Cast* v) override;
+  void visit(const Var* v) override;
+  void visit(const Let* v) override;
+  void visit(const LetStmt* v) override;
+  void visit(const Ramp* v) override;
+  void visit(const Load* v) override;
+  void visit(const For* v) override;
+  void visit(const Block* v) override;
+  void visit(const Store* v) override;
+  void visit(const Broadcast* v) override;
+  void visit(const IfThenElse* v) override;
+  void visit(const BaseCallNode* v) override;
+  void visit(const Intrinsics* v) override;
+  void visit(const FunctionCall* v) override;
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
+  void visit(const Cond* v) override;
+
+  llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
+  llvm::Value* emitMaskedLoad(
+      llvm::Value* addr,
+      llvm::Value* idx,
+      llvm::Value* mask);
+  void emitUnmaskedStore(llvm::Value* base, llvm::Value* idx, llvm::Value* val);
+  void emitMaskedStore(
+      llvm::Value* base,
+      llvm::Value* idx,
+      llvm::Value* mask,
+      llvm::Value* val);
+
+  void optimize(llvm::Module& M);
+};
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch
 
 static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #if 0
@@ -50,16 +147,67 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 #endif
 }
 
+LLVMCodeGen::~LLVMCodeGen() = default;
+
 LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
-    : LLVMCodeGen(stmt, std::vector<BufferArg>()) {}
+    : LLVMCodeGen(stmt, std::vector<CodeGen::BufferArg>()) {}
 
 LLVMCodeGen::LLVMCodeGen(
     Stmt* stmt,
     const std::vector<BufferArg>& args,
     Dtype dtype)
     : CodeGen(stmt, args),
-      context_(std::make_unique<llvm::LLVMContext>()),
-      irb_(getContext()) {
+      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, dtype)) {}
+
+static void* argToPtr(
+    const CodeGen::BufferArg& bufferArg,
+    const CodeGen::CallArg& callArg) {
+  if (!bufferArg.isVar()) {
+    return callArg.data();
+  }
+
+  switch (bufferArg.dtype().scalar_type()) {
+#define TYPE_CASE(_1, Name) \
+  case ScalarType::Name:    \
+    return callArg.Name##Ptr();
+    break;
+
+    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
+#undef TYPE_CASE
+
+    default:
+      LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
+                 << "dtype=" << bufferArg.var()->dtype();
+  }
+  return nullptr;
+}
+
+void LLVMCodeGen::call(const std::vector<CallArg>& args) {
+  CHECK_EQ(args.size(), buffer_args().size())
+      << "args: " << args.size() << ", buffers: " << buffer_args().size();
+  std::vector<void*> argv;
+  for (size_t i = 0; i < buffer_args().size(); i++) {
+    auto const& bufferArg = buffer_args()[i];
+    auto const& callArg = args[i];
+    argv.push_back(argToPtr(bufferArg, callArg));
+  }
+  value<float>(argv);
+  USE_TRIGGER(llvm_codegen_executed);
+}
+
+void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
+  return (void*)impl->getKernelAddress();
+}
+
+llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
+  return kernelAddress_;
+}
+
+LLVMCodeGenImpl::LLVMCodeGenImpl(
+    Stmt* stmt,
+    const std::vector<CodeGen::BufferArg>& args,
+    Dtype dtype)
+    : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
   CharTy_ = llvm::Type::getInt8Ty(getContext());
@@ -113,11 +261,11 @@ LLVMCodeGen::LLVMCodeGen(
   USE_TRIGGER(llvm_codegen_created);
 }
 
-llvm::LLVMContext& LLVMCodeGen::getContext() {
+llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
   return *context_.getContext();
 }
 
-llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
+llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
   switch (dtype.scalar_type()) {
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
@@ -132,11 +280,11 @@ llvm::Type* LLVMCodeGen::dtypeToLLVM(Dtype dtype) {
   return nullptr;
 }
 
-llvm::Type* LLVMCodeGen::dtypeToLLVMPtr(Dtype dtype) {
+llvm::Type* LLVMCodeGenImpl::dtypeToLLVMPtr(Dtype dtype) {
   return dtypeToLLVM(dtype)->getPointerTo();
 }
 
-void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
+void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto voidPtrPtrTy = llvm::Type::getInt8PtrTy(getContext())->getPointerTo();
   auto wrapper = llvm::Function::Create(
       llvm::FunctionType::get(IntTy_, {voidPtrPtrTy}, false),
@@ -163,7 +311,7 @@ void LLVMCodeGen::emitWrapper(const std::vector<llvm::Type*>& params) {
   irb_.CreateRet(cc);
 }
 
-void LLVMCodeGen::emitKernel(
+void LLVMCodeGenImpl::emitKernel(
     Stmt* stmt,
     const std::vector<llvm::Type*>& params) {
   // Set insert point to the real function.
@@ -196,45 +344,9 @@ void LLVMCodeGen::emitKernel(
 #endif
 }
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      LOG(FATAL) << "Unhandled dtype for arg: " << bufferArg.var()->name_hint()
-                 << "dtype=" << bufferArg.var()->dtype();
-  }
-  return nullptr;
-}
-
-void LLVMCodeGen::call(const std::vector<CallArg>& args) {
-  CHECK_EQ(args.size(), buffer_args().size())
-      << "args: " << args.size() << ", buffers: " << buffer_args().size();
-  for (size_t i = 0; i < buffer_args().size(); i++) {
-    auto const& bufferArg = buffer_args()[i];
-    auto const& callArg = args[i];
-    args_.push_back(argToPtr(bufferArg, callArg));
-  }
-  value<float>(args_);
-  args_.clear();
-  USE_TRIGGER(llvm_codegen_executed);
-}
-
 // TODO: The binary ops are copypasta.
 
-void LLVMCodeGen::visit(const Add* v) {
+void LLVMCodeGenImpl::visit(const Add* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -252,7 +364,7 @@ void LLVMCodeGen::visit(const Add* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Sub* v) {
+void LLVMCodeGenImpl::visit(const Sub* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -270,7 +382,7 @@ void LLVMCodeGen::visit(const Sub* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Mul* v) {
+void LLVMCodeGenImpl::visit(const Mul* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -288,7 +400,7 @@ void LLVMCodeGen::visit(const Mul* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Div* v) {
+void LLVMCodeGenImpl::visit(const Div* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -306,7 +418,7 @@ void LLVMCodeGen::visit(const Div* v) {
   }
 }
 
-void LLVMCodeGen::visit(const And* v) {
+void LLVMCodeGenImpl::visit(const And* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -321,7 +433,7 @@ void LLVMCodeGen::visit(const And* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Or* v) {
+void LLVMCodeGenImpl::visit(const Or* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -336,7 +448,7 @@ void LLVMCodeGen::visit(const Or* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Xor* v) {
+void LLVMCodeGenImpl::visit(const Xor* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -351,7 +463,7 @@ void LLVMCodeGen::visit(const Xor* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Lshift* v) {
+void LLVMCodeGenImpl::visit(const Lshift* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -366,7 +478,7 @@ void LLVMCodeGen::visit(const Lshift* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Rshift* v) {
+void LLVMCodeGenImpl::visit(const Rshift* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   bool lfp = lhs->getType()->isFloatingPointTy();
@@ -381,11 +493,11 @@ void LLVMCodeGen::visit(const Rshift* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Mod* v) {
+void LLVMCodeGenImpl::visit(const Mod* v) {
   throw std::runtime_error("Mod unsupported in LLVM codegen yet");
 }
 
-void LLVMCodeGen::visit(const Max* v) {
+void LLVMCodeGenImpl::visit(const Max* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -406,7 +518,7 @@ void LLVMCodeGen::visit(const Max* v) {
       irb_.CreateFCmp(llvm::FCmpInst::FCMP_OGT, lhs, rhs), lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const Min* v) {
+void LLVMCodeGenImpl::visit(const Min* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -427,7 +539,7 @@ void LLVMCodeGen::visit(const Min* v) {
       irb_.CreateFCmp(llvm::FCmpInst::FCMP_OLT, lhs, rhs), lhs, rhs);
 }
 
-void LLVMCodeGen::visit(const CompareSelect* v) {
+void LLVMCodeGenImpl::visit(const CompareSelect* v) {
   v->lhs()->accept(this);
   auto lhs = this->value_;
   v->rhs()->accept(this);
@@ -511,21 +623,21 @@ getFromType(llvm::Type* type, T value) {
 }
 
 #define IMM_VISIT_DECLARE(Type, Name)                  \
-  void LLVMCodeGen::visit(const Name##Imm* v) {        \
+  void LLVMCodeGenImpl::visit(const Name##Imm* v) {    \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
-void LLVMCodeGen::visit(const HalfImm* v) {
+void LLVMCodeGenImpl::visit(const HalfImm* v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
-void LLVMCodeGen::visit(const BoolImm* v) {
+void LLVMCodeGenImpl::visit(const BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
-void LLVMCodeGen::visit(const Cast* v) {
+void LLVMCodeGenImpl::visit(const Cast* v) {
   v->src_value()->accept(this);
 
   llvm::Type* dstType = dtypeToLLVM(v->dtype());
@@ -569,7 +681,7 @@ void LLVMCodeGen::visit(const Cast* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Var* v) {
+void LLVMCodeGenImpl::visit(const Var* v) {
   if (varToArg_.count(v)) {
     auto idx = varToArg_.at(v);
     auto arg = fn_->arg_begin() + idx;
@@ -579,7 +691,7 @@ void LLVMCodeGen::visit(const Var* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Let* v) {
+void LLVMCodeGenImpl::visit(const Let* v) {
   const Var* var = dynamic_cast<const Var*>(v->var());
   CHECK(var != nullptr);
   v->value()->accept(this);
@@ -598,7 +710,7 @@ void LLVMCodeGen::visit(const Let* v) {
 }
 
 // TODO: refactor this and merge with Let
-void LLVMCodeGen::visit(const LetStmt* v) {
+void LLVMCodeGenImpl::visit(const LetStmt* v) {
   const Var* var = v->var();
   CHECK(var != nullptr);
   v->value()->accept(this);
@@ -616,7 +728,7 @@ void LLVMCodeGen::visit(const LetStmt* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Ramp* v) {
+void LLVMCodeGenImpl::visit(const Ramp* v) {
   v->base()->accept(this);
   auto base = this->value_;
   v->stride()->accept(this);
@@ -642,14 +754,14 @@ void LLVMCodeGen::visit(const Ramp* v) {
   }
 }
 
-llvm::Value* LLVMCodeGen::emitUnmaskedLoad(
+llvm::Value* LLVMCodeGenImpl::emitUnmaskedLoad(
     llvm::Value* base,
     llvm::Value* idx) {
   auto addr = irb_.CreateGEP(base, idx);
   return irb_.CreateLoad(addr);
 }
 
-llvm::Value* LLVMCodeGen::emitMaskedLoad(
+llvm::Value* LLVMCodeGenImpl::emitMaskedLoad(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* mask) {
@@ -677,7 +789,7 @@ llvm::Value* LLVMCodeGen::emitMaskedLoad(
   return phi;
 }
 
-void LLVMCodeGen::visit(const Load* v) {
+void LLVMCodeGenImpl::visit(const Load* v) {
   v->base_handle()->accept(this);
   auto base = this->value_;
   v->index()->accept(this);
@@ -749,7 +861,7 @@ void LLVMCodeGen::visit(const Load* v) {
   value_ = load;
 }
 
-void LLVMCodeGen::visit(const For* v) {
+void LLVMCodeGenImpl::visit(const For* v) {
   // Create "start" and "stop" values.
   v->start()->accept(this);
   auto start = this->value_;
@@ -793,13 +905,13 @@ void LLVMCodeGen::visit(const For* v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
-void LLVMCodeGen::visit(const Block* v) {
+void LLVMCodeGenImpl::visit(const Block* v) {
   for (Stmt* s : v->stmts()) {
     s->accept(this);
   }
 }
 
-void LLVMCodeGen::emitUnmaskedStore(
+void LLVMCodeGenImpl::emitUnmaskedStore(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* val) {
@@ -807,7 +919,7 @@ void LLVMCodeGen::emitUnmaskedStore(
   irb_.CreateStore(val, addr);
 }
 
-void LLVMCodeGen::emitMaskedStore(
+void LLVMCodeGenImpl::emitMaskedStore(
     llvm::Value* base,
     llvm::Value* idx,
     llvm::Value* mask,
@@ -831,7 +943,7 @@ void LLVMCodeGen::emitMaskedStore(
   irb_.SetInsertPoint(tailblock);
 }
 
-void LLVMCodeGen::visit(const Store* v) {
+void LLVMCodeGenImpl::visit(const Store* v) {
   v->base_handle()->accept(this);
   auto base = this->value_;
   v->index()->accept(this);
@@ -890,13 +1002,13 @@ void LLVMCodeGen::visit(const Store* v) {
   }
 }
 
-void LLVMCodeGen::visit(const Broadcast* v) {
+void LLVMCodeGenImpl::visit(const Broadcast* v) {
   v->value()->accept(this);
   int lanes = v->lanes();
   value_ = irb_.CreateVectorSplat(lanes, value_);
 }
 
-void LLVMCodeGen::visit(const IfThenElse* v) {
+void LLVMCodeGenImpl::visit(const IfThenElse* v) {
   v->condition()->accept(this);
   llvm::Value* condition = value_;
   llvm::Value* c =
@@ -926,7 +1038,7 @@ void LLVMCodeGen::visit(const IfThenElse* v) {
   value_ = phi;
 }
 
-void LLVMCodeGen::visit(const BaseCallNode* v) {
+void LLVMCodeGenImpl::visit(const BaseCallNode* v) {
   LOG(FATAL) << "Unimplemented: BaseCall";
 }
 
@@ -940,7 +1052,7 @@ static void applyMathFunctionAttributes(llvm::Function* f) {
   f->addFnAttr(llvm::Attribute::WillReturn);
 }
 
-void LLVMCodeGen::visit(const Intrinsics* v) {
+void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
   bool call_simd_sleef = false;
@@ -1151,23 +1263,23 @@ void LLVMCodeGen::visit(const Intrinsics* v) {
   }
 }
 
-void LLVMCodeGen::visit(const FunctionCall* v) {
+void LLVMCodeGenImpl::visit(const FunctionCall* v) {
   LOG(FATAL) << "Unimplemented: FunctionCall";
 }
 
-void LLVMCodeGen::visit(const Allocate* v) {
+void LLVMCodeGenImpl::visit(const Allocate* v) {
   LOG(FATAL) << "Unimplemented: Allocate";
 }
 
-void LLVMCodeGen::visit(const Free* v) {
+void LLVMCodeGenImpl::visit(const Free* v) {
   LOG(FATAL) << "Unimplemented: Free";
 }
 
-void LLVMCodeGen::visit(const Cond* v) {
+void LLVMCodeGenImpl::visit(const Cond* v) {
   LOG(FATAL) << "Unimplemented: Cond";
 }
 
-void LLVMCodeGen::optimize(llvm::Module& M) {
+void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::FunctionPassManager FPM(&M);
   llvm::legacy::PassManager PM;
 

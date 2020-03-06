@@ -16,7 +16,7 @@ namespace orc {
 
 class PytorchLLVMJITImpl;
 
-class TORCH_API PytorchLLVMJIT {
+class PytorchLLVMJIT {
  public:
   PytorchLLVMJIT();
   ~PytorchLLVMJIT();
@@ -29,7 +29,7 @@ class TORCH_API PytorchLLVMJIT {
   const DataLayout& getDataLayout();
 
  private:
-  // Use PImpl idiom here to hide the no-rtti parts of the JIT structure.
+  // Use the PImpl idiom here to hide the no-rtti parts of the JIT structure.
   std::unique_ptr<PytorchLLVMJITImpl> impl_;
 };
 
