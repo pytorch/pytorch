@@ -395,6 +395,7 @@ protected:
   bool check_mem_overlap_ = false;
   bool all_ops_same_shape_ = false;
   bool requires_channels_last_output_ = false;
+  bool requires_channels_last_3d_output_ = false;
 };
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
