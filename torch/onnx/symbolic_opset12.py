@@ -76,7 +76,7 @@ def broadcast_tensors(g, tensor_list):
     tensors = sym_help._unpack_list(tensor_list)
     if (tensors[0].type().dim() != 2 and tensors[0].type().sizes() != tensors[1].type().sizes()):
         return _unimplemented("broadcast_tensors", "broadcast for tensors is only implemented in case when there are 2 tensors of the same size")
-    return g.op("prim::ListConstruct", *tensors)
+    return tensor_list
 
 def mse_loss(g, input, target, reduction):
     # none reduction : onnx::Constant[value={0}]
