@@ -784,7 +784,7 @@ class TestCase(expecttest.TestCase):
         'float16': (0.001, 1e-5),
         'bfloat16': (0.016, 1e-5),
         'float32': (1.3e-6, 1.3e-6),
-        'float64': (1e-5, 1e-8), # NumPy default
+        'float64': (1e-5, 1e-8),  # NumPy default
         'complex32': (1.3e-6, 1.3e-6),
         'complex64': (1e-5, 1e-8),
     }
