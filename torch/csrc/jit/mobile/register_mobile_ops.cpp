@@ -63,34 +63,6 @@ void conv2d_kernel(const c10::OperatorHandle& op, Stack* stack) {
     pack(*stack, std::move(result_));
 }
 
-void view_kernel(const c10::OperatorHandle& op, Stack* stack) {
-#ifdef USE_STATIC_DISPATCH
-  at::AutoNonVariableTypeMode non_var_type_mode(true);
-#endif
-  auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).view(
-      (std::move(peek(*stack, 1, 2))).toIntVector()
-      );
-  drop(*stack, 2);
-  pack(*stack, std::move(result_));
-}
-
-void permute_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  auto result_ = ((std::move(peek(*stack, 0, 2))).toTensor()).permute(
-      (std::move(peek(*stack, 1, 2))).toIntVector()
-  );
-  drop(*stack, 2);
-  pack(*stack, std::move(result_));
-}
-
-void cat_kernel(const c10::OperatorHandle& op, Stack* stack) {
-  auto result_ = at::cat(
-      (std::move(peek(*stack, 0, 2))).toTensorVector(),
-      (std::move(peek(*stack, 1, 2))).toInt()
-  );
-  drop(*stack, 2);
-  pack(*stack, std::move(result_));
-}
-
 void __is__kernel(const c10::OperatorHandle& op, Stack* stack) {
   c10::IValue self, obj;
   pop(*stack, self, obj);
@@ -300,7 +272,13 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
   torch::RegisterOperators::options()
-    .kernel<&view_kernel>(c10::DispatchKey::CPUTensorId)
+    .kernel(c10::DispatchKey::CPUTensorId,
+    [] (const Tensor& self, c10::ArrayRef<int64_t> size) {
+      #ifdef USE_STATIC_DISPATCH
+        at::AutoNonVariableTypeMode non_var_type_mode(true);
+      #endif
+      return self.view(size);
+    })
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::dim",
@@ -382,7 +360,10 @@ static auto registry = torch::RegisterOperators().op(
 ).op(
   "_aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)",
   torch::RegisterOperators::options()
-    .kernel<&permute_kernel>(c10::DispatchKey::CPUTensorId)
+    .kernel(c10::DispatchKey::CPUTensorId,
+      [](const Tensor& self, c10::ArrayRef<int64_t> dims) {
+        return self.permute(dims);
+      })
     .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
 ).op(
   "_aten::matmul(Tensor self, Tensor other) -> Tensor",
@@ -413,7 +394,10 @@ static auto registry = torch::RegisterOperators().op(
   })
 ).op(
   "_aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
-  torch::RegisterOperators::options().kernel<&cat_kernel>(c10::DispatchKey::CPUTensorId)
+  torch::RegisterOperators::options().kernel(c10::DispatchKey::CPUTensorId,
+  [] (c10::ArrayRef<Tensor> tensors, int64_t dim) {
+    return at::cat(tensors, dim);
+  })
 ).op(
   "_aten::__is__(t1 self, t2 obj) -> bool",
   torch::RegisterOperators::options().catchAllKernel<&__is__kernel>()
