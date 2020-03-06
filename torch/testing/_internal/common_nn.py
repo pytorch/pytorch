@@ -3512,7 +3512,7 @@ class NNTestCase(TestCase):
         # TODO: compare structure
         if input.numel() != 0:
             self.assertLessEqual(
-                max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
+                max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
                 PRECISION
             )
 
@@ -3542,7 +3542,7 @@ class NNTestCase(TestCase):
         numerical_t = list(iter_tensors(numerical_d_x))
 
         self.assertLessEqual(
-            max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
+            max(a.add(n, alpha=-1).abs().max() for a, n in zip(analytical_t, numerical_t)),
             PRECISION
         )
 
