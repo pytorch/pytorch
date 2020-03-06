@@ -394,6 +394,50 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
+void qgelu_kernel(const Tensor& qx, Tensor& qy) {
+  float i_scale = qx.q_scale();
+  int64_t i_zero_point = qx.q_zero_point();
+  auto i_scale_vec = Vec256<float>(i_scale);
+  auto i_zero_point_vec = Vec256<float>((float)i_zero_point);
+  auto i_scale_neg_zp_premul_vec = i_scale_vec * i_zero_point_vec.neg();
+
+  float o_scale = qy.q_scale();
+  int64_t o_zero_point = qy.q_zero_point();
+  float inv_o_scale = 1.0 / o_scale;
+
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qgelu", [&]() {
+
+    auto iter = TensorIterator::unary_op(qy, qx);
+
+    using qVec = Vec256<scalar_t>;
+    using Vec = Vec256<float>;
+    const Vec kAlphaVec(M_SQRT1_2);
+    const Vec kOneVec(1);
+    const Vec kPointFiveVec(0.5);
+
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t value_qx) -> scalar_t {
+        const auto x = at::dequantize_val(i_scale, i_zero_point, value_qx);
+        // GELU
+        const float y = x * 0.5f * (1.0f + std::erf(x * M_SQRT1_2));
+        return at::quantize_val<scalar_t>(o_scale, o_zero_point, y);
+      },
+      [&](qVec value_qx) -> qVec {
+        const auto value_dx = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
+                                                  i_scale_neg_zp_premul_vec);
+        qVec::float_vec_return_type retvals;
+        for (int idx = 0; idx < qVec::float_num_vecs(); idx++) {
+          // GELU
+          retvals[idx] = retvals[idx] * kPointFiveVec * (
+              kOneVec + (retvals[idx] * kAlphaVec).erf());
+        }
+        return qVec::quantize(retvals, o_scale, o_zero_point, inv_o_scale);
+      }
+    );
+  });
+}
+
 // Note: out is assumed to be the same size as self and other.
 // Note: Addition is only supported when self, other, out are of the same dtype.
 template <bool ReLUFused = false>
@@ -1149,6 +1193,7 @@ REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
 REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
 REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qgelu_stub, &qgelu_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);

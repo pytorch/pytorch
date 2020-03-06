@@ -1,6 +1,7 @@
 from __future__ import division
 from builtins import round
 
+import math
 import numpy as np
 import unittest
 
@@ -168,6 +169,31 @@ class TestQuantizedOps(TestCase):
         qY_hat = op(qX, negative_slope=alpha)
         self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                          message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
+
+    """Tests the correctness of the quantized::gelu op."""
+    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
+                       qparams=hu.qparams()),
+           alpha=st.floats(0.0, 1.0, allow_nan=False, allow_infinity=False))
+    def test_qgelu(self, X, alpha):
+        X, (scale, zero_point, torch_type) = X
+
+        X = torch.from_numpy(X)
+        qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                       dtype=torch_type)
+
+        # calculate GT
+        dqX = qX.dequantize()
+        # GELU
+        dqY_hat = dqX * 0.5 * (1.0 + (dqX / math.sqrt(2)).erf())
+        qY_hat = torch.quantize_per_tensor(dqY_hat, scale=scale,
+                                           zero_point=zero_point,
+                                           dtype=torch_type)
+
+        # torch.nn.functional
+        op = torch.nn.quantized.functional.gelu
+        qY = op(qX)
+        self.assertEqual(qY, qY_hat,
+                         message="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),

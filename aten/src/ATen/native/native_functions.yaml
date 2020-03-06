@@ -2368,6 +2368,7 @@
   dispatch:
     CPU: gelu_cpu
     CUDA: gelu_cuda
+    QuantizedCPU: quantized_gelu
 
 - func: gelu_backward(Tensor grad, Tensor self) -> Tensor
   use_c10_dispatcher: full

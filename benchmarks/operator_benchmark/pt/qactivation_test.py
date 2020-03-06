@@ -44,6 +44,7 @@ qactivation_ops = op_bench.op_list(
     attrs=(
         ('relu', nnq.ReLU),
         ('relu6', nnq.ReLU6),
+        ('functional.gelu', nnq.functional.gelu),
     ),
     attr_names=('op_name', 'op_func'),
 )
