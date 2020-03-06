@@ -2427,16 +2427,23 @@ class TestDistributions(TestCase):
 
         def ref_log_prob(idx, val, log_prob):
             prob = p[idx]
-            self.assertEqual(log_prob, math.log(prob if val else 1 - prob))
+            if prob > 0.499 and prob < 0.501: # using default value of lim here
+                log_norm_const = math.log(2.) + 4. / 3. * math.pow(prob - 0.5, 2) +\
+                                 104. / 45. * math.pow(prob - 0.5, 4)
+            else:
+                log_norm_const = math.log(2. * math.atanh(1. - 2. * prob) / (1. - 2.0 * prob))
+            res = val * math.log(prob) + (1. - val) * math.log1p(-prob) + log_norm_const
+            self.assertEqual(log_prob, res)
 
-        self._check_log_prob(Bernoulli(p), ref_log_prob)
-        self._check_log_prob(Bernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
-        self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
+        self._check_log_prob(ContinuousBernoulli(p), ref_log_prob)
+        self._check_log_prob(ContinuousBernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
 
         # check entropy computation
-        self.assertEqual(Bernoulli(p).entropy(), torch.tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
-        self.assertEqual(Bernoulli(torch.tensor([0.0])).entropy(), torch.tensor([0.0]))
-        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), prec=1e-4)
+        self.assertEqual(ContinuousBernoulli(p).entropy(), torch.tensor([-0.02938, -0.07641, -0.00682]), prec=1e-4)
+        # entropy below corresponds to the clamped value of prob when using float 64
+        # the value for float32 should be -1.76898
+        self.assertEqual(ContinuousBernoulli(torch.tensor([0.0])).entropy(), torch.tensor([-2.58473]))
+        self.assertEqual(ContinuousBernoulli(s).entropy(), torch.tensor(-0.02938), prec=1e-4)
 
     def test_continuous_bernoulli_3d(self):
         p = torch.full((2, 3, 5), 0.5).requires_grad_()
