@@ -97,6 +97,14 @@ void expectListEquals(c10::ArrayRef<T> expected, std::vector<T> actual) {
   }
 }
 
+template<class T, size_t N>
+void expectListEquals(c10::ArrayRef<T> expected, std::array<T, N> actual) {
+  EXPECT_EQ(expected.size(), actual.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(expected[i], actual[i]);
+  }
+}
+
 // NB: This is not really sound, but all of the type sets constructed here
 // are singletons so it's fine
 static inline c10::DispatchKey extractDispatchKey(const at::Tensor& t) {

@@ -1169,6 +1169,60 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(Tensor[] a) -> Tensor[]");
 
 
+  // std::array list types (with empty list)
+  testArgTypes<std::array<double, 0>>::test(
+    std::array<double, 0>(), [] (std::array<double, 0> v) {},
+    std::array<double, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<c10::List<double>>().size()));},
+    "(float[0] a) -> float[0]");
+  testArgTypes<std::array<int64_t, 0>>::test(
+    std::array<int64_t, 0>(), [] (std::array<int64_t, 0> v) {},
+    std::array<int64_t, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<c10::List<int64_t>>().size()));},
+    "(int[0] a) -> int[0]");
+  testArgTypes<std::array<bool, 0>>::test(
+    std::array<bool, 0>(), [] (std::array<bool, 0> v) {},
+    std::array<bool, 0>(), [] (const IValue& v) {EXPECT_EQ(0, (v.to<std::array<bool, 0>>().size()));},
+    "(bool[0] a) -> bool[0]");
+  testArgTypes<std::array<std::string, 0>>::test(
+    std::array<std::string, 0>(), [] (std::array<std::string, 0> v) {EXPECT_EQ(0, v.size());},
+    std::array<std::string, 0>(), [] (const IValue& v) {EXPECT_EQ(0, v.toListRef().size());},
+    "(str[0] a) -> str[0]");
+
+
+  // std::array list types (with non-empty list)
+  testArgTypes<std::array<double, 2>>::test(
+    std::array<double, 2>({1.5, 2.5}), [] (std::array<double, 2> v) {expectListEquals({1.5, 2.5}, v);},
+    std::array<double, 2>({3.5, 4.5}), [] (const IValue& v) {expectListEquals({3.5, 4.5}, v.to<std::array<double, 2>>());},
+    "(float[2] a) -> float[2]");
+  testArgTypes<std::array<int64_t, 2>>::test(
+    std::array<int64_t, 2>({1, 2}), [] (std::array<int64_t, 2> v) {expectListEquals({1, 2}, v);},
+    std::array<int64_t, 2>({3, 4}), [] (const IValue& v) {expectListEquals({3, 4}, v.to<std::array<int64_t, 2>>());},
+    "(int[2] a) -> int[2]");
+  testArgTypes<std::array<bool, 2>>::test(
+    std::array<bool, 2>({true, false}), [] (std::array<bool, 2> v) {expectListEquals({true, false}, v);},
+    std::array<bool, 2>({true, false}), [] (const IValue& v) {expectListEquals({true, false}, v.to<std::array<bool, 2>>());},
+    "(bool[2] a) -> bool[2]");
+  testArgTypes<std::array<std::string, 2>>::test(
+    std::array<std::string, 2>({"first", "second"}), [] (std::array<std::string, 2> v) {expectListEquals({"first", "second"}, v);},
+    std::array<std::string, 2>({"first", "second"}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.toListRef().size());
+      EXPECT_EQ("first", v.toListRef()[0].toStringRef());
+      EXPECT_EQ("second", v.toListRef()[1].toStringRef());
+    },
+    "(str[2] a) -> str[2]");
+  testArgTypes<std::array<Tensor, 2>>::test(
+    std::array<Tensor, 2>({dummyTensor(c10::DispatchKey::CPUTensorId), dummyTensor(c10::DispatchKey::CUDATensorId)}), [] (std::array<Tensor, 2> v) {
+      EXPECT_EQ(2, v.size());
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v[0]));
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v[1]));
+    },
+    std::array<Tensor, 2>({dummyTensor(c10::DispatchKey::CUDATensorId), dummyTensor(c10::DispatchKey::CPUTensorId)}), [] (const IValue& v) {
+      EXPECT_EQ(2, v.to<c10::List<at::Tensor>>().size());
+      EXPECT_EQ(c10::DispatchKey::CUDATensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(0)));
+      EXPECT_EQ(c10::DispatchKey::CPUTensorId, extractDispatchKey(v.to<c10::List<at::Tensor>>().get(1)));
+    },
+    "(Tensor[2] a) -> Tensor[2]");
+
+
   // deprecated list types (with empty list)
   testArgTypes<std::vector<double>>::test<TestLegacyAPI>(
     std::vector<double>(), [] (const std::vector<double>& v) {EXPECT_EQ(0, v.size());},

@@ -325,6 +325,8 @@ struct CAFFE2_API IValue final {
   IValue(at::ArrayRef<T> v);
   template<class T>
   IValue(const std::vector<T>& v);
+  template<class T, size_t N>
+  IValue(std::array<T, N> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);

@@ -105,6 +105,12 @@ namespace detail {
     static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
   };
 
+  template<class T, size_t N, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<std::array<T, N>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
+  };
+
   // The following specialisations of assert_is_valid_input_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
@@ -169,6 +175,12 @@ namespace detail {
   : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
     static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::vector<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
     // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported output type: std::vector<T>. Please use List<T> instead.");
+  };
+
+  template<class T, size_t N, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<std::array<T, N>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported output type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
   // The following specialisations of assert_is_valid_output_type are technically not
