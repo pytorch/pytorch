@@ -1073,7 +1073,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_random(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
-                return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+                return torch.mul(x, (torch.randn(2, 3, 4) + x).size(0))
 
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
@@ -1081,6 +1081,22 @@ class TestONNXRuntime(unittest.TestCase):
         class Rand(torch.nn.Module):
             def forward(self, x):
                 return torch.mul(x, (torch.rand(2, 3, 4) + x).size(0))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Rand(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_random_dynamic_size(self):
+        class RandN(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.randn(x.size()).size(1))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(RandN(), x)
+
+        class Rand(torch.nn.Module):
+            def forward(self, x):
+                return torch.mul(x, torch.rand(x.size()).size(1))
 
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
