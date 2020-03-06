@@ -42,7 +42,14 @@ if sys.version_info < (3, 3):
 
 """Add helper function to spawn N processes and wait for completion of any of
 them. This depends `mp.get_context` which was added in Python 3.4."""
-from .spawn import spawn, SpawnContext, _supports_context, start_processes, ProcessContext
+from .spawn import (
+    ProcessContext,
+    SpawnContext,
+    _supports_context,
+    spawn,
+    start_processes,
+    start_processes_in_context,
+)
 
 
 if sys.platform == 'darwin' or sys.platform == 'win32':

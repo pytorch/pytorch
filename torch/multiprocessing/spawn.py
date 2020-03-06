@@ -135,13 +135,23 @@ class SpawnContext(ProcessContext):
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
 def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+    mp_context = multiprocessing.get_context(start_method)
+    start_process_in_context(mp_context, fn, args, nprocs, join, daemon)
+
+
+def start_processes_in_context(mp_context, fn, args=(), nprocs=1, join=True, daemon=False):
+    r""" A more general method to ``torch.muliprocessing.spawn`` in which
+    the processes are started in the provided ``mp_context``. Useful when
+    ``fn`` needs a multiprocessing data structure that needs to be created in the
+    same multiprocessing context as the process.
+    """
+
     _python_version_check()
-    mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
     for i in range(nprocs):
-        error_queue = mp.SimpleQueue()
-        process = mp.Process(
+        error_queue = mp_context.SimpleQueue()
+        process = mp_context.Process(
             target=_wrap,
             args=(fn, i, args, error_queue),
             daemon=daemon,
