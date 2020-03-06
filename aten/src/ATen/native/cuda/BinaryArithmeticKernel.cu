@@ -82,11 +82,7 @@ void remainder_kernel_cuda(TensorIterator& iter) {
       using thrust_t = typename ztype_cuda<scalar_t>::thrust_t;
       gpu_kernel_with_scalars(iter,
         []GPU_LAMBDA(thrust_t a, thrust_t b) __ubsan_ignore_float_divide_by_zero__ -> thrust_t {
-          if (b == 0) {
-            return static_cast<thrust_t>(std::numeric_limits<scalar_t>::quiet_NaN());
-          } else {
-            return a - b * static_cast<thrust_t>(std::floor(a / b));
-          }
+          return a - b * static_cast<thrust_t>(std::floor(a / b));
         });
     });
   }
