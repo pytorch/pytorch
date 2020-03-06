@@ -66,7 +66,7 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   RNNOptionsBase options_base;
 
  protected:
-  // Resets _flat_weights
+  // Resets flat_weights_
   // Note: be v. careful before removing this, as 3rd party device types
   // likely rely on this behavior to properly .to() modules like LSTM.
   void reset_flat_weights();
@@ -91,9 +91,9 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
     int64_t max_batch_size,
     Tensor hx);
 
-  std::vector<std::string> _flat_weights_names;
-  std::vector<std::vector<std::string>> _all_weights;
-  std::vector<Tensor> _flat_weights;
+  std::vector<std::string> flat_weights_names_;
+  std::vector<std::vector<std::string>> all_weights_;
+  std::vector<Tensor> flat_weights_;
 };
 } // namespace detail
 

@@ -84,8 +84,8 @@ void RNNImplBase<Derived>::reset() {
     TORCH_CHECK(false, "Unrecognized RNN mode: " + torch::enumtype::get_enum_name(options_base.mode()));
   }
 
-  _flat_weights_names = {};
-  _all_weights = {};
+  flat_weights_names_ = {};
+  all_weights_ = {};
 
   for (int64_t layer = 0; layer < options_base.num_layers(); layer++) {
     for (int64_t direction = 0; direction < num_directions; direction++) {
@@ -116,18 +116,18 @@ void RNNImplBase<Derived>::reset() {
         auto param = layer_params[i];
         this->register_parameter(name, param);
       }
-      _flat_weights_names.insert(_flat_weights_names.end(), param_names.begin(), param_names.end());
-      _all_weights.emplace_back(param_names);
+      flat_weights_names_.insert(flat_weights_names_.end(), param_names.begin(), param_names.end());
+      all_weights_.emplace_back(param_names);
     }
   }
 
-  _flat_weights = {};
-  for (const auto& wn : _flat_weights_names) {
+  flat_weights_ = {};
+  for (const auto& wn : flat_weights_names_) {
     auto named_parameters = this->named_parameters(/*recurse=*/false);
     if (named_parameters.contains(wn)) {
-      _flat_weights.emplace_back(named_parameters[wn]);
+      flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      _flat_weights.emplace_back(Tensor());
+      flat_weights_.emplace_back(Tensor());
     }
   }
 
@@ -142,17 +142,17 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // Right now, this works only if the module is on the GPU and cuDNN is enabled.
   // Otherwise, it's a no-op.
 
-  // Short-circuits if _flat_weights is only partially instantiated
-  if (_flat_weights.size() != _flat_weights_names.size()) {
+  // Short-circuits if flat_weights_ is only partially instantiated
+  if (flat_weights_.size() != flat_weights_names_.size()) {
     return;
   }
 
-  // Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
-  // or the tensors in _flat_weights are of different dtypes
+  // Short-circuits if any tensor in self.flat_weights_ is not acceptable to cuDNN
+  // or the tensors in flat_weights_ are of different dtypes
 
-  auto first_fw = _flat_weights[0];
+  auto first_fw = flat_weights_[0];
   auto dtype = first_fw.dtype();
-  for (const auto& fw : _flat_weights) {
+  for (const auto& fw : flat_weights_) {
     if (!(fw.dtype() == dtype) ||
         !fw.is_cuda() ||
         !torch::cudnn_is_acceptable(fw)) {
@@ -165,10 +165,10 @@ void RNNImplBase<Derived>::flatten_parameters() {
   // alias would break the assumptions of the uniqueness check in
   // Module::named_parameters().
   std::unordered_set<void*> unique_data_ptrs;
-  for (const auto& p : _flat_weights) {
+  for (const auto& p : flat_weights_) {
     unique_data_ptrs.emplace(p.data_ptr());
   }
-  if (unique_data_ptrs.size() != _flat_weights.size()) {
+  if (unique_data_ptrs.size() != flat_weights_.size()) {
     return;
   }
 
@@ -176,11 +176,11 @@ void RNNImplBase<Derived>::flatten_parameters() {
     torch::DeviceGuard device_guard(first_fw.device());
 
     // Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
-    // an inplace operation on self._flat_weights
+    // an inplace operation on self.flat_weights_
     {
       torch::NoGradGuard no_grad;
       torch::_cudnn_rnn_flatten_weight(
-            _flat_weights,
+            flat_weights_,
             options_base.bias() ? 4 : 2,
             options_base.input_size(),
             static_cast<int64_t>(get_cudnn_mode_for_rnn(options_base.mode())),
@@ -194,13 +194,13 @@ void RNNImplBase<Derived>::flatten_parameters() {
 
 template <typename Derived>
 void RNNImplBase<Derived>::reset_flat_weights() {
-  _flat_weights = {};
-  for (const auto& wn : _flat_weights_names) {
+  flat_weights_ = {};
+  for (const auto& wn : flat_weights_names_) {
     auto named_parameters = this->named_parameters(/*recurse=*/false);
     if (named_parameters.contains(wn)) {
-      _flat_weights.emplace_back(named_parameters[wn]);
+      flat_weights_.emplace_back(named_parameters[wn]);
     } else {
-      _flat_weights.emplace_back(Tensor());
+      flat_weights_.emplace_back(Tensor());
     }
   }
 }
@@ -317,20 +317,20 @@ std::tuple<Tensor, Tensor> RNNImplBase<Derived>::forward_helper(
   std::tuple<Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
     if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
-      result = torch::rnn_tanh(input, hx, _flat_weights, options_base.bias(), options_base.num_layers(),
+      result = torch::rnn_tanh(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
                                options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
     } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
-      result = torch::rnn_relu(input, hx, _flat_weights, options_base.bias(), options_base.num_layers(),
+      result = torch::rnn_relu(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
                                options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
     } else {
       TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
     }
   } else {
     if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
-      result = torch::rnn_tanh(input, batch_sizes, hx, _flat_weights, options_base.bias(),
+      result = torch::rnn_tanh(input, batch_sizes, hx, flat_weights_, options_base.bias(),
                                options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
     } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
-      result = torch::rnn_relu(input, batch_sizes, hx, _flat_weights, options_base.bias(),
+      result = torch::rnn_relu(input, batch_sizes, hx, flat_weights_, options_base.bias(),
                                options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
     } else {
       TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
@@ -388,7 +388,7 @@ template <typename Derived>
 std::vector<Tensor> RNNImplBase<Derived>::all_weights() const {
   std::vector<Tensor> result = {};
   auto named_parameters = this->named_parameters(/*recurse=*/false);
-  for (const auto& weights : _all_weights) {
+  for (const auto& weights : all_weights_) {
     for (const auto& weight : weights) {
       result.emplace_back(named_parameters[weight]);
     }
@@ -486,10 +486,10 @@ std::tuple<Tensor, std::tuple<Tensor, Tensor>> LSTMImpl::forward_helper(
   this->check_forward_args(input, hx, batch_sizes);
   std::tuple<Tensor, Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
-    result = torch::lstm(input, {std::get<0>(hx), std::get<1>(hx)}, _flat_weights, options.bias(), options.num_layers(),
+    result = torch::lstm(input, {std::get<0>(hx), std::get<1>(hx)}, flat_weights_, options.bias(), options.num_layers(),
                      options.dropout(), this->is_training(), options.bidirectional(), options.batch_first());
   } else {
-    result = torch::lstm(input, batch_sizes, {std::get<0>(hx), std::get<1>(hx)}, _flat_weights, options.bias(),
+    result = torch::lstm(input, batch_sizes, {std::get<0>(hx), std::get<1>(hx)}, flat_weights_, options.bias(),
                      options.num_layers(), options.dropout(), this->is_training(), options.bidirectional());
   }
   auto output = std::get<0>(result);
@@ -563,10 +563,10 @@ std::tuple<Tensor, Tensor> GRUImpl::forward_helper(
   this->check_forward_args(input, hx, batch_sizes);
   std::tuple<Tensor, Tensor> result;
   if (!batch_sizes.defined()) {
-    result = torch::gru(input, hx, _flat_weights, options.bias(), options.num_layers(),
+    result = torch::gru(input, hx, flat_weights_, options.bias(), options.num_layers(),
                      options.dropout(), this->is_training(), options.bidirectional(), options.batch_first());
   } else {
-    result = torch::gru(input, batch_sizes, hx, _flat_weights, options.bias(),
+    result = torch::gru(input, batch_sizes, hx, flat_weights_, options.bias(),
                      options.num_layers(), options.dropout(), this->is_training(), options.bidirectional());
   }
   auto output = std::get<0>(result);
