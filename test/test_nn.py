@@ -8884,13 +8884,14 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
-    def _test_dropout(self, cls, device, input, memory_format=None):
+    def _test_dropout(self, cls, device, input, memory_format=torch.contiguous_format):
         p = 0.2
         input = input.to(device).fill_(1 - p)
 
         module = cls(p)
         input_var = input.clone(memory_format=memory_format).requires_grad_()
         output = module(input_var)
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
@@ -8898,6 +8899,7 @@ class TestNNDeviceType(NNTestCase):
         module = cls(p, True)
         input_var = input.clone(memory_format=memory_format).requires_grad_()
         output = module(input_var + 0)
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
         self.assertLess(abs(output.data.mean() - (1 - p)), 0.05)
         output.backward(input)
         self.assertLess(abs(input_var.grad.data.mean() - (1 - p)), 0.05)
