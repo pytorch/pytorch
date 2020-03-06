@@ -70,9 +70,9 @@ static void avg_pool3d_out_frame(
             int64_t hend = std::min(hstart + kH, inputHeight + padH);
             int64_t wend = std::min(wstart + kW, inputWidth + padW);
             int64_t pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-            dstart = std::max(dstart, 0L);
-            hstart = std::max(hstart, 0L);
-            wstart = std::max(wstart, 0L);
+            dstart = std::max(dstart, static_cast<int64_t>(0));
+            hstart = std::max(hstart, static_cast<int64_t>(0));
+            wstart = std::max(wstart, static_cast<int64_t>(0));
             dend = std::min(dend, inputDepth);
             hend = std::min(hend, inputHeight);
             wend = std::min(wend, inputWidth);
