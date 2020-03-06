@@ -116,21 +116,6 @@ THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
   return THCTensor_(newWithSize)(state, {size0}, {});
 }
 
-THCTensor *THCTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t size1)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1}, {});
-}
-
-THCTensor *THCTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t size1, int64_t size2)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1, size2}, {});
-}
-
-THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
-{
-  return THCTensor_(newWithSize)(state, {size0, size1, size2, size3}, {});
-}
-
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 {
   // already available in Aten as at::clone()
