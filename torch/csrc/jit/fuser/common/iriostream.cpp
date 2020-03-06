@@ -15,67 +15,6 @@ void IRPrinter::handle(Fusion* fusion) {
   }
 }
 
-/*
-void IRPrinter::handle(const Statement* const stmt) {
-  if (stmt->isVal()){
-    handle(static_cast<const Val*>(stmt));
-    return;
-  } else if (stmt->isExpr()) {
-    handle(static_cast<const Expr*>(stmt));
-    return;
-  }
-  throw std::runtime_error("Unkown statment type found in os << Statement.");
-}
-
-void IRPrinter::handle(const Val* const val) {
-  switch (*(val->getValType())) {
-    case ValType::Tensor:
-      handle(static_cast<const Tensor* const>(val)); return;
-    case ValType::TensorDomain:
-      handle(static_cast<const TensorDomain* const>(val)); return;
-    case ValType::TensorView:
-      handle(static_cast<const TensorView* const>(val)); return;
-    case ValType::IterDomain:
-      handle(static_cast<const IterDomain* const>(val)); return;
-    case ValType::TensorIndex:
-      handle(static_cast<const TensorIndex* const>(val)); return;
-
-    case ValType::Scalar:
-      switch (*(val->getDataType())) {
-        case DataType::Float:
-          handle(static_cast<const Float* const>(val)); return;
-        case DataType::Int:
-          handle(static_cast<const Int* const>(val)); return;
-        default:
-          break;
-      }
-    default:
-      break;
-  }
-  throw std::runtime_error("Unknown ValType in os << Val.");
-}
-
-void IRPrinter::handle(const Expr* const expr) {
-  switch (*(expr->getExprType())) {
-    case ExprType::UnaryOp:
-      handle(static_cast<const UnaryOp* const>(expr)); return;
-    case ExprType::BinaryOp:
-      handle(static_cast<const BinaryOp* const>(expr)); return;
-    case ExprType::ForLoop:
-      handle(static_cast<const ForLoop* const>(expr)); return;
-    case ExprType::IfThenElse:
-      handle(static_cast<const IfThenElse* const>(expr)); return;
-    case ExprType::Split:
-      handle(static_cast<const Split* const>(expr)); return;
-    case ExprType::Merge:
-      handle(static_cast<const Merge* const>(expr)); return;
-    case ExprType::Reorder:
-      handle(static_cast<const Reorder* const>(expr)); return;
-  }
-  throw std::runtime_error("Unknown ExprType in os << Expr.");
-}
-*/
-
 TORCH_API void IRPrinter::handle(const TensorDomain* const td) {
   os << "[ ";
   for (std::vector<const IterDomain*>::size_type i = 0; i < td->size(); i++) {

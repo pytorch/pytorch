@@ -182,13 +182,12 @@ void Statement::const_dispatch(T handler, const Statement* const stmt) {
 }
 
 /*
- * Generic mutator_dispatch for any handler that modifies the IR. This could be a
- * transformation on loop structures, or parallelizing a loop. This mutator_dispatch is
- * paired with a class that implements the functions template <typenname
- * node_type> Statement* mutate(node_type* node) mutate should call
- * (statement* node_to_dispatch)->mutator_dispatch() It could also implement
- * Statement* mutate(Statement* stmt){
- *   stmt->mutator_dispatch(this);
+ * Generic mutator_dispatch for any handler that modifies the IR. This could be
+ * a transformation on loop structures, or parallelizing a loop. This
+ * mutator_dispatch is paired with a class that implements the functions
+ * template <typenname node_type> Statement* mutate(node_type* node) mutate
+ * should call (statement* node_to_dispatch)->mutator_dispatch() It could also
+ * implement Statement* mutate(Statement* stmt){ stmt->mutator_dispatch(this);
  * }
  * And therefore dispatch should never call:
  *   ptr(mutator)->mutate(static_cast<Statement*>(this));
@@ -253,9 +252,9 @@ Statement* Statement::mutator_dispatch(T mutator, Statement* stmt) {
 }
 
 /*
- * Handler template instantiations. These should only have to be done on base classes.
- * Actual visitors/mutators should inhereit from these classes and call ->dispatch(this)
- * to avoid needing an explicit instantiation.
+ * Handler template instantiations. These should only have to be done on base
+ * classes. Actual visitors/mutators should inhereit from these classes and call
+ * ->dispatch(this) to avoid needing an explicit instantiation.
  */
 template void Statement::dispatch(OptOutDispatch, Statement*);
 template void Statement::dispatch(OptOutDispatch*, Statement*);
@@ -271,8 +270,12 @@ template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
-template void Statement::const_dispatch(OptInConstDispatch, const Statement* const);
-template void Statement::const_dispatch(OptInConstDispatch*, const Statement* const);
+template void Statement::const_dispatch(
+    OptInConstDispatch,
+    const Statement* const);
+template void Statement::const_dispatch(
+    OptInConstDispatch*,
+    const Statement* const);
 template void Val::const_dispatch(OptInConstDispatch, const Val* const);
 template void Val::const_dispatch(OptInConstDispatch*, const Val* const);
 template void Expr::const_dispatch(OptInConstDispatch, const Expr* const);
@@ -291,7 +294,6 @@ template Statement* Val::mutator_dispatch(OptInMutator, Val*);
 template Statement* Val::mutator_dispatch(OptInMutator*, Val*);
 template Statement* Expr::mutator_dispatch(OptInMutator, Expr*);
 template Statement* Expr::mutator_dispatch(OptInMutator*, Expr*);
-
 
 void OptOutDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
@@ -330,30 +332,6 @@ Statement* OptOutMutator::mutate(Expr* e) {
   return Expr::mutator_dispatch(this, e);
 }
 Statement* OptOutMutator::mutate(Val* v) {
-  return Val::mutator_dispatch(this, v);
-}
-
-Statement* OptOutMutator::mutate(IterDomain* n){ return n;}
-Statement* OptOutMutator::mutate(TensorDomain* n){ return n;}
-Statement* OptOutMutator::mutate(Tensor* n){ return n;}
-Statement* OptOutMutator::mutate(TensorView* n){ return n;}
-Statement* OptOutMutator::mutate(Float* n){ return n;}
-Statement* OptOutMutator::mutate(Int* n){ return n;}
-Statement* OptOutMutator::mutate(Split* n){ return n;}
-Statement* OptOutMutator::mutate(Merge* n){ return n;}
-Statement* OptOutMutator::mutate(Reorder* n){ return n;}
-Statement* OptOutMutator::mutate(UnaryOp* n){ return n;}
-Statement* OptOutMutator::mutate(BinaryOp* n){ return n;}
-Statement* OptOutMutator::mutate(ForLoop* n){ return n;}
-Statement* OptOutMutator::mutate(IfThenElse* n){ return n;}
-
-Statement* OptInMutator::mutate(Statement* s) {
-  return Statement::mutator_dispatch(this, s);
-}
-Statement* OptInMutator::mutate(Expr* e) {
-  return Expr::mutator_dispatch(this, e);
-}
-Statement* OptInMutator::mutate(Val* v) {
   return Val::mutator_dispatch(this, v);
 }
 
