@@ -96,7 +96,7 @@ Tensor& set_cpu_(
 
 Tensor& set_cpu_(Tensor& result) {
   Storage storage(result.dtype(), 0, c10::GetAllocator(kCPU), true);
-  return set_cpu_(result, storage, 0, {0}, {});
+  return at::native::set_cpu_(result, storage, 0, {0}, {});
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
