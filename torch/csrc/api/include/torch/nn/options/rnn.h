@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/enum.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
 
@@ -68,6 +69,64 @@ struct TORCH_API RNNOptions {
 
 using LSTMOptions = detail::RNNOptionsBase;
 using GRUOptions = detail::RNNOptionsBase;
+
+namespace detail {
+
+/// Common options for RNNCell, LSTMCell and GRUCell modules
+struct TORCH_API RNNCellOptionsBase {
+  RNNCellOptionsBase(int64_t input_size, int64_t hidden_size, bool bias, int64_t num_chunks);
+  virtual ~RNNCellOptionsBase() = default;
+  
+  TORCH_ARG(int64_t, input_size);
+  TORCH_ARG(int64_t, hidden_size);
+  TORCH_ARG(bool, bias);
+  TORCH_ARG(int64_t, num_chunks);
+};
+
+} // namespace detail
+
+/// Options for RNNCell modules.
+struct TORCH_API RNNCellOptions {
+  typedef c10::variant<enumtype::kTanh, enumtype::kReLU> nonlinearity_t;
+
+  RNNCellOptions(int64_t input_size, int64_t hidden_size);
+
+  /// The number of expected features in the input `x`
+  TORCH_ARG(int64_t, input_size);
+  /// The number of features in the hidden state `h`
+  TORCH_ARG(int64_t, hidden_size);
+  /// If ``false``, then the layer does not use bias weights `b_ih` and `b_hh`.
+  /// Default: ``true``
+  TORCH_ARG(bool, bias) = true;
+  /// The non-linearity to use. Can be either ``torch::kTanh`` or ``torch::kReLU``. Default: ``torch::kTanh``
+  TORCH_ARG(nonlinearity_t, nonlinearity) = torch::kTanh;
+};
+
+/// Options for LSTMCell modules.
+struct TORCH_API LSTMCellOptions {
+  LSTMCellOptions(int64_t input_size, int64_t hidden_size);
+
+  /// The number of expected features in the input `x`
+  TORCH_ARG(int64_t, input_size);
+  /// The number of features in the hidden state `h`
+  TORCH_ARG(int64_t, hidden_size);
+  /// If ``false``, then the layer does not use bias weights `b_ih` and `b_hh`.
+  /// Default: ``true``
+  TORCH_ARG(bool, bias) = true;
+};
+
+/// Options for GRUCell modules.
+struct TORCH_API GRUCellOptions {
+  GRUCellOptions(int64_t input_size, int64_t hidden_size);
+
+  /// The number of expected features in the input `x`
+  TORCH_ARG(int64_t, input_size);
+  /// The number of features in the hidden state `h`
+  TORCH_ARG(int64_t, hidden_size);
+  /// If ``false``, then the layer does not use bias weights `b_ih` and `b_hh`.
+  /// Default: ``true``
+  TORCH_ARG(bool, bias) = true;
+};
 
 } // namespace nn
 } // namespace torch
