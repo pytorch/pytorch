@@ -51,12 +51,17 @@
           build_environment: "conda 2.7 cpu"
           requires:
             - setup
+      # This job has an average run time of 3 hours o.O
+      # Now only running this on master to reduce overhead
       - binary_mac_build:
           name: binary_macos_libtorch_2_7_cpu_build
           build_environment: "libtorch 2.7 cpu"
           requires:
             - setup
-
+          filters:
+            branches:
+              only:
+                - master
       - binary_linux_test:
           name: binary_linux_manywheel_2_7mu_cpu_devtoolset7_test
           build_environment: "manywheel 2.7mu cpu devtoolset7"

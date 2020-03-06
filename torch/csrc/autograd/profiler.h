@@ -25,6 +25,8 @@ struct Node;
 
 namespace profiler {
 
+TORCH_API uint16_t getThreadId();
+
 struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
@@ -230,6 +232,7 @@ using thread_event_lists = std::vector<std::vector<Event>>;
 // there no autograd functions are being executed when these function are used.
 TORCH_API void enableProfiler(ProfilerConfig);
 TORCH_API thread_event_lists disableProfiler();
+TORCH_API bool profilerEnabled();
 
 
 // Usage:

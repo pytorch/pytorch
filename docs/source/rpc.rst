@@ -62,11 +62,11 @@ across RPC boundaries. These features can be categorized into four sets of APIs.
    :meth:`~torch.optim.Optimizer` (e.g., :meth:`~torch.optim.SGD`,
    :meth:`~torch.optim.Adagrad`, etc.) and a list of parameter RRefs, creates an
    :meth:`~torch.optim.Optimizer` instance on each distinct RRef owner, and
-   updates parameters accordingly when running `step()`. When you have
+   updates parameters accordingly when running ``step()``. When you have
    distributed forward and backward passes, parameters and gradients will be
    scattered across multiple workers, and hence it requires an optimizer on each
    of the involved workers. Distributed Optimizer wraps all those local
-   optimizers into one, and provides a concise constructor and `step()` API.
+   optimizers into one, and provides a concise constructor and ``step()`` API.
 
 
 .. _rpc:
@@ -78,16 +78,21 @@ Before using RPC and distributed autograd primitives, initialization must take
 place. To initialize the RPC framework we need to use
 :meth:`~torch.distributed.rpc.init_rpc` which would initialize the RPC
 framework, RRef framework and distributed autograd. By default, this will also
-initialize the `ProcessGroup` (:meth:`~torch.distributed.init_process_group`)
-backend for RPC communication. The `ProcessGroup` backend internally uses gloo
+initialize the ``ProcessGroup`` (:meth:`~torch.distributed.init_process_group`)
+backend for RPC communication. The ``ProcessGroup`` backend internally uses gloo
 for communication.
 
 
 .. automodule:: torch.distributed.rpc
 .. autofunction:: init_rpc
 
-The following APIs provide primitives allowing users to remotely execute
-functions as well as create (RRefs) to remote data objects.
+The following APIs allow users to remotely execute functions as well as create
+references (RRefs) to remote data objects. In these APIs, when passing a
+``Tensor`` as an argument or a return value, the destination worker will try to
+create a ``Tensor`` with the same meta (i.e., device, stride, etc.), which might
+crash if the device lists on source and destination workers are different. In
+such cases, applications can always feed in CPU tensors and manually move it
+to appropriate devices if necessary.
 
 .. autofunction:: rpc_sync
 .. autofunction:: rpc_async
@@ -96,17 +101,18 @@ functions as well as create (RRefs) to remote data objects.
 .. autofunction:: shutdown
 .. autoclass:: WorkerInfo
     :members:
-.. autoclass:: RpcBackendOptions
+.. autoclass:: ProcessGroupRpcBackendOptions
     :members:
-
+    :inherited-members:
 
 .. _rref:
+
 
 RRef
 ----
 
-An `RRef` (Remote REFerence) is a reference to a value of some type `T`
-(e.g. `Tensor`) on a remote worker. This handle keeps the referenced remote
+An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
+(e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
 value alive on the owner, but there is no implication that the value will be
 transferred to the local worker in the future. RRefs can be used in
 multi-machine training by holding references to `nn.Modules

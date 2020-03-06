@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -12,21 +13,22 @@ Value* CreateSizeOfDim(Value* input, int64_t dim, Node* insertBefore) {
   return size;
 }
 
-Value* ConvertSelectToIndex(int64_t index, Node* insertBefore) {
-  // Create index tensor based on index attribute of aten::select node.
+Value* ConvertSelectToIndex(Value* index, Node* insertBefore) {
+  // Create index tensor based on index input of aten::select node.
   auto graph = insertBefore->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto idx_tensor = graph->createNumToTensor(insertConstant(*graph, index));
+  auto idx_tensor = graph->createNumToTensor(index);
   graph->insertNode(idx_tensor);
   return graph->insert(aten::unsqueeze, {idx_tensor->output(), 0});
 }
 
 Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   // Create index tensor based on aten::slice node.
+  const int64_t int_max = std::numeric_limits<int>::max();
   auto graph = slice->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto start = slice->get(attr::start);
-  auto end = slice->get(attr::end);
+  auto start = slice->get(attr::start) ? slice->get(attr::start) : 0;
+  auto end = slice->get(attr::end) ? slice->get(attr::end) : int_max;
   auto step = slice->get(attr::step);
   auto index = graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   auto sliced_index = graph->insert(aten::slice, {index, {0}, start, end, step});
@@ -135,8 +137,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
                             std::forward_as_tuple(dim),
                             std::forward_as_tuple(index_tensor, aten::slice));
     } else if (node->kind() == aten::select) {
-      auto index = node->get(attr::index)->toInt();
-      auto index_tensor = ConvertSelectToIndex(index, index_put_node);
+      auto index_tensor = ConvertSelectToIndex(node->input(2), index_put_node);
       dim_index_map.emplace(std::piecewise_construct,
                             std::forward_as_tuple(dim),
                             std::forward_as_tuple(index_tensor, aten::select));

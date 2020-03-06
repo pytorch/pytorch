@@ -273,7 +273,8 @@ TCPStore::TCPStore(
     PortType masterPort,
     int numWorkers,
     bool isServer,
-    const std::chrono::milliseconds& timeout)
+    const std::chrono::milliseconds& timeout,
+    bool waitWorkers)
     : Store(timeout),
       isServer_(isServer),
       tcpStoreAddr_(masterAddr),
@@ -283,7 +284,7 @@ TCPStore::TCPStore(
       regularPrefix_("/") {
   if (isServer_) {
     // Opening up the listening socket
-    std::tie(masterListenSocket_, std::ignore) = tcputil::listen(masterPort);
+    std::tie(masterListenSocket_, tcpStorePort_) = tcputil::listen(masterPort);
     // Now start the daemon
     tcpStoreDaemon_ = std::unique_ptr<TCPStoreDaemon>(
         new TCPStoreDaemon(masterListenSocket_));
@@ -292,7 +293,9 @@ TCPStore::TCPStore(
   storeSocket_ = tcputil::connect(
       tcpStoreAddr_, tcpStorePort_, /* wait= */ true, timeout_);
 
-  waitForWorkers_();
+  if (waitWorkers) {
+    waitForWorkers();
+  }
 }
 
 TCPStore::~TCPStore() {
@@ -305,7 +308,7 @@ TCPStore::~TCPStore() {
   }
 }
 
-void TCPStore::waitForWorkers_() {
+void TCPStore::waitForWorkers() {
   addHelper_(initKey_, 1);
   // Let server block until all workers have completed, this ensures that
   // the server daemon thread is always running until the very end
@@ -418,6 +421,10 @@ void TCPStore::waitHelper_(
   if (waitResponse != WaitResponseType::STOP_WAITING) {
     throw std::runtime_error("Stop_waiting response is expected");
   }
+}
+
+PortType TCPStore::getPort() {
+  return tcpStorePort_;
 }
 
 } // namespace c10d

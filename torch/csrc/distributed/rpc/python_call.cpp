@@ -20,8 +20,7 @@ Message PythonCall::toMessage() && {
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
-  return std::make_unique<PythonCall>(
-      message.payload(), message.tensors());
+  return std::make_unique<PythonCall>(message.payload(), message.tensors());
 }
 
 const std::vector<char>& PythonCall::pickledPayload() const {

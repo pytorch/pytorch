@@ -75,4 +75,23 @@ static inline std::vector<int64_t> conv_weight_size(
   return weight_size;
 }
 
+static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
+  std::vector<int64_t> shape(dim, 1);
+  shape[1] = -1;
+  return bias.reshape(shape);
+}
+
+static inline bool cudnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+  // disable NHWC for float64 input.
+  if (!detail::getCUDAHooks().compiledWithCuDNN() ||
+      input.scalar_type() == at::kDouble ||
+      weight.scalar_type() == at::kDouble) {
+    return false;
+  }
+  long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+  return (cudnn_version >= 7603) &&
+      ((input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) ||
+      (weight.suggest_memory_format() == at::MemoryFormat::ChannelsLast));
+}
+
 }} // namespace at::native

@@ -12,7 +12,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <ATen/core/LegacyDeviceTypeInit.h>
-#include <c10/core/impl/LocalTensorTypeSet.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/TensorImpl.h>
 #include <ATen/core/TensorBody.h>
 
@@ -20,12 +20,12 @@ namespace at {
 
 class CAFFE2_API LegacyTypeDispatch {
  public:
-  void initForTensorTypeSet(TensorTypeSet ts) {
-    // TODO: Avoid use of legacyExtractTypeId here.  The key
-    // problem is that you may get a TensorTypeSet with
+  void initForDispatchKeySet(DispatchKeySet ts) {
+    // TODO: Avoid use of legacyExtractDispatchKey here.  The key
+    // problem is that you may get a DispatchKeySet with
     // VariableTensorId set; should you initialize the "underlying"
     // type in that case?  Hard to say.
-    auto b = tensorTypeIdToBackend(legacyExtractTypeId(ts));
+    auto b = dispatchKeyToBackend(legacyExtractDispatchKey(ts));
     auto p = backendToDeviceType(b);
     static std::once_flag cpu_once;
     static std::once_flag cuda_once;
@@ -82,11 +82,11 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   // NB: The enabled parameter must ALWAYS be black, as Henry Ford used to say.
   // TODO: Eliminate this parameter entirely
   AutoNonVariableTypeMode(bool enabled = true) :
-    guard_(TensorTypeId::VariableTensorId) {
+    guard_(DispatchKey::VariableTensorId) {
 
     TORCH_INTERNAL_ASSERT(enabled);
   }
-  c10::impl::ExcludeTensorTypeIdGuard guard_;
+  c10::impl::ExcludeDispatchKeyGuard guard_;
 };
 
 } // namespace at

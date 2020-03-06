@@ -141,8 +141,7 @@ void compare(
           // For small values / small difference, the relative error
           // can be huge but the absolute error will be small
           EXPECT_TRUE(
-              relErr <= maxRelErr ||
-              (relErr > maxRelErr && absErr <= absErrForRelErrFailure))
+              relErr <= maxRelErr || absErr <= absErrForRelErrFailure)
               << v1 << " " << v2 << " (rel err " << relErr << ") "
               << "(" << n << " " << c << " " << h << " " << w << ") "
               << "running N " << N << " inputC " << inputC << " H " << H

@@ -46,7 +46,7 @@ class CAFFE2_API TvmTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights,
       const ShapeInfoMap& shape_hints);
 
-  // Apply transform to cluser connected TVM runnable ops into one TVMJitOp
+  // Apply transform to cluster connected TVM runnable ops into one TVMJitOp
   NetDef applyTvmTransform(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,

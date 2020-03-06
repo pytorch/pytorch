@@ -85,6 +85,8 @@ max_pool3d_with_indices = _max_pool("max_pool3d_with_indices", _triple, 3, retur
 def _avg_pool(name, tuple_fn):
     @parse_args('v', 'is', 'is', 'is', 'i', 'i', 'none')
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override=None):
+        if not stride:
+            stride = kernel_size
         padding = sym_help._avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name)
         if count_include_pad:
             input = g.op("Pad", input,
@@ -126,7 +128,7 @@ upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
 upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
 upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, use_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
@@ -143,7 +145,7 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
         assert steps is None or len(starts) == len(steps)
         if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807 \
            and (steps is None or (len(steps) == 1 and steps[0] == 1)):
-            return input    
+            return input
         axes = g.op("Constant", value_t=torch.tensor(axes))
         starts = g.op("Constant", value_t=torch.tensor(starts))
         ends = g.op("Constant", value_t=torch.tensor(ends))

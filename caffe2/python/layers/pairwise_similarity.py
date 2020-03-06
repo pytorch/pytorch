@@ -17,7 +17,7 @@ class PairwiseSimilarity(ModelLayer):
                  name='pairwise_similarity', **kwargs):
         super(PairwiseSimilarity, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Struct), (
-            "Incorrect input type. Excpected Struct, but received: {0}".
+            "Incorrect input type. Expected Struct, but received: {0}".
             format(input_record))
         assert (
             ('all_embeddings' in input_record) ^

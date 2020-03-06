@@ -23,7 +23,7 @@ inline int start_index(int out_idx, int out_len, int in_len) {
    * in_len: the dimension_size of input matrix
    * Basically, in_len / out_len gives the number of
    * elements in each average computation.
-   * This functin computes the start index on input matrix.
+   * This function computes the start index on input matrix.
    */
   return (int)std::floor((float)(out_idx * in_len) / out_len);
 }

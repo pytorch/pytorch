@@ -102,7 +102,7 @@ static_assert(string_equal("hello", copy.data(), copy.size()), "");
 } // namespace test_copy_constructor
 
 namespace test_copy_assignment {
-AT_CPP14_CONSTEXPR string_view assign(string_view value) {
+constexpr string_view assign(string_view value) {
   string_view result = "temporary_content";
   result = value; // this is the assignment we're testing
   return result;

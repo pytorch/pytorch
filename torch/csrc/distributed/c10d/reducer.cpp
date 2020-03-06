@@ -723,7 +723,7 @@ void Reducer::finalize_backward() {
   // Due to the lazy wait, it is possible that reduction of the current
   // iteration is still going when the one for next iteration gets kicked off.
   // For such case, we want to wait explicitly to make sure the reduction does
-  // complete before kicking off next one. Otherwise the prevous one may
+  // complete before kicking off next one. Otherwise the previous one may
   // interfere, write to the device-side memory and clobber the content of
   // local_unused_maps_dev_.
   if (!local_used_maps_reduced_) {

@@ -130,6 +130,41 @@ void check_exact_values(
   }
 }
 
+TEST(OptimTest, OptimizerAccessors) {
+  auto options = AdagradOptions(1.0);
+  std::vector<torch::Tensor> params;
+  for (size_t i = 0; i < 3; i++) {
+    params.push_back(torch::randn(10));
+  }
+  auto optimizer = Adagrad(params, options);
+  // test for defaults() method with non-const reference
+  auto& options_ = static_cast<AdagradOptions&>(optimizer.defaults());
+  ASSERT_TRUE(options == options_);
+  // test for param_groups() with non-const reference return
+  auto& params_groups = optimizer.param_groups();
+  params_groups.push_back(OptimizerParamGroup(params));
+  auto& params_1 = params_groups[1].params();
+  for (size_t i = 0; i < params_1.size(); i++) {
+    torch::equal(params[i], params_1[i]);
+  }
+
+  // test for add_param_group() when one or more params existing in another param_group
+  // are passed in the new param group to be added
+  ASSERT_THROWS_WITH(
+    optimizer.add_param_group(OptimizerParamGroup(params)), "some parameters appear in more than one parameter group");
+
+  // test for state() with non-const reference return
+  auto& state_ = static_cast<AdagradParamState&>(*(optimizer.state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
+  state_.step(state_.step()+1);
+
+  const auto& optimizer_ = Adagrad(params, options);
+  optimizer_.defaults();
+  // test for param_groups() with const reference return
+  const auto& params_2 = optimizer_.param_groups();
+  // test for state() with const reference return
+  optimizer_.state();
+}
+
 TEST(OptimTest, BasicInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;

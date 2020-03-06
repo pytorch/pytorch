@@ -519,7 +519,8 @@ class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
-                 output_effective_lr_and_update=False, **kwargs):
+                 output_effective_lr_and_update=False,
+                 pruning_options=None, **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -532,6 +533,43 @@ class AdagradOptimizer(Optimizer):
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
         self.init_kwargs = kwargs
+
+        self._process_pruning_options(pruning_options)
+
+    def _process_pruning_options(self, pruning_options):
+        self.use_mask = False
+
+        if pruning_options is None:
+            pruning_options = {}
+        else:
+            assert isinstance(pruning_options, dict), "pruning_options can only "\
+                "be provided as a dictionary, currently: {}".format(pruning_options)
+
+        self.mask_tensor = pruning_options.get("mask_tensor", None)
+        self.mask_db_path = pruning_options.get("mask_db_path", None)
+        self.mask_db_type = pruning_options.get("mask_db_type", None)
+        self.mask_blob_name = pruning_options.get("mask_blob_name", None)
+
+        if self.mask_tensor is not None:
+            assert type(self.mask_tensor) is np.ndarray, "mask_tensor must be a numpy array!"
+            assert self.mask_db_path is None, "mask can be provided through either a numpy array "\
+                "or a db path, not both"
+            assert self.mask_db_type is None, "mask can be provided through either a numpy array "\
+                "or a db path, not both"
+            assert self.mask_blob_name is None, "mask can be provided through either a numpy array "\
+                "or a db path, not both"
+            self.use_mask = True
+        if self.mask_db_path is not None or self.mask_db_type is not None\
+                or self.mask_blob_name is not None:
+            assert self.mask_db_path is not None, "when mask is provided through db, "\
+                "db path, db type, and blob name are all needed"
+            assert self.mask_db_type is not None, "when mask is provided through db, "\
+                "db path, db type, and blob name are all needed"
+            assert self.mask_blob_name is not None, "when mask is provided through db, "\
+                "db path, db type, and blob name are all needed"
+            assert self.mask_tensor is None, "mask can be provided through either a numpy array "\
+                "or a db path, not both"
+            self.use_mask = True
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -614,6 +652,25 @@ class AdagradOptimizer(Optimizer):
                     value=0.0
                 )
 
+        if self.use_mask is True:
+            if self.mask_tensor is not None:
+                if not isinstance(grad, core.GradientSlice):
+                    mask_blob = param_init_net.GivenTensorFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+                else:
+                    self.mask_tensor = self.mask_tensor.astype(np.uint8)
+                    mask_blob = param_init_net.GivenTensorBoolFill([], [str(param) + "_mask"], values=self.mask_tensor, shape=self.mask_tensor.shape)
+                    mask_blob = param_init_net.Cast(mask_blob, to=core.DataType.UINT8)
+                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"], value=False, dtype=core.DataType.BOOL, shape=[1])
+            elif self.mask_db_path is not None or self.mask_db_type is not None\
+                    or self.mask_blob_name is not None:  # mask is provided through a db file
+                mask_blob = param_init_net.Load(
+                    [], self.mask_blob_name, db=self.mask_db_path, db_type=self.mask_db_type, absolute_path=True
+                )
+                if isinstance(grad, core.GradientSlice):
+                    mask_changed_blob = param_init_net.ConstantFill([], [str(param) + "_mask_changed_blob"], value=False, dtype=core.DataType.BOOL, shape=[1])
+            else:
+                raise NotImplementedError("If mask is used, it needs to be provided through a numpy array or a db file")
+
         self._aux_params.local.append(param_squared_sum)
 
         if self.rowWise:
@@ -625,12 +682,22 @@ class AdagradOptimizer(Optimizer):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+
+            input_args = [param, param_squared_sum, grad.indices, grad.values, lr]
             if self.rowWise:
-                op = 'RowWiseSparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedRowWiseSparseAdagrad'
+                    input_args += [mask_blob, mask_changed_blob]
+                else:
+                    op = 'RowWiseSparseAdagrad'
             else:
-                op = 'SparseAdagrad'
+                if self.use_mask is True:
+                    op = 'MaskedSparseAdagrad'
+                    input_args += [mask_blob, mask_changed_blob]
+                else:
+                    op = 'SparseAdagrad'
             net.__getattr__(op)(
-                [param, param_squared_sum, grad.indices, grad.values, lr],
+                input_args,
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
                 engine=self.engine,
@@ -638,18 +705,31 @@ class AdagradOptimizer(Optimizer):
         else:
             output_args = [param, param_squared_sum]
             if self.output_effective_lr_and_update:
+                assert self.use_mask is False, \
+                    "MaskedAdagrad doesn't support outputting effective_lr_and_update"
                 output_args.append(str(param) + '_effective_lr')
                 output_args.append(str(param) + '_update')
             elif self.output_effective_lr:
+                assert self.use_mask is False, \
+                    "MaskedAdagrad doesn't support outputting effective_lr"
                 output_args.append(str(param) + '_effective_lr')
 
-            net.Adagrad(
-                [param, param_squared_sum, grad, lr],
-                output_args,
-                epsilon=self.epsilon,
-                decay=float(self.decay),
-                engine=self.engine
-            )
+            if self.use_mask:
+                net.MaskedAdagrad(
+                    [param, param_squared_sum, grad, lr, mask_blob],
+                    output_args,
+                    epsilon=self.epsilon,
+                    decay=float(self.decay),
+                    engine=self.engine
+                )
+            else:
+                net.Adagrad(
+                    [param, param_squared_sum, grad, lr],
+                    output_args,
+                    epsilon=self.epsilon,
+                    decay=float(self.decay),
+                    engine=self.engine
+                )
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale

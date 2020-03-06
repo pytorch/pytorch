@@ -74,3 +74,19 @@ def intEq0None(self, input):
 def str3Concat(self, input):
     # type: (str) -> str
     return input + input + input
+
+def newEmptyShapeWithItem(self, input):
+    return torch.tensor([int(input.item())])[0]
+
+def testAliasWithOffset(self):
+    # type: () -> List[Tensor]
+    x = torch.tensor([100, 200])
+    a = [x[0], x[1]]
+    return a
+
+def testNonContiguous(self):
+    x = torch.tensor([100, 200, 300])[::2]
+    assert not x.is_contiguous()
+    assert x[0] == 100
+    assert x[1] == 300
+    return x

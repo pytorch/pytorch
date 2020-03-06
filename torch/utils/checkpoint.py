@@ -115,7 +115,7 @@ def checkpoint(function, *args, **kwargs):
     :func:`torch.no_grad` manner, i.e., not storing the intermediate
     activations. Instead, the forward pass saves the inputs tuple and the
     :attr:`function` parameter. In the backwards pass, the saved inputs and
-    :attr:`function` is retreived, and the forward pass is computed on
+    :attr:`function` is retrieved, and the forward pass is computed on
     :attr:`function` again, now tracking the intermediate activations, and then
     the gradients are calculated using these activation values.
 

@@ -184,100 +184,106 @@ In-place version of :meth:`~Tensor.acos`
 
 add_docstr_all('add',
                r"""
-add(value) -> Tensor
-add(value=1, other) -> Tensor
+add(other, *, alpha=1) -> Tensor
+
+Add a scalar or tensor to :attr:`self` tensor. If both :attr:`alpha`
+and :attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`alpha` before being used.
+
+When :attr:`other` is a tensor, the shape of :attr:`other` must be
+:ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
+tensor
 
 See :func:`torch.add`
 """)
 
 add_docstr_all('add_',
                r"""
-add_(value) -> Tensor
-add_(value=1, other) -> Tensor
+add_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
 
 add_docstr_all('addbmm',
                r"""
-addbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
+addbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addbmm`
 """)
 
 add_docstr_all('addbmm_',
                r"""
-addbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
+addbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addbmm`
 """)
 
 add_docstr_all('addcdiv',
                r"""
-addcdiv(value=1, tensor1, tensor2) -> Tensor
+addcdiv(tensor1, tensor2, *, value=1) -> Tensor
 
 See :func:`torch.addcdiv`
 """)
 
 add_docstr_all('addcdiv_',
                r"""
-addcdiv_(value=1, tensor1, tensor2) -> Tensor
+addcdiv_(tensor1, tensor2, *, value=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addcdiv`
 """)
 
 add_docstr_all('addcmul',
                r"""
-addcmul(value=1, tensor1, tensor2) -> Tensor
+addcmul(tensor1, tensor2, *, value=1) -> Tensor
 
 See :func:`torch.addcmul`
 """)
 
 add_docstr_all('addcmul_',
                r"""
-addcmul_(value=1, tensor1, tensor2) -> Tensor
+addcmul_(tensor1, tensor2, *, value=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addcmul`
 """)
 
 add_docstr_all('addmm',
                r"""
-addmm(beta=1, alpha=1, mat1, mat2) -> Tensor
+addmm(mat1, mat2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addmm`
 """)
 
 add_docstr_all('addmm_',
                r"""
-addmm_(beta=1, alpha=1, mat1, mat2) -> Tensor
+addmm_(mat1, mat2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addmm`
 """)
 
 add_docstr_all('addmv',
                r"""
-addmv(beta=1, alpha=1, mat, vec) -> Tensor
+addmv(mat, vec, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addmv`
 """)
 
 add_docstr_all('addmv_',
                r"""
-addmv_(beta=1, alpha=1, mat, vec) -> Tensor
+addmv_(mat, vec, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addmv`
 """)
 
 add_docstr_all('addr',
                r"""
-addr(beta=1, alpha=1, vec1, vec2) -> Tensor
+addr(vec1, vec2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.addr`
 """)
 
 add_docstr_all('addr_',
                r"""
-addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
+addr_(vec1, vec2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.addr`
 """)
@@ -491,14 +497,14 @@ In-place version of :meth:`~Tensor.atan`
 
 add_docstr_all('baddbmm',
                r"""
-baddbmm(beta=1, alpha=1, batch1, batch2) -> Tensor
+baddbmm(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 See :func:`torch.baddbmm`
 """)
 
 add_docstr_all('baddbmm_',
                r"""
-baddbmm_(beta=1, alpha=1, batch1, batch2) -> Tensor
+baddbmm_(batch1, batch2, *, beta=1, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.baddbmm`
 """)
@@ -555,6 +561,34 @@ add_docstr_all('bitwise_not_',
 bitwise_not_() -> Tensor
 
 In-place version of :meth:`~Tensor.bitwise_not`
+""")
+
+add_docstr_all('bitwise_and',
+               r"""
+bitwise_and() -> Tensor
+
+See :func:`torch.bitwise_and`
+""")
+
+add_docstr_all('bitwise_and_',
+               r"""
+bitwise_and_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_and`
+""")
+
+add_docstr_all('bitwise_or',
+               r"""
+bitwise_or() -> Tensor
+
+See :func:`torch.bitwise_or`
+""")
+
+add_docstr_all('bitwise_or_',
+               r"""
+bitwise_or_() -> Tensor
+
+In-place version of :meth:`~Tensor.bitwise_or`
 """)
 
 add_docstr_all('bitwise_xor',
@@ -801,6 +835,20 @@ Args:
     non_blocking (bool): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
+""")
+
+add_docstr_all('cummax',
+               r"""
+cummax(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummax`
+""")
+
+add_docstr_all('cummin',
+               r"""
+cummin(dim) -> (Tensor, Tensor)
+
+See :func:`torch.cummin`
 """)
 
 add_docstr_all('cumprod',
@@ -1385,7 +1433,7 @@ the indices specified in :attr:`indices` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, value)`` is equivalent to
 ``tensor[indices] = value``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+If :attr:`accumulate` is ``True``, the elements in :attr:`value` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
@@ -1472,6 +1520,13 @@ add_docstr_all('is_floating_point',
 is_floating_point() -> bool
 
 Returns True if the data type of :attr:`self` is a floating point data type.
+""")
+
+add_docstr_all('is_complex',
+               r"""
+is_complex() -> bool
+
+Returns True if the data type of :attr:`self` is a complex data type.
 """)
 
 add_docstr_all('is_signed',
@@ -1944,7 +1999,7 @@ add_docstr_all('permute',
                r"""
 permute(*dims) -> Tensor
 
-Permute the dimensions of this tensor.
+Returns a view of the original tensor with its dimensions permuted.
 
 Args:
     *dims (int...): The desired ordering of dimensions
@@ -2383,23 +2438,23 @@ Example::
 
 add_docstr_all('scatter_add_',
                r"""
-scatter_add_(dim, index, other) -> Tensor
+scatter_add_(dim, index, src) -> Tensor
 
 Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
 specified in the :attr:`index` tensor in a similar fashion as
-:meth:`~torch.Tensor.scatter_`. For each value in :attr:`other`, it is added to
-an index in :attr:`self` which is specified by its index in :attr:`other`
+:meth:`~torch.Tensor.scatter_`. For each value in :attr:`src`, it is added to
+an index in :attr:`self` which is specified by its index in :attr:`src`
 for ``dimension != dim`` and by the corresponding value in :attr:`index` for
 ``dimension = dim``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
-    self[index[i][j][k]][j][k] += other[i][j][k]  # if dim == 0
-    self[i][index[i][j][k]][k] += other[i][j][k]  # if dim == 1
-    self[i][j][index[i][j][k]] += other[i][j][k]  # if dim == 2
+    self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
 
-:attr:`self`, :attr:`index` and :attr:`other` should have same number of
-dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
+:attr:`self`, :attr:`index` and :attr:`src` should have same number of
+dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
 ``d != dim``.
 
@@ -2410,7 +2465,7 @@ Args:
     index (LongTensor): the indices of elements to scatter and add,
       can be either empty or the same size of src.
       When empty, the operation returns identity.
-    other (Tensor): the source elements to scatter and add
+    src (Tensor): the source elements to scatter and add
 
 Example::
 
@@ -2430,7 +2485,7 @@ add_docstr_all('select',
 select(dim, index) -> Tensor
 
 Slices the :attr:`self` tensor along the selected dimension at the given index.
-This function returns a tensor with the given dimension removed.
+This function returns a view of the original tensor with the given dimension removed.
 
 Args:
     dim (int): the dimension to slice
@@ -2671,11 +2726,11 @@ Example::
 
 add_docstr_all('sub',
                r"""
-sub(value, other) -> Tensor
+sub(other, *, alpha=1) -> Tensor
 
-Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`value` and
-:attr:`other` are specified, each element of :attr:`other` is scaled by
-:attr:`value` before being used.
+Subtracts a scalar or tensor from :attr:`self` tensor. If both :attr:`alpha`
+and :attr:`other` are specified, each element of :attr:`other` is scaled by
+:attr:`alpha` before being used.
 
 When :attr:`other` is a tensor, the shape of :attr:`other` must be
 :ref:`broadcastable <broadcasting-semantics>` with the shape of the underlying
@@ -2685,7 +2740,7 @@ tensor.
 
 add_docstr_all('sub_',
                r"""
-sub_(x) -> Tensor
+sub_(other, *, alpha=1) -> Tensor
 
 In-place version of :meth:`~Tensor.sub`
 """)
@@ -3068,7 +3123,7 @@ add_docstr_all('unfold',
                r"""
 unfold(dimension, size, step) -> Tensor
 
-Returns a tensor which contains all slices of size :attr:`size` from
+Returns a view of the original tensor which contains all slices of size :attr:`size` from
 :attr:`self` tensor in the dimension :attr:`dimension`.
 
 Step between two slices is given by :attr:`step`.
@@ -3399,14 +3454,14 @@ Out-of-place version of :meth:`torch.Tensor.index_fill_`
 
 add_docstr_all('scatter',
                r"""
-scatter(dim, index, source) -> Tensor
+scatter(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_`
 """)
 
 add_docstr_all('scatter_add',
                r"""
-scatter_add(dim, index, source) -> Tensor
+scatter_add(dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
@@ -3497,6 +3552,11 @@ Tensors may not have two named dimensions with the same name.
 add_docstr_all('is_cuda',
                r"""
 Is ``True`` if the Tensor is stored on the GPU, ``False`` otherwise.
+""")
+
+add_docstr_all('is_quantized',
+               r"""
+Is ``True`` if the Tensor is quantized, ``False`` otherwise.
 """)
 
 add_docstr_all('device',

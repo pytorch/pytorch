@@ -5,11 +5,6 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 
-// In CUDA 8.0, definition of data types for sgemmex changed
-#if CUDA_VERSION < 8000
-#define CUDA_R_16F CUBLAS_DATA_HALF
-#endif
-
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
       (X > 0 && X <= INT_MAX),               \
@@ -125,12 +120,10 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_INTERNAL_ERROR) {
     return "CUBLAS_STATUS_INTERNAL_ERROR";
   }
-#if CUDA_VERSION >= 6000
   if (error == CUBLAS_STATUS_NOT_SUPPORTED) {
     return "CUBLAS_STATUS_NOT_SUPPORTED";
   }
-#endif
-#if CUDA_VERSION >= 6050
+#ifdef CUBLAS_STATUS_LICENSE_ERROR
   if (error == CUBLAS_STATUS_LICENSE_ERROR) {
     return "CUBLAS_STATUS_LICENSE_ERROR";
   }
@@ -157,7 +150,6 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(cublasDgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
@@ -169,7 +161,6 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(cublasSgemm(
       handle, opa, opb, m, n, k, &alpha, a, lda, b, ldb, &beta, c, ldc));
 }
@@ -183,7 +174,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
 #ifdef __HIP_PLATFORM_HCC__
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,
@@ -211,8 +201,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       0,
       0));
 #else
-
-# if CUDA_VERSION >= 9000
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major >= 5) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
@@ -238,7 +226,6 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         CUBLAS_GEMM_DFALT_TENSOR_OP));
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
   } else {
-# endif
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,
         opa,
@@ -257,9 +244,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         c,
         CUDA_R_16F,
         ldc));
-# if CUDA_VERSION >= 9000
   }
-# endif
 #endif
 }
 
@@ -273,7 +258,6 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   float fbeta = beta;
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::BFloat16);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(rocblas_gemm_ex(
       handle,
       opa,
@@ -320,7 +304,6 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double)) {
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(double);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
       cublasDgemv(handle, op, m, n, &alpha, a, lda, x, incx, &beta, y, incy));
 }
@@ -331,7 +314,6 @@ void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float)) {
   cublasOperation_t op = _cublasOpFromChar(trans);
   _cublasAdjustLdLevel2(m, n, &lda);
   GEMV_CHECK_ARGVALUES(float);
-  TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
       cublasSgemv(handle, op, m, n, &alpha, a, lda, x, incx, &beta, y, incy));
 }
@@ -345,7 +327,7 @@ void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half)) {
       incy == 1,
       "at::cuda::blas::gemv<Half>: support for incy != 1 not implemented");
   gemm<at::Half>(
-      stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -358,7 +340,7 @@ void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16)) {
       incy == 1,
       "at::cuda::blas::gemv<at::BFloat16>: support for incy != 1 not implemented");
   gemm<at::BFloat16>(
-      stream, trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
+      trans, 'n', m, 1, n, alpha, a, n, x, n, beta, y, m);
 }
 #endif
 

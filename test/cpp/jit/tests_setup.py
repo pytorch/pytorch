@@ -51,9 +51,23 @@ class SerializationInterop(FileSetup):
         torch.save(value, self.path, _use_new_zipfile_serialization=True)
 
 
+# See testTorchSaveError in test/cpp/jit/tests.h for usage
+class TorchSaveError(FileSetup):
+    path = 'eager_value.pt'
+
+    def setup(self):
+        ones = torch.ones(2, 2)
+        twos = torch.ones(3, 5) * 2
+
+        value = (ones, twos)
+
+        torch.save(value, self.path, _use_new_zipfile_serialization=False)
+
+
 tests = [
     EvalModeForLoadedModule(),
     SerializationInterop(),
+    TorchSaveError(),
 ]
 
 def setup():

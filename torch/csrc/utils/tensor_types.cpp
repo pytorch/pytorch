@@ -21,9 +21,6 @@ static const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::CUDA: return "torch.cuda";
     case at::Backend::SparseCPU: return "torch.sparse";
     case at::Backend::SparseCUDA: return "torch.cuda.sparse";
-    // We split complex into its own backend, but keeping it the same here for now
-    case at::Backend::ComplexCPU: return "torch";
-    case at::Backend::ComplexCUDA: return "torch.cuda";
     default: AT_ERROR("Unimplemented backend ", backend);
   }
 }
@@ -50,7 +47,7 @@ at::TensorOptions options_from_string(const std::string& str) {
   const std::unordered_map<std::string, at::DeprecatedTypeProperties*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    auto backend = tensorTypeIdToBackend(torch::tensors::get_default_tensor_type_id());
+    auto backend = dispatchKeyToBackend(torch::tensors::get_default_dispatch_key());
     auto scalar_type = torch::tensors::get_default_scalar_type();
     return getDeprecatedTypeProperties(backend, scalar_type).options();
   }

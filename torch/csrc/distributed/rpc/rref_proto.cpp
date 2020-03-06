@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_proto.h>
-#include <torch/csrc/jit/pickle.h>
+#include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/jit/serialization/pickle.h>
 
 #include <limits>
 
@@ -19,8 +20,11 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
   auto payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
-  auto value =
-      jit::unpickle(payload, payload_size, nullptr, &message.tensors());
+  auto value = jit::unpickle(
+      payload,
+      payload_size,
+      *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &message.tensors());
   return value.toTuple()->elements();
 }
 
@@ -176,8 +180,7 @@ std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
   auto values = toIValues(message, MessageType::RREF_CHILD_ACCEPT);
   TORCH_INTERNAL_ASSERT(values.size() == 1, "Expect 1 IValues from message.");
 
-  return std::make_unique<RRefChildAccept>(
-      ForkId::fromIValue(values.back()));
+  return std::make_unique<RRefChildAccept>(ForkId::fromIValue(values.back()));
 }
 
 std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(

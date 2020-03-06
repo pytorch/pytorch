@@ -5,8 +5,19 @@
  */
 #pragma once
 
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/api/module.h>
+
+namespace std {
+
+template <>
+struct hash<torch::jit::script::Module> {
+  inline size_t operator()(const torch::jit::script::Module& arg) const {
+    return std::hash<c10::intrusive_ptr<c10::ivalue::Object>>()(arg._ivalue());
+  }
+};
+
+}
 
 namespace torch {
 namespace jit {
@@ -15,6 +26,19 @@ using QConfig = std::tuple<script::Module, script::Module>;
 using QConfigDict = std::unordered_map<std::string, QConfig>;
 using ModuleQConfigMap =
     std::unordered_map<script::ModulePtr, c10::optional<QConfig>>;
+
+struct OptionalQConfigHash {
+  inline size_t operator()(const c10::optional<QConfig>& qconfig_opt) const {
+    if (qconfig_opt.has_value()) {
+      const auto& m1 = std::get<0>(*qconfig_opt);
+      const auto& m2 = std::get<1>(*qconfig_opt);
+      return std::hash<script::Module>()(m1) + 7 * std::hash<script::Module>()(m2);
+    }
+    return 0;
+  }
+};
+
+using QConfigTypePtrMap = std::unordered_map<c10::optional<QConfig>, TypePtr, OptionalQConfigHash>;
 
 /** \brief Quantize model's inputs and outputs.
  *
@@ -61,6 +85,13 @@ TORCH_API script::Module InsertQuantDeQuant(
     const std::string& method_name,
     bool inplace = false);
 
+/** Replicate dequantize node for each use, so that we can match
+ *  quantization patterns
+ */
+TORCH_API void ReplicateDeQuant(std::shared_ptr<Graph>& graph);
+
+TORCH_API void SwapDeQuant(std::shared_ptr<Graph>& graph);
+
 /** \brief Backend specific pass to fuse dequantize - op - quantize calls
  * as quantized_op calls.
  *
@@ -86,7 +117,7 @@ TORCH_API void QuantFusion(std::shared_ptr<Graph>& graph);
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.
  */
-TORCH_API void FoldConvBatchNorm2d(const script::Module& module);
+TORCH_API script::Module FoldConvBatchNorm2d(const script::Module& module);
 
 /** \brief Fold quantize function call into module
  *
@@ -139,7 +170,7 @@ TORCH_API void FoldPrepackedWeightIntoModule(
     const script::Module& linear_params_module,
     const script::Module& conv_params_module);
 
-/** Recursivly deduplicate multiple uses of the same module by
+/** Recursively deduplicate multiple uses of the same module by
  *  creating an instance clone for each use of the module, which means
  *  the type will be the same as before and all the attributes will be
  *  copied, then we'll change the use of the original module to the use

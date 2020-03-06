@@ -3,33 +3,75 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/constants.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/node_hashing.h>
-#include <torch/csrc/jit/operator.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/node_hashing.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
 
-c10::optional<Stack> runNodeIfInputsAreConstant(const Node* node) {
+c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
   Stack stack;
-  for (const Value* input : node->inputs()) {
+  for (auto input : n->inputs()) {
     if (auto ival = toIValue(input)) {
-      stack.push_back(ival);
+      stack.push_back(*ival);
     } else {
       return c10::nullopt;
     }
   }
-  try {
-    auto op = getOperation(node);
-    op(stack);
-    TORCH_INTERNAL_ASSERT(stack.size() == node->outputs().size());
-  } catch (...) {
-    return c10::nullopt;
+  switch (n->kind()) {
+    case prim::ListUnpack: {
+      if (stack.back().toList().size() != n->outputs().size()) {
+        return c10::nullopt;
+      }
+      listUnpack(stack, n->outputs().size());
+    } break;
+    case prim::TupleConstruct: {
+      auto tt = n->output()->type()->expect<TupleType>();
+      if (tt->name()) {
+        namedTupleConstruct(stack, tt, n->inputs().size());
+      } else {
+        tupleConstruct(stack, n->inputs().size());
+      }
+    } break;
+    case prim::ListConstruct: {
+      listConstruct(
+          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+    } break;
+    case prim::DictConstruct: {
+      dictConstruct(
+          stack, n->output()->type()->expect<DictType>(), n->inputs().size());
+    } break;
+    case prim::CreateObject: {
+      createObject(stack, n->output()->type()->expect<ClassType>());
+    } break;
+    case prim::isinstance: {
+      isinstance(stack, n->tys(attr::types));
+    } break;
+    default: {
+      auto op = n->getOperation();
+      try {
+        op(stack);
+      } catch (...) {
+        return c10::nullopt;
+      }
+    } break;
+  }
+
+  for (const IValue& v : stack) {
+    if (v.isTensor()) {
+      at::Tensor t = v.toTensor();
+      if (t.defined() && t.requires_grad()) {
+        // requires grad tensors cannot be constants
+        return c10::nullopt;
+      }
+    }
   }
   return stack;
 }
@@ -46,13 +88,6 @@ std::unordered_set<Symbol> skip_list = {
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
-};
-
-std::unordered_set<Symbol> tuple_ops = {
-    prim::TupleSlice,
-    prim::TupleIndex,
-    prim::TupleUnpack,
-    prim::TupleConstruct,
 };
 
 struct ConstantPropagator {
@@ -82,76 +117,13 @@ struct ConstantPropagator {
     }
   }
 
-  void pushIValue(Value* v, Stack& stack) {
-    if (tuples.count(v)) {
-      const auto& ival = tuples[v];
-      stack.push_back(ival);
-    } else {
-      stack.push_back(*toIValue(v));
-    }
-  }
-
-  std::vector<IValue> runNode(Node* n) {
-    auto op = getOperation(n);
-    Stack stack;
-    for (auto input : n->inputs()) {
-      pushIValue(input, stack);
-    }
-    op(stack);
-    auto var_outputs = fmap(stack, [&](IValue v) -> IValue {
-      if (v.isTensor()) {
-        auto t = std::move(v).toTensor();
-        if (t.defined()) {
-          if (t.requires_grad()) {
-            // error gets caught within propagateNode()
-            throw c10::Error("Can't insert requires grad as constant", "");
-          }
-          return IValue(t);
-        } else {
-          return t;
-        }
-      } else {
-        return v;
-      }
-    });
-    return var_outputs;
-  }
-
-  // Tuples are not representable as constants, however
-  // we can try to insert each tuple element and then create a TupleConstruct
-  // from the elements
-  Value* tryInsertTuple(const IValue& tuple, Value* tuple_to_replace) {
-    auto type = tuple_to_replace->type();
-    TupleTypePtr tup_type;
-    if (auto opt = type->cast<OptionalType>()) {
-      tup_type = opt->getElementType()->expect<TupleType>();
-    } else {
-      tup_type = type->expect<TupleType>();
-    }
-    auto type_elements = tup_type->elements();
-    const auto& tuple_elements = tuple.toTuple()->elements();
-    std::vector<Value*> inputs;
-    for (size_t i = 0; i < type_elements.size(); ++i) {
-      auto inp = tryInsertConstant(*graph_, tuple_elements[i]);
-      if (inp) {
-        inputs.push_back(*inp);
-      } else {
-        return nullptr;
-      }
-    }
-    auto new_tuple = graph_->insertNode(graph_->createTuple(inputs));
-    tuple_to_replace->replaceAllUsesWith(new_tuple->output());
-    new_tuple->output()->copyMetadata(tuple_to_replace);
-    return new_tuple->output();
-  }
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
-    try {
-      outputs = runNode(n);
-    } catch (...) {
-      // Catch exceptions. This op may not be run,
-      // so catch the error here & leave the op in the graph
+    if (auto outputs_opt = runNodeIfInputsAreConstant(n)) {
+      outputs = std::move(outputs_opt.value());
+    } else {
+      // The op failed to run, so we cannot continue constant-prop for it.
       return;
     }
     auto graph = n->owningGraph();
@@ -168,19 +140,6 @@ struct ConstantPropagator {
           (*new_output)->setType(n->outputs()[i]->type());
         }
         n->outputs()[i]->replaceAllUsesWith(*new_output);
-      } else if (outputs[i].isTuple()) {
-        // we save the new Tuple ivalue in case it is used in an op that
-        // forwards tuples later in the graph, such as a Tuple index
-        auto tuple_val = n->outputs()[i];
-        if (auto new_tup = tryInsertTuple(outputs[i], tuple_val)) {
-          GRAPH_UPDATE(
-              "Folding tuple %",
-              n->outputs()[i]->debugName(),
-              " with ",
-              getHeader(new_tup->node()));
-          tuple_val = new_tup;
-        }
-        tuples[tuple_val] = std::move(outputs[i]);
       }
       // If we cannot insert the IValue as a constant, give up replacing the
       // node and let DCE remove it
@@ -322,12 +281,6 @@ struct ConstantPropagator {
         })) {
       return true;
     }
-    if (tuple_ops.count(n->kind())) {
-      return (
-          std::all_of(n->inputs().begin(), n->inputs().end(), [&](Value* v) {
-            return v->node()->kind() == prim::Constant || tuples.count(v);
-          }));
-    }
     return false;
   };
 
@@ -390,8 +343,6 @@ struct ConstantPropagator {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
-  // these are tuples which we know the computed IValue for
-  std::unordered_map<Value*, IValue> tuples;
 };
 } // anonymous namespace
 
