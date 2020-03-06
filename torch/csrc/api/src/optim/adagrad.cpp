@@ -115,11 +115,7 @@ std::vector<Tensor>& Adagrad::parameters() noexcept {
 }
 
 size_t Adagrad::size() const noexcept {
-  size_t count = 0;
-  for (const auto& group : param_groups_) {
-    count += group.params().size();
-  }
-  return count;
+  return _size_new_design();
 }
 
 void Adagrad::save(serialize::OutputArchive& archive) const {

@@ -38,7 +38,7 @@ void THCTensor_(topk)(THCState* state,
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
   gatherTopK<scalar_t, INDEX_T, DIM, DIR>                                   \
-    <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(             \
       inputInfo,                                                        \
       static_cast<INDEX_T>(sliceSize),                                  \
       static_cast<INDEX_T>(k),                                          \
