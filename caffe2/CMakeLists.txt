@@ -411,6 +411,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/passes/fixup_trace_scope_blocks.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inline_fork_wait.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_fuser.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/passes/cuda_graph_fuser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/graph_rewrite_helper.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/guard_elimination.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/inplace_check.cpp
@@ -486,7 +487,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
-  if (NOT INTERN_DISABLE_MOBILE_INTERP AND BUILD_CAFFE2_MOBILE)
+  if (NOT INTERN_DISABLE_MOBILE_INTERP)
     set (MOBILE_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
