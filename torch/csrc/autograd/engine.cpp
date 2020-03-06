@@ -416,9 +416,6 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
 void GraphTask::set_exception(
     std::exception& e,
     const std::shared_ptr<Node>& fn) {
-  // Careful: setting the future_result can trigger DistAutogradContext to
-  // resetGraphTask(), sometimes deleting this underlying GraphTask.
-  // Don't touch *this after setError() below.
   set_exception_without_signal(fn);
   future_result_->setErrorIfNeeded(e.what());
 }
