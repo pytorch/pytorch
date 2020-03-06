@@ -67,13 +67,9 @@ class class_ {
     classTypePtr->addAttribute("capsule", at::CapsuleType::get());
 
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::intrusive_ptr<CurClass>).name(),
-         c10::StrongTypePtr(
-             std::shared_ptr<script::CompilationUnit>(), classTypePtr)});
+        {typeid(c10::intrusive_ptr<CurClass>).name(), classTypePtr});
     c10::getCustomClassTypeMap().insert(
-        {typeid(c10::tagged_capsule<CurClass>).name(),
-         c10::StrongTypePtr(
-             std::shared_ptr<script::CompilationUnit>(), classTypePtr)});
+        {typeid(c10::tagged_capsule<CurClass>).name(), classTypePtr});
 
     registerCustomClass(classTypePtr);
   }
@@ -172,7 +168,8 @@ class class_ {
   template <typename Func>
   void defineMethod(std::string name, Func func) {
     auto qualMethodName = qualClassName + "." + name;
-    auto schema = c10::inferFunctionSchema<Func>(std::move(name), "");
+    auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+
     auto wrapped_func = [func = std::move(func)](Stack& stack) mutable -> void {
       // TODO: we need to figure out how to profile calls to custom functions
       // like this! Currently can't do it because the profiler stuff is in
