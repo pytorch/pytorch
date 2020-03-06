@@ -34,7 +34,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     PYTORCH_CUDA_MEMCHECK, largeCUDATensorTest
 import torch.backends.quantized
 import torch.testing._internal.data
-
+from test_type_promotion import float_double_default_dtype
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -12152,24 +12152,20 @@ class TestTorchDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.ceil(a, out=b))
 
     # Test for unary ops appropriate for floating-type output from integral and boolean inputs
+    @float_double_default_dtype
     @dtypes(torch.int8, torch.int16, torch.int32, torch.int64, torch.bool)
     def test_intbool_to_float_upcasting(self, device, dtype):
         # Not all the functions are appropriate for this upcasting, so only test for the list below
-        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log10", "log1p",
+        op_list = ["acos", "asin", "ceil", "expm1", "floor", "log", "log10", "log1p", "log10",
                    "log2", "sin", "sinh", "sqrt", "trunc", "atan", "cos", "cosh", "exp", "tan",
-                   "tanh"]
+                   "tanh", "erf", "erfc", "erfinv", "lgamma", "mvlgamma", "digamma", "rsqrt",
+                   "sigmoid"]
         # Make sure that the ops promote to floating default types
-        # Test both float32 and double (float64) dtypes
-        saved_dtype = torch.get_default_dtype()
-        default_floating_types = [torch.float32, torch.float64]
-        for default_floating_type in default_floating_types:
-            torch.set_default_dtype(default_floating_type)
-            for op_name in op_list:
-                x = torch.tensor([2], dtype=dtype, device=device)
-                out = getattr(torch, op_name)(x)
-                # Assert all int and bool dtypes are promoted to default floating dtype
-                self.assertIs(out.dtype, torch.get_default_dtype())
-        torch.set_default_dtype(saved_dtype)
+        for op_name in op_list:
+            x = torch.tensor([2], dtype=dtype, device=device)
+            out = getattr(torch, op_name)(x)
+            # Assert all int and bool dtypes are promoted to default floating dtype
+            self.assertIs(out.dtype, torch.get_default_dtype())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self, device):

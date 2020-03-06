@@ -135,7 +135,7 @@ Tensor round(const Tensor& self) { return unary_op_impl(self, at::round_out); }
 Tensor& round_(Tensor& self) { return unary_op_impl_(self, at::round_out); }
 
 Tensor& digamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, digamma_stub); }
-Tensor digamma(const Tensor& self) { return unary_op_impl(self, digamma_out); }
+Tensor digamma(const Tensor& self) { return unary_float_op_impl(self, digamma_out); }
 Tensor& digamma_(Tensor& self) { return unary_op_impl_(self, digamma_out); }
 
 Tensor& reciprocal_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, reciprocal_stub); }
@@ -143,7 +143,7 @@ Tensor reciprocal(const Tensor& self) { return unary_op_impl(self, at::reciproca
 Tensor& reciprocal_(Tensor& self) { return unary_op_impl_(self, at::reciprocal_out); }
 
 Tensor& rsqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, rsqrt_stub); }
-Tensor rsqrt(const Tensor& self) { return unary_op_impl(self, at::rsqrt_out); }
+Tensor rsqrt(const Tensor& self) { return unary_float_op_impl(self, at::rsqrt_out); }
 Tensor& rsqrt_(Tensor& self) { return unary_op_impl_(self, at::rsqrt_out); }
 
 Tensor& sign_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sign_stub); }
@@ -166,7 +166,7 @@ Tensor square(const Tensor& self) { return at::pow(self, 2); }
 Tensor& square_(Tensor& self) { return at::pow_out(self, self, 2); }
 
 Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sigmoid_stub);  }
-Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
+Tensor sigmoid(const Tensor& self) { return unary_float_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
 Tensor& trunc_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, trunc_stub); }
@@ -232,7 +232,7 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
+    /*check_mem_overlap=*/true, /*promote=*/result.scalar_type() != self.scalar_type());
   polygamma_stub(iter.device_type(), iter, n);
   return result;
 }
@@ -331,7 +331,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? \
       at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
       at::empty({0}, self.options()); \
-    at::op##_out(result, self.to(result.scalar_type()));               \
+    at::op##_out(result, self);               \
     return result;                                                     \
   }
 
@@ -343,7 +343,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     checkDeviceType(#op, result, DeviceType::device);                  \
     checkLayout(#op, result, Layout::Strided);                         \
     auto iter = TensorIterator::unary_op(result, self,                 \
-      /*check_mem_overlap=*/true);                                     \
+      /*check_mem_overlap=*/true, /*promote=*/result.scalar_type() != self.scalar_type()); \
     op##_stub(iter.device_type(), iter);                               \
     return result;                                                     \
   }
@@ -366,18 +366,18 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 #define IMPLEMENT_UNARY_FLOATING_OP_VEC_CUDA(op)                       \
   IMPLEMENT_UNARY_FLOATING_OP_CORE(op)                                 \
   IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CUDA)
+  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
 
 IMPLEMENT_UNARY_FLOATING_OP_VEC(atan)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(cos)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(cosh)
-IMPLEMENT_UNARY_OP_VEC(erf)
-IMPLEMENT_UNARY_OP_VEC(erfc)
-IMPLEMENT_UNARY_OP_VEC_CUDA(erfinv)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(erf)
+IMPLEMENT_UNARY_FLOATING_OP_VEC(erfc)
+IMPLEMENT_UNARY_FLOATING_OP_VEC_CUDA(erfinv)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(exp)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(tan)
 IMPLEMENT_UNARY_FLOATING_OP_VEC(tanh)
-IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
+IMPLEMENT_UNARY_FLOATING_OP_VEC_CUDA(lgamma)
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
