@@ -20,25 +20,52 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
 
 void CodeWrite::printIndexInto(std::vector<Int*> indices, const TensorView* const tv){
    
-  TensorDomain* root = TransformReplay::getRoot(tv->domain());
-
   bool inpOrOut
      = FusionGuard::getCurFusion()->isInput(tv)
     || FusionGuard::getCurFusion()->isOutput(tv);
 
   os << "[";
-  for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
-    print_inline(indices[i]);
-    os << " * ";
-    if(inpOrOut)
-      os << "TV" << tv->name() << "->stride(" << i << ")";
-    else
-      print_inline(root->axis(i)->size());
+  //Linearize the indexing for inputs/outputs
+  if(inpOrOut){
+    for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
+      print_inline(indices[i]);
+      os << " * TV" << tv->name() << "->stride(" << i << ")";
+      if (i != (indices.size() - 1) )
+        os << " + ";
+    }
+  }else{
+    //If not an input or output, our dimensions are what ever the loop structure is
+    //from getComputeAtAxis() out, minus thread/block bindings.
+    //Only handle registers for now!
+    indices = getLoopIndices();
 
-    if (i != (indices.size() - 1) )
-      os << " + ";
+    //We may not print anything actually, we don't want to print * or + assuming we've printed something
+    bool first_ind_print = true;
+    
+    for(decltype(indices.size()) i{tv->getComputeAtAxis()}; i < indices.size(); i++){
+      if(fors[i].second->isBlockDim() || fors[i].second->isThreadDim())
+        continue;
+      if(!first_ind_print && i != indices.size()-1)
+        os << " + ";
+      first_ind_print = false;
+
+      print_inline(indices[i]);
+
+      for( decltype(indices.size()) j{i+1}; i < indices.size(); i++ ){
+        if(fors[i+j].second->isBlockDim() || fors[i+j].second->isThreadDim())
+        continue;
+
+        os << " * ";
+        print_inline(fors[i+j].second->size());
+      }
+
+    }
+    //If nothing was printed, throw out a 0. Ideally we could try reducing this to a single register, but likely don't need to for now.
+    if(first_ind_print)
+      os << 0;
   }
   os << "]";
+  
 }
 
 void CodeWrite::print(const TensorView* const tv) {
@@ -56,7 +83,7 @@ void CodeWrite::print(const TensorView* const tv) {
     throw std::runtime_error(
         "Could not find consumer for producer in CodeWrite.");
   }
-  os << "TV" << tv2->name();
+  os << "TV" << tv->name();
 
   std::vector<Int*> indices =
     IndexCompute::computeIndices(tv2, getLoopIndices());
@@ -282,7 +309,7 @@ void CodeWrite::printAlloc(TensorView* tv){
     size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
   }
   indent();
-  os << tv->getDataType().value() << "* TV" << tv->name() << "[";
+  os << tv->getDataType().value() << " TV" << tv->name() << "[";
   print_inline(size);
   os << "];" << std::endl;
 }
