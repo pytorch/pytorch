@@ -1272,6 +1272,27 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
   return native::flatten(self, start_pos, end_pos, out_dim);
 }
 
+static int64_t __cumprod(IntArrayRef sizes) {
+  int64_t result = 1;
+  for (auto size : sizes) {
+    result *= size;
+  }
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+  TORCH_INTERNAL_ASSERT(sizes.size() > 0);
+  TORCH_CHECK(
+      __cumprod(sizes) == self.size(dim),
+      "unflatten: incorrect sizes");
+
+  int64_t dim_wrap = maybe_wrap_dim(dim, self.dim());
+  auto new_sizes = self.sizes().vec();
+  new_sizes.erase(new_sizes.begin() + dim_wrap);
+  new_sizes.insert(new_sizes.begin() + dim_wrap, sizes.begin(), sizes.end());
+  return self.view(new_sizes);
+}
+
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
   for (size_t i = 0; i < positions.size() - 1; i++) {

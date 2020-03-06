@@ -394,3 +394,5 @@ legacy_contiguous_format = contiguous_format
 from torch.multiprocessing._atfork import register_after_fork
 register_after_fork(torch.get_num_threads)
 del register_after_fork
+
+from .batching import vmap
