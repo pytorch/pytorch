@@ -295,82 +295,6 @@ Tensor RNNImplBase<Derived>::permute_hidden(Tensor hx, const Tensor& permutation
 }
 
 template <typename Derived>
-std::tuple<Tensor, Tensor> RNNImplBase<Derived>::forward_helper(
-  const Tensor& input,
-  const Tensor& batch_sizes,
-  const Tensor& sorted_indices,
-  int64_t max_batch_size,
-  Tensor hx) {
-  if (!hx.defined()) {
-    int64_t num_directions = options_base.bidirectional() ? 2 : 1;
-    hx = torch::zeros({options_base.num_layers() * num_directions,
-                     max_batch_size, options_base.hidden_size()},
-                     torch::dtype(input.dtype()).device(input.device()));
-  } else {
-    // Each batch of the hidden state should match the input sequence that
-    // the user believes he/she is passing in.
-    hx = this->permute_hidden(hx, sorted_indices);
-  }    
-
-  this->check_forward_args(input, hx, batch_sizes);
-
-  std::tuple<Tensor, Tensor> result;
-  if (!batch_sizes.defined()) {
-    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
-      result = torch::rnn_tanh(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
-                               options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
-    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
-      result = torch::rnn_relu(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
-                               options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
-    } else {
-      TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
-    }
-  } else {
-    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
-      result = torch::rnn_tanh(input, batch_sizes, hx, flat_weights_, options_base.bias(),
-                               options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
-    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
-      result = torch::rnn_relu(input, batch_sizes, hx, flat_weights_, options_base.bias(),
-                               options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
-    } else {
-      TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
-    }
-  }
-  auto output = std::get<0>(result);
-  auto hidden = std::get<1>(result);
-
-  return std::make_tuple(output, hidden);
-}
-
-template <typename Derived>
-std::tuple<Tensor, Tensor> RNNImplBase<Derived>::forward(const Tensor& input, Tensor hx) {
-  auto batch_sizes = torch::Tensor();
-  auto max_batch_size = options_base.batch_first() ? input.size(0) : input.size(1);
-  auto sorted_indices = torch::Tensor();
-  auto unsorted_indices = torch::Tensor();
-
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(input, batch_sizes, sorted_indices, max_batch_size, hx);
-
-  return std::make_tuple(output, this->permute_hidden(hidden, unsorted_indices));
-}
-
-template <typename Derived>
-std::tuple<PackedSequence, Tensor> RNNImplBase<Derived>::forward_with_packed_input(const PackedSequence& packed_input, Tensor hx) {
-  const auto& input = packed_input.data();
-  const auto& batch_sizes = packed_input.batch_sizes();
-  const auto& sorted_indices = packed_input.sorted_indices();
-  const auto& unsorted_indices = packed_input.unsorted_indices();
-  auto max_batch_size = batch_sizes[0].item<int64_t>();
-
-  Tensor output, hidden;
-  std::tie(output, hidden) = this->forward_helper(input, batch_sizes, sorted_indices, max_batch_size, hx);
-
-  auto output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
-  return std::make_tuple(output_packed, this->permute_hidden(hidden, unsorted_indices));
-}
-
-template <typename Derived>
 void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name = this->name();
   const std::string name_without_impl = name.substr(0, name.size() - 4);
@@ -426,6 +350,79 @@ RNNImpl::RNNImpl(const RNNOptions& options_)
               .dropout(options_.dropout())
               .bidirectional(options_.bidirectional())),
       options(options_) {}
+
+std::tuple<Tensor, Tensor> RNNImpl::forward_helper(
+  const Tensor& input,
+  const Tensor& batch_sizes,
+  const Tensor& sorted_indices,
+  int64_t max_batch_size,
+  Tensor hx) {
+  if (!hx.defined()) {
+    int64_t num_directions = options_base.bidirectional() ? 2 : 1;
+    hx = torch::zeros({options_base.num_layers() * num_directions,
+                     max_batch_size, options_base.hidden_size()},
+                     torch::dtype(input.dtype()).device(input.device()));
+  } else {
+    // Each batch of the hidden state should match the input sequence that
+    // the user believes he/she is passing in.
+    hx = this->permute_hidden(hx, sorted_indices);
+  }    
+
+  this->check_forward_args(input, hx, batch_sizes);
+
+  std::tuple<Tensor, Tensor> result;
+  if (!batch_sizes.defined()) {
+    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
+      result = torch::rnn_tanh(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
+                               options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
+    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
+      result = torch::rnn_relu(input, hx, flat_weights_, options_base.bias(), options_base.num_layers(),
+                               options_base.dropout(), this->is_training(), options_base.bidirectional(), options_base.batch_first());
+    } else {
+      TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
+    }
+  } else {
+    if (c10::get_if<enumtype::kRNN_TANH>(&options_base.mode())) {
+      result = torch::rnn_tanh(input, batch_sizes, hx, flat_weights_, options_base.bias(),
+                               options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
+    } else if (c10::get_if<enumtype::kRNN_RELU>(&options_base.mode())) {
+      result = torch::rnn_relu(input, batch_sizes, hx, flat_weights_, options_base.bias(),
+                               options_base.num_layers(), options_base.dropout(), this->is_training(), options_base.bidirectional());
+    } else {
+      TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(options_base.mode()));
+    }
+  }
+  auto output = std::get<0>(result);
+  auto hidden = std::get<1>(result);
+
+  return std::make_tuple(output, hidden);
+}
+
+std::tuple<Tensor, Tensor> RNNImpl::forward(const Tensor& input, Tensor hx) {
+  auto batch_sizes = torch::Tensor();
+  auto max_batch_size = options_base.batch_first() ? input.size(0) : input.size(1);
+  auto sorted_indices = torch::Tensor();
+  auto unsorted_indices = torch::Tensor();
+
+  Tensor output, hidden;
+  std::tie(output, hidden) = this->forward_helper(input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
+
+  return std::make_tuple(output, this->permute_hidden(hidden, unsorted_indices));
+}
+
+std::tuple<PackedSequence, Tensor> RNNImpl::forward_with_packed_input(const PackedSequence& packed_input, Tensor hx) {
+  const auto& input = packed_input.data();
+  const auto& batch_sizes = packed_input.batch_sizes();
+  const auto& sorted_indices = packed_input.sorted_indices();
+  const auto& unsorted_indices = packed_input.unsorted_indices();
+  auto max_batch_size = batch_sizes[0].item<int64_t>();
+
+  Tensor output, hidden;
+  std::tie(output, hidden) = this->forward_helper(input, batch_sizes, sorted_indices, max_batch_size, std::move(hx));
+
+  auto output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices);
+  return std::make_tuple(output_packed, this->permute_hidden(hidden, unsorted_indices));
+}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

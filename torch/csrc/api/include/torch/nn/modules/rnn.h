@@ -53,13 +53,6 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   /// called once upon construction, inside `reset()`.
   void flatten_parameters();
 
-  virtual std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {});
- protected:
-  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
-
- public:
-  virtual std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
-
   std::vector<Tensor> all_weights() const;
 
   /// The RNN's options.
@@ -84,13 +77,6 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   Tensor permute_hidden(Tensor hx, const Tensor& permutation) const;
 
-  std::tuple<Tensor, Tensor> forward_helper(
-    const Tensor& input,
-    const Tensor& batch_sizes,
-    const Tensor& sorted_indices,
-    int64_t max_batch_size,
-    Tensor hx);
-
   std::vector<std::string> flat_weights_names_;
   std::vector<std::vector<std::string>> all_weights_;
   std::vector<Tensor> flat_weights_;
@@ -107,8 +93,23 @@ class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
   RNNImpl(int64_t input_size, int64_t hidden_size)
       : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(const RNNOptions& options_);
+
+  std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {});
+ protected:
+  FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(Tensor())})
+
  public:
+  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
+
   RNNOptions options;
+
+ protected:
+  std::tuple<Tensor, Tensor> forward_helper(
+    const Tensor& input,
+    const Tensor& batch_sizes,
+    const Tensor& sorted_indices,
+    int64_t max_batch_size,
+    Tensor hx);
 };
 
 /// A `ModuleHolder` subclass for `RNNImpl`.
@@ -169,12 +170,12 @@ class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
       : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(const GRUOptions& options_);
 
-  std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {}) override;
+  std::tuple<Tensor, Tensor> forward(const Tensor& input, Tensor hx = {});
  protected:
   FORWARD_HAS_DEFAULT_ARGS({1, AnyValue(torch::Tensor())})
 
  public:
-  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {}) override;
+  std::tuple<PackedSequence, Tensor> forward_with_packed_input(const PackedSequence& packed_input, Tensor hx = {});
 
   GRUOptions options;
 
