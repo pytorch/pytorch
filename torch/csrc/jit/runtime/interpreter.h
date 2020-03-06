@@ -94,10 +94,12 @@ struct InterpreterContinuation {
   InterpreterContinuation(
       InterpreterState state_,
       Stack stack_,
-      bool grad_mode_enabled_)
+      bool grad_mode_enabled_,
+      int64_t dist_autograd_context_id_)
       : state(state_),
         stack(std::move(stack_)),
-        grad_mode_enabled(grad_mode_enabled_) {}
+        grad_mode_enabled(grad_mode_enabled_),
+        dist_autograd_context_id(dist_autograd_context_id_) {}
 
   void operator()();
 
@@ -105,6 +107,7 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   bool grad_mode_enabled;
+  int64_t dist_autograd_context_id;
 };
 
 // what is the tensors type, including state from the current execution context

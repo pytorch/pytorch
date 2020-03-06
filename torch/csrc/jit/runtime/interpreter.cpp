@@ -7,16 +7,17 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/autograd/context/container.h>
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/ir/constants.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/passes/bailout_graph.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <exception>
@@ -33,6 +34,8 @@
 
 namespace torch {
 namespace jit {
+
+using torch::distributed::autograd::DistAutogradContainer;
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -1134,7 +1137,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
-                      autograd::GradMode::is_enabled()));
+                      autograd::GradMode::is_enabled(),
+                      DistAutogradContainer::currentContextId()));
                 }
 
                private:
@@ -1252,7 +1256,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
-                autograd::GradMode::is_enabled());
+                autograd::GradMode::is_enabled(),
+                DistAutogradContainer::currentContextId());
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1424,6 +1429,7 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
+  DistAutogradContainer::setCurrentContextId(dist_autograd_context_id);
   autograd::AutoGradMode grad_mode(grad_mode_enabled);
   state.runAsync(stack);
 }

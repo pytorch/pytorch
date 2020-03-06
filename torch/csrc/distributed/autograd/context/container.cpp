@@ -214,6 +214,10 @@ size_t DistAutogradContainer::numAutogradContexts() const {
   return autograd_context_.size();
 }
 
+int64_t DistAutogradContainer::currentContextId() {
+  return current_context_id_;
+}
+
 } // namespace autograd
 } // namespace distributed
 } // namespace torch
