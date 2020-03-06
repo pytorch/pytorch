@@ -348,15 +348,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
     return result;                                                     \
   }
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                                     \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
-
-#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
-
 // These macros ensure the unary ops (which support upcasting integral/boolean inputs
 // to default floating type) pass through IMPLEMENT_UNARY_FLOATING_OP_CORE macro
 #define IMPLEMENT_UNARY_FLOATING_OP_VEC(op)                            \
