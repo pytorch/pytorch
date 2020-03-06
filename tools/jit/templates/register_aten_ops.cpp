@@ -100,8 +100,8 @@ c10::OperatorOptions atenOperatorOptions() {
   return result;
 }
 
-int (*DUMMY_OPERATION_JITONLY)(Stack&) =
-  [](Stack& stack) -> int {
+int (*DUMMY_OPERATION_JITONLY)(Stack*) =
+  [](Stack* stack) -> int {
     TORCH_CHECK(false, "Operator has been stripped in the custom build.")
     return 0;
   };
