@@ -29,21 +29,13 @@ bool isCustomClass(const c10::IValue& v) {
       getCustomClass(v.toObject()->type()->name()->qualifiedName());
 }
 
-std::unordered_map<std::string, std::shared_ptr<Function>>& customClassMethods() {
-  static std::unordered_map<std::string, std::shared_ptr<Function>>
-      customClassMethods;
+std::vector<std::shared_ptr<Function>>& customClassMethods() {
+  static std::vector<std::shared_ptr<Function>> customClassMethods;
   return customClassMethods;
 }
 
-Function* getCustomClassMethod(const std::string& qualname) {
-  TORCH_CHECK(customClassMethods().count(qualname));
-  return customClassMethods()[qualname].get();
-}
-
 void registerCustomClassMethod(std::shared_ptr<Function> fn) {
-  TORCH_INTERNAL_ASSERT(
-      !customClassMethods().count(fn->qualname().qualifiedName()));
-  customClassMethods()[fn->qualname().qualifiedName()] = std::move(fn);
+  customClassMethods().emplace_back(std::move(fn));
 }
 
 } // namespace jit
