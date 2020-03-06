@@ -10,6 +10,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
+#include <cstdlib>
 #include <cmath>
 
 #ifdef USE_FBGEMM
