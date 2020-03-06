@@ -861,6 +861,16 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 5, 5, device=torch.device('cpu'))
         self.assertONNX(lambda x: torch.det(x), x, opset_version=11)
 
+    def test_softmaxcrossentropy(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(), (x, y), opset_version=12)
+
+    def test_softmaxcrossentropy_ignore_index(self):
+        x = torch.randn(3, 5)
+        y = torch.empty(3, dtype=torch.long).random_(5)
+        self.assertONNX(torch.nn.CrossEntropyLoss(ignore_index=1), (x, y), opset_version=12)
+
 
 if __name__ == '__main__':
     no_onnx_dep_flag = '--no-onnx'
