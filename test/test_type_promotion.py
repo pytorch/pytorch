@@ -122,8 +122,10 @@ class TestTypePromotion(TestCase):
     @float_double_default_dtype
     def test_from_issue(self, device):
         a = torch.rand(3, dtype=torch.float32, device=device)
+        b = torch.randn(3, dtype=torch.complex64, device=device)
         u = torch.tensor([0, 0, 1], dtype=torch.uint8, device=device)
         self.assertEqual((a * 5).dtype, torch.float32)
+        self.assertEqual((b * 5).dtype, torch.complex64)
         self.assertEqual((u + 1).dtype, torch.uint8)
         self.assertEqual((u + 1000).dtype, torch.uint8)  # integer overflow
 
@@ -135,6 +137,7 @@ class TestTypePromotion(TestCase):
         # adding a 0-dim tensor to a float doesn't promote to double unless first
         # type was integral.
         self.assertEqual((a + other).dtype, torch.float32)
+        self.assertEqual((b + other).dtype, torch.complex64)
 
     @float_double_default_dtype
     def test_half(self, device):
