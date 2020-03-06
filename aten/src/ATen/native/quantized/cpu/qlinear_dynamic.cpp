@@ -400,6 +400,9 @@ static auto registry =
         .op("quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
+        .op("_quantized::linear_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
+            torch::RegisterOperators::options()
+                .kernel<QLinearDynamicInt8<false>>(DispatchKey::CPUTensorId))
         .op("quantized::linear_relu_dynamic(Tensor X, Tensor W_prepack) -> Tensor Y",
             torch::RegisterOperators::options()
                 .kernel<QLinearDynamicInt8<true>>(DispatchKey::CPUTensorId))
