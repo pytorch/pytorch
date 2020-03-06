@@ -779,28 +779,33 @@ class TestCase(expecttest.TestCase):
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
+    # dtype name : (rtol, atol)
     dtype_precisions = {
-        torch.half: 0.001,
-        torch.bfloat16: 0.016,
-        torch.float: 1.3e-6,
-        torch.double: 5e-7,
-        torch.int: 0
+        'float16': (0.001, 1e-5),
+        'bfloat16': (0.016, 1e-5),
+        'float32': (1.3e-6, 1.3e-6),
+        'float64': (1e-5, 1e-8), # NumPy default
+        'complex32': (1.3e-6, 1.3e-6),
+        'complex64': (1e-5, 1e-8),
     }
 
-    def compared_dtype(self, x, y):
-        dtype = torch.float
-        if isinstance(x, torch.Tensor):
-            dtype = x.dtype
-        elif isinstance(y, torch.Tensor):
-            dtype = y.dtype
-        elif TEST_NUMPY and isinstance(x, numpy.ndarray):
-            dtype = torch.from_numpy(x).dtype
+    def get_default_tolerance(self, a, b=None):
+        if b is None:
+            dtype = torch.float
+            if isinstance(a, torch.Tensor):
+                dtype = a.dtype
+            elif isinstance(a, torch.dtype):
+                dtype = a
+            elif TEST_NUMPY and isinstance(a, numpy.ndarray):
+                dtype = torch.from_numpy(a).dtype
 
-        if dtype.is_floating_point:
-            return dtype
-        else:
-            return torch.int
+            # todo: set 0-tolerance for integral type.
+            dtype = str(dtype).split('.')[-1]
+            return self.dtype_precisions.get(dtype, (self.precision, self.precision))
 
+        a_tol = self.get_default_tolerance(a)
+        b_tol = self.get_default_tolerance(b)
+        return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
     def assertEqual(self, x, y, message='', rtol=None, atol=None, allow_inf=False, exact_dtype=None):
         # we allow setting an absolute tolerance as a positional arg for BC with legacy testing behavior.
@@ -812,10 +817,7 @@ class TestCase(expecttest.TestCase):
             rtol = 0
         elif atol is None and rtol is None:
             # if both are None, use defaults per-dtype
-            t = self.compared_dtype(x, y)
-            prec = self.dtype_precisions[t]
-            atol = prec
-            rtol = prec
+            (rtol, atol) = self.get_default_tolerance(x, y)
         else:
             if rtol is None:
                 rtol = 0
@@ -951,8 +953,7 @@ class TestCase(expecttest.TestCase):
         if not isinstance(message, str):
             raise Error("fix this test, message should be a string")
         if atol is None:
-            dtype = self.compared_dtype(x, y)
-            atol = self.dtype_precisions[dtype]
+            (_, atol) = self.get_default_tolerance(x, y)
 
         if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
             if x.size() != y.size():
