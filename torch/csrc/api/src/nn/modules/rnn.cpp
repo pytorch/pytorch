@@ -238,7 +238,7 @@ void RNNImplBase<Derived>::reset_parameters() {
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::check_input(const Tensor& input, const Tensor& batch_sizes) {
+void RNNImplBase<Derived>::check_input(const Tensor& input, const Tensor& batch_sizes) const {
   int64_t expected_input_dim = batch_sizes.defined() ?  2 : 3;
   TORCH_CHECK(
     input.dim() == expected_input_dim,
@@ -250,7 +250,7 @@ void RNNImplBase<Derived>::check_input(const Tensor& input, const Tensor& batch_
 
 template <typename Derived>
 std::tuple<int64_t, int64_t, int64_t> RNNImplBase<Derived>::get_expected_hidden_size(
-  const Tensor& input, const Tensor& batch_sizes) {
+  const Tensor& input, const Tensor& batch_sizes) const {
   int64_t mini_batch = 0;
   if (batch_sizes.defined()) {
     mini_batch = batch_sizes[0].item<int64_t>();
@@ -265,7 +265,7 @@ template <typename Derived>
 void RNNImplBase<Derived>::check_hidden_size(
     const Tensor& hx,
     std::tuple<int64_t, int64_t, int64_t> expected_hidden_size,
-    std::string msg) {
+    std::string msg) const {
   auto expected_hidden_size_vec = std::vector<int64_t>({
     std::get<0>(expected_hidden_size),
     std::get<1>(expected_hidden_size),
@@ -279,7 +279,7 @@ void RNNImplBase<Derived>::check_hidden_size(
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::check_forward_args(Tensor input, Tensor hidden, Tensor batch_sizes) {
+void RNNImplBase<Derived>::check_forward_args(Tensor input, Tensor hidden, Tensor batch_sizes) const {
   this->check_input(input, batch_sizes);
   auto expected_hidden_size = this->get_expected_hidden_size(input, batch_sizes);
 
@@ -287,7 +287,7 @@ void RNNImplBase<Derived>::check_forward_args(Tensor input, Tensor hidden, Tenso
 }
 
 template <typename Derived>
-Tensor RNNImplBase<Derived>::permute_hidden(Tensor hx, const Tensor& permutation) {
+Tensor RNNImplBase<Derived>::permute_hidden(Tensor hx, const Tensor& permutation) const {
   if (!permutation.defined()) {
     return hx;
   }
@@ -442,7 +442,7 @@ LSTMImpl::LSTMImpl(const LSTMOptions& options_)
               .bidirectional(options_.bidirectional())),
       options(options_) {}
 
-void LSTMImpl::check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) {
+void LSTMImpl::check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) const {
   this->check_input(input, batch_sizes);
   auto expected_hidden_size = this->get_expected_hidden_size(input, batch_sizes);
 
@@ -452,7 +452,7 @@ void LSTMImpl::check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor
                           "Expected hidden[1] size {1}, got {2}");
 }
 
-std::tuple<Tensor, Tensor> LSTMImpl::permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation) {
+std::tuple<Tensor, Tensor> LSTMImpl::permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation) const {
   if (!permutation.defined()) {
     return hx;
   }

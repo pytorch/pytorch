@@ -71,22 +71,18 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
   // likely rely on this behavior to properly .to() modules like LSTM.
   void reset_flat_weights();
 
-  std::vector<std::string> _flat_weights_names;
-  std::vector<std::vector<std::string>> _all_weights;
-  std::vector<Tensor> _flat_weights;
+  void check_input(const Tensor& input, const Tensor& batch_sizes) const;
 
-  void check_input(const Tensor& input, const Tensor& batch_sizes);
-
-  std::tuple<int64_t, int64_t, int64_t> get_expected_hidden_size(const Tensor& input, const Tensor& batch_sizes);
+  std::tuple<int64_t, int64_t, int64_t> get_expected_hidden_size(const Tensor& input, const Tensor& batch_sizes) const;
 
   void check_hidden_size(
     const Tensor& hx,
     std::tuple<int64_t, int64_t, int64_t> expected_hidden_size,
-    std::string msg = "Expected hidden size {1}, got {2}");
+    std::string msg = "Expected hidden size {1}, got {2}") const;
 
-  void check_forward_args(Tensor input, Tensor hidden, Tensor batch_sizes);
+  void check_forward_args(Tensor input, Tensor hidden, Tensor batch_sizes) const;
 
-  Tensor permute_hidden(Tensor hx, const Tensor& permutation);
+  Tensor permute_hidden(Tensor hx, const Tensor& permutation) const;
 
   std::tuple<Tensor, Tensor> forward_helper(
     const Tensor& input,
@@ -94,6 +90,10 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
     const Tensor& sorted_indices,
     int64_t max_batch_size,
     Tensor hx);
+
+  std::vector<std::string> _flat_weights_names;
+  std::vector<std::vector<std::string>> _all_weights;
+  std::vector<Tensor> _flat_weights;
 };
 } // namespace detail
 
@@ -140,9 +140,9 @@ class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   LSTMOptions options;
 
  protected:
-  void check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes);
+  void check_forward_args(const Tensor& input, std::tuple<Tensor, Tensor> hidden, const Tensor& batch_sizes) const;
 
-  std::tuple<Tensor, Tensor> permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation);
+  std::tuple<Tensor, Tensor> permute_hidden(std::tuple<Tensor, Tensor> hx, const Tensor& permutation) const;
 
   std::tuple<Tensor, std::tuple<Tensor, Tensor>> forward_helper(
     const Tensor& input,
