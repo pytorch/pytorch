@@ -9538,7 +9538,7 @@ class TestNNDeviceType(NNTestCase):
             out2 = conv1(input_c)
             self.assertEqual(out1, out2)
 
-    @largeCUDATensorTest('32GB')
+    @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -9555,7 +9555,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(maxdiff3, 0)
 
     @skipIfRocm
-    @largeCUDATensorTest('32GB')
+    @largeCUDATensorTest('12GB')
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
