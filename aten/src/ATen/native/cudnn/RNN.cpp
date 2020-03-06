@@ -16,10 +16,6 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-bool _use_cudnn_rnn_flatten_weight() {
-  return false;
-}
-
 Tensor _cudnn_rnn_flatten_weight(
     TensorList weight_arr, int64_t weight_stride0,
     int64_t input_size,
@@ -618,10 +614,6 @@ namespace {
   }
 
 } // anonymous namespace
-
-bool _use_cudnn_rnn_flatten_weight() {
-  return true;
-}
 
 // NB: does inplace update into TensorList
 // It would be a relatively simple matter to refactor this into multiple
