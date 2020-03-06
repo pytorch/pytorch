@@ -3,21 +3,21 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 
-#define CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(operation) cpu_scatter_gather_base_kernel( \
-  self, dim, index, src, \
-  method_name, [&] (                                                    \
-    auto* self_data, auto self_dim_stride,                              \
-    const auto* index_data, auto index_dim_stride,                      \
-    const auto* src_data, auto src_dim_stride) {                        \
-      for (int64_t i = 0; i < index_dim_size; ++i) {                    \
-        int64_t idx_dim = index_data[i * index_dim_stride];             \
-        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,            \
-                    "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim, \
-                    " with size ", self_dim_size);                      \
-        self_data[idx_dim * self_dim_stride] operation src_data[i * src_dim_stride]; \
-      }                                                                 \
-   },                                                                   \
-  /*serial_exec=*/false);                                               \
+// #define CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(operation) cpu_scatter_gather_base_kernel( \
+//   self, dim, index, src, \
+//   method_name, [&] (                                                    \
+//     auto* self_data, auto self_dim_stride,                              \
+//     const auto* index_data, auto index_dim_stride,                      \
+//     const auto* src_data, auto src_dim_stride) {                        \
+//       for (int64_t i = 0; i < index_dim_size; ++i) {                    \
+//         int64_t idx_dim = index_data[i * index_dim_stride];             \
+//         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,            \
+//                     "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim, \
+//                     " with size ", self_dim_size);                      \
+//         self_data[idx_dim * self_dim_stride] operation src_data[i * src_dim_stride]; \
+//       }                                                                 \
+//    },                                                                   \
+//   /*serial_exec=*/false);                                               \
   
 
 namespace at { namespace native {
@@ -340,20 +340,47 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
   std::string method_name = "scatter_" + reduce + "_";
+  std::function<void(int)> op;
 
-  // Perform checks here since its expensive to do it for every iteration of the loop.
-  if (reduce == "add") {
-    CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(+=);
-  }
-  else if (reduce == "subtract") {
-    CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(-=);
-  }
-  else if (reduce == "multiply") {
-    CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(*=);
-  }
-  else if (reduce == "divide") {
-    CPU_SCATTER_GATHER_BASE_KERNEL_REDUCE(/=);    
-  }
+    cpu_scatter_gather_base_kernel(
+    self, dim, index, src,
+    method_name, [&] (
+      auto* self_data, auto self_dim_stride,
+      const auto* index_data, auto index_dim_stride,
+      const auto* src_data, auto src_dim_stride
+    ) {
+      if (reduce == "add") {
+        op = [&](int idx_dim) {
+               self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
+             };
+      }
+      else if (reduce == "subtract") {
+        op = [&](int idx_dim) {
+               self_data[idx_dim * self_dim_stride] -= src_data[i * src_dim_stride];
+             };
+      }
+      else if (reduce == "multiply") {
+        op = [&](int idx_dim) {
+               self_data[idx_dim * self_dim_stride] *= src_data[i * src_dim_stride];
+             };
+      }
+      else if (reduce == "divide") {
+        op = [&](int idx_dim) {
+               self_data[idx_dim * self_dim_stride] \= src_data[i * src_dim_stride];
+             };
+      }
+      
+      for (int64_t i = 0; i < index_dim_size; ++i) {
+        int64_t idx_dim = index_data[i * index_dim_stride];
+        // we are not putting idx_dim in the error message because it disables
+        // loop optimizations in clang-7
+        TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
+                    "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
+                    " with size ", self_dim_size);
+        op(idx_dim);
+      }
+    },
+    /*serial_exec=*/false);
 }
 
 } // anonymous namespace
