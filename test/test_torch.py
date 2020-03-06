@@ -4323,6 +4323,9 @@ tensor([[[1., 1., 1.,  ..., 1., 1., 1.],
         self.assertEqual(x, xv)
         self.assertEqual(xv, x)
 
+        self.assertRaisesRegex(AssertionError, "don't combine", 
+                               lambda: self.assertEqual(x, xv, 1.0, ""))
+
     def test_new(self):
         x = torch.autograd.Variable(torch.Tensor())
         y = torch.autograd.Variable(torch.randn(4, 4))
