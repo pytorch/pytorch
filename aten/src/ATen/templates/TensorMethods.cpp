@@ -74,6 +74,10 @@ Device Tensor::device() const {
   return impl_->device();
 }
 
+c10::optional<Device> Tensor::optional_device() const {
+  return impl_->optional_device();
+}
+
 int64_t Tensor::get_device() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->get_device();

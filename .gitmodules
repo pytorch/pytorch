@@ -130,3 +130,6 @@
     ignore = dirty
     path = third_party/tensorpipe
     url = https://github.com/pytorch/tensorpipe.git
+[submodule "third_party/json"]
+	path = third_party/json
+	url = git@github.com:nlohmann/json.git

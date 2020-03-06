@@ -806,4 +806,94 @@ Tensor& log_sigmoid_backward_out_cpu(
 DEFINE_DISPATCH(GeluKernel);
 DEFINE_DISPATCH(GeluBackwardKernel);
 
+Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
+}
+
+Tensor select_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
+  return grad_input;
+}
+
+std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
+  TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
+  TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
+  int64_t dim_size = self.size(dim);
+  TORCH_CHECK(split_size > 0 || self.size(dim) == 0,
+           "split_size can only be 0 if dimension size is 0, "
+           "but got dimension size of ", dim_size);
+  // if split_size is 0 and dimension size is 0, there is 1 split.
+  int64_t num_splits = 1;
+  if (split_size != 0) {
+    // ensuring num_splits is at least 1 makes consistent the case where split_size > dim_size
+    // (returns a single split).  We might want to error here, but keep it for BC.
+    num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
+  }
+  std::vector<Tensor> splits(num_splits);
+  int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
+
+  for (int64_t i = 0; i < num_splits; ++i) {
+    auto length = i < num_splits - 1 ? split_size : last_split_size;
+    splits[i] = self.narrow(dim, i * split_size, length);
+  }
+  return splits;
+}
+
+std::vector<Tensor> split_with_sizes(const Tensor& self, IntArrayRef split_sizes, int64_t dim) {
+  TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
+  int64_t dim_size = self.size(dim);
+  int64_t num_splits = split_sizes.size();
+  std::vector<Tensor> splits(num_splits);
+  int64_t start_idx = 0;
+  int64_t i;
+
+  for (i = 0; i < num_splits; ++i) {
+    auto length = split_sizes[i];
+    TORCH_CHECK(length >= 0,
+             "split_with_sizes expects split_sizes have only non-negative ",
+             "entries, but got split_sizes=", split_sizes);
+    splits[i] = self.narrow(dim, start_idx, length);
+    start_idx += length;
+  }
+  TORCH_CHECK(start_idx == dim_size,
+           "split_with_sizes expects split_sizes to sum exactly to ", dim_size,
+           " (input tensor's size at dimension ", dim, "), ", "but got split_sizes=", split_sizes);
+  return splits;
+}
+
+Tensor split_backward(c10::ArrayRef<Tensor> grads,
+                      int64_t split_size, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  int64_t dim_size = sizes[dim];
+  int64_t num_splits = grads.size();
+  std::vector<int64_t> split_sizes(num_splits, split_size);
+  split_sizes[num_splits - 1] = split_size - (split_size * num_splits - dim_size);
+  return at::native::split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
+}
+
+Tensor split_with_sizes_backward(c10::ArrayRef<Tensor> grads,
+                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+
+  // it's possible some of the grads are not defined (represents tensors of all 0s).
+  // Since at::cat can't handle those, let's define them
+  std::vector<Tensor> grads_all_defined(grads.size());
+  for (size_t j = 0; j < grads.size(); ++j) {
+    if (grads[j].defined()) {
+      grads_all_defined[j] = grads[j];
+    } else {
+      auto length = split_sizes[j];
+      auto grad_size = sizes.vec();
+      grad_size[dim] = length;
+      grads_all_defined[j] = at::zeros(grad_size, options);
+    }
+  }
+
+  auto ret =  at::cat(grads_all_defined, dim);
+  return ret;
+}
+
 }}  // namespace at::native

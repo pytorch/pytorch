@@ -728,18 +728,6 @@ Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntArrayR
   return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
-Tensor slice_backward(Tensor grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.slice(dim, start, end, step).copy_(grad);
-  return grad_input;
-}
-
-Tensor select_backward(Tensor grad, IntArrayRef input_sizes, int64_t dim, int64_t index) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  grad_input.select(dim, index).copy_(grad);
-  return grad_input;
-}
-
 Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
   if (sizes.size() != 2) {
     throw std::runtime_error("expected matrix input");
@@ -858,38 +846,6 @@ Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inver
     grad_L = at::zeros({1}, L.options()).expand_as(L);
   }
   return grad_L;
-}
-
-Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
-                                 IntArrayRef split_sizes, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-
-  // it's possible some of the grads are not defined (represents tensors of all 0s).
-  // Since at::cat can't handle those, let's define them
-  std::vector<Tensor> grads_all_defined(grads.size());
-  for (size_t j = 0; j < grads.size(); ++j) {
-    if (grads[j].defined()) {
-      grads_all_defined[j] = grads[j];
-    } else {
-      auto length = split_sizes[j];
-      auto grad_size = sizes.vec();
-      grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, options);
-    }
-  }
-
-  auto ret =  at::cat(grads_all_defined, dim);
-  return ret;
-}
-
-Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
-                      int64_t split_size, int64_t dim, IntArrayRef sizes, const at::TensorOptions &options) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  int64_t dim_size = sizes[dim];
-  int64_t num_splits = grads.size();
-  std::vector<int64_t> split_sizes(num_splits, split_size);
-  split_sizes[num_splits - 1] = split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
 }
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {

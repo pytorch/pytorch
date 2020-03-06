@@ -374,6 +374,8 @@ def generate_storage_type_and_tensor(backend, density, declarations, per_op_regi
     if env['DeviceType'] == 'CPU' or env['DeviceType'] == 'Vulkan':
         top_env['cpu_type_headers'].append(
             '#include <ATen/{}.h>'.format(env['Type']))
+    elif env['DeviceType'] == 'Checkpoint':
+        pass
     else:
         assert env['DeviceType'] == 'CUDA'
         top_env['cuda_type_headers'].append(
@@ -437,6 +439,8 @@ def declare_outputs():
     if options.force_schema_registration:
         file_manager.will_write('SchemaRegister.cpp')
 
+    file_manager.will_write("CheckpointType.h")
+    file_manager.will_write("CheckpointType.cpp")
 
 def filter_by_extension(files, *extensions):
     filtered_files = []
@@ -512,6 +516,8 @@ def generate_outputs():
     for backend, density in iterate_types():
         generate_storage_type_and_tensor(
             backend, density, declarations, per_op_registrations, schema_registrations)
+
+    generate_storage_type_and_tensor('Checkpoint', 'Dense', declarations, per_op_registrations, schema_registrations)
 
     core_files = {
         'TensorBody.h': TENSOR_H,

@@ -180,6 +180,9 @@ enum class DispatchKey : uint8_t {
   // constituent parts.
   Named,
 
+  // Checkpoint must go after Autograd. This way, Autograd will hook ad outside of CheckpointTensor.
+  Checkpoint,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AUTOGRAD ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends.  It inspects the autograd

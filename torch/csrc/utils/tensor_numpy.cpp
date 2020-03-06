@@ -73,7 +73,8 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
   return result;
 }
 
-PyObject* tensor_to_numpy(const at::Tensor& tensor) {
+PyObject* tensor_to_numpy(const at::Tensor& tensor_) {
+  Tensor tensor = tensor_.decheckpoint();
   if (tensor.device().type() != DeviceType::CPU) {
     throw TypeError(
       "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "

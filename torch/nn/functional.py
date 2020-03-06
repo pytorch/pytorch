@@ -4083,9 +4083,10 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if k is not None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        # extremely bizarre, but got errors of dimension mistmatch here and below unless I changed view -> reshape
+        k = k.contiguous().reshape(-1, bsz * num_heads, head_dim).transpose(0, 1)
     if v is not None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        v = v.contiguous().reshape(-1, bsz * num_heads, head_dim).transpose(0, 1)
 
     if static_k is not None:
         assert static_k.size(0) == bsz * num_heads
@@ -4136,7 +4137,8 @@ def multi_head_attention_forward(query,                           # type: Tensor
 
     attn_output = torch.bmm(attn_output_weights, v)
     assert list(attn_output.size()) == [bsz * num_heads, tgt_len, head_dim]
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    # also had to change view to reshape
+    attn_output = attn_output.transpose(0, 1).contiguous().reshape(tgt_len, bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
 
     if need_weights:
