@@ -84,8 +84,8 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CUDATensorId
   ).release();
-  THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
-                          {size0}, {stride0});
+  THTensor_(setStorageNd)(self, storage, storageOffset, 1,
+                          &size0, &stride0);
 
   return self;
 }
