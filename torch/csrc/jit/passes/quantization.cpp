@@ -153,6 +153,7 @@ std::vector<size_t> getGeneralOpTensorInputIndexes(Node* n) {
     "__upsample",
     "__upsample_bilinear",
     "__upsample_nearest",
+    "dropout",
   };
   std::vector<std::string> single_input_call_funcs = {
     "adaptive_avg_pool2d",

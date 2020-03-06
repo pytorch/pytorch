@@ -1993,6 +1993,7 @@ graph(%input, %weight):
                 x = F.upsample(x, (32, 32))
                 x = F.upsample_bilinear(x, (32, 32))
                 x = F.upsample_nearest(x, (32, 32))
+                x = F.dropout(x)
                 return x
         m = torch.jit.script(M())
         torch._C._jit_pass_inline(m.graph)
@@ -2008,6 +2009,7 @@ graph(%input, %weight):
                    .check("aten::__upsample") \
                    .check("aten::__upsample_bilinear") \
                    .check("aten::__upsample_nearest") \
+                   .check("aten::dropout") \
                    .run(m.graph)
         torch._C._jit_pass_swap_dequantize(m.graph)
         FileCheck().check("aten::max_pool2d") \
@@ -2021,6 +2023,7 @@ graph(%input, %weight):
                    .check("aten::__upsample") \
                    .check("aten::__upsample_bilinear") \
                    .check("aten::__upsample_nearest") \
+                   .check("aten::dropout") \
                    .check("dequantize") \
                    .run(m.graph)
 
