@@ -14329,6 +14329,8 @@ a")
                 return x
             ''')
 
+    @skipIfRocm
+    @unittest.skipIf(IS_WINDOWS, "TODO: Fix this test case")
     def test_hasattr(self):
         nt = torch.classes._TorchScriptTesting_PickleTester([3, 4])
         hasattr(nt, "non_existent_attr")  # should not throw
