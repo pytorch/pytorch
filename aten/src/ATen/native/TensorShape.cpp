@@ -588,9 +588,8 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
-  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(start.numel() == 1 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
-              "start must be int or 0-dim Long Tensor.");
+  TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
+              "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
   return at::narrow(self, dim, st, length);
 }
