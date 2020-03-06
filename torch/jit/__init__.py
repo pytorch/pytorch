@@ -1853,7 +1853,16 @@ class TracedModule(ScriptModule):
         # Copy a subset of `orig` to a temporary nn.Module.
         # This is a way to customize what will actually get compiled by create_script_module
         id_set = set()
-        tmp_module = Module()
+
+        # This allows us to preserve the original module's qualified name by defining a new
+        # type with the attribute _jit_override_qualname. In torch._jit_internal._qualified_name
+        # we have a special case that will look up this attribute to override whatever qualname
+        # we would get from the python type system
+        class QualnameWrapper(torch.nn.Module):
+            pass
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(type(orig))
+
+        tmp_module = QualnameWrapper()
 
         def check_unique(param):
             if param in id_set:
@@ -1880,8 +1889,6 @@ class TracedModule(ScriptModule):
         for name, submodule in orig._modules.items():
             tmp_module._modules[name] = make_module(submodule, TracedModule, _compilation_unit=None)
 
-        # TODO: this way of doing it means we lose name information on the class,
-        # since the qualname is basically "nn.Module"
         script_module = torch.jit._recursive.create_script_module(tmp_module, lambda module: (), share_types=False)
 
         self.__dict__['_name'] = type(orig).__name__

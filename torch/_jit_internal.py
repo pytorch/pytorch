@@ -744,6 +744,8 @@ for i in range(2, 7):
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
 def _qualified_name(obj):
+    if hasattr(obj, '_jit_override_qualname'):
+        return getattr(obj, '_jit_override_qualname')
     # short-circuit in cases where the object already has a known qualified name
     if isinstance(obj, torch._C.ScriptFunction):
         return obj.qualified_name
