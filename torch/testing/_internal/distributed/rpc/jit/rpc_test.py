@@ -578,9 +578,9 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
             RuntimeError, "attempted to get undefined function"
         ):
             ret = rpc._rpc_sync_torchscript(
-                "worker{}".format(dst_rank), MyScriptClass, args=(self.rank, )
+                "worker{}".format(dst_rank), MyScriptClass, args=()
             )
-        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=(self.rank, ))
+        ret = rpc.rpc_sync("worker{}".format(dst_rank), MyScriptClass, args=())
 
         with self.assertRaisesRegex(
             RuntimeError, "attempted to get undefined function"

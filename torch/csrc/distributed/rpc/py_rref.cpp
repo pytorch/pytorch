@@ -64,15 +64,12 @@ TypePtr tryInferTypeWithTypeHint(
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
     TORCH_CHECK(
-        type_hint_ptr != nullptr,
-        "type_hint, ",
-        type_qualified_name.qualifiedName(),
-        ", could not be found, did you pass a valid interface type?");
-    TORCH_CHECK(
-        module.value().type()->isSubtypeOf(type_hint_ptr),
+        type_hint_ptr != nullptr &&
+            module.value().type()->isSubtypeOf(type_hint_ptr),
         module.value().type()->python_str(),
-        " is not a subtype of ",
-        type_hint_ptr->python_str());
+        " is not a subtype of the type hint: ",
+        type_qualified_name.qualifiedName(),
+        ", did you pass a valid interface type?");
     return type_hint_ptr;
   } else {
     TORCH_CHECK(
