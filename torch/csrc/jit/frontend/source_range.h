@@ -114,12 +114,14 @@ struct CAFFE2_API SourceRange {
   }
   static const size_t CONTEXT = 3;
   void highlight(std::ostream& out) const;
+
   // Customizable version of 'highlight' method.
   void print_with_context(
       std::ostream& out,
       size_t context,
       bool highlight,
       const std::string& funcname) const;
+
   const std::shared_ptr<Source>& source() const {
     return source_;
   }
@@ -170,6 +172,14 @@ struct CAFFE2_API SourceRange {
   size_t start_;
   size_t end_;
 };
+
+
+struct StackEntry {
+  std::string filename;
+  SourceRange range;
+};
+
+C10_EXPORT void format_stack_trace(std::ostream& out, const std::vector<StackEntry>& entries);
 
 inline std::ostream& operator<<(std::ostream& out, const SourceRange& range) {
   range.highlight(out);
