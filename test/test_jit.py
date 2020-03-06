@@ -23,6 +23,7 @@ from jit.test_class_type import TestClassType  # noqa: F401
 from jit.test_builtins import TestBuiltins, TestTensorBuiltins  # noqa: F401
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -10047,27 +10048,55 @@ a")
             m2 = M2()
             m2(torch.zeros(4, 3))
 
-    def test_named_modules(self):
+    def test_module_apis(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+
+            def forward(self, thing):
+                return thing - 2
+
+        class Double(torch.nn.Module):
+            def __init__(self):
+                super(Double, self).__init__()
+
+            def forward(self, thing):
+                return thing * 2
+
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()
-                self.mod = (nn.ReLU())
-                self.mod2 = (nn.ReLU())
-                self.mod3 = nn.Sequential(nn.Sequential(nn.ReLU()))
+                self.mod = (Sub())
+                self.mod2 = (Sub())
+                self.mod3 = nn.Sequential(nn.Sequential(Sub()))
+                self.mod4 = nn.Sequential(Sub(), Double())
 
             @torch.jit.export
-            def method(self, x):
+            def method(self, x, x1, y, y1):
                 mod_names = ""
                 for name, mod in self.named_modules():
                     mod_names = mod_names + " " + name
                     x = mod(x)
-                return mod_names, x
+
+                children_names = ""
+                for name, mod in self.named_children():
+                    children_names = children_names + " " + name
+                    x1 = mod(x1)
+
+                for mod in self.modules():
+                    y = mod(y)
+
+                for mod in self.children():
+                    y1 = mod(y1)
+
+                return mod_names, children_names, x, x1, y, y1
 
             def forward(self, x):
                 return x + 2
 
         mod = torch.jit.script(MyMod())
-        self.assertEqual(mod.method(torch.tensor(2)), MyMod().method(torch.tensor(2)))
+        inps = tuple([torch.tensor(i) for i in range(1, 5)])
+        self.assertEqual(mod.method(*inps), MyMod().method(*inps))
 
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
