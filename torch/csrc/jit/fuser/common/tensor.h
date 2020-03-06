@@ -90,6 +90,24 @@ struct TORCH_API IterDomain : public Val {
     return is_reduction_domain_;
   }
   
+  bool isParallelized(){ return parallel_method_ == ParallelType::Serial;}
+
+  bool isBlockDim(){
+    if( parallel_method_ == ParallelType::BIDz
+      ||parallel_method_ == ParallelType::BIDy
+      ||parallel_method_ == ParallelType::BIDx)
+      return true;
+    return false;
+    }
+    
+  bool isThreadDim(){
+    if( parallel_method_ == ParallelType::TIDz
+      ||parallel_method_ == ParallelType::TIDy
+      ||parallel_method_ == ParallelType::TIDx)
+      return true;
+    return false;
+  }
+
   void parallelize(ParallelType t){parallel_method_ = t;}
 
   ParallelType parallel_method() const noexcept {

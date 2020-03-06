@@ -852,6 +852,61 @@ void testGPU_FusionCodeGen2() {
   
  }
 
+
+void testGPU_FusionSimplePWise() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  //dimensionality of the problem
+  int nDims = 3; 
+
+  //Set up symbolic sizes for the axes should be dimensionality of the problem
+  std::vector<IterDomain*> dom;
+  for(int i=0; i<nDims; i++)
+    dom.push_back(new IterDomain(new Int()));
+
+  //Set up your input tensor views
+  TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
+  TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
+
+  //Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  //Do math with it, it returns a `Val*` but can be static_casted back to TensorView
+  TensorView* tv2 = static_cast<TensorView*>(add(tv1, new Float(2.0)));
+  TensorView* tv3 = static_cast<TensorView*>(add(tv0, tv2));
+
+  //Register your outputs
+  fusion.addOutput(tv3);
+
+  // Do transformations, remember, transformations are outputs to inputs
+  // This doesn't have to be in this order
+  merge(tv3, 1);
+  merge(tv3, 0);
+  
+  // Split by n_threads
+  split(tv3, 0, 128);
+
+  //For all inputs, computeAt the output inline, temporaries should be squeezed between them
+  tv0->computeAt(tv3, -1);
+  tv1->computeAt(tv3, -1);
+
+  //Parallelize TV3  
+  tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
+  
+
+  std::cout
+  << "%T3[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] compute_at( %T5, 1 ) = %T1 + 2f\n"
+  << "%T5[ iS{( ceilDiv(%i0, 4) )}, iS{4}, iS{%i1}, iS{%i2} ] = %T0 + %T3\n"
+  << "::::::::::::" << std::endl;
+
+  //Generate the kernel, it gets sent to what ever stream you give it
+  CodeWrite cw(std::cout);
+  cw.traverse(&fusion);
+  
+}
+
 void testGPU_FusionForLoop() {
   Fusion fusion;
   FusionGuard fg(&fusion);
