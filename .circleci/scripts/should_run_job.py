@@ -27,7 +27,9 @@ default_set = set([
     'caffe2-py3.5-cuda10.1-cudnn7-ubuntu16.04',
     # Caffe2 ONNX
     'caffe2-onnx-py2-gcc5-ubuntu16.04',
-    'caffe2-onnx-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-main-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-ort1-py3.6-clang7-ubuntu16.04',
+    'caffe2-onnx-ort2-py3.6-clang7-ubuntu16.04',
     # Caffe2 Clang
     'caffe2-py2-clang7-ubuntu16.04',
     # Caffe2 CMake
@@ -59,9 +61,11 @@ default_set = set([
     'pytorch-ios-11.2.1-x86_64_build',
     'pytorch-ios-11.2.1-arm64_build',
     'pytorch-ios-11.2.1-arm64_custom_build',
-    # PyTorch Mobile builds
+    # PyTorch Mobile builds (host toolchain + mobile CMake build options)
     'pytorch-linux-xenial-py3-clang5-mobile-build',
-    'pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-static',
+    'pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic',
+    'pytorch-linux-xenial-py3-clang5-mobile-code-analysis',
 
     # Pytorch backward compatibility check
     'pytorch-linux-backward-compatibility-check-test',
