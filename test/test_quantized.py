@@ -170,11 +170,10 @@ class TestQuantizedOps(TestCase):
                          message="F.leaky_relu failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::elu op."""
-    # TODO: better range for alpha
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
                        qparams=hu.qparams()),
-           alpha=st.floats(0.5, 1.0, allow_nan=False, allow_infinity=False))
+           alpha=st.floats(0.01, 10.0, allow_nan=False, allow_infinity=False))
     def test_qelu(self, X, alpha):
         X, (scale, zero_point, torch_type) = X
 
@@ -201,11 +200,9 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qXcopy, qY_hat,
                          message="F.elu_ failed ({} vs {})".format(qXcopy, qY_hat))
 
-        # test .out
-        qY = torch.quantize_per_tensor(torch.zeros(X.shape), scale=scale,
-                                       zero_point=zero_point, dtype=torch_type)
-        op(qX, alpha=alpha, out=qY)
-        self.assertEqual(qY, qY_hat,
+        # test explicit scale and zp
+        qYout = op(qX, alpha=alpha, scale=scale, zero_point=zero_point)
+        self.assertEqual(qYout, qY_hat,
                          message="F.elu.out failed ({} vs {})".format(qY, qY_hat))
 
     """Tests the correctness of the quantized::qnnpack_sigmoid op."""

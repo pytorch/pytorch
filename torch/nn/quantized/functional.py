@@ -323,9 +323,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
 
-def elu(input, alpha=1., inplace=False, out=None):
-    # TODO question for reviewers: should we support specifying scale
-    #   and zp explicitly, or should we just force people to use the .out API for that?
+def elu(input, alpha=1., inplace=False, scale=None, zero_point=None):
     r"""float(input, alpha_) -> Tensor
 
     Applies the quantized ELU function element-wise:
@@ -337,14 +335,23 @@ def elu(input, alpha=1., inplace=False, out=None):
         input: quantized input
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
         inplace: Inplace modification of the input tensor
+        scale, zero_point: Scale and zero point of the output tensor.
     """
     if not input.is_quantized:
         raise ValueError("Input to 'quantized.elu' must be quantized!")
-    if out is not None:
-        return torch._C._nn.elu(input, alpha, out=out)
-    if inplace:
+    if (scale is not None) != (zero_point is not None):
+        raise ValueError("Either both or none of (scale, zero_point) must be specified!")
+
+    if scale is not None and zero_point is not None:
+        assert not inplace, "Cannot rescale with `inplace`"
+        output = torch.quantize_per_tensor(torch.zeros(input.shape),
+                                           scale, int(zero_point), input.dtype)
+        torch._C._nn.elu(input, alpha, out=output)
+        return output
+    elif inplace:
         return torch._C._nn.elu_(input, alpha)
-    return torch._C._nn.elu(input, alpha)
+    else:
+        return torch._C._nn.elu(input, alpha)
 
 def clamp(input, min_, max_):
     # type: (Tensor, float, float) -> Tensor

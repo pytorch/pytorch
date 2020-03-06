@@ -399,8 +399,8 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
   int64_t i_zp = qx.q_zero_point();
   float i_scale = qx.q_scale();
 
-  // TODO before land: verify we don't need to auto-compute output
-  //  scale and zp here
+  // In a future PR, we can improve on output scale and zero_point
+  // selection.
   int64_t o_zp = qy.q_zero_point();
   float o_scale = qy.q_scale();
   float inv_o_scale = 1.0 / o_scale;
@@ -435,7 +435,6 @@ void qelu_kernel(const Tensor& qx, Scalar alpha, Tensor& qy) {
         return at::quantize_val<scalar_t>(o_scale, o_zp, y);
       },
       [&](qVec value_qx) -> qVec {
-        // TODO before land: verify this passes tests on CircleCI
         // dequantize
         auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
                                             i_scale_neg_zp_premul_vec);

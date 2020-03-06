@@ -25,11 +25,6 @@ Tensor& quantized_elu_(Tensor& self, Scalar alpha, Scalar scale,
   return self;
 }
 
-// TODO question for reviewers: do we need to implement scale and input_scale,
-//   since they are not implemented in the Python interface and seem to only
-//   be here for backwards compatibility with ONXX?  Various solutions available
-//   (throw an error, implement and test, etc), wondering which one we usually
-//   go for and why. Context on these: D18587389.
 Tensor quantized_elu(
     const Tensor& qx, Scalar alpha, Scalar scale, Scalar input_scale) {
   Tensor qy = at::_empty_affine_quantized(qx.sizes(), qx.options(),
