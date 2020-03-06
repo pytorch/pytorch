@@ -21,7 +21,7 @@
 #include <torch/csrc/distributed/rpc/script_remote_call.h>
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 
 namespace torch {
 namespace distributed {
@@ -164,8 +164,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::SCRIPT_RREF_FETCH_CALL: {
       auto& srf = static_cast<ScriptRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(srf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(srf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         return wrap(ScriptRRefFetchRet({rref->getValue()}).toMessage());
       }
@@ -190,8 +189,7 @@ std::shared_ptr<FutureMessage> RequestCallbackImpl::processRpc(
     case MessageType::PYTHON_RREF_FETCH_CALL: {
       auto& prf = static_cast<PythonRRefFetchCall&>(rpc);
       auto& ctx = RRefContext::getInstance();
-      c10::intrusive_ptr<OwnerRRef> rref =
-          ctx.getOwnerRRef(prf.rrefId());
+      c10::intrusive_ptr<OwnerRRef> rref = ctx.getOwnerRRef(prf.rrefId());
       if (rref->hasValue()) { // optional fast-path
         auto value = rref->getValue();
         py::object pyValue;

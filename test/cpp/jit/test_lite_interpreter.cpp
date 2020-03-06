@@ -1,9 +1,11 @@
 #include <test/cpp/jit/test_base.h>
-#include <torch/csrc/jit/script/module.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/import.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/torch.h>
+#include <c10/core/TensorOptions.h>
 
 // Tests go in torch::jit
 namespace torch {
@@ -188,6 +190,118 @@ void testLiteInterpreterLoadOrigJit() {
   std::stringstream ss;
   m.save(ss);
   ASSERT_THROWS_WITH(_load_for_mobile(ss), "file not found");
+}
+
+void testLiteInterpreterWrongMethodName() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+  ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
+}
+
+void testLiteInterpreterParams() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
+  m.define(R"(
+    def forward(self, x):
+      b = 1.0
+      return self.foo * x + b
+  )");
+  double learning_rate = 0.1, momentum = 0.1;
+  int n_epoc = 10;
+  // init: y = x + 1;
+  // target: y = 2 x + 1
+  std::vector<std::pair<Tensor, Tensor>> trainData{
+      {1 * torch::ones({1}), 3 * torch::ones({1})},
+  };
+  // Reference: Full jit
+  std::stringstream ms;
+  m.save(ms);
+  auto mm = load(ms);
+//  mm.train();
+  std::vector<::at::Tensor> parameters;
+  for (auto parameter : mm.parameters()) {
+    parameters.emplace_back(parameter);
+  }
+  ::torch::optim::SGD optimizer(
+      parameters,
+      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
+  for (int epoc = 0; epoc < n_epoc; ++epoc) {
+    for (auto &data : trainData) {
+      auto source = data.first, targets = data.second;
+      optimizer.zero_grad();
+      std::vector<IValue> train_inputs{source};
+      auto output = mm.forward(train_inputs).toTensor();
+      auto loss = ::torch::l1_loss(output, targets);
+      loss.backward();
+      optimizer.step();
+    }
+  }
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<::at::Tensor> bc_parameters = bc.parameters();
+  ::torch::optim::SGD bc_optimizer(
+      bc_parameters,
+      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
+  for (int epoc = 0; epoc < n_epoc; ++epoc) {
+    for (auto &data : trainData) {
+      auto source = data.first, targets = data.second;
+      bc_optimizer.zero_grad();
+      std::vector<IValue> train_inputs{source};
+      auto output = bc.forward(train_inputs).toTensor();
+      auto loss = ::torch::l1_loss(output, targets);
+      loss.backward();
+      bc_optimizer.step();
+    }
+  }
+  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
+}
+
+void testLiteInterpreterSetState() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def __getstate__(self):
+      return self.foo + self.foo
+    def __setstate__(self, a):
+      self.foo = a
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+
+  std::stringstream ms;
+  m.save(ms);
+  auto loaded_m = load(ms);
+  auto ref = loaded_m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
 }
 
 } // namespace jit

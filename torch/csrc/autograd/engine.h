@@ -102,10 +102,9 @@ struct GraphTask {
 
   // Set an appropriate exception on this graph_task which was encountered while
   // running the provided function. But doesn't signal completion on
-  // 'future_result_' right away. The user needs to explicitly mark the returned
-  // future completed with an appropriate exception.
-  std::shared_ptr<FutureVariableList> set_exception_without_signal(
-      const std::shared_ptr<Node>& fn);
+  // 'future_result_' right away. The user needs to explicitly mark
+  // 'future_result_' completed with an appropriate exception.
+  void set_exception_without_signal(const std::shared_ptr<Node>& fn);
 
   // Whether or not to stop execution for this GraphTask when an error is
   // encountered. When set to true, this would cause Engine::execute() to throw
@@ -218,7 +217,7 @@ struct TORCH_API Engine {
   void start_threads();
   virtual void thread_init(int device);
   virtual void thread_on_exception(
-      std::shared_ptr<GraphTask>& graph_task,
+      std::shared_ptr<GraphTask> graph_task,
       const std::shared_ptr<Node>& fn,
       std::exception& e);
   virtual void thread_main(
@@ -227,6 +226,7 @@ struct TORCH_API Engine {
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
   void set_device(int device);
+  void initialize_threads_pool();
 
   // Ensures ready_queues_ are initialized only once
   std::once_flag start_threads_flag_;
