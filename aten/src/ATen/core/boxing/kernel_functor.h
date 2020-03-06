@@ -99,6 +99,12 @@ namespace detail {
     // TODO static_assert(AllowDeprecatedTypes, "You tried to register a kernel with an unsupported input type: std::vector<T>. Please use List<T> instead.");
   };
 
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::ArrayRef<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {
+    static_assert(!std::is_same<T, at::Scalar>::value, "You tried to register a kernel with an unsupported input type: ArrayRef<Scalar>. Please use List<int64_t>, List<double> or Tensor instead.");
+  };
+
   // The following specialisations of assert_is_valid_input_type are technically not
   // necessary since we would hit the base case and show an error message
   // there if they didn't exist, but we can show a better error message
@@ -189,10 +195,21 @@ namespace detail {
 
 
   template<class T, bool AllowDeprecatedTypes>
-  T ivalue_to_arg(IValue&& v) {
-    assert_is_valid_input_type<T, AllowDeprecatedTypes>();
-    return std::move(v).to<T>();
-  }
+  struct ivalue_to_arg final {
+    static T call(IValue&& v) {
+      assert_is_valid_input_type<T, AllowDeprecatedTypes>();
+      return std::move(v).to<T>();
+    }
+  };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
+    // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
+    // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
+    static std::vector<T> call(IValue&& v) {
+      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(std::move(v));
+    }
+  };
 
   template<class T, bool AllowDeprecatedTypes>
   IValue return_to_ivalue(T&& v) {
@@ -207,7 +224,7 @@ namespace detail {
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
 
     using IValueArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
-    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>(
+    return (*functor)(ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, IValueArgTypes>>>, AllowDeprecatedTypes>::call(
       std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     )...);
   }
