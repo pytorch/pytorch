@@ -128,6 +128,19 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
       DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
       KernelFunction::makeFromBoxedFunction<&generic_wrapper_fallback>()
   );
+  auto registry2 = torch::RegisterOperators()
+      .op(torch::RegisterOperators::options()
+      .schema("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor")
+      .kernel(DispatchKey::TESTING_ONLY_GenericWrapperTensorId,
+              [] (const Tensor& input,
+                  const Tensor& weight,
+                  const Tensor& bias,
+                  IntArrayRef stride,
+                  IntArrayRef padding,
+                  IntArrayRef dilation,
+                  int64_t groups) -> Tensor {
+          return input
+      }));
 
   override_call_count = 0;
   Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
