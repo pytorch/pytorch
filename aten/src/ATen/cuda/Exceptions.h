@@ -6,20 +6,28 @@
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDAException.h>
 
+namespace c10 {
+
+class CuDNNError : public c10::Error {
+  using Error::Error;
+};
+
+}  // namespace c10
+
 // See Note [CHECK macro]
-#define AT_CUDNN_CHECK(EXPR)                                                     \
-  do {                                                                           \
-    cudnnStatus_t status = EXPR;                                                 \
-    if (status != CUDNN_STATUS_SUCCESS) {                                        \
-      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                \
-        AT_ERROR(                                                                \
-            "cuDNN error: ",                                                     \
-            cudnnGetErrorString(status),                                         \
-            ". This error may appear if you passed in a non-contiguous input."); \
-      } else {                                                                   \
-        AT_ERROR("cuDNN error: ", cudnnGetErrorString(status));                  \
-      }                                                                          \
-    }                                                                            \
+#define AT_CUDNN_CHECK(EXPR)                                                                  \
+  do {                                                                                        \
+    cudnnStatus_t status = EXPR;                                                              \
+    if (status != CUDNN_STATUS_SUCCESS) {                                                     \
+      if (status == CUDNN_STATUS_NOT_SUPPORTED) {                                             \
+        TORCH_CHECK_WITH(CuDNNError, false,                                                   \
+            "cuDNN error: ",                                                                  \
+            cudnnGetErrorString(status),                                                      \
+            ". This error may appear if you passed in a non-contiguous input.");              \
+      } else {                                                                                \
+        TORCH_CHECK_WITH(CuDNNError, false, "cuDNN error: ", cudnnGetErrorString(status));    \
+      }                                                                                       \
+    }                                                                                         \
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
