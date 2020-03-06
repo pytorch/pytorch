@@ -100,6 +100,7 @@ public:
   Vec256(Args... vals) {
     values = { vals... };
   }
+  //This also implies const T& operator[](int idx) const
   operator const T*() const {
     return values;
   }
@@ -162,9 +163,6 @@ public:
   }
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
-  }
-  const T& operator[](int idx) const {
-    return values[idx];
   }
   T& operator[](int idx) {
     return values[idx];
