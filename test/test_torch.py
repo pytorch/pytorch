@@ -13747,15 +13747,15 @@ class TestTorchDeviceType(TestCase):
             # Need to test a fairly large tensor with float cpu to run
             # the Vec256 implementation
             if device == 'cpu':
-                a = torch.tensor([6, -6, -6, 6, 27, -27, -27, 27]*10000, dtype=dtype, device=device)
-                b = torch.tensor([-3, 3, -3, 3, -5, 5, -5, 5]*10000, dtype=dtype, device=device)
+                a = torch.tensor([6, -6, -6, 6, 27, -27, -27, 27] * 10000, dtype=dtype, device=device)
+                b = torch.tensor([-3, 3, -3, 3, -5, 5, -5, 5] * 10000, dtype=dtype, device=device)
                 r = a.remainder(b)
-                r_expected = torch.tensor([0, 0, 0, 0, -3, 3, -2, 2]*10000, dtype=dtype, device=device)
+                r_expected = torch.tensor([0, 0, 0, 0, -3, 3, -2, 2] * 10000, dtype=dtype, device=device)
                 self.assertEqual(r, r_expected)
 
                 # Test nan cases
-                a = torch.tensor([-34, 0, 34]*20000, dtype=dtype, device=device)
-                b = torch.zeros(3*20000, dtype=dtype, device=device)
+                a = torch.tensor([-34, 0, 34] * 20000, dtype=dtype, device=device)
+                b = torch.zeros(3 * 20000, dtype=dtype, device=device)
                 self.assertTrue(torch.isnan(a.remainder(b)).all())
 
         elif dtype == torch.int64:
