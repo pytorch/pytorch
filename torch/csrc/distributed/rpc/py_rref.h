@@ -12,7 +12,7 @@ namespace rpc {
 // pickle and unpickle.
 class PyRRef {
  public:
-  explicit PyRRef(const py::object& value);
+  explicit PyRRef(const py::object& value, const py::object& type_hint);
   explicit PyRRef(c10::intrusive_ptr<RRef> rref);
 
   bool isOwner() const;
