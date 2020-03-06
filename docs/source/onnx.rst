@@ -538,7 +538,7 @@ but intuitively the interface they provide looks like this::
                 in positional.
         """
 
-The ONNX graph C++ definition is in ``torch/csrc/jit/ir.h``.
+The ONNX graph C++ definition is in ``torch/csrc/jit/ir/ir.h``.
 
 Here is an example of handling missing symbolic function for ``elu`` operator.
 We try to export the model and see the error message as below::

@@ -1,4 +1,4 @@
-from typing import Iterable, Any, Optional, Callable
+from typing import Iterable, Any, Optional, Callable, Union, List
 from .optimizer import Optimizer
 
 class _LRScheduler:
@@ -9,7 +9,7 @@ class _LRScheduler:
     def step(self, epoch: Optional[int]=...) -> None: ...
 
 class LambdaLR(_LRScheduler):
-    def __init__(self, optimizer: Optimizer, lr_lambda: float, last_epoch: int=...) -> None: ...
+    def __init__(self, optimizer: Optimizer, lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]], last_epoch: int=...) -> None: ...
 
 class StepLR(_LRScheduler):
     def __init__(self, optimizer: Optimizer, step_size: int, gamma: float=..., last_epoch: int=...) -> None:...

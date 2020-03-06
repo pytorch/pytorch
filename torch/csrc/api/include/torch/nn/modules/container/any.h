@@ -2,6 +2,8 @@
 
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
+#include <torch/nn/modules/container/any_module_holder.h>
+#include <torch/nn/modules/container/any_value.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -107,9 +109,6 @@ namespace nn {
 /// \endrst
 class AnyModule {
  public:
-  /// A type-erased value.
-  class Value;
-
   /// A default-constructed `AnyModule` is in an empty state.
   AnyModule() = default;
 
@@ -146,13 +145,13 @@ class AnyModule {
   AnyModule& operator=(std::shared_ptr<ModuleType> module);
 
   /// Invokes `forward()` on the contained module with the given arguments, and
-  /// returns the return value as an `Value`. Use this method when chaining
+  /// returns the return value as an `AnyValue`. Use this method when chaining
   /// `AnyModule`s in a loop.
   template <typename... ArgumentTypes>
-  Value any_forward(ArgumentTypes&&... arguments);
+  AnyValue any_forward(ArgumentTypes&&... arguments);
 
   /// Invokes `forward()` on the contained module with the given arguments, and
-  /// casts the returned `Value` to the supplied `ReturnType` (which defaults to
+  /// casts the returned `AnyValue` to the supplied `ReturnType` (which defaults to
   /// `torch::Tensor`).
   template <typename ReturnType = torch::Tensor, typename... ArgumentTypes>
   ReturnType forward(ArgumentTypes&&... arguments);
@@ -187,21 +186,7 @@ class AnyModule {
   bool is_empty() const noexcept;
 
  private:
-  /// \internal
-  /// The static type of the object we store in the `AnyModule`, which erases
-  /// the actual type, but allows us to call `forward()` on the underlying
-  /// module.
-  struct Placeholder;
-
-  /// \internal
-  /// The dynamic type of the object stored in the `AnyModule`. It contains the
-  /// concrete instance to which all calls are forwarded. It is parameterized
-  /// over the concrete type of the module, and the types of the arguments the
-  /// module takes in its `forward()` method.
-  template <typename ModuleType, typename... ArgumentTypes>
-  struct Holder;
-
-  /// Creates a `unique_ptr<Placeholder>` pointing to a `Holder` of the correct
+  /// Creates a `unique_ptr<AnyModulePlaceholder>` pointing to a `AnyModuleHolder` of the correct
   /// type. This method is used to deduce the arguments of the module's
   /// `forward()` method.
   template <
@@ -209,7 +194,7 @@ class AnyModule {
       typename Class,
       typename ReturnType,
       typename... ArgumentTypes>
-  std::unique_ptr<Placeholder> make_holder(
+  std::unique_ptr<AnyModulePlaceholder> make_holder(
       std::shared_ptr<ModuleType>&& module,
       ReturnType (Class::*)(ArgumentTypes...));
 
@@ -222,187 +207,7 @@ class AnyModule {
   ModuleType& get_() const;
 
   /// The type erased module.
-  std::unique_ptr<Placeholder> content_;
-};
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Value ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-/// A simplified implementation of `std::any` which stores
-/// a type erased object, whose concrete value can be retrieved at runtime by
-/// checking if the `typeid()` of a requested type matches the `typeid()` of
-/// the object stored. It is simplified in that it does not handle copying, as
-/// we do not require it for our use cases. Moves are sufficient.
-class AnyModule::Value {
- public:
-  /// Move construction and assignment is allowed, and follows the default
-  /// behavior of move for `std::unique_ptr`.
-  Value(Value&&) = default;
-  Value& operator=(Value&&) = default;
-
-  /// Copy is disallowed, because we don't need it.
-  Value(const Value& other) = delete;
-  Value& operator=(const Value& other) = delete;
-
-  /// Returns a pointer to the value contained in the `Value` if the type passed
-  /// as template parameter matches the type of the value stored, and returns a
-  /// null pointer otherwise.
-  template <typename T>
-  T* try_get() {
-    static_assert(
-        !std::is_reference<T>::value,
-        "Value stores decayed types, you cannot cast it to a reference type");
-    static_assert(
-        !std::is_array<T>::value,
-        "Value stores decayed types, you must cast it to T* instead of T[]");
-    if (typeid(T).hash_code() == type_info().hash_code()) {
-      return &static_cast<Holder<T>&>(*content_).value;
-    }
-    return nullptr;
-  }
-
-  /// Returns the value contained in the `Value` if the type passed as template
-  /// parameter matches the type of the value stored, and throws an exception
-  /// otherwise.
-  template <typename T>
-  T get() {
-    if (auto* maybe_value = try_get<T>()) {
-      return *maybe_value;
-    }
-    AT_ERROR(
-        "Attempted to cast Value to ",
-        c10::demangle(typeid(T).name()),
-        ", but its actual type is ",
-        c10::demangle(type_info().name()));
-  }
-
-  /// Returns the `type_info` object of the contained value.
-  const std::type_info& type_info() const noexcept {
-    return content_->type_info;
-  }
-
- private:
-  friend class AnyModule;
-  friend struct TestValue;
-
-  /// Constructs the `Value` from value type.
-  template <typename T>
-  explicit Value(T&& value)
-      : content_(
-            torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
-
-  /// \internal
-  /// The static type of the object we store in the `Value`, which erases the
-  /// actual object's type, allowing us only to check the `type_info` of the
-  /// type stored in the dynamic type.
-  struct Placeholder {
-    explicit Placeholder(const std::type_info& type_info_) noexcept
-        : type_info(type_info_) {}
-    virtual ~Placeholder() = default;
-    const std::type_info& type_info;
-  };
-
-  /// \internal
-  /// The dynamic type of the object we store in the `Value`, which hides the
-  /// actual object we have erased in this `Value`.
-  template <typename T>
-  struct Holder : public Placeholder {
-    /// A template because T&& would not be universal reference here.
-    template <typename U>
-    explicit Holder(U&& value_) noexcept
-        : Placeholder(typeid(T)), value(std::forward<U>(value_)) {}
-    T value;
-  };
-
-  /// The type erased object.
-  std::unique_ptr<Placeholder> content_;
-};
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Placeholder ~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
-  using AnyModule::Value::Placeholder::Placeholder;
-
-  /// The "erased" `forward()` method.
-  virtual Value forward(std::vector<Value>&& arguments) = 0;
-
-  /// Returns std::shared_ptr<Module> pointing to the erased module.
-  virtual std::shared_ptr<Module> ptr() = 0;
-
-  /// Returns a `Placeholder` with a shallow copy of this `AnyModule`.
-  virtual std::unique_ptr<Placeholder> copy() const = 0;
-
-  /// Returns a `Placeholder` with a deep copy of this `AnyModule`.
-  virtual std::unique_ptr<Placeholder> clone(optional<Device> device) const = 0;
-};
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename ModuleType, typename... ArgumentTypes>
-struct AnyModule::Holder : public AnyModule::Placeholder {
-  /// \internal
-  struct CheckedGetter {
-    template <typename T>
-    decay_t<T>&& operator()(size_t index) {
-      AT_ASSERT(index < arguments_.size());
-      auto& value = arguments_[index];
-      if (auto* maybe_value = value.template try_get<decay_t<T>>()) {
-        return std::move(*maybe_value);
-      }
-      AT_ERROR(
-          "Expected argument #",
-          index,
-          " to be of type ",
-          c10::demangle(typeid(T).name()),
-          ", but received value of type ",
-          c10::demangle(value.type_info().name()));
-    }
-    std::vector<Value>& arguments_;
-  };
-
-  /// \internal
-  struct InvokeForward {
-    template <typename... Ts>
-    Value operator()(Ts&&... ts) {
-      return Value(module_->forward(std::forward<Ts>(ts)...));
-    }
-    std::shared_ptr<ModuleType>& module_;
-  };
-
-  /// Constructs the `Holder` from a concrete module.
-  explicit Holder(std::shared_ptr<ModuleType>&& module_)
-      : Placeholder(typeid(ModuleType)), module(std::move(module_)) {}
-
-  /// Calls `forward()` on the underlying module, casting each `Value` in the
-  /// argument vector to a concrete value.
-  Value forward(std::vector<Value>&& arguments) override {
-    TORCH_CHECK(
-        arguments.size() == sizeof...(ArgumentTypes),
-        c10::demangle(type_info.name()),
-        "'s forward() method expects ",
-        sizeof...(ArgumentTypes),
-        " arguments, but received ",
-        arguments.size());
-    // FYI: During invocation of a module's `forward()` method, the values live
-    // in the `arguments` vector inside this function.
-    return torch::unpack<Value, ArgumentTypes...>(
-        InvokeForward{module}, CheckedGetter{arguments});
-  }
-
-  std::shared_ptr<Module> ptr() override {
-    return module;
-  }
-
-  std::unique_ptr<Placeholder> copy() const override {
-    return torch::make_unique<Holder>(*this);
-  }
-
-  std::unique_ptr<Placeholder> clone(optional<Device> device) const override {
-    return torch::make_unique<Holder>(
-        std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
-  }
-
-  /// The actual concrete module instance.
-  std::shared_ptr<ModuleType> module;
+  std::unique_ptr<AnyModulePlaceholder> content_;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -451,7 +256,7 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
 
 inline AnyModule AnyModule::clone(optional<Device> device) const {
   AnyModule clone;
-  clone.content_ = content_ ? content_->clone(device) : nullptr;
+  clone.content_ = content_ ? content_->clone_module(device) : nullptr;
   return clone;
 }
 
@@ -461,13 +266,13 @@ AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {
 }
 
 template <typename... ArgumentTypes>
-AnyModule::Value AnyModule::any_forward(ArgumentTypes&&... arguments) {
+AnyValue AnyModule::any_forward(ArgumentTypes&&... arguments) {
   TORCH_CHECK(!is_empty(), "Cannot call forward() on an empty AnyModule");
-  std::vector<Value> values;
+  std::vector<AnyValue> values;
   values.reserve(sizeof...(ArgumentTypes));
   torch::apply(
-      [&values](Value&& value) { values.push_back(std::move(value)); },
-      Value(std::forward<ArgumentTypes>(arguments))...);
+      [&values](AnyValue&& value) { values.push_back(std::move(value)); },
+      AnyValue(std::forward<ArgumentTypes>(arguments))...);
   return content_->forward(std::move(values));
 }
 
@@ -523,7 +328,7 @@ template <
     typename Class,
     typename ReturnType,
     typename... ArgumentTypes>
-std::unique_ptr<AnyModule::Placeholder> AnyModule::make_holder(
+std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
     std::shared_ptr<ModuleType>&& module,
     ReturnType (Class::*)(ArgumentTypes...)) {
   static_assert(
@@ -534,7 +339,7 @@ std::unique_ptr<AnyModule::Placeholder> AnyModule::make_holder(
       !std::is_void<ReturnType>::value,
       "AnyModule cannot store modules that return void "
       "(you can return a dummy value).");
-  return torch::make_unique<Holder<decay_t<ModuleType>, ArgumentTypes...>>(
+  return torch::make_unique<AnyModuleHolder<decay_t<ModuleType>, ArgumentTypes...>>(
       std::move(module));
 }
 
@@ -551,7 +356,7 @@ template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
 ModuleType& AnyModule::get_(
     ReturnType (ModuleType::*)(ArgumentTypes...)) const {
   if (typeid(ModuleType).hash_code() == type_info().hash_code()) {
-    return *static_cast<Holder<ModuleType, ArgumentTypes...>&>(*content_)
+    return *static_cast<AnyModuleHolder<ModuleType, ArgumentTypes...>&>(*content_)
                 .module;
   }
   AT_ERROR(
