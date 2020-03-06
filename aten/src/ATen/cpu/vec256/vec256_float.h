@@ -72,8 +72,9 @@ public:
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
     __at_align32__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value
-    // See https://github.com/pytorch/pytorch/issues/32502 for more details
+    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
+    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
+    // instructions while a loop would be compiled to one instruction.
     for (auto i = 0; i < size(); ++i) {
       tmp_values[i] = 0.0;
     }

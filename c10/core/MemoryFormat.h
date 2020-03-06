@@ -52,17 +52,118 @@ inline std::ostream& operator<<(
   }
 }
 
-inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
-  AT_ASSERT(sizes.size() == 4);
+// Note: Hardcoded the channel last stride indices here to get better performance
+inline std::vector<int64_t> get_channels_last_strides_2d(IntArrayRef sizes) {
   std::vector<int64_t> strides(sizes.size());
-  strides[1] = 1;
-  strides[3] = sizes[1];
-  strides[2] = strides[3] * sizes[3];
-  strides[0] = strides[2] * sizes[2];
-  return strides;
+  switch (sizes.size()) {
+    case 4:
+      strides[1] = 1;
+      strides[3] = sizes[1];
+      strides[2] = strides[3] * sizes[3];
+      strides[0] = strides[2] * sizes[2];
+      return strides;
+    case 3:
+      strides[0] = 1;
+      strides[2] = sizes[0];
+      strides[1] = strides[2] * sizes[2];
+      return strides;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast2d doesn't support size ", sizes.size());
+  }
 }
 
-// Note [Ambiguous is_channels_last_strides]
+inline std::vector<int64_t> get_channels_last_strides_3d(IntArrayRef sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  switch (sizes.size()) {
+    case 5:
+      strides[1] = 1;
+      strides[4] = sizes[1];
+      strides[3] = strides[4] * sizes[4];
+      strides[2] = strides[3] * sizes[3];
+      strides[0] = strides[2] * sizes[2];
+      return strides;
+    case 4:
+      strides[0] = 1;
+      strides[3] = sizes[0];
+      strides[2] = strides[3] * sizes[3];
+      strides[1] = strides[2] * sizes[2];
+      return strides;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "ChannelsLast3d doesn't support size ", sizes.size());
+  }
+}
+
+// NOTE:
+// Below are Helper functions for is_channels_last_strides_xd.
+// 1. Please do not combine these helper functions, each helper function handles
+// exactly one case of sizes + memory_format, by doing this, the strides indices
+// will be a constant array and we can access it using constant index number,
+// the complier will fully unroll the loop on strides indices to gain a better
+// performance.
+// 2. No error check in helper function, caller ensures the correctness of the input
+// 3. All helper functions have similar comments, only 1st helper function is commented here.
+inline bool is_channels_last_strides_2d_s4(const IntArrayRef sizes, const IntArrayRef strides) {
+  int64_t min = 0;
+  // special case for trivial C dimension. default to NCHW
+  if (strides[1]==0) {
+    return false;
+  }
+  // loop strides indices
+  for (auto& d : {1, 3, 2, 0}) {
+    if (sizes[d] == 0) {
+      return false;
+    }
+    if (strides[d] < min) {
+      return false;
+    }
+    // Fallback to NCHW as default layout for ambiguous cases
+    // This is the flaw of implicit memory_format from strides.
+    // N111 tensor with identical strides for size 1 dimension;
+    // Two cases could lead us here:
+    // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
+    // b. N11W contiguous Tensor sliced on the W-dimension. ([N,1,1,1]@[W,W,W,W])
+    if (d==0 && min==strides[1]) {
+      return false;
+    }
+    // This is necessary to:
+    // 1. distinguish the memory_format of N1H1;
+    //     [H, 1, 1, 1] channels_last stride
+    //     [H, H, 1, 1] contiguous stride
+    // 2. permutation of 1C1W:
+    //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
+    //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
+    min = strides[d];
+    if (sizes[d] > 1) {
+      min *= sizes[d];
+    }
+  }
+  return true;
+}
+
+inline bool is_channels_last_strides_3d_s5(const IntArrayRef sizes, const IntArrayRef strides) {
+  int64_t min = 0;
+  if (strides[1] == 0) {
+    return false;
+  }
+  for (auto& d : {1, 4, 3, 2, 0}) {
+    if (sizes[d] == 0) {
+      return false;
+    }
+    if (strides[d] < min) {
+      return false;
+    }
+    if (d == 0 && min == strides[1]) {
+      return false;
+    }
+    min = strides[d];
+    if (sizes[d] > 1) {
+      min *= sizes[d];
+    }
+  }
+  return true;
+}
+
+// Note [Ambiguous is_channels_last_strides_xd]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // The flaw of carrying memory_format implicitly through strides is very hard
 // to WAR properly. issue #24090
@@ -106,44 +207,33 @@ inline std::vector<int64_t> get_channels_last_strides(IntArrayRef sizes) {
 // By the time accumulated permutation is enabled to replace implicit
 // memory_foramt through strides, we should be updating our tests and fix the
 // issues in our tests.
-inline bool is_channels_last_strides(const IntArrayRef sizes, const IntArrayRef strides) {
-  if (sizes.size() == 4) {
-    int64_t min = 0;
-    // special case for trivial C dimension. default to NCHW
-    if (strides[1]==0) {
+//
+// We use Channels Last 2d as an example above.
+// This is a general problem for all the is_channels_last_strides_xd implementation.
+// Please check the helper functions (is_channels_last_strides_*d_s*) for more details.
+
+inline bool is_channels_last_strides_2d(const IntArrayRef sizes, const IntArrayRef strides) {
+  switch (sizes.size()) {
+    case 4:
+      return is_channels_last_strides_2d_s4(sizes, strides);
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
       return false;
-    }
-    for (auto& d : {1, 3, 2, 0}) {
-      if (sizes[d] == 0) {
-        return false;
-      }
-      if (strides[d] < min) {
-        return false;
-      }
-      // Fallback to NCHW as default layout for ambiguous cases
-      // This is the flaw of implicit memory_format from strides.
-      // N111 tensor with identical strides for size 1 dimension;
-      // Two cases could lead us here:
-      // a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
-      // b. N11W contiguous Tensor sliced on the W-dimension. ([N,1,1,1]@[W,W,W,W])
-      if (d==0 && min==strides[1]) {
-        return false;
-      }
-      // This is necessary to:
-      // 1. distinguish the memory_format of N1H1;
-      //     [H, 1, 1, 1] channels_last stride
-      //     [H, H, 1, 1] contiguous stride
-      // 2. permutation of 1C1W:
-      //     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
-      //     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as channels_last
-      min = strides[d];
-      if (sizes[d] > 1) {
-        min *= (sizes[d]-1);
-      }
-    }
-    return true;
+    default:
+      return false;
   }
-  return false;
+}
+
+inline bool is_channels_last_strides_3d(const IntArrayRef sizes, const IntArrayRef strides) {
+  switch (sizes.size()) {
+    case 5:
+      return is_channels_last_strides_3d_s5(sizes, strides);
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return false;
+    default:
+      return false;
+  }
 }
 
 } // namespace c10
