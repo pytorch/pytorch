@@ -6167,7 +6167,7 @@ add_docstr(torch.true_divide,
            r"""
 true_divide(dividend, divisor) -> Tensor
 
-Performs "true division" that always computes the dividend divided by the divisor
+Performs "true division" that always computes the division
 in floating point. Analogous to division in Python 3 and equivalent to
 :func:`torch.div` except when both inputs have bool or integer scalar types,
 in which case they are cast to the default (floating) scalar type before the division.

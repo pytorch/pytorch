@@ -742,7 +742,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
+
+        prev_default = torch.get_default_dtype()
+
+        torch.set_default_dtype(torch.float)
         self.run_test(torch.jit.trace(TrueDivModule(), (x, y)), (x, y))
+
+        torch.set_default_dtype(torch.double)
+        self.run_test(torch.jit.trace(TrueDivModule(), (x, y)), (x, y))
+
+        torch.set_default_dtype(prev_default)
 
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):

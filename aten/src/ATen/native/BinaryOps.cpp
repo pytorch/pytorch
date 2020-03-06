@@ -92,18 +92,22 @@ Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& diviso
 }
 
 Tensor true_divide(const Tensor& self, const Tensor& divisor) {
+  // If both inputs have integral (or bool) types, sets the output to have
+  // the default (floating) scalar type
   if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
    && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
     const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
     Tensor result = at::empty({0}, self.options().dtype(scalar_type));
 
-    auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+    auto iter = TensorIterator::binary_op(result, self, divisor);
     div_stub(iter.device_type(), iter);
     return result;
   }
 
+  // If at least one input is non-integral (or bool) participates in
+  // type promotion like other binary ufuncs
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  auto iter = TensorIterator::binary_op(result, self, divisor);
   div_stub(iter.device_type(), iter);
   return iter.output();
 }

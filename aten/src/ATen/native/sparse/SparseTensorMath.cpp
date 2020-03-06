@@ -214,8 +214,6 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
 // true_divide(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
-SparseTensor& true_divide_out_sparse_zerodim(SparseTensor& r, const SparseTensor& t, const Tensor& value);
-
 Tensor true_divide_sparse(const Tensor& self, const Tensor& value) {
   auto commonDtype = at::result_type(self, value);
 

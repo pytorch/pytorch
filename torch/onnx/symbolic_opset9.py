@@ -138,7 +138,7 @@ def floor_divide(g, self, other):
 # Division where both inputs are cast to floating types
 # If both inputs are floating, performs div as usual
 # If only one input is a floating type, the other input is cast to its type
-# If neither input is a floating type, both inputs are case to float
+# If neither input is a floating type, both inputs are cast to the default scalar type
 def true_divide(g, self, other):
     # Case 1: both values are floating
     # Performs div as usual
@@ -158,9 +158,15 @@ def true_divide(g, self, other):
         return div(g, self, other)
 
     # Case 4: neither is floating
-    # Casts inputs to float
-    g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx['Float'])
-    g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Float'])
+    # Casts both inputs to the default scalar type
+    scalar_type = torch.get_default_dtype()
+    onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Float']
+    assert scalar_type is torch.float or scalar_type is torch.double
+    if torch.get_default_dtype() is torch.double:
+        onnx_scalar_type = sym_help.cast_pytorch_to_onnx['Double']
+
+    g.op("Cast", self, to_i=onnx_scalar_type)
+    g.op("Cast", other, to_i=onnx_scalar_type)
     return div(g, self, other)
 
 

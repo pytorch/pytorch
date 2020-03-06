@@ -447,6 +447,21 @@ class TestTypePromotion(TestCase):
         casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
         self.assertEqual(casting_result, torch.true_divide(dividend, divisor))
 
+    @dtypes(torch.bool, torch.short, torch.uint8, torch.int, torch.long)
+    def test_true_divide_out(self, device, dtype):
+        dividend = torch.randn(5, device=device).to(dtype)
+        divisor = torch.arange(1, 6, device=device).to(dtype)
+
+        # Tests that requests for an integer quotient fail
+        integral_quotient = torch.empty(5, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.true_divide(dividend, divisor, out=integral_quotient)
+
+        # Tests that requests for a floating quotient succeed
+        floating_quotient = torch.empty(5, device=device, dtype=torch.get_default_dtype())
+        casting_result = dividend.to(torch.get_default_dtype()) / divisor.to(torch.get_default_dtype())
+        self.assertEqual(casting_result, torch.true_divide(dividend, divisor, out=floating_quotient))
+
     def _test_sparse_op_input_tensors(self, device, dtype, coalesced, zeros=True):
         t = self._get_test_tensor(device, dtype, not zeros)
         if zeros and dtype != torch.bool:
