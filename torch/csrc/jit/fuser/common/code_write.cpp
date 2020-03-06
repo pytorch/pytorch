@@ -18,54 +18,57 @@ std::vector<Int*> CodeWrite::getLoopIndices() {
   return inds;
 }
 
-void CodeWrite::printIndexInto(std::vector<Int*> indices, const TensorView* const tv){
-   
-  bool inpOrOut
-     = FusionGuard::getCurFusion()->isInput(tv)
-    || FusionGuard::getCurFusion()->isOutput(tv);
+void CodeWrite::printIndexInto(
+    std::vector<Int*> indices,
+    const TensorView* const tv) {
+  bool inpOrOut = FusionGuard::getCurFusion()->isInput(tv) ||
+      FusionGuard::getCurFusion()->isOutput(tv);
 
   os << "[";
-  //Linearize the indexing for inputs/outputs
-  if(inpOrOut){
+  // Linearize the indexing for inputs/outputs
+  if (inpOrOut) {
     for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
       print_inline(indices[i]);
       os << " * TV" << tv->name() << "->stride(" << i << ")";
-      if (i != (indices.size() - 1) )
+      if (i != (indices.size() - 1))
         os << " + ";
     }
-  }else{
-    //If not an input or output, our dimensions are what ever the loop structure is
-    //from getComputeAtAxis() out, minus thread/block bindings.
-    //Only handle registers for now!
-    indices = getLoopIndices();
+  } else {
+    // If not an input or output, our dimensions are what ever the loop
+    // structure is from getComputeAtAxis() out, minus thread/block bindings.
+    // Only handle registers for now!
 
-    //We may not print anything actually, we don't want to print * or + assuming we've printed something
+    // We may not print anything actually, we don't want to print * or +
+    // assuming we've printed something
     bool first_ind_print = true;
-    
-    for(decltype(indices.size()) i{tv->getComputeAtAxis()}; i < indices.size(); i++){
-      if(fors[i].second->isBlockDim() || fors[i].second->isThreadDim())
+
+    for (decltype(fors.size()) i{tv->getComputeAtAxis()}; i < fors.size(); i++) {
+      if (fors[i].second->isBlockDim() || fors[i].second->isThreadDim())
         continue;
-      if(!first_ind_print && i != indices.size()-1)
+
+      if (!first_ind_print && i != fors.size() - 1)
         os << " + ";
+
       first_ind_print = false;
 
-      print_inline(indices[i]);
+      //Index
+      print_inline(fors[i].first);
 
-      for( decltype(indices.size()) j{i+1}; i < indices.size(); i++ ){
-        if(fors[i+j].second->isBlockDim() || fors[i+j].second->isThreadDim())
-        continue;
-
+      for (decltype(fors.size()) j{i + 1}; j < fors.size(); j++) {
+        if (fors[j].second->isBlockDim() || fors[j].second->isThreadDim())
+          continue;
         os << " * ";
-        print_inline(fors[i+j].second->size());
+        //Strides
+        print_inline(fors[j].second->size());
       }
-
     }
-    //If nothing was printed, throw out a 0. Ideally we could try reducing this to a single register, but likely don't need to for now.
-    if(first_ind_print)
+
+    // If nothing was printed, throw out a 0. Ideally we could try reducing this
+    // to a single register, but likely don't need to for now.
+    if (first_ind_print)
       os << 0;
   }
   os << "]";
-  
 }
 
 void CodeWrite::print(const TensorView* const tv) {
@@ -86,7 +89,7 @@ void CodeWrite::print(const TensorView* const tv) {
   os << "TV" << tv->name();
 
   std::vector<Int*> indices =
-    IndexCompute::computeIndices(tv2, getLoopIndices());
+      IndexCompute::computeIndices(tv2, getLoopIndices());
 
   printIndexInto(indices, tv);
 }
@@ -136,7 +139,9 @@ bool CodeWrite::printLHS(TensorView* tv) {
   bool predicated = print_predicate(tv);
 
   print(tv);
-  os << " = ";
+  os << "\n";
+  indent(); 
+  os<<"  = ";
 
   consumer = tv;
   producer = true;
@@ -186,11 +191,13 @@ void CodeWrite::print(const BinaryOp* const bop) {
 
   if (auto inline_bop = inline_op_str(bop->type())) {
     print(bop->lhs());
-    os << " " << inline_bop.value() << " ";
+    os << "\n"; indent(); os << "  ";
+    os << inline_bop.value() << " ";
     print(bop->rhs());
   } else {
     os << bop->type() << "(";
     print(bop->lhs());
+    os << "\n"; indent();
     os << ", ";
     print(bop->rhs());
     os << ")";
@@ -299,13 +306,13 @@ void CodeWrite::resetFors() {
   clearActiveView();
 }
 
-void CodeWrite::printAlloc(TensorView* tv){
-  if(FusionGuard::getCurFusion()->isInput(tv)
-  || FusionGuard::getCurFusion()->isOutput(tv))
+void CodeWrite::printAlloc(TensorView* tv) {
+  if (FusionGuard::getCurFusion()->isInput(tv) ||
+      FusionGuard::getCurFusion()->isOutput(tv))
     return;
 
   Int* size = new Int(1);
-  for(auto i = tv->getComputeAtAxis(); i < tv->domain()->size(); i++){
+  for (auto i = tv->getComputeAtAxis(); i < tv->domain()->size(); i++) {
     size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
   }
   indent();
@@ -340,7 +347,7 @@ void CodeWrite::updateView(TensorView* tv) {
       // Reset the loop structure
       resetFors();
     }
-    //All active fors have been closed
+    // All active fors have been closed
     printAlloc(tv);
 
     for (int i = fors.size(); i < tv->domain()->size(); i++)
@@ -348,14 +355,13 @@ void CodeWrite::updateView(TensorView* tv) {
     reset_fors = true;
 
   } else {
-
     active_view_axis = tv->getComputeAtAxis();
     active_view = tv->getComputeAtView();
 
     int depth = fors.size();
     for (int i = active_view_axis; i < depth; i++)
       closeFor();
-    //Allocate tv if not input/output
+    // Allocate tv if not input/output
     printAlloc(tv);
     for (int i = fors.size(); i < tv->domain()->size(); i++)
       openFor(tv->getAxis(i));
