@@ -1,9 +1,9 @@
 #pragma once
 
-/*
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
+#include <torch/csrc/jit/fuser/common/dispatch.h>
 #include <iostream>
 
 namespace torch {
@@ -20,37 +20,14 @@ struct Fusion;
  * should make it a simple instantiation of all the mutate functions on all node
  * types so that people can inhereit it, and only specialize those nodes which
  * they want to have a particular transformation.
- * /
+ */
 
-struct TORCH_API BaseMutator {
-  void mutate(Fusion* fusion);
-  virtual Statement* mutate(Statement*);
 
-  virtual Statement* mutate(Val*);
-  virtual Statement* mutate(Expr*);
-
-  virtual Statement* mutate(UnaryOp*);
-  virtual Statement* mutate(BinaryOp*);
-
-  virtual Statement* mutate(Split*);
-  virtual Statement* mutate(Merge*);
-  virtual Statement* mutate(Reorder*);
-
-  virtual Statement* mutate(TensorDomain*);
-  virtual Statement* mutate(TensorView*);
-  virtual Statement* mutate(IterDomain*);
-  // Tensor is reference to JIT tensor, should never be mutated.
-  virtual Statement* mutate(Tensor*) final;
-
-  virtual Statement* mutate(Float*);
-  virtual Statement* mutate(Int*);
-};
-
-struct TORCH_API ReplaceAll : public BaseMutator {
+struct TORCH_API ReplaceAll : public OptOutMutator {
  private:
   Statement* mutate(Val*);
   Statement* mutate(Expr* expr) {
-    return BaseMutator::mutate(expr);
+    return OptOutMutator::mutate(expr);
   }
 
   ReplaceAll(Val* _instance, Val* _with) : instance_(_instance), with_(_with) {}
@@ -66,6 +43,7 @@ struct TORCH_API ReplaceAll : public BaseMutator {
       Expr* _within) {
     if (_within == nullptr)
       return;
+    FusionGuard fg(_within->fusion());
     ReplaceAll ra(_instance, _with);
     ra.mutate(_within);
   }
@@ -76,4 +54,3 @@ struct TORCH_API ReplaceAll : public BaseMutator {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
-*/

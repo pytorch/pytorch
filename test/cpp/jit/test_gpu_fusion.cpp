@@ -98,18 +98,20 @@ void testGPU_FusionCastOp() {
   TORCH_CHECK(f3->getDataType().value() == f3_test->getDataType().value());
 }
 
-/*
-class ZeroMutator : public BaseMutator {
+class ZeroMutator : public OptOutMutator {
  public:
   Statement* mutate(Float* f) {
     if (f->isConst() && *(f->value()) == 1.0)
       return new Float(0.0);
     return f;
   }
+  void mutate(Fusion* f){
+    OptOutMutator::mutate(f);
+  }
 };
-*/
+
 void testGPU_FusionMutator() {
-  /*
+  
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -118,14 +120,13 @@ void testGPU_FusionMutator() {
   Val* f5 = add(f4, i1);
   std::cout<<"Replacing floats of val 1 with 0 in: "<<fusion<<std::endl;
   ZeroMutator mutator;
-  BaseMutator* base_mutator = &mutator;
-  base_mutator->mutate(&fusion);
+  mutator.mutate(&fusion);
   Val* lhs = static_cast<BinaryOp*>(fusion.origin(f5))->lhs();
   TORCH_CHECK(lhs->getValType().value() == ValType::Scalar && lhs->getDataType().value() == DataType::Float);
   Float* flhs = static_cast<Float *>( lhs );
   
   TORCH_CHECK(flhs->value().value() == 0.f);
-  */
+  
 }
 
 void testGPU_FusionRegister() {
@@ -478,7 +479,7 @@ void testGPU_FusionEquality() {
 }
 
 void testGPU_FusionReplaceAll() {
-  /*
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -503,7 +504,7 @@ void testGPU_FusionReplaceAll() {
   BinaryOp* bop = static_cast<BinaryOp*>(fusion.origin(f3));
   // make sure the binary op (origin of f3) actually changed to 2.f
   TORCH_CHECK(static_cast<Float*>(bop->lhs())->same_as(new Float{2.f}));
-  */
+
 }
 
 void testGPU_FusionComputeAt() {

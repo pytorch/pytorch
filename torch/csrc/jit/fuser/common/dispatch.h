@@ -139,11 +139,14 @@ virtual ~OptOutMutator() = default;
   OptOutMutator(OptOutMutator&& other) = default;
   OptOutMutator& operator=(OptOutMutator&& other) = default;
 
+  virtual void mutate(Fusion* fusion);
+
   // Hierarchal dispatch functions for handle
   virtual Statement* mutate(Statement* s);
   virtual Statement* mutate(Expr* e);
   virtual Statement* mutate(Val* v);
 
+  //****Functions below defined in mutator.cpp*****///
   // Vals
   virtual Statement* mutate(IterDomain*);
   virtual Statement* mutate(TensorDomain*);
