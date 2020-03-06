@@ -510,8 +510,8 @@ Tensor & scatter_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Te
 
 Tensor & scatter_cpu_reduce_(Tensor & self, int64_t dim, const Tensor & index,
                       const Tensor & src, std::string reduce) {
-  TORCH_CHECK(reduce != "add" || reduce != "subtract" ||
-              reduce != "multiply" || reduce != "divide",
+  TORCH_CHECK(reduce == "add" || reduce == "subtract" ||
+              reduce == "multiply" || reduce == "divide",
               "reduce argument must be either of add, subtract, multiply or divide.");
   scatter_reduce_stub(self.device().type(), self, dim, index, src, reduce);
   return self;
