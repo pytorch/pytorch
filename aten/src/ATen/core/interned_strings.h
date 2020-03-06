@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CudaFusionGroup)           \
   _(prim, DifferentiableGraph)       \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
@@ -95,6 +96,7 @@ namespace c10 {
   _(prim, zip)                       \
   _(prim, enumerate)                 \
   _(prim, range)                     \
+  _(prim, list)                      \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
   _(prim, tolist)                    \
