@@ -292,8 +292,8 @@ def build_deps():
         if os.path.dirname(f) in str(os.getenv('USE_SYSTEM_LIB')):
             report("Not checking for {} in third_party".format(f))
         else:
-            if not os.path.exists(os.path.join(third_party_path,f)):
-                report("Could not find {}".format(os.path.join(third_party_path,f)))
+            if not os.path.exists(os.path.join(third_party_path, f)):
+                report("Could not find {}".format(os.path.join(third_party_path, f)))
                 report("Did you run 'git submodule update --init --recursive'?")
                 sys.exit(1)
 
