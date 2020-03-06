@@ -36,7 +36,7 @@ struct Float;
 struct Int;
 struct Add;
 
-struct TORCH_API IRPrinter {
+struct TORCH_API IRPrinter : public OptInConstDispatch {
 
   std::ostream& os;
   bool print_inline_ = false;
@@ -45,44 +45,45 @@ public:
 
   IRPrinter(std::ostream& _os):os(_os){}
 
-  virtual void print(Fusion* const);
-  //Print calls some non const fusion ops,
+  virtual void handle(Fusion* const f);
+  
+  //handle calls some non const fusion ops,
   //eventhough fusion should remain unchanged.
   //Need to look into this.
-  virtual void print(const Fusion* const f){
-    print(const_cast<Fusion*>(f));
+  virtual void handle(const Fusion* const f){
+    handle(const_cast<Fusion*>(f));
   }
-  virtual void print(Fusion& f){print(&f);}
+  virtual void handle(Fusion& f){handle(&f);}
 
-  virtual void print(const Statement* const);
+  virtual void handle(const Statement* const s) { OptInConstDispatch::handle(s); };
 
-  virtual void print(const Val* const);
-  virtual void print(const Expr* const);
+  virtual void handle(const Val* const v) { OptInConstDispatch::handle(v); };
+  virtual void handle(const Expr* const e) { OptInConstDispatch::handle(e); };
 
-  virtual void print(const Tensor* const);
-  virtual void print(const TensorDomain* const);
-  virtual void print(const TensorView* const);
-  virtual void print(const IterDomain* const);
-  virtual void print(const TensorIndex* const);
-  virtual void print(const TensorContiguity* const);
+  virtual void handle(const Tensor* const);
+  virtual void handle(const TensorDomain* const);
+  virtual void handle(const TensorView* const);
+  virtual void handle(const IterDomain* const);
+  virtual void handle(const TensorIndex* const);
+  virtual void handle(const TensorContiguity* const);
 
-  virtual void print(const Float* const);
-  virtual void print(const Int* const);
+  virtual void handle(const Float* const);
+  virtual void handle(const Int* const);
 
-  virtual void print(const UnaryOp* const);
-  virtual void print(const BinaryOp* const);
+  virtual void handle(const UnaryOp* const);
+  virtual void handle(const BinaryOp* const);
 
-  virtual void print(const ForLoop* const);
-  virtual void print(const IfThenElse* const);
+  virtual void handle(const ForLoop* const);
+  virtual void handle(const IfThenElse* const);
 
-  virtual void print(const Split* const);
-  virtual void print(const Merge* const);
-  virtual void print(const Reorder* const);
+  virtual void handle(const Split* const);
+  virtual void handle(const Merge* const);
+  virtual void handle(const Reorder* const);
 
   void print_inline(const Statement* const stmt){
     bool prev = print_inline_;
     print_inline_ = true;
-    print(stmt);
+    handle(stmt);
     print_inline_ = prev;
   }
 

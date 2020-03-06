@@ -12,12 +12,12 @@ class TORCH_API IRMathPrinter : public IRPrinter {
  public:
   IRMathPrinter(std::ostream& os) : IRPrinter(os) {}
 
-  void print(const Split* const) override {}
-  void print(const Merge* const) override {}
-  void print(const Reorder* const) override {}
+  void handle(const Split* const) override {}
+  void handle(const Merge* const) override {}
+  void handle(const Reorder* const) override {}
 
-  void print(Fusion* f) override {
-    IRPrinter::print(f);
+  void handle(Fusion* f) override {
+    IRPrinter::handle(f);
   }
 };
 
@@ -26,21 +26,21 @@ class TORCH_API IRTransformPrinter : public IRPrinter {
   IRTransformPrinter(std::ostream& os) : IRPrinter(os) {}
 
   // Tensor Expressions
-  void print(const UnaryOp* const uop) override {
+  void handle(const UnaryOp* const uop) override {
     if(print_inline_)
-      IRPrinter::print(uop);
+      IRPrinter::handle(uop);
   }
 
-  void print(const BinaryOp* const bop) override {
+  void handle(const BinaryOp* const bop) override {
     if(print_inline_)
-      IRPrinter::print(bop);
+      IRPrinter::handle(bop);
   }
   
-  void print(const ForLoop* const) override {}
-  void print(const IfThenElse* const) override {}
+  void handle(const ForLoop* const) override {}
+  void handle(const IfThenElse* const) override {}
 
-  void print(Fusion* f) override {
-    IRPrinter::print(f);
+  void handle(Fusion* f) override {
+    IRPrinter::handle(f);
   }
 };
 

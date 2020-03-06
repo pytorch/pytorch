@@ -1,5 +1,6 @@
 #pragma once
 
+/*
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/tensor.h>
@@ -19,7 +20,7 @@ struct Fusion;
  * should make it a simple instantiation of all the mutate functions on all node
  * types so that people can inhereit it, and only specialize those nodes which
  * they want to have a particular transformation.
- */
+ * /
 
 struct TORCH_API BaseMutator {
   void mutate(Fusion* fusion);
@@ -75,3 +76,4 @@ struct TORCH_API ReplaceAll : public BaseMutator {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+*/

@@ -71,7 +71,7 @@ void CodeWrite::printIndexInto(
   os << "]";
 }
 
-void CodeWrite::print(const TensorView* const tv) {
+void CodeWrite::handle(const TensorView* const tv) {
   TensorDomain* td = tv->domain();
 
   const TensorView* tv2 = tv;
@@ -94,13 +94,13 @@ void CodeWrite::print(const TensorView* const tv) {
   printIndexInto(indices, tv);
 }
 
-void CodeWrite::print(const Val* const val) {
+void CodeWrite::handle(const Val* const val) {
   if (*(val->getValType()) == ValType::TensorView)
-    print(static_cast<const TensorView* const>(val));
+    handle(static_cast<const TensorView* const>(val));
   else if (overrides.find(val) != overrides.end())
     os << overrides[val];
   else
-    IRPrinter::print(val);
+    IRPrinter::handle(val);
 }
 
 bool CodeWrite::print_predicate(const TensorView* const pred_tv) {
@@ -138,7 +138,7 @@ bool CodeWrite::printLHS(TensorView* tv) {
   // Print predicates, first need to find predicate.
   bool predicated = print_predicate(tv);
 
-  print(tv);
+  handle(tv);
   os << "\n";
   indent(); 
   os<<"  = ";
@@ -150,10 +150,10 @@ bool CodeWrite::printLHS(TensorView* tv) {
 }
 
 // Already filtered so output is a TensorView
-void CodeWrite::print(const UnaryOp* const uop) {
+void CodeWrite::handle(const UnaryOp* const uop) {
   if (!isTVOp(uop)) {
     if (print_inline_)
-      IRPrinter::print(uop);
+      IRPrinter::handle(uop);
     return;
   }
 
@@ -161,10 +161,10 @@ void CodeWrite::print(const UnaryOp* const uop) {
 
   if (auto inline_uop = inline_op_str(uop->type())) {
     os << inline_uop.value();
-    print(uop->in());
+    handle(uop->in());
   } else {
     os << uop->type() << "(";
-    print(uop->in());
+    handle(uop->in());
     os << ")";
   }
 
@@ -180,26 +180,26 @@ void CodeWrite::print(const UnaryOp* const uop) {
   }
 }
 
-void CodeWrite::print(const BinaryOp* const bop) {
+void CodeWrite::handle(const BinaryOp* const bop) {
   if (!isTVOp(bop)) {
     if (print_inline_)
-      IRPrinter::print(bop);
+      IRPrinter::handle(bop);
     return;
   }
 
   bool predicated = printLHS(static_cast<TensorView*>(bop->out()));
 
   if (auto inline_bop = inline_op_str(bop->type())) {
-    print(bop->lhs());
+    handle(bop->lhs());
     os << "\n"; indent(); os << "  ";
     os << inline_bop.value() << " ";
-    print(bop->rhs());
+    handle(bop->rhs());
   } else {
     os << bop->type() << "(";
-    print(bop->lhs());
+    handle(bop->lhs());
     os << "\n"; indent();
     os << ", ";
-    print(bop->rhs());
+    handle(bop->rhs());
     os << ")";
   }
 
@@ -283,13 +283,13 @@ void CodeWrite::openFor(IterDomain* id) {
   indent_size++;
 
   os << "for( size_t ";
-  print(fors.back().first);
+  handle(fors.back().first);
   os << " = 0; ";
-  print(fors.back().first);
+  handle(fors.back().first);
   os << " < ";
   print_inline(id->size());
   os << "; ++";
-  print(fors.back().first);
+  handle(fors.back().first);
   os << " ) {" << std::endl;
 }
 
@@ -464,7 +464,7 @@ void CodeWrite::traverse(
 
   header();
   for (auto* expr : exprs)
-    IRPrinter::print(expr);
+    IRPrinter::handle(expr);
   resetFors();
   os << "}\n";
   indent_size--;

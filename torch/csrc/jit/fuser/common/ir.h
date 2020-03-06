@@ -64,7 +64,7 @@ namespace fuser {
  *     - Members must be private or protected
  *     - Accessor functions for members
  *     - Must call Val constructor, Val constructor registers with fusion
- * 2) Statement::dispatch and Statement::dispatch_mutator in ir.cpp must be updated
+ * 2) Statement::dispatch and Statement::dispatch in ir.cpp must be updated
  * 3) Virtual handle functions must be added to iter_visitor.h/.cpp
  * 4) Mutator fucntions must be added to mutator.h/.cpp
  * 5) Printing functions should be added to iriostream.h/.cpp
@@ -95,7 +95,7 @@ namespace fuser {
  *    - Accessor functions for members
  *    - Constructors need to register with the Fusion after inputs/outputs are defined
  *    - Implementation of bool same_as(...)
- * 2) Statement::dispatch and Statement::dispatch_mutator in ir.cpp must be updated to include
+ * 2) Statement::dispatch and Statement::dispatch in ir.cpp must be updated to include
  *         dispatch on the added Expr.
  * 3) Virtual handle functions must be added to iter_visitor.h/.cpp
  * 4) Mutator fucntions must be added to mutator.h/.cpp
@@ -130,7 +130,10 @@ struct TORCH_API Statement {
   static void dispatch(T handler, Statement*);
 
   template <typename T>
-  static Statement* dispatch_mutator(T mutator, Statement*);
+  static void const_dispatch(T handler, const Statement* const);
+
+  template <typename T>
+  static Statement* mutator_dispatch(T mutator, Statement*);
 
   virtual c10::optional<ValType> getValType() const noexcept { return c10::nullopt; }
   virtual c10::optional<DataType> getDataType() const noexcept { return c10::nullopt; }
@@ -192,7 +195,10 @@ public:
   static void dispatch(T handler, Val*);
 
   template <typename T>
-  static Statement* dispatch_mutator(T mutator, Val*);
+  static void const_dispatch(T handler, const Val* const);
+
+  template <typename T>
+  static Statement* mutator_dispatch(T mutator, Val*);
 
 protected:
   const ValType vtype_;
@@ -392,7 +398,10 @@ public:
   static void dispatch(T handler, Expr*);
 
   template <typename T>
-  static Statement* dispatch_mutator(T mutator, Expr*);
+  static void const_dispatch(T handler, const Expr* const);
+
+  template <typename T>
+  static Statement* mutator_dispatch(T mutator, Expr*);
 
 private:
   ExprType type_;
