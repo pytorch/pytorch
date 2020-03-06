@@ -45,7 +45,7 @@ static void avg_pool3d_out_frame(
     c10::optional<int64_t> divisor_override) {
   at::parallel_for(0, nInputPlane, 0, [&](int64_t start, int64_t end) {
     for (auto k = start; k < end; k++) {
-      int64_t xx, yy, zz;
+      int64_t od, oh, ow;
       /* For all output pixels... */
       auto input_data = input.contiguous().data_ptr<scalar_t>();
       auto output_data = output.data_ptr<scalar_t>();
@@ -59,20 +59,20 @@ static void avg_pool3d_out_frame(
           std::numeric_limits<typename scalar_t::underlying>::lowest();
       auto maximum = std::numeric_limits<typename scalar_t::underlying>::max();
 
-      for (zz = 0; zz < outputDepth; zz++) {
-        for (yy = 0; yy < outputHeight; yy++) {
-          for (xx = 0; xx < outputWidth; xx++) {
+      for (od = 0; od < outputDepth; od++) {
+        for (oh = 0; oh < outputHeight; oh++) {
+          for (ow = 0; ow < outputWidth; ow++) {
             /* Compute the mean of the input image... */
-            int64_t dstart = zz * dD - padD;
-            int64_t hstart = yy * dH - padH;
-            int64_t wstart = xx * dW - padW;
+            int64_t dstart = od * dD - padD;
+            int64_t hstart = oh * dH - padH;
+            int64_t wstart = ow * dW - padW;
             int64_t dend = std::min(dstart + kD, inputDepth + padD);
             int64_t hend = std::min(hstart + kH, inputHeight + padH);
             int64_t wend = std::min(wstart + kW, inputWidth + padW);
             int64_t pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-            dstart = std::max(dstart, (int64_t)0);
-            hstart = std::max(hstart, (int64_t)0);
-            wstart = std::max(wstart, (int64_t)0);
+            dstart = std::max(dstart, 0L);
+            hstart = std::max(hstart, 0L);
+            wstart = std::max(wstart, 0L);
             dend = std::min(dend, inputDepth);
             hend = std::min(hend, inputHeight);
             wend = std::min(wend, inputWidth);
@@ -217,7 +217,7 @@ Tensor q_avg_pool3d(
   const int64_t outputHeight = output_shape[output_shape.size() - 2];
   const int64_t outputWidth = output_shape[output_shape.size() - 1];
 
-  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
+  if (input.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     auto output = at::_empty_affine_quantized(
         output_shape,
         input.options(),
