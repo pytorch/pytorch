@@ -660,6 +660,24 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+      Operator(
+         "prim::itemsize(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, static_cast<int64_t>(a.itemsize()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
+      Operator(
+         "prim::nbytes(Tensor a) -> int",
+         [](Stack& stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, static_cast<int64_t>(a.nbytes()));
+           return 0;
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "prim::layout(Tensor a) -> int",
          [](Stack& stack) {

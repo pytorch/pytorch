@@ -102,6 +102,8 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"T", "prim"},
            {"ndim", "prim"},
            {"name", "prim"},
+           {"itemsize", "prim"},
+           {"nbytes", "prim"},
        }},
       {TypeKind::DeviceObjType, {{"type", "prim"}, {"index", "prim"}}}};
   auto kind = value_->type()->kind();
