@@ -43,8 +43,8 @@ void RMSpropOptions::serialize(torch::serialize::InputArchive& archive) {
 
 bool operator==(const RMSpropParamState& lhs, const RMSpropParamState& rhs) {
   return (lhs.step() == rhs.step()) &&
-         torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()) &&
          torch::equal(lhs.square_avg(), rhs.square_avg()) &&
+         torch::equal(lhs.momentum_buffer(), rhs.momentum_buffer()) &&
          torch::equal(lhs.grad_avg(), rhs.grad_avg());
 }
 
@@ -82,13 +82,9 @@ void RMSprop::step() {
         state->square_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
         if(options.momentum() > 0) {
           state->momentum_buffer(torch::zeros_like(p.data(), MemoryFormat::Preserve));
-        } else {
-          state->momentum_buffer({});
         }
         if(options.centered()) {
           state->grad_avg(torch::zeros_like(p.data(), MemoryFormat::Preserve));
-        } else {
-          state->grad_avg({});
         }
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] = std::move(state);
       }
@@ -103,6 +99,7 @@ void RMSprop::step() {
         grad = grad.add(p.data(), options.weight_decay());
       }
 
+      NoGradGuard no_grad;
       square_avg.mul_(alpha).addcmul_(grad, grad, 1 - alpha);
 
       Tensor avg;
@@ -123,6 +120,22 @@ void RMSprop::step() {
       }
     }
   }
+}
+
+void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
+  return _add_parameters_new_design(parameters);
+}
+
+const std::vector<Tensor>& RMSprop::parameters() const noexcept {
+  return _parameters_new_design();
+}
+
+std::vector<Tensor>& RMSprop::parameters() noexcept {
+  return _parameters_new_design();
+}
+
+size_t RMSprop::size() const noexcept {
+  return _size_new_design();
 }
 
 void RMSprop::save(serialize::OutputArchive& archive) const {
@@ -154,22 +167,6 @@ void RMSprop::load(serialize::InputArchive& archive) {
       state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] = std::move(state);
     }
   }
-}
-
-void RMSprop::add_parameters(const std::vector<Tensor>& parameters) {
-  param_groups_.emplace_back(OptimizerParamGroup(parameters, defaults_->clone()));
-}
-
-const std::vector<Tensor>& RMSprop::parameters() const noexcept {
-  return param_groups_.at(0).params();
-}
-
-std::vector<Tensor>& RMSprop::parameters() noexcept {
-  return param_groups_.at(0).params();
-}
-
-size_t RMSprop::size() const noexcept {
-  return _size_new_design();
 }
 } // namespace optim
 } // namespace torch
