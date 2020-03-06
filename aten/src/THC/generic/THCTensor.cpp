@@ -106,14 +106,17 @@ THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, pt
   return self;
 }
 
-THCTensor *THCTensor_(newWithSize)(THCState *state, at::IntArrayRef size, at::IntArrayRef stride)
-{
-  return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);
-}
-
 THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
-  return THCTensor_(newWithSize)(state, {size0}, {});
+  THCStorage *new_storage = THCStorage_(new)(state);
+  THCTensor *self = c10::make_intrusive<at::TensorImpl, at::UndefinedTensorImpl>(
+    c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
+    at::DispatchKey::CUDATensorId
+  ).release();
+  THCTensor_(setStorageNd)(state, self, new_storage, storageOffset, sizes.size(),
+                           {size0}, {});
+
+  return self;
 }
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
