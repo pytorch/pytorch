@@ -90,8 +90,7 @@ THTensor *THTensor_(newWithSize1d)(int64_t size0)
     c10::intrusive_ptr<at::StorageImpl>::reclaim(new_storage),
     at::DispatchKey::CPUTensorId
   ).release();
-  THTensor_(setStorageNd)(self, new_storage, storageOffset, sizes.size(),
-                          {size0}, {});
+  THTensor_(setStorageNd)(self, new_storage, 0, 1, &size0, nullptr);
 
   return self;
 }
