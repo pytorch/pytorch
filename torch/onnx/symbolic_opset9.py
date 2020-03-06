@@ -1768,7 +1768,7 @@ def randn_like(g, self, dtype, layout=None, device=None, pin_memory=False, memor
     return g.op('RandomNormalLike', self, dtype_i=sym_help.scalar_type_to_onnx[dtype])
 
 
-def rand_like(g, self, dtype, layout, device, pin_memory=False, memory_format=None):
+def rand_like(g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None):
     dtype = sym_help._get_const(dtype, 'i', 'dtype')
     if dtype is None:
         dtype = 6  # float
@@ -2182,7 +2182,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         bias = g.op("Constant", value_t=bias_value)
 
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
-    axes = [i for i in range(1, len(input_sizes) - 1)]
+    axes = list(range(1, len(input_sizes) - 1))
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
 

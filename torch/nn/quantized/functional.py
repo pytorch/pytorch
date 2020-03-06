@@ -227,7 +227,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
                                            align_corners)
 
 def linear(input, weight, bias=None, scale=None, zero_point=None):
-    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+    # type: (Tensor, Tensor, Optional[Tensor], Optional[float], Optional[int]) -> Tensor
     r"""
     Applies a linear transformation to the incoming quantized data:
     :math:`y = xA^T + b`.

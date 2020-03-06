@@ -861,12 +861,13 @@ Both input operands should be of type `bool`.
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(name, symbol) \
-  OPERATOR_SCHEMA(name)                                   \
-      .NumInputs(2)                                       \
-      .NumOutputs(1)                                      \
-      .AllowInplace({{0, 0}})                             \
-      .FillUsing(BitwiseDocGenerator(symbol));            \
+#define CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(name, symbol)    \
+  OPERATOR_SCHEMA(name)                                      \
+      .NumInputs(2)                                          \
+      .NumOutputs(1)                                         \
+      .AllowInplace({{0, 0}})                                \
+      .FillUsing(BitwiseDocGenerator(symbol))                \
+      .TensorInferenceFunction(ElementwiseOpShapeInference); \
   SHOULD_NOT_DO_GRADIENT(name)
 
 CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseOr, "bitwise_or");
@@ -878,6 +879,7 @@ CAFFE2_SCHEMA_FOR_BINARY_BITWISE_OP(BitwiseXor, "bitwise_xor");
 OPERATOR_SCHEMA(Not)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Performs element-wise negation on input tensor `X`.
 
@@ -934,6 +936,7 @@ SHOULD_NOT_DO_GRADIENT(Not);
 OPERATOR_SCHEMA(Sign)
     .NumInputs(1)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Computes sign for each element of the input: -1, 0 or 1.
 

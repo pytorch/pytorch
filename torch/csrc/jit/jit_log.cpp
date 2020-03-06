@@ -6,11 +6,11 @@
 
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
-#include <torch/csrc/jit/function.h>
-#include <torch/csrc/jit/ir.h>
+#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/python_print.h>
-#include <torch/csrc/jit/script/error_report.h>
+#include <torch/csrc/jit/serialization/python_print.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 
 namespace torch {
 namespace jit {
