@@ -83,7 +83,7 @@ ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeS
     if(isComplexType(current)) {
       current = typeMetaToScalarType(at::get_default_complex_dtype());
     }
-    if(isFloatingType(current)) {
+    else if(isFloatingType(current)) {
       current = current_default;
     }
   }
