@@ -39,7 +39,7 @@ namespace native {
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
   auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/ true);
+    /*check_mem_overlap=*/true, /*promote=*/result.scalar_type() != self.scalar_type());
   stub(iter.device_type(), iter);
   return result;
 }
@@ -62,7 +62,7 @@ static inline Tensor unary_float_op_impl(const Tensor& self, OutImpl& out_impl) 
   Tensor result = isIntegralType(self.scalar_type(), /*include_bool=*/ true) ? \
                   at::empty({0}, self.options().dtype(typeMetaToScalarType(c10::get_default_dtype()))) : \
                   at::empty({0}, self.options());
-  return out_impl(result, self.to(result.scalar_type()));
+  return out_impl(result, self);
 }
 
 template <typename OutImpl>
