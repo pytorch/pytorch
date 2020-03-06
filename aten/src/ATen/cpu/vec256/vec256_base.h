@@ -101,11 +101,11 @@ public:
     values = { vals... };
   }
   // This also implies const T& operator[](int idx) const
-  operator const T*() const {
+  inline operator const T*() const {
     return values;
   }
   // This also implies T& operator[](int idx)
-  operator T*() {
+  inline operator T*() {
     return values;
   }
   template <int64_t mask_>
