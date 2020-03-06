@@ -127,6 +127,18 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
         %r = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
         return (%r) )";
 
+  std::string cat = R"(
+graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
+        %input_dequant = aten::dequantize(%input_quant)
+        %r = aten::cat(%input_dequant, %dim)
+        %r_quant = aten::quantize_per_tensor(%r, %r_scale, %r_zero_point, %r_dtype)
+        return (%r_quant) )";
+
+  std::string quantized_cat = R"(
+graph(%input_quant, %dim, %r_scale, %r_zero_point, %r_dtype):
+         %r_quant = quantized::cat(%input_quant, %dim, %r_scale, %r_zero_point)
+         return (%r_quant) )";
+
   return {
     {conv2d, quantized_conv2d},
     {conv2d_relu, quantized_conv2d_relu},
@@ -137,6 +149,7 @@ graph(%packed_params, %a_quant, %r_scale, %r_zero_point, %r_dtype):
     {aten_linear, quantized_aten_linear},
     {add_relu, quantized_add_relu},
     {add_inplace_relu, quantized_add_relu},
+    {cat, quantized_cat},
   };
 
 }

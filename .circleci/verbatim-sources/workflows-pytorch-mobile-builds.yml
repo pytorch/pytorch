@@ -6,8 +6,28 @@
           build_environment: "pytorch-linux-xenial-py3-clang5-mobile-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:07597f23-fa81-474c-8bef-5c8a91b50595"
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_py3_clang5_android_ndk_r19c_mobile_code_analysis
+          name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_static
           requires:
             - setup
-          build_environment: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-mobile-code-analysis"
+          build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-static"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-asan:07597f23-fa81-474c-8bef-5c8a91b50595"
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_mobile_custom_build_dynamic
+          requires:
+            - setup
+          build_environment: "pytorch-linux-xenial-py3-clang5-mobile-custom-build-dynamic"
+          # Use LLVM-DEV toolchain in android-ndk-r19c docker image
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:07597f23-fa81-474c-8bef-5c8a91b50595"
+      - pytorch_linux_build:
+          name: pytorch_linux_xenial_py3_clang5_mobile_code_analysis
+          requires:
+            - setup
+          # Most of this CI is already covered by "mobile-custom-build-dynamic" job
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+          build_environment: "pytorch-linux-xenial-py3-clang5-mobile-code-analysis"
+          # Use LLVM-DEV toolchain in android-ndk-r19c docker image
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:07597f23-fa81-474c-8bef-5c8a91b50595"

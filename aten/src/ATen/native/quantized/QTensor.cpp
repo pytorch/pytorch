@@ -32,6 +32,14 @@ Tensor dequantize_quant(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
+std::vector<Tensor> dequantize_tensors_quant(TensorList tensors) {
+  std::vector<Tensor> dequantized_tensors;
+  for (auto i = 0; i < tensors.size(); ++i) {
+    dequantized_tensors.push_back(tensors[i].dequantize());
+  }
+  return dequantized_tensors;
+}
+
 double q_scale_quant(const Tensor& self) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
   TORCH_CHECK(quantizer->qscheme() == kPerTensorAffine);
