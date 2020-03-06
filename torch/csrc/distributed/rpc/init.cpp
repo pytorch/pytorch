@@ -8,9 +8,10 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
@@ -98,10 +99,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           .def(
               "get_debug_info",
               &RpcAgent::getDebugInfo,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "enable_gil_profiling",
-              &RpcAgent::enableGILProfiling,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_metrics",
@@ -263,8 +260,21 @@ If the future completes with an error, an exception is thrown.
       "_set_and_start_rpc_agent",
       [](const std::shared_ptr<RpcAgent>& rpcAgent) {
         RpcAgent::setCurrentRpcAgent(rpcAgent);
+        // Initializing typeResolver inside RpcAgent constructor will make
+        // RpcAgent have python dependency. To avoid RpcAgent to have python
+        // dependency, setTypeResolver() here.
+        std::shared_ptr<TypeResolver> typeResolver =
+            std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+              auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+                  qn.qualifiedName());
+              return c10::StrongTypePtr(
+                  PythonRpcHandler::getInstance().jitCompilationUnit(),
+                  std::move(typePtr));
+            });
+        rpcAgent->setTypeResolver(typeResolver);
         rpcAgent->start();
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);
@@ -293,8 +303,10 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(PyGILState_Check());
         return pyRpcBuiltin(dst, opName, rf, args, kwargs);
-      });
+      },
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_rpc_python_udf",
@@ -302,8 +314,10 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        DCHECK(!PyGILState_Check());
         return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
+      py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -345,6 +359,7 @@ If the future completes with an error, an exception is thrown.
          const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(!PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
@@ -354,8 +369,14 @@ If the future completes with an error, an exception is thrown.
                                   .jitCompilationUnit()
                                   ->get_function(qualifiedName)
                                   .getSchema();
-        auto stack = torch::jit::createStackForSchema(
-            functionSchema, args, kwargs, c10::nullopt);
+        Stack stack;
+        // Acquire GIL for py::args and py::kwargs processing.
+        {
+          pybind11::gil_scoped_acquire ag;
+          stack = torch::jit::createStackForSchema(
+              functionSchema, args, kwargs, c10::nullopt);
+        }
+        DCHECK(!PyGILState_Check());
         auto fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
@@ -369,8 +390,10 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(PyGILState_Check());
         return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
-      });
+      },
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_torchscript",
@@ -378,16 +401,23 @@ If the future completes with an error, an exception is thrown.
          const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(!PyGILState_Check());
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
                                   ->get_function(qualifiedName)
                                   .getSchema();
-        auto stack = torch::jit::createStackForSchema(
-            functionSchema, args, kwargs, c10::nullopt);
-        auto userRRefPtr = remoteTorchscript(
+        Stack stack;
+        // Acquire GIL for py::args and py::kwargs processing.
+        {
+          pybind11::gil_scoped_acquire ag;
+          stack = torch::jit::createStackForSchema(
+              functionSchema, args, kwargs, c10::nullopt);
+        }
+        DCHECK(!PyGILState_Check());
+        auto rrefPtr = remoteTorchscript(
             dstWorkerName, qualifiedName, functionSchema, stack);
-        return PyRRef(userRRefPtr);
+        return PyRRef(rrefPtr);
       },
       py::call_guard<py::gil_scoped_release>());
 
@@ -397,8 +427,10 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        DCHECK(!PyGILState_Check());
         return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
+      py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -412,6 +444,19 @@ If the future completes with an error, an exception is thrown.
 
           Returns:
             `datetime.timedelta` instance indicating the RPC timeout.
+      )");
+
+  module.def(
+      "enable_gil_profiling",
+      [](bool flag) {
+        RpcAgent::getCurrentRpcAgent()->enableGILProfiling(flag);
+      },
+      R"(
+    Set whether GIL wait times should be enabled or not. This incurs a slight
+    overhead cost. Default is disabled for performance reasons.
+
+    Arguments:
+        flag (bool): True to set GIL profiling, False to disable.
       )");
 
   module.def(

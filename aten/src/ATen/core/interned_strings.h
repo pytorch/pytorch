@@ -67,9 +67,11 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
-  _(prim, ImplicitTensorToNum)       \
   _(aten, Bool)                      \
   _(aten, Int)                       \
+  _(aten, FloatImplicit)             \
+  _(aten, IntImplicit)               \
+  _(aten, ScalarImplicit)            \
   _(aten, Float)                     \
   _(aten, str)                       \
   _(aten, Delete)                    \
@@ -96,6 +98,7 @@ namespace c10 {
   _(prim, range)                     \
   _(prim, rangelist)                 \
   _(prim, isinstance)                \
+  _(prim, tolist)                    \
   _(prim, unchecked_cast)            \
   _(aten, _grad_sum_to_size)         \
   _(aten, _size_if_not_equal)        \
@@ -210,6 +213,7 @@ namespace c10 {
   _(onnx, Mod)                       \
   _(onnx, Sqrt)                      \
   _(onnx, SplitToSequence)           \
+  _(onnx, SequenceAt)                \
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \

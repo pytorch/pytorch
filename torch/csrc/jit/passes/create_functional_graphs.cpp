@@ -1,12 +1,10 @@
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir.h>
-#include <torch/csrc/jit/passes/alias_analysis.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/utils/memory.h>
 
-#include "torch/csrc/jit/ir.h"
 
 #include <cstddef>
 #include <limits>
