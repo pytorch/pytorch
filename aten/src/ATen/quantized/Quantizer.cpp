@@ -10,7 +10,6 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/core/Tensor.h>
 #include <typeinfo>
-#include <cstdlib>
 #include <cmath>
 
 #ifdef USE_FBGEMM
@@ -357,7 +356,7 @@ DST_T requantize_val(double src_scale, int64_t src_zero_point,
 template <typename DST_T>
 DST_T requantize_val(double multiplier, int64_t zero_point, int64_t src) {
   int64_t quantize_down =
-      zero_point + std::lrintf(src * static_cast<float>(multiplier));
+      zero_point + lrintf(src * static_cast<float>(multiplier));
   int32_t min = std::numeric_limits<typename DST_T::underlying>::min();
   int32_t max = std::numeric_limits<typename DST_T::underlying>::max();
   return static_cast<DST_T>(
