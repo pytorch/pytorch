@@ -116,7 +116,7 @@ struct TORCH_API IterDomain : public Val {
     return is_reduction_domain_;
   }
   
-  bool isParallelized(){ return parallel_method_ == ParallelType::Serial;}
+  bool isParallelized(){ return parallel_method_ != ParallelType::Serial;}
 
   bool isBlockDim(){
     if( parallel_method_ == ParallelType::BIDz
@@ -124,8 +124,8 @@ struct TORCH_API IterDomain : public Val {
       ||parallel_method_ == ParallelType::BIDx)
       return true;
     return false;
-    }
-    
+  }
+
   bool isThreadDim(){
     if( parallel_method_ == ParallelType::TIDz
       ||parallel_method_ == ParallelType::TIDy
@@ -151,7 +151,7 @@ struct TORCH_API IterDomain : public Val {
 
  private:
   Int* const size_;
-  ParallelType parallel_method_;
+  ParallelType parallel_method_ = ParallelType::Serial;
   bool is_reduction_domain_;
 };
 
