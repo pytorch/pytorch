@@ -22,6 +22,8 @@ struct IfThenElse;
 struct Tensor;
 struct TensorDomain;
 struct TensorView;
+struct IterDomain;
+struct TensorIndex;
 
 struct TensorContiguity;
 
@@ -29,8 +31,6 @@ struct TensorContiguity;
 struct Split;
 struct Merge;
 struct Reorder;
-
-struct IterDomain;
 
 struct Float;
 struct Int;
@@ -63,6 +63,7 @@ public:
   virtual void print(const TensorDomain* const);
   virtual void print(const TensorView* const);
   virtual void print(const IterDomain* const);
+  virtual void print(const TensorIndex* const);
   virtual void print(const TensorContiguity* const);
 
   virtual void print(const Float* const);

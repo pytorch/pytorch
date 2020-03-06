@@ -36,6 +36,8 @@ void IRPrinter::print(const Val* const val) {
       print(static_cast<const TensorView* const>(val)); return;
     case ValType::IterDomain:
       print(static_cast<const IterDomain* const>(val)); return;
+    case ValType::TensorIndex:
+      print(static_cast<const TensorIndex* const>(val)); return;
 
     case ValType::Scalar:
       switch (*(val->getDataType())) {
@@ -121,6 +123,10 @@ TORCH_API void IRPrinter::print(const IterDomain* const id) {
   os << "{";
   print_inline(id->size());
   os << "}";
+}
+
+TORCH_API void IRPrinter::print(const TensorIndex* const ti) {
+  print_inline(ti->size());
 }
 
 void IRPrinter::print(const Tensor* const t) {

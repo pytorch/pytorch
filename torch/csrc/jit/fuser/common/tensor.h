@@ -52,6 +52,32 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+struct TORCH_API TensorIndex : public Val {
+  TensorIndex(Int* _size)
+      : Val(ValType::TensorIndex, DataType::Int),
+        size_(_size) { }
+
+  bool same_as(const TensorIndex* const other) const {
+    return size()->same_as(other->size());
+  }
+
+  Int* size() const noexcept {
+    return size_;
+  }
+
+  TensorIndex() = delete;
+  ~TensorIndex() = default;
+
+  TensorIndex(const TensorIndex& other) = delete;
+  TensorIndex& operator=(const TensorIndex& other) = delete;
+
+  TensorIndex(TensorIndex&& other) = delete;
+  TensorIndex& operator=(TensorIndex&& other) = delete;
+
+ private:
+  Int* const size_;
+};
+
 struct TORCH_API IterDomain : public Val {
   ~IterDomain() = default;
 
