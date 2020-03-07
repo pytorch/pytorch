@@ -13,8 +13,8 @@ namespace fuser {
 
 std::vector<Int*> CodeWrite::getLoopIndices() {
   std::vector<Int*> inds;
-  for (auto pair : fors)
-    inds.push_back(pair.first);
+  for (auto loop : fors)
+    inds.push_back(loop->index());
   return inds;
 }
 
@@ -43,7 +43,7 @@ void CodeWrite::printIndexInto(
     bool first_ind_print = true;
 
     for (decltype(fors.size()) i{tv->getComputeAtAxis()}; i < fors.size(); i++) {
-      if (fors[i].second->isBlockDim() || fors[i].second->isThreadDim())
+      if (fors[i]->range()->isBlockDim() || fors[i]->range()->isThreadDim())
         continue;
 
       if (!first_ind_print && i != fors.size() - 1)
@@ -52,14 +52,14 @@ void CodeWrite::printIndexInto(
       first_ind_print = false;
 
       //Index
-      print_inline(fors[i].first);
+      print_inline(fors[i]->index());
 
       for (decltype(fors.size()) j{i + 1}; j < fors.size(); j++) {
-        if (fors[j].second->isBlockDim() || fors[j].second->isThreadDim())
+        if (fors[j]->range()->isBlockDim() || fors[j]->range()->isThreadDim())
           continue;
         os << " * ";
         //Strides
-        print_inline(fors[j].second->size());
+        print_inline(fors[j]->range()->size());
       }
     }
 
@@ -221,8 +221,8 @@ void CodeWrite::indent() {
 }
 
 void CodeWrite::closeFor() {
-  IterDomain* id = fors.back().second;
-  Val* iterator = fors.back().first;
+  IterDomain* id = fors.back()->range();
+  Val* iterator = fors.back()->index();
   fors.pop_back();
   if (id->parallel_method() != ParallelType::Serial) {
     auto it = overrides_find(iterator);
@@ -272,10 +272,10 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
 }
 
 void CodeWrite::openFor(IterDomain* id) {
-  fors.push_back({new Int(), id});
+  fors.push_back(new ForLoop(new Int(), new Int(0), id, {}));
 
   if (id->parallel_method() != ParallelType::Serial) {
-    bind(id, fors.back().first);
+    bind(id, fors.back()->index());
     return;
   }
 
@@ -283,13 +283,13 @@ void CodeWrite::openFor(IterDomain* id) {
   indent_size++;
 
   os << "for( size_t ";
-  handle(fors.back().first);
-  os << " = 0; ";
-  handle(fors.back().first);
+  handle(fors.back()->index());
+  os << " = " << fors.back()->start() << "; ";
+  handle(fors.back()->index());
   os << " < ";
   print_inline(id->size());
   os << "; ++";
-  handle(fors.back().first);
+  handle(fors.back()->index());
   os << " ) {" << std::endl;
 }
 
@@ -449,7 +449,7 @@ void CodeWrite::traverse(
   producer = false;
   consumer = nullptr;
 
-  fors = std::vector<std::pair<Int*, IterDomain*>>();
+  fors = std::vector<const ForLoop*>();
   indent_size = 0;
   active_view = nullptr;
   active_view_axis = 0;

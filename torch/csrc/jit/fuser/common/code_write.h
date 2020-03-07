@@ -77,7 +77,7 @@ struct TORCH_API CodeWrite : public IRPrinter {
   bool producer = false;
   TensorView* consumer = nullptr;
 
-  std::vector<std::pair<Int*, IterDomain*>> fors;
+  std::vector<const ForLoop*> fors;
   int indent_size = 0;
 
   const TensorView* active_view = nullptr;
