@@ -81,6 +81,8 @@ void BoundShapeInferencer::InferOps(
     InferReshape(op);
   } else if (op.type() == "LengthsRangeFill") {
     InferLengthsRangeFill(op);
+  } else if (op.type() == "Gather") {
+    InferGather(op);
   } else if (
       (caffe2::StartsWith(op.type(), "GivenTensor") &&
        caffe2::EndsWith(op.type(), "Fill")) ||
@@ -89,6 +91,13 @@ void BoundShapeInferencer::InferOps(
     InferGivenTensorFill(op);
   } else if (op.type() == "Shape") {
     InferShape(op);
+  } else if (
+      op.type() == "FloatToFused8BitRowwiseQuantized" ||
+      op.type() == "HalfFloatToFused8BitRowwiseQuantized" ||
+      op.type() == "FloatToFused4BitRowwiseQuantized" ||
+      op.type() == "HalfToFused4BitRowwiseQuantized" ||
+      op.type() == "FloatToHalf" || op.type() == "FbGemmPack") {
+    InferQuantization(op);
   } else {
     InferCommonOp(op);
   }
@@ -309,8 +318,8 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
-  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we pack
-  // 2 entries into 1 uint8 element of the embedding table.
+  // for fp16 scale and 2 bytes for fp16 bias. Then we double it because we
+  // pack 2 entries into 1 uint8 element of the embedding table.
   // (https://fburl.com/diffusion/stmsyz74)
   else if (is4bit) {
     output_dim1 -= 4;
@@ -476,6 +485,45 @@ void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
   }
 }
 
+void BoundShapeInferencer::InferGather(const OperatorDef& op) {
+  CAFFE_ENFORCE_EQ(op.input_size(), 2, "Gather has to have 2 inputs");
+  if (shape_info_.find(op.input(0)) != shape_info_.end() &&
+      shape_info_.find(op.input(1)) == shape_info_.end()) {
+    std::vector<int64_t> out_dims{spec_.max_batch_size, spec_.max_seq_size};
+    std::vector<TensorBoundShape::DimType> out_dim_types{
+        TensorBoundShape_DimType_BATCH,
+        TensorBoundShape_DimType_FEATURE_MAX_DEFAULT};
+    auto it = shape_info_.find(op.input(0));
+    const auto& dims = it->second.shape.dims();
+    const auto& dim_types = it->second.getDimType();
+    CAFFE_ENFORCE(
+        dims.size() > 0,
+        "dims size of first input of Gather should be larger than 1, input: ",
+        op.input(0),
+        " dims size: ",
+        dims.size());
+    CAFFE_ENFORCE(
+        dims.size() == dim_types.size(),
+        "dim size and dim_type size of ",
+        op.input(0),
+        " should be the same ",
+        dims.size(),
+        " vs ",
+        dim_types.size());
+    out_dims.insert(out_dims.end(), dims.begin() + 1, dims.end());
+    out_dim_types.insert(
+        out_dim_types.end(), dim_types.begin() + 1, dim_types.end());
+    CheckAndSetTensorBoundShape(
+        op.output(0),
+        out_dim_types,
+        out_dims,
+        it->second.shape.data_type(),
+        it->second.is_quantized);
+  } else {
+    InferCommonOp(op);
+  }
+}
+
 void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   CAFFE_ENFORCE_EQ(op.input_size(), 3, "FC has to have 3 inputs");
   const auto w_it = shape_info_.find(op.input(1));
@@ -559,6 +607,11 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
       ConvertToVec(output_shapes[0].dims()),
       output_data_type,
       int8_fc ? true : false);
+}
+
+void BoundShapeInferencer::InferQuantization(const OperatorDef& op) {
+  current_dim_type_ = TensorBoundShape_DimType_CONSTANT;
+  InferCommonOp(op);
 }
 
 void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {

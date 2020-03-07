@@ -212,6 +212,32 @@ TEST(BoundShapeInference, LengthsRangeFill) {
       TensorProto_DataType_INT32);
 }
 
+TEST(BoundShapeInference, Gather) {
+  NetDef net;
+  net.add_op()->CopyFrom(
+      CreateOperatorDef("Gather", "", {"Data", "Indices"}, {"Out"}, {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "Data",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {30, 20},
+          TensorProto_DataType_INT64));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Out",
+      {TensorBoundShape_DimType_BATCH,
+       TensorBoundShape_DimType_FEATURE_MAX_DEFAULT,
+       TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, spec.max_seq_size, 20},
+      TensorProto_DataType_INT64);
+}
+
 TEST(BoundShapeInference, Reshape) {
   NetDef net;
   std::vector<int> new_shape{-1, 8};
@@ -589,6 +615,29 @@ TEST(BoundShapeInference, FC3D) {
       "Out0",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 16});
+}
+
+TEST(BoundShapeInference, Quantization) {
+  NetDef net;
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "FloatToFused8BitRowwiseQuantized", "", {"w"}, {"Out_w"}, {}));
+  ShapeInfoMap shape_map;
+  shape_map.emplace(
+      "w",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 64}));
+  BoundShapeSpec spec(20, 1000);
+  BoundShapeInferencer eng(spec);
+  eng.InferBoundShapeAndType(net, shape_map, nullptr);
+  const auto& out_shape = eng.shape_info();
+  verifyShapeInfo(
+      out_shape,
+      "Out_w",
+      {TensorBoundShape_DimType_CONSTANT, TensorBoundShape_DimType_CONSTANT},
+      {16, 72},
+      TensorProto_DataType_UINT8);
 }
 
 TEST(BoundShapeInference, Combo0) {
