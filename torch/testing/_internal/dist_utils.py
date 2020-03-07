@@ -139,3 +139,6 @@ def initialize_pg(init_method, rank, world_size):
             rank=rank,
             world_size=world_size,
         )
+
+def worker_name(rank):
+    return "worker{}".format(rank)
