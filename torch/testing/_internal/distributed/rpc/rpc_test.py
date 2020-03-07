@@ -13,7 +13,7 @@ import torch.testing._internal.dist_utils as dist_utils
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
 from torch.distributed.rpc.api import _use_rpc_pickler
 from torch.distributed.rpc.internal import PythonUDF, RPCExecMode, _internal_rpc_pickler
-from torch.testing._internal.common_utils import IS_MACOS, load_tests
+from torch.testing._internal.common_utils import load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_shutdown_error_regex,
@@ -1459,10 +1459,6 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected.keys(), info.keys())
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
-        IS_MACOS,
-        "Test is flaky on MacOS, see https://github.com/pytorch/pytorch/issues/32019",
-    )
     def test_handle_send_exceptions(self):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
@@ -1482,15 +1478,11 @@ class RpcTest(RpcAgentTestFixture):
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker = "worker{}".format(dst_rank)
             # allow destination worker to exit without joining
-            wait_until_node_failure(dst_rank)
+            error_str = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+            wait_until_node_failure(dst_rank, error_str)
             fut = rpc.rpc_async(dst_worker, torch.add, args=(torch.ones(1), 3))
             # Shutdown sequence is not very well defined and as a result
-            # we can see any of these error messages.
-            error_str = (
-                "Encountered exception in ProcessGroupAgent::enqueueSend"
-                if self.rpc_backend == rpc.backend_registry.BackendType.PROCESS_GROUP
-                else get_shutdown_error_regex()
-            )
+            # we can see any of the error messages defined in get_shutdown_error_regex.
             with self.assertRaisesRegex(RuntimeError, error_str):
                 fut.wait()
         # exit all workers non-gracefully.

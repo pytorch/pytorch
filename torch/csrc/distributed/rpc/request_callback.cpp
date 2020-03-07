@@ -46,7 +46,7 @@ std::shared_ptr<FutureMessage> RequestCallback::operator()(
         ": ",
         e.what());
     return std::make_shared<FutureMessage>(
-        createExceptionResponse(request, errorMsg));
+        createExceptionResponse(errorMsg, request.id()));
   }
 }
 

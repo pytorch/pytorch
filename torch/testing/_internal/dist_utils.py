@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import time
 from functools import partial, wraps
+import re
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
@@ -87,7 +88,7 @@ TEST_CONFIG.build_rpc_backend_options = lambda test_object: rpc.backend_registry
 def noop():
     pass
 
-def wait_until_node_failure(rank):
+def wait_until_node_failure(rank, expected_error_regex=".*"):
     '''
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
@@ -95,19 +96,23 @@ def wait_until_node_failure(rank):
     while True:
         try:
             rpc.rpc_sync("worker{}".format(rank), noop, args=())
-            time.sleep(0.5)
-        except Exception:
-            break
+            time.sleep(0.1)
+        except Exception as e:
+            if re.match(pattern=expected_error_regex, string=str(e)):
+                return str(e)
 
 # Shutdown sequence is not well defined, so we may see any of the following errors
 # When running tests that simulate errors via a shutdown on the remote end.
-def get_shutdown_error_regex():
-    error_regexes = [
-        "Request aborted during client shutdown",
-        "worker.: Error in reponse from worker.: server shutting down",
-        "worker.: Error in response from worker.: Failed to write to remote endpoint",
-        "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
-    ]
+def get_shutdown_error_regex(rpc_backend):
+    if rpc_backend == "PROCESS_GROUP":
+        error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
+    else:
+        error_regexes = [
+            "Request aborted during client shutdown",
+            "worker.: Error in reponse from worker.: server shutting down",
+            "worker.: Error in response from worker.: Failed to write to remote endpoint",
+            "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
+        ]
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
     return error_regex
 

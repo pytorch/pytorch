@@ -3,14 +3,15 @@ import threading
 import time
 import unittest
 from enum import Enum
-
-import torch
+import datetime
+from datetime import timedelta
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
+import torch.testing._internal.dist_utils as dist_utils
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_shutdown_error_regex,
@@ -1163,11 +1164,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Run backwards, and validate we receive an error.
                 dist_autograd.backward(context_id, [val.sum()])
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily since ProcessGroupAgent does not report errors on node failures",
-    )
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure(self):
         initialize_pg(self.init_method, self.rank, self.world_size)
@@ -1185,14 +1181,15 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             # Kill all odd rank nodes.
             if self.rank % 2 == 0:
+                shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
                 # Wait for all other nodes to die.
                 for rank in range(self.world_size):
                     if rank % 2 != 0:
-                        wait_until_node_failure(rank)
+                        wait_until_node_failure(rank, shutdown_error_regex)
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex()
-                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
                     # Run backwards, and validate we receive an error since all
                     # other nodes are dead.
                     dist_autograd.backward(context_id, [res.sum()])
@@ -1394,14 +1391,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         while not DistAutogradTest._backward_done:
             time.sleep(0.1)
 
-    @unittest.skipIf(
-        torch.testing._internal.dist_utils.TEST_CONFIG.rpc_backend_name
-        == "PROCESS_GROUP",
-        "Skipping this test temporarily since ProcessGroupAgent "
-        + "does not report errors on node failures",
-    )
     @dist_init(clean_shutdown=False)
     def test_backward_node_failure_python_udf(self):
+        # Set a short timeout to quickly time out failed RPCs.
+        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
         initialize_pg(self.init_method, self.rank, self.world_size)
 
         with dist_autograd.context() as context_id:
@@ -1415,7 +1408,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 args=(t1, t2, dst, self.world_size, 1),
             )
 
-            # Wait for all RPCs to be done.
             dist.barrier()
 
             # Kill rank 2 (last hop of nested rpc) and verify rank 0 receives an error.
@@ -1424,22 +1416,29 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             if self.rank == 0:
                 # Wait for rank 2 to die.
-                wait_until_node_failure(2)
+                shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+                wait_until_node_failure(2, shutdown_error_regex)
 
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex().
-                with self.assertRaisesRegex(RuntimeError, get_shutdown_error_regex()):
+                with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):
                     # Run backwards, and validate we receive an error since rank 2 is dead.
                     dist_autograd.backward(context_id, [res.sum()])
 
                 # Tell other nodes RPC is done.
                 for i in range(self.world_size):
                     if i != self.rank and i != 2:
-                        rpc.rpc_sync(
-                            "worker{}".format(i),
-                            DistAutogradTest._set_backward_done,
-                            args=(),
-                        )
+                        # Due to non-graceful shutdown of workers, this RPC may not return successfully.
+                        # For example, the destination worker could process the RPC, exit and begin shutdown, and 
+                        # shutdown RPC before responding and satisfying this RPC. Therefore, we swallow possible errors here.
+                        try:
+                            rpc.rpc_sync(
+                                "worker{}".format(i),
+                                DistAutogradTest._set_backward_done,
+                                args=(),
+                            )
+                        except Exception as e:
+                            pass
             else:
                 # Wait for backward to finish on rank 0.
                 DistAutogradTest._wait_backward_done()
