@@ -1655,9 +1655,7 @@ struct CAFFE2_API ClassType : public NamedType {
         constantNames_.cend();
   }
 
-  size_t addConstant(
-      const std::string& name,
-      const IValue& value);
+  size_t addConstant(const std::string& name, const IValue& value);
 
   c10::optional<size_t> findConstantSlot(const std::string& name) const {
     TORCH_CHECK(constantNames_.size() == constantValues_.size());
@@ -1689,8 +1687,11 @@ struct CAFFE2_API ClassType : public NamedType {
     return constantNames_[slot];
   }
 
+
   IValue getConstant(const std::string& name) const;
+
   IValue getConstant(size_t slot) const;
+
   c10::optional<IValue> findConstant(const std::string& name) const;
 
   size_t numConstants() const {
@@ -1750,6 +1751,7 @@ struct CAFFE2_API ClassType : public NamedType {
   void unsafeRemoveMethod(const std::string& name);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
+
   std::shared_ptr<const CompilationUnit> compilation_unit() const;
 
   // generate a refined version of this class.
