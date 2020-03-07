@@ -22,11 +22,13 @@ def apply_permutation(tensor, permutation, dim=1):
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
-                     'batch_first', 'dropout', 'bidirectional']
+                     'batch_first', 'dropout', 'bidirectional',
+                     'cat_layer_fwd_bwd_states']
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0., bidirectional=False):
+                 dropout=0., bidirectional=False,
+                 cat_layer_fwd_bwd_states=True):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -36,6 +38,7 @@ class RNNBase(Module):
         self.batch_first = batch_first
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
+        self.cat_layer_fwd_bwd_states = cat_layer_fwd_bwd_states
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -62,9 +65,12 @@ class RNNBase(Module):
 
         self._flat_weights_names = []
         self._all_weights = []
+        hidden_switch = bidirectional and cat_layer_fwd_bwd_states
+        bidirectional_size = hidden_size * num_directions
+        actual_size = bidirectional_size if hidden_switch else hidden_size
         for layer in range(num_layers):
             for direction in range(num_directions):
-                layer_input_size = input_size if layer == 0 else hidden_size * num_directions
+                layer_input_size = input_size if layer == 0 else actual_size
 
                 w_ih = Parameter(torch.Tensor(gate_size, layer_input_size))
                 w_hh = Parameter(torch.Tensor(gate_size, hidden_size))
@@ -85,6 +91,7 @@ class RNNBase(Module):
                 self._flat_weights_names.extend(param_names)
                 self._all_weights.append(param_names)
 
+        self._original_flat_names = list(self._flat_weights_names)
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
         self.flatten_parameters()
         self.reset_parameters()
@@ -131,13 +138,42 @@ class RNNBase(Module):
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
 
-            # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
-            # an inplace operation on self._flat_weights
-            with torch.no_grad():
-                torch._cudnn_rnn_flatten_weight(
-                    self._flat_weights, (4 if self.bias else 2),
-                    self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
-                    self.batch_first, bool(self.bidirectional))
+            if self.cat_layer_fwd_bwd_states:
+                # Note: no_grad() is necessary since _cudnn_rnn_flatten_weight is
+                # an inplace operation on self._flat_weights
+                with torch.no_grad():
+                    torch._cudnn_rnn_flatten_weight(
+                        self._flat_weights, (4 if self.bias else 2),
+                        self.input_size, rnn.get_cudnn_mode(self.mode),
+                        self.hidden_size, self.num_layers,
+                        self.batch_first, bool(self.bidirectional),
+                        bool(self.cat_layer_fwd_bwd_states))
+            else:
+                # Rearrange weights in order to have them in
+                # (forward_weights, backward_weights) order
+                fwd_weights = [self._flat_weights[i]
+                               for i in range(len(self._flat_weights))
+                               if i % 2 == 0]
+                fwd_names = [self._flat_weights_names[i]
+                             for i in range(len(self._flat_weights))
+                             if i % 2 == 0]
+                bwd_weights = [self._flat_weights[i]
+                               for i in range(len(self._flat_weights))
+                               if i % 2 != 0]
+                bwd_names = [self._flat_weights_names[i]
+                             for i in range(len(self._flat_weights))
+                             if i % 2 != 0]
+                # See above note regarding gradient disabling
+                with torch.no_grad():
+                    for weight_pack in (fwd_weights, bwd_weights):
+                        torch._cudnn_rnn_flatten_weight(
+                            weight_pack, (4 if self.bias else 2),
+                            self.input_size, rnn.get_cudnn_mode(self.mode),
+                            self.hidden_size, self.num_layers,
+                            self.batch_first, False,
+                            bool(self.cat_layer_fwd_bwd_states))
+                self._flat_weights = fwd_weights + bwd_weights
+                self._flat_weights_names = fwd_names + bwd_names
 
     def _apply(self, fn):
         ret = super(RNNBase, self)._apply(fn)
@@ -145,7 +181,7 @@ class RNNBase(Module):
         # Resets _flat_weights
         # Note: be v. careful before removing this, as 3rd party device types
         # likely rely on this behavior to properly .to() modules like LSTM.
-        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
+        self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._original_flat_names]
         # Flattens params (on CUDA)
         self.flatten_parameters()
 
@@ -224,10 +260,12 @@ class RNNBase(Module):
         _impl = _rnn_impls[self.mode]
         if batch_sizes is None:
             result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
-                           self.dropout, self.training, self.bidirectional, self.batch_first)
+                           self.dropout, self.training, self.bidirectional, self.batch_first,
+                           self.cat_layer_fwd_bwd_states)
         else:
             result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
-                           self.num_layers, self.dropout, self.training, self.bidirectional)
+                           self.num_layers, self.dropout, self.training, self.bidirectional,
+                           self.cat_layer_fwd_bwd_states)
         output = result[0]
         hidden = result[1]
 
@@ -247,6 +285,8 @@ class RNNBase(Module):
             s += ', dropout={dropout}'
         if self.bidirectional is not False:
             s += ', bidirectional={bidirectional}'
+        if not self.cat_layer_fwd_bwd_states:
+            s += ', cat_layer_fwd_bwd_states={cat_layer_fwd_bwd_states}'
         return s.format(**self.__dict__)
 
     def __setstate__(self, d):
@@ -318,6 +358,11 @@ class RNN(RNNBase):
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+            hidden states will be concatenated and fed as input to each
+            layer, except for the first one. If set to ``False``, each hidden
+            state will be processed independently and concatenated just at the
+            end of the network. Default: ``True``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -451,6 +496,11 @@ class LSTM(RNNBase):
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
+        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+            hidden states will be concatenated and fed as input to each
+            layer, except for the first one. If set to ``False``, each hidden
+            state will be processed independently and concatenated just at the
+            end of the network. Default: ``True``
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -566,10 +616,12 @@ class LSTM(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
             result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
-                              self.dropout, self.training, self.bidirectional, self.batch_first)
+                              self.dropout, self.training, self.bidirectional, self.batch_first,
+                              self.cat_layer_fwd_bwd_states)
         else:
             result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
-                              self.num_layers, self.dropout, self.training, self.bidirectional)
+                              self.num_layers, self.dropout, self.training, self.bidirectional,
+                              self.cat_layer_fwd_bwd_states)
         output = result[0]
         hidden = result[1:]
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -621,6 +673,11 @@ class GRU(RNNBase):
             GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
+        cat_layer_fwd_bwd_states: If ``True``, then the forward and backward
+            hidden states will be concatenated and fed as input to each
+            layer, except for the first one. If set to ``False``, each hidden
+            state will be processed independently and concatenated just at the
+            end of the network. Default: ``True``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -723,10 +780,12 @@ class GRU(RNNBase):
         self.check_forward_args(input, hx, batch_sizes)
         if batch_sizes is None:
             result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
-                             self.dropout, self.training, self.bidirectional, self.batch_first)
+                             self.dropout, self.training, self.bidirectional, self.batch_first,
+                             self.cat_layer_fwd_bwd_states)
         else:
             result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
-                             self.num_layers, self.dropout, self.training, self.bidirectional)
+                             self.num_layers, self.dropout, self.training, self.bidirectional,
+                             self.cat_layer_fwd_bwd_states)
         output = result[0]
         hidden = result[1]
 
