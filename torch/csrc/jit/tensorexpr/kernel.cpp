@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-
 #include <torch/csrc/jit/tensorexpr/constant_folder.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/schedule.h>
 
@@ -155,39 +155,50 @@ static bool isOne(ExprHandle e) {
   return n->value() == 1;
 }
 
-static std::vector<ExprHandle> broadcastShapes(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
+  bool broadcast = false;
   auto at = a.rbegin();
   auto bt = b.rbegin();
   std::vector<ExprHandle> ret;
   while (at != a.rend() || bt != b.rend()) {
     if (at == a.rend()) {
+      broadcast = true;
       ret.push_back(*bt++);
       continue;
     }
     if (bt == b.rend()) {
+      broadcast = true;
       ret.push_back(*at++);
       continue;
     }
     // TODO: if neither *at nor *bt is 1, ensure they are identical
     // expressions.  Nb: `==` doesn't work since that simply produces a new
     // ExprHandle.
-    ExprHandle dim = isOne(*at) ? *bt : *at;
+    ExprHandle dim = *at;
+    if (isOne(*at)) {
+      if (!isOne(*bt)) {
+        dim = *bt;
+        broadcast = true;
+      }
+    }
     ret.push_back(dim);
     at++;
     bt++;
   }
   std::reverse(ret.begin(), ret.end());
-  return ret;
+  return {ret, broadcast};
 }
 
 template <typename... Args>
-static std::vector<ExprHandle> broadcastShapes(
+static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b,
     Args... args) {
-  return broadcastShapes(broadcastShapes(a, b), args...);
+  auto const& res = broadcastShapes(a, b);
+  auto const& res2 = broadcastShapes(res.first, args...);
+  return {res2.first, res.second || res2.second};
 }
 
 std::vector<ExprHandle> TensorExprKernel::valueShape(
@@ -225,8 +236,10 @@ Tensor* TensorExprKernel::ComputeTwoOperand(
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         inner_expr) {
   auto const& n = v->node();
-  auto const& shape =
+  auto const& res =
       broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
+  auto const& shape = res.first;
+  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
@@ -249,8 +262,10 @@ Tensor* TensorExprKernel::ComputeTwoOperandWithAlpha(
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         inner_expr) {
   auto const& n = v->node();
-  auto const& shape =
+  auto const& res =
       broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
+  auto const& shape = res.first;
+  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
@@ -275,10 +290,12 @@ Tensor* TensorExprKernel::ComputeConditionWithTwoOperand(
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         inner_expr) {
   auto const& n = v->node();
-  auto const& shape = broadcastShapes(
+  auto const& res = broadcastShapes(
       valueShape(n->inputs()[0]),
       valueShape(n->inputs()[1]),
       valueShape(n->inputs()[2]));
+  auto const& shape = res.first;
+  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
@@ -304,10 +321,12 @@ Tensor* TensorExprKernel::ComputeThreeOperand(
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         inner_expr) {
   auto const& n = v->node();
-  auto const& shape = broadcastShapes(
+  auto const& res = broadcastShapes(
       valueShape(n->inputs()[0]),
       valueShape(n->inputs()[1]),
       valueShape(n->inputs()[2]));
+  auto const& shape = res.first;
+  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
@@ -334,11 +353,13 @@ Tensor* TensorExprKernel::ComputeFourOperand(
         const ExprHandle&,
         const ExprHandle&)>& inner_expr) {
   auto const& n = v->node();
-  auto const& shape = broadcastShapes(
+  auto const& res = broadcastShapes(
       valueShape(n->inputs()[0]),
       valueShape(n->inputs()[1]),
       valueShape(n->inputs()[2]),
       valueShape(n->inputs()[3]));
+  auto const& shape = res.first;
+  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
@@ -613,6 +634,7 @@ Tensor* TensorExprKernel::ComputeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::rand_like: {
+      hasRandom_ = true;
       return ComputeOneOperand("aten_rand_like", v, [](const ExprHandle& a) {
         return Intrinsics::make(IntrinsicsOp::kRand, a.dtype());
       });
@@ -1041,8 +1063,89 @@ void TensorExprKernel::LowerToBackend(BackendType backend_type) {
   codegen_ = CreateCodeGen(codegen_name, stmt, params);
 }
 
+template <typename T>
+static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
+  return !a.has_value() || *a == b;
+}
+
+static bool isValidVaryingShape(
+    const c10::VaryingShape& vs,
+    at::IntArrayRef sz) {
+  if (!vs.size().has_value()) {
+    // TODO: does it make sense to have kernels with completely unspecified
+    // shapes/strides
+    return true;
+  }
+
+  if (*vs.size() != sz.size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < sz.size(); i++) {
+    if (!isValidPrimProperty(vs[i], sz[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void checkInputs(const at::ArrayRef<IValue>& inputs, std::vector<TypePtr>& input_types) {
+  TORCH_INTERNAL_ASSERT(
+      inputs.size() == input_types.size(),
+      "number of actual inputs don't match with the number of inputs to a subgraph");
+  for (size_t i = 0; i < inputs.size(); i++) {
+    // enable this to debug the asserts below
+    GRAPH_DEBUG(
+        "Comparing input ",
+        i,
+        " ivalue ",
+        inputs[i],
+        " against type ",
+        *input_types[i]);
+    if (inputs[i].isTensor()) {
+      auto t = inputs[i].toTensor();
+      TORCH_INTERNAL_ASSERT(
+          t.defined(), "input ", i, " can't be an undefined tensor!");
+      auto tt = input_types[i]->cast<TensorType>();
+      TORCH_INTERNAL_ASSERT(tt, "input ", i, " expected to be a tensor!");
+      TORCH_INTERNAL_ASSERT(
+          isValidPrimProperty(tt->scalarType(), t.scalar_type()),
+          "input ",
+          i,
+          " scalar types don't match");
+      // TODO: do we need an extra check to make sure the device is specified
+      TORCH_INTERNAL_ASSERT(
+          isValidPrimProperty(tt->device(), t.device()),
+          "input ",
+          i,
+          " device types don't match");
+      TORCH_INTERNAL_ASSERT(
+          isValidVaryingShape(tt->sizes(), t.sizes()),
+          "input ",
+          i,
+          " sizes don't match");
+      TORCH_INTERNAL_ASSERT(
+          isValidVaryingShape(tt->strides(), t.strides()),
+          "input ",
+          i,
+          " strides don't match");
+    } else if (inputs[i].isInt()) {
+      TORCH_INTERNAL_ASSERT(
+          input_types[i]->cast<IntType>(), "type of ", i, " isn't an int!");
+    } else if (inputs[i].isDouble()) {
+      TORCH_INTERNAL_ASSERT(
+          input_types[i]->cast<FloatType>(), "type of ", i, " isn't an int!");
+    } else {
+      // TODO: cover more IValue types
+      // TODO: make it a hard error
+    }
+  }
+}
+
 void TensorExprKernel::PickAndCheckBackendType(
     const at::ArrayRef<IValue>& inputs) {
+  checkInputs(inputs, input_types_);
+
   at::Device device = [&inputs]() {
     for (auto const& input : inputs) {
       if (input.isTensor()) {
@@ -1218,17 +1321,18 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
   }
 }
 
-TensorExprKernel::TensorExprKernel(const Graph& subgraph) {
+void TensorExprKernel::compile() {
   KernelScope kernel_scope(&kernel_arena_);
 
   // Bind inputs to buffers.
-  n_inputs_ = subgraph.inputs().size();
-  for (auto const& input : subgraph.inputs()) {
+  n_inputs_ = graph_->inputs().size();
+  for (auto const& input : graph_->inputs()) {
     bindInput(input);
+    input_types_.push_back(input->type());
   }
 
   // Bind nodes to tensor compute expressions.
-  for (auto const& n : subgraph.nodes()) {
+  for (auto const& n : graph_->nodes()) {
     if (n->kind() == prim::Constant || n->kind() == prim::ListConstruct) {
       continue;
     } else {
@@ -1238,17 +1342,43 @@ TensorExprKernel::TensorExprKernel(const Graph& subgraph) {
         }
       }
     }
+    if (hasRandom_ && hasBroadcast_) {
+      throw std::runtime_error(
+          "Cannot support broadcast and random within one kernel");
+    }
   }
 
   // Move output operands from `tensors_` to `tensor_outputs_`
-  for (const auto& output : subgraph.outputs()) {
+  for (const auto& output : graph_->outputs()) {
     CHECK(tensors_.count(output->unique())) << "Output must be a tensor";
     tensor_outputs_.emplace_back(tensors_.at(output->unique()));
     tensors_.erase(output->unique());
   }
 }
 
+TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
+    : graph_(subgraph), code_(subgraph) {
+  try {
+    compile();
+  } catch (...) {
+    fallback_ = true;
+  }
+}
+
 void TensorExprKernel::run(Stack& stack) {
+  if (fallback_) {
+    fallback(stack);
+    return;
+  }
+  try {
+    runKernel(stack);
+  } catch (...) {
+    fallback_ = true;
+    fallback(stack);
+  }
+}
+
+void TensorExprKernel::runKernel(Stack& stack) {
   KernelScope kernel_scope(&kernel_arena_);
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, n_inputs_);

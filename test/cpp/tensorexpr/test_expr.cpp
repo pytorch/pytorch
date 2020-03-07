@@ -467,5 +467,40 @@ void testIfThenElse02() {
   ASSERT_EQ(eval.value<float>(), 2.0f);
 }
 
+void testStmtClone() {
+  KernelScope kernel_scope;
+  const int N = 16;
+
+  Buffer a_buf("a", kInt, {N});
+  VarHandle index = VarHandle("index", kInt);
+  Stmt* body =
+      Store::make(VarHandle(a_buf.data()), index, 5, 1);
+  Stmt* loop = For::make(index, 0, N, body);
+
+  Stmt* cloned_loop = Stmt::clone(loop);
+  std::vector<int> orig_loop_results(N);
+  std::vector<int> cloned_loop_results(N);
+  SimpleIREvaluator(loop, a_buf)(orig_loop_results);
+  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results);
+
+  assertAllEqual(orig_loop_results, 5);
+  assertAllEqual(cloned_loop_results, 5);
+
+  // Let's add another assign to the body in the cloned loop and verify that the
+  // original statement hasn't changed while the cloned one has.
+  Stmt* body_addition = Store::make(VarHandle(a_buf.data()), index, 33, 1);
+  Block* cloned_body =
+      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+  cloned_body->append_stmt(body_addition);
+
+  std::vector<int> orig_loop_results_after_mutation(N);
+  std::vector<int> cloned_loop_results_after_mutation(N);
+  SimpleIREvaluator(loop, a_buf)(orig_loop_results_after_mutation);
+  SimpleIREvaluator(cloned_loop, a_buf)(cloned_loop_results_after_mutation);
+
+  assertAllEqual(orig_loop_results_after_mutation, 5);
+  assertAllEqual(cloned_loop_results_after_mutation, 33);
+}
+
 } // namespace jit
 } // namespace torch

@@ -483,6 +483,9 @@ Stmt* LoopNest::LowerToStmt(Tensor* t) {
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
 
+  if (f->ndim() == 0) {
+    return body;
+  }
   CHECK(f->ndim() >= 1);
   for (size_t i = 0; i < f->ndim(); i++) {
     // Going in reverse order: from innermost loop to the outermost
@@ -575,7 +578,7 @@ void LoopNest::SplitWithTail(
   // x -> x.outer * inner.size + x.inner
   auto combined_index1 = i_outer * factor + i_inner;
 
-  Stmt* body_inner = Substitute(f->body(), {{f->var(), combined_index1}});
+  Stmt* body_inner = Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = For::make(i_inner, 0, factor, body_inner);
   *outer = For::make(i_outer, 0, split_count, *inner);
@@ -588,7 +591,7 @@ void LoopNest::SplitWithTail(
     // x -> x.tail + outer.size * inner.size
     auto combined_index2 = i_tail + split_count * factor;
 
-    Stmt* body_tail = Substitute(f->body(), {{f->var(), combined_index2}});
+    Stmt* body_tail = Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
     *tail = For::make(i_tail, 0, tail_size, body_tail);
 
     p->append_stmt(*tail);
@@ -633,7 +636,7 @@ void LoopNest::SplitWithMask(Stmt* s, int factor, Stmt** outer, Stmt** inner) {
   // x -> x.outer * inner.size + x.inner
   auto combined_index = i_outer * factor + i_inner;
 
-  Stmt* body_inner = f->body();
+  Stmt* body_inner = Stmt::clone(f->body());
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {

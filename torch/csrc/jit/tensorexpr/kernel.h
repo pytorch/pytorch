@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -44,9 +45,13 @@ inline std::vector<ExprHandle> computeIndicesToBroadcast(
 
 class TensorExprKernel {
  public:
-  explicit TensorExprKernel(const Graph& subgraph);
+  explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
 
   void run(Stack& stack);
+
+  void fallback(Stack& stack) {
+    InterpreterState(code_).run(stack);
+  }
 
  private:
   enum BackendType {
@@ -55,6 +60,10 @@ class TensorExprKernel {
     kLLVMCodeGen,
     kCudaCodeGen,
   };
+
+  void compile();
+
+  void runKernel(Stack& stack);
 
   ExprHandle constant(const torch::jit::Value* v);
 
@@ -205,6 +214,12 @@ class TensorExprKernel {
   KernelArena kernel_arena_;
   BackendType backend_type_ = BackendType::kUninitialized;
   at::Device device_ = at::kCPU;
+  std::vector<TypePtr> input_types_;
+  std::shared_ptr<Graph> graph_;
+  Code code_;
+  bool fallback_{false};
+  bool hasRandom_{false};
+  bool hasBroadcast_{false};
 };
 
 TORCH_API int& GetTECudaPointwiseLoopLevels();

@@ -12,15 +12,24 @@ namespace tensorexpr {
 class Buffer;
 
 // The common base between all statement node.
-class Stmt : public KernelScopedObject {
+class TORCH_API Stmt : public KernelScopedObject {
  public:
   Stmt() {}
-  TORCH_API virtual void accept(IRVisitor* visitor) const = 0;
+  virtual void accept(IRVisitor* visitor) const = 0;
   virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
 
   Stmt* get_parent() const {
     return parent_;
   }
+
+  /*
+   * Make a deep copy of the given statement.
+   *
+   * All statements used in children of the statement are cloned. Note that
+   * expressions and variables are not deep-copied: it is not necessary since
+   * they are immutable.
+   */
+  static Stmt* clone(Stmt* s);
 
  protected:
   static void set_parent(Stmt* s, Stmt* new_parent) {
@@ -64,6 +73,7 @@ class LetStmt : public StmtNode<LetStmt> {
   }
 
   static Stmt* make(const VarHandle& var, const ExprHandle& value, Stmt* body) {
+    CHECK(!body->get_parent());
     return new LetStmt(var.node(), value.node(), body);
   }
 
@@ -97,16 +107,19 @@ class Block : public StmtNode<Block> {
   }
 
   void append_stmt(Stmt* s) {
+    CHECK(!s->get_parent());
     stmts_.push_back(s);
     set_parent(s, this);
   }
   bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
+    CHECK(!new_stmt->get_parent());
     auto pos = std::find(stmts_.begin(), stmts_.end(), old_stmt);
     if (pos == stmts_.end()) {
       return false;
     }
     stmts_.insert(pos, new_stmt);
     stmts_.erase(pos);
+    set_parent(old_stmt, nullptr);
     set_parent(new_stmt, this);
     return true;
   }
@@ -116,6 +129,7 @@ class Block : public StmtNode<Block> {
 
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
+      CHECK(!s->get_parent());
       stmts_.push_back(s);
       set_parent(s, this);
     }
@@ -417,6 +431,7 @@ class For : public StmtNode<For> {
   For(const Var* var, const Expr* start, const Expr* stop, Stmt* body)
       : var_(var), start_(start), stop_(stop) {
     CHECK(var && start && stop && body);
+    CHECK(!body->get_parent());
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});
@@ -432,6 +447,7 @@ class For : public StmtNode<For> {
       const LoopOptions& loop_options)
       : var_(var), start_(start), stop_(stop), loop_options_(loop_options) {
     CHECK(var && start && stop && body);
+    CHECK(!body->get_parent());
     Block* b = dynamic_cast<Block*>(body);
     if (!b) {
       b = new Block({body});

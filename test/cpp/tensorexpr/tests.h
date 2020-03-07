@@ -94,7 +94,8 @@ namespace jit {
   _(ConstantFoldMinMax)         \
   _(ConstantFoldIntrinsics)     \
   _(ConstantFoldWithVar)        \
-  _(UnFoldableExpr)
+  _(UnFoldableExpr)             \
+  _(StmtClone)
 
 #define TH_FORALL_TESTS_LLVM(_) \
   _(LLVMByteImmTest)            \
