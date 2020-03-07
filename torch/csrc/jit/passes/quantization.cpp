@@ -494,7 +494,7 @@ class InsertObserversHelper {
 
   c10::optional<script::Module> getObserverFor(Value* v);
 
-  bool propagateObservedProperty(Value* output, std::unordered_set<Value*>& graph_observed_values);
+  void propagateObservedProperty(Value* output, std::unordered_set<Value*>& graph_observed_values);
 
   void skipValuesInPattern(
       Graph& graph,
@@ -1114,7 +1114,7 @@ std::tuple<OptionalModuleVector, OptionalModuleVector, std::vector<size_t>> Inse
   return std::make_tuple(graph_input_observers, graph_output_observers, output_idxs);
 }
 
-bool InsertObserversHelper::propagateObservedProperty(
+void InsertObserversHelper::propagateObservedProperty(
     Value* output, std::unordered_set<Value*>& graph_observed_values) {
   if (pass_through_value_map_.count(output)) {
     // since the vector is always non-empty, we will
@@ -1128,9 +1128,7 @@ bool InsertObserversHelper::propagateObservedProperty(
       // all ops that doesn't require observation
       graph_observed_values.insert(output);
     }
-    return all_observed;
   }
-  return false;
 }
 
 void insertDeQuantCall(Graph* graph,
