@@ -1490,7 +1490,11 @@ jobs:
               exit 1
             fi
             echo ${IOS_DEV_TEAM_ID}
-            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
+              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
+            else
+              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
+            fi
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
@@ -2256,7 +2260,6 @@ workflows:
       # Pytorch iOS PR builds
       - pytorch_ios_build:
           name: pytorch_ios_11_2_1_x86_64_build
-          context: org-member
           build_environment: "pytorch-ios-11.2.1-x86_64_build"
           ios_arch: "x86_64"
           ios_platform: "SIMULATOR"
