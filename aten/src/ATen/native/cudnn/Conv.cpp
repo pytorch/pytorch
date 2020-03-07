@@ -390,7 +390,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 #if CUDNN_VERSION < 7500
   bool blacklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
   int stride_dim = args.input.dim() - 2;
-  blacklist &&= std::any_of(std::begin(args.params.stride),
+  blacklist &= std::any_of(std::begin(args.params.stride),
                             std::begin(args.params.stride) + stride_dim,
                             [=](int n){return n != 1;});
 #endif
@@ -408,7 +408,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
         // See Note [blacklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
         bool skip = blacklist;
-        skip &&= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
+        skip &= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
                   static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)
         if (skip) {
           continue;
