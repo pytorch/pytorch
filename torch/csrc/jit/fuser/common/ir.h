@@ -115,6 +115,7 @@ struct FusionGuard;
 struct Expr;
 struct UnaryOp;
 struct BinaryOp;
+struct IterDomain;
 
 
 /*
@@ -477,9 +478,9 @@ private:
 struct TORCH_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
-    Val* _index
-  , Val* _begin
-  , Val* _end
+    Int* _index
+  , Int* _start
+  , IterDomain* _range
   , const std::vector<const Expr*> &_body);
 
   ForLoop(const ForLoop& other) = delete;
@@ -488,9 +489,9 @@ struct TORCH_API ForLoop : public Expr {
   ForLoop(ForLoop&& other) = delete;
   ForLoop& operator=(ForLoop&& other) = delete;
 
-  Val* index() const noexcept { return index_; }
-  Val* begin() const noexcept { return begin_; }
-  Val* end()   const noexcept { return end_; }
+  Int*        index() const noexcept { return index_; }
+  Int*        start() const noexcept { return start_; }
+  IterDomain* range() const noexcept { return range_; }
   const std::vector<const Expr*>& body() const noexcept { return body_; }
 
   void add_expr(const Expr* e) { body_.push_back(e); }
@@ -502,9 +503,9 @@ struct TORCH_API ForLoop : public Expr {
 
 private:
   // TODO: Why is the pointer const and not what's in the object?
-  Val* const index_;
-  Val* const begin_;
-  Val* const end_;
+  Int* const index_;
+  Int* const start_;
+  IterDomain* const range_;
   std::vector<const Expr*> body_;
 };
 

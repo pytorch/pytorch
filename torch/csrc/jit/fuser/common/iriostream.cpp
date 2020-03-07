@@ -164,7 +164,7 @@ void IRPrinter::handle(const BinaryOp* const bop) {
 }
 
 void IRPrinter::handle(const ForLoop* const fl) {
-  os << "ForLoop: " << fl->index() << " index " << fl->begin() << " begin " << fl->end() << " end \n";
+  os << "ForLoop: index: " << fl->index() << " start: " << fl->start() << " range: " << fl->range() << "\n";
   for(auto &expr : fl->body()) {
     os << "\t";
     handle(expr);	
