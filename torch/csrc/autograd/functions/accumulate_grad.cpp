@@ -34,16 +34,17 @@ auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   if (!variable.requires_grad())
     return {};
 
-  const auto& new_grad = grads[0];
   at::Tensor& grad = variable.grad();
   // If the function has post hooks (for example, a DDP allreduce hook),
-  // call_function in Engine.cpp will temporarily bump the refcount by one,
-  // hence the addition of !post_hooks().empty() for num_expected_refs in
-  // addition to the one reference that we're holding.
+  // call_function in Engine.cpp will temporarily bump the expected refcount
+  // by one, hence the addition of !post_hooks().empty() for 'num_expected_refs'
+  // in addition to the one reference that we're holding.
+  // 'num_expected_refs' is used to determine whether or not we should clone
+  // the grad or can steal the grad.
   accumulateGradAndCallHooks(
       variable,
       grad,
-      new_grad,
+      std::move(grads[0]),
       1 + !post_hooks().empty() /* num_expected_refs */,
       [&grad](at::Tensor&& grad_update) { grad = std::move(grad_update); });
 

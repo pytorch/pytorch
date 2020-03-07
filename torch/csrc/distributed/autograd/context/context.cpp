@@ -88,7 +88,9 @@ void DistAutogradContext::accumulateGrad(
       variable,
       old_grad,
       grad,
-      num_expected_refs,
+      // Add +1 here since we can't std::move(grad) since it is a const ref,
+      // which incurs a refcount bump for the Tensor.
+      num_expected_refs + 1,
       [this, &variable](at::Tensor&& grad_update) {
         accumulatedGrads_.insert(variable, std::move(grad_update));
       });
@@ -126,10 +128,9 @@ void DistAutogradContext::addOutstandingRpc(
           std::runtime_error err((*futErr).what());
           std::unique_lock<std::mutex> lock(lock_);
           if (graphTask_) {
-            auto future_result =
-                graphTask_->set_exception_without_signal(nullptr);
+            graphTask_->set_exception_without_signal(nullptr);
             lock.unlock();
-            future_result->setErrorIfNeeded(err.what());
+            graphTask_->future_result_->setErrorIfNeeded(err.what());
           } else {
             LOG(WARNING)
                 << "Ignoring error since GraphTask is no longer valid: "

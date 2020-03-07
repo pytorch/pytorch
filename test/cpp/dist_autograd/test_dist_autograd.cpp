@@ -56,6 +56,7 @@ TEST_F(DistAutogradTest, TestSendFunctionInvalidInputs) {
 
 TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   autogradContainer_->newContext();
+  auto contextId = autogradContainer_->currentContext()->contextId();
   auto& engine = DistEngine::getInstance();
   ASSERT_EQ(0, engine.numBackwardPasses());
 
@@ -67,7 +68,7 @@ TEST_F(DistAutogradTest, TestInitializedContextCleanup) {
   ASSERT_NE(nullptr, t.grad_fn());
 
   // Execute engine.
-  engine.execute({t}, /* retainGraph */ false);
+  engine.execute(contextId, {t}, /* retainGraph */ false);
 
   // Validate appropriate cleanup.
   ASSERT_EQ(0, engine.numBackwardPasses());

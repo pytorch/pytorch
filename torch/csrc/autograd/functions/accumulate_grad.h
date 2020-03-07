@@ -29,23 +29,18 @@ struct TORCH_API AccumulateGrad : public Node {
   static void accumulateGradAndCallHooks(
       const Variable& variable,
       at::Tensor variable_grad,
-      const at::Tensor& new_grad,
+      at::Tensor new_grad,
       size_t num_expected_refs,
       const T& update_grad) {
-    // Copy since we need to work with non-const Tensor. Grab the original
-    // use_count beforehand though.
-    size_t new_grad_use_count = new_grad.use_count();
-    at::Tensor new_grad_copy = new_grad;
-
     for (auto& hook : impl::hooks(variable)) {
-      new_grad_copy = (*hook)({new_grad_copy})[0];
+      new_grad = (*hook)({new_grad})[0];
     }
 
     if (!variable_grad.defined()) {
       // under following condition, we can avoid clone()
-      if (!GradMode::is_enabled() && !new_grad_copy.is_sparse() &&
-          new_grad_copy.is_contiguous() &&
-          new_grad_use_count <= num_expected_refs) {
+      if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
+          new_grad.is_contiguous() &&
+          new_grad.use_count() <= num_expected_refs) {
         // first check it is in first-order grad only mode
         // then check not sparse before is_contiguous
         // then check contiguous, otherwise later in place accumulation may fail
@@ -54,12 +49,14 @@ struct TORCH_API AccumulateGrad : public Node {
         // references we expect is basically internal structures that are
         // holding references to the Tensor and that is fine since these are not
         // exposed to the user.
-        update_grad(new_grad_copy.detach());
+        update_grad(new_grad.detach());
       } else if (
-          !GradMode::is_enabled() && new_grad_copy.is_sparse() &&
-          new_grad_copy._indices().is_contiguous() &&
-          new_grad_copy._values().is_contiguous() &&
-          new_grad_use_count <= num_expected_refs) {
+          !GradMode::is_enabled() && new_grad.is_sparse() &&
+          new_grad._indices().is_contiguous() &&
+          new_grad._values().is_contiguous() &&
+          new_grad._indices().use_count() <= num_expected_refs &&
+          new_grad._values().use_count() <= num_expected_refs &&
+          new_grad.use_count() <= num_expected_refs) {
         // Can't detach sparse tensor (since metadata changes are not allowed
         // after detach), so just create a new one for the grad which is a
         // shallow copy. We need a shallow copy so that modifying the original
@@ -69,43 +66,43 @@ struct TORCH_API AccumulateGrad : public Node {
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         update_grad(at::sparse_coo_tensor(
-            new_grad_copy._indices(),
-            new_grad_copy._values(),
-            new_grad_copy.sizes(),
-            new_grad_copy.options()));
+            new_grad._indices(),
+            new_grad._values(),
+            new_grad.sizes(),
+            new_grad.options()));
       } else {
-        if (new_grad_copy.is_sparse()) {
-          update_grad(new_grad_copy.clone());
+        if (new_grad.is_sparse()) {
+          update_grad(new_grad.clone());
         } else {
-          update_grad(new_grad_copy.clone(at::MemoryFormat::Contiguous));
+          update_grad(new_grad.clone(at::MemoryFormat::Contiguous));
         }
       }
     } else if (!GradMode::is_enabled()) {
       // This case is not strictly necessary, but it makes the first-order only
       // case slightly more efficient.
-      if (variable_grad.is_sparse() && !new_grad_copy.is_sparse()) {
-        // If `variable_grad` is sparse and `new_grad_copy` is not sparse, their
+      if (variable_grad.is_sparse() && !new_grad.is_sparse()) {
+        // If `variable_grad` is sparse and `new_grad` is not sparse, their
         // sum is not sparse, and we must change the TensorImpl type of
         // `variable_grad` for it to store the result. However, changing the
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
-        update_grad(new_grad_copy + variable_grad);
+        update_grad(new_grad + variable_grad);
       } else {
         // In this case we can avoid changing the grad tensor. There are three
         // scenarios when we'll hit this case:
         //
-        // 1. `variable_grad` is sparse, and `new_grad_copy` is sparse.
-        // 2. `variable_grad` is dense, and `new_grad_copy` is sparse.
-        // 3. `variable_grad` is dense, and `new_grad_copy` is dense.
+        // 1. `variable_grad` is sparse, and `new_grad` is sparse.
+        // 2. `variable_grad` is dense, and `new_grad` is sparse.
+        // 3. `variable_grad` is dense, and `new_grad` is dense.
         //
-        // In all of these three cases, `variable_grad += new_grad_copy` is a
-        // valid operation which adds `new_grad_copy` to `variable_grad` in
+        // In all of these three cases, `variable_grad += new_grad` is a
+        // valid operation which adds `new_grad` to `variable_grad` in
         // place. `variable_grad` is thus still referring to the same tensor
         // after the operation.
-        variable_grad += new_grad_copy;
+        variable_grad += new_grad;
       }
     } else {
-      update_grad(variable_grad + new_grad_copy);
+      update_grad(variable_grad + new_grad);
     }
   }
 
