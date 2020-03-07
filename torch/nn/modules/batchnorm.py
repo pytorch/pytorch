@@ -12,15 +12,16 @@ class _NormBase(Module):
     """Common base of _InstanceNorm and _BatchNorm"""
     _version = 2
     __constants__ = ['track_running_stats', 'momentum', 'eps',
-                     'num_features', 'affine']
+                     'num_features', 'affine', 'zero_gamma']
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, zero_gamma=False,
                  track_running_stats=True):
         super(_NormBase, self).__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
         self.affine = affine
+        self.zero_gamma = zero_gamma
         self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = Parameter(torch.Tensor(num_features))
@@ -47,14 +48,17 @@ class _NormBase(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            init.ones_(self.weight)
+            if self.zero_gamma:
+                init.zeros_(self.weight)
+            else:
+                init.ones_(self.weight)
             init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
 
     def extra_repr(self):
-        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, zero_gamma={zero_gamma}' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -75,10 +79,10 @@ class _NormBase(Module):
 
 class _BatchNorm(_NormBase):
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, zero_gamma=False,
                  track_running_stats=True):
         super(_BatchNorm, self).__init__(
-            num_features, eps, momentum, affine, track_running_stats)
+            num_features, eps, momentum, affine, zero_gamma, track_running_stats)
 
     def forward(self, input):
         self._check_input_dim(input)
@@ -150,6 +154,8 @@ class BatchNorm1d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        zero_gamma: a boolean value that when set to ``True``, this module has
+            zero value as the initial weight of gamma. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -222,6 +228,8 @@ class BatchNorm2d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        zero_gamma: a boolean value that when set to ``True``, this module has
+            zero value as the initial weight of gamma. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -295,6 +303,8 @@ class BatchNorm3d(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        zero_gamma: a boolean value that when set to ``True``, this module has
+            zero value as the initial weight of gamma. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -373,6 +383,8 @@ class SyncBatchNorm(_BatchNorm):
             (i.e. simple average). Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
             learnable affine parameters. Default: ``True``
+        zero_gamma: a boolean value that when set to ``True``, this module has
+            zero value as the initial weight of gamma. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -409,9 +421,9 @@ class SyncBatchNorm(_BatchNorm):
         https://arxiv.org/abs/1502.03167
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True, zero_gamma=False,
                  track_running_stats=True, process_group=None):
-        super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, track_running_stats)
+        super(SyncBatchNorm, self).__init__(num_features, eps, momentum, affine, zero_gamma, track_running_stats)
         self.process_group = process_group
         # gpu_size is set through DistributedDataParallel initialization. This is to ensure that SyncBatchNorm is used
         # under supported condition (single GPU per process)
@@ -501,7 +513,7 @@ class SyncBatchNorm(_BatchNorm):
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
             module_output = torch.nn.SyncBatchNorm(module.num_features,
                                                    module.eps, module.momentum,
-                                                   module.affine,
+                                                   module.affine, module.zero_gamma,
                                                    module.track_running_stats,
                                                    process_group)
             if module.affine:
