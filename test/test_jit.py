@@ -1938,6 +1938,43 @@ graph(%input, %weight):
         res = get_forward(m._c)(x)
         self.assertEqual(res, ref_res)
 
+    def test_replicate_dequantize_in_block(self):
+        class M(torch.nn.Module):
+            def __init__(self, cond):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 1).float()
+
+                self.cond = cond
+
+            def forward(self, x):
+                x = torch.dequantize(x)
+                if self.cond:
+                    x = self.conv(x)
+                else:
+                    x = x + 3
+                return x
+
+        x = torch.randn([1, 3, 10, 10], dtype=torch.float)
+        x = torch.quantize_per_tensor(x, 0.5, 1, torch.quint8)
+        m = torch.jit.script(M(True))
+        ref_res = m(x)
+        FileCheck().check_count("aten::dequantize", 1, exactly=True) \
+                   .run(m.graph)
+        torch._C._jit_pass_replicate_dequantize(m.graph)
+        FileCheck().check_count("aten::dequantize", 2, exactly=True) \
+                   .run(m.graph)
+        # check dequantize is right before CallMethod of conv
+        FileCheck().check("aten::dequantize") \
+                   .check_next("CallMethod") \
+                   .run(m.graph)
+        # check dequantize is right before add
+        FileCheck().check("aten::dequantize") \
+                   .check("aten::dequantize") \
+                   .check_next("aten::add") \
+                   .run(m.graph)
+        res = get_forward(m._c)(x)
+        self.assertEqual(res, ref_res)
+
     def test_swap_dequantize(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -10234,27 +10271,55 @@ a")
             m2 = M2()
             m2(torch.zeros(4, 3))
 
-    def test_named_modules(self):
+    def test_module_apis(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super(Sub, self).__init__()
+
+            def forward(self, thing):
+                return thing - 2
+
+        class Double(torch.nn.Module):
+            def __init__(self):
+                super(Double, self).__init__()
+
+            def forward(self, thing):
+                return thing * 2
+
         class MyMod(torch.nn.Module):
             def __init__(self):
                 super(MyMod, self).__init__()
-                self.mod = (nn.ReLU())
-                self.mod2 = (nn.ReLU())
-                self.mod3 = nn.Sequential(nn.Sequential(nn.ReLU()))
+                self.mod = (Sub())
+                self.mod2 = (Sub())
+                self.mod3 = nn.Sequential(nn.Sequential(Sub()))
+                self.mod4 = nn.Sequential(Sub(), Double())
 
             @torch.jit.export
-            def method(self, x):
+            def method(self, x, x1, y, y1):
                 mod_names = ""
                 for name, mod in self.named_modules():
                     mod_names = mod_names + " " + name
                     x = mod(x)
-                return mod_names, x
+
+                children_names = ""
+                for name, mod in self.named_children():
+                    children_names = children_names + " " + name
+                    x1 = mod(x1)
+
+                for mod in self.modules():
+                    y = mod(y)
+
+                for mod in self.children():
+                    y1 = mod(y1)
+
+                return mod_names, children_names, x, x1, y, y1
 
             def forward(self, x):
                 return x + 2
 
         mod = torch.jit.script(MyMod())
-        self.assertEqual(mod.method(torch.tensor(2)), MyMod().method(torch.tensor(2)))
+        inps = tuple([torch.tensor(i) for i in range(1, 5)])
+        self.assertEqual(mod.method(*inps), MyMod().method(*inps))
 
     def test_script_module_const(self):
         class M(torch.jit.ScriptModule):
@@ -10736,6 +10801,12 @@ a")
             return torch.cdist(a, b, compute_mode="use_mm_for_euclid_dist")
 
         self.checkScript(cdist_fn, ())
+
+        def norm():
+            c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float)
+            return torch.norm(c, p="fro"), torch.norm(c, p="nuc"), torch.norm(c), torch.norm(c, p=.5)
+
+        self.checkScript(norm, ())
 
     def test_missing_getstate(self):
         class Foo(torch.nn.Module):
@@ -18906,7 +18977,11 @@ for test in criterion_tests:
 
 if __name__ == '__main__':
     run_tests()
-    if not PY2:
+    PY36 = sys.version_info >= (3, 6)
+    if PY36:
         import test_jit_py3
+        import jit.test_module_interface
         suite = unittest.findTestCases(test_jit_py3)
+        unittest.TextTestRunner().run(suite)
+        suite = unittest.findTestCases(jit.test_module_interface)
         unittest.TextTestRunner().run(suite)
