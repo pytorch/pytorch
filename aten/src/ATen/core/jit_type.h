@@ -17,7 +17,6 @@
 struct ClassType;
 namespace torch {
 namespace jit {
-struct Function;
 namespace script {
 struct CompilationUnit;
 }
@@ -828,7 +827,6 @@ struct CAFFE2_API RRefType
 };
 
 
-using ::torch::jit::Function;
 struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 
@@ -1060,9 +1058,8 @@ struct CAFFE2_API StringType : public Type {
 
 struct FunctionType;
 using FunctionTypePtr = std::shared_ptr<FunctionType>;
-using ::torch::jit::Function;
 struct CAFFE2_API FunctionType : public NamedType {
-  static FunctionTypePtr create(Function* function) {
+  static FunctionTypePtr create(torch::jit::Function* function) {
     return FunctionTypePtr(
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
@@ -1079,14 +1076,14 @@ struct CAFFE2_API FunctionType : public NamedType {
   std::string python_str() const override {
     return "Function";
   }
-  Function* function() const {
+  torch::jit::Function* function() const {
     return function_;
   }
   static const TypeKind Kind = TypeKind::FunctionType;
 
  private:
-  FunctionType(Function* function);
-  Function* function_;
+  FunctionType(torch::jit::Function* function);
+  torch::jit::Function* function_;
 };
 
 struct NoneType;
@@ -1516,7 +1513,7 @@ struct CAFFE2_API ClassType : public NamedType {
     return n.qualifiedName();
   }
 
-  const std::vector<Function*>& methods() const;
+  const std::vector<torch::jit::Function*>& methods() const;
 
   TypePtr findAttribute(const std::string& name) const {
     TORCH_INTERNAL_ASSERT(attributeNames_.size() == attributeTypes_.size());
@@ -1738,8 +1735,8 @@ struct CAFFE2_API ClassType : public NamedType {
     return parameterSlots_->at(slot);
   }
 
-  void addMethod(Function* method);
-  Function* getMethod(const std::string& name) const;
+  void addMethod(torch::jit::Function* method);
+  torch::jit::Function* getMethod(const std::string& name) const;
 
   // [Internal Only] Remove method from the ClassType
   // caller is responsible to make sure the modification is safe:
@@ -1791,14 +1788,13 @@ struct CAFFE2_API ClassType : public NamedType {
   std::shared_ptr<std::vector<bool>> parameterSlots_;
 
   // List of methods associated with this class.
-  std::vector<Function*> methods_;
+  std::vector<torch::jit::Function*> methods_;
 
 };
 
 struct InterfaceType;
 using InterfaceTypePtr = std::shared_ptr<InterfaceType>;
 using ::torch::jit::script::CompilationUnit;
-using ::torch::jit::Function;
 
 // Interfaces are a list of abstract methods that a class might meet.
 // If a class provides those methods, it implicitly meets the interface.

@@ -30,7 +30,7 @@ namespace {
 struct PythonTypeResolver : public jit::script::Resolver {
   std::shared_ptr<jit::script::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      Function& /* unused */,
+      torch::jit::Function& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");

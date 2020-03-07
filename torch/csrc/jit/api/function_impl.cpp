@@ -1,4 +1,4 @@
-#include <torch/csrc/jit/api/function.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/inliner.h>
 
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -6,9 +6,9 @@
 namespace torch {
 namespace jit {
 namespace {
-FunctionSchema defaultSchemaFor(const Function& function) {
-  std::vector<Argument> args;
-  std::vector<Argument> returns;
+c10::FunctionSchema defaultSchemaFor(const Function& function) {
+  std::vector<c10::Argument> args;
+  std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
   for (size_t i = 0; i < num_inputs; ++i) {
@@ -24,19 +24,19 @@ FunctionSchema defaultSchemaFor(const Function& function) {
 }
 } // namespace
 
-void placeholderCreator(Function&) {
+void placeholderCreator(GraphFunction&) {
   throw RecursiveMethodCallError();
 }
 
-void Function::run(Stack& stack) {
+void GraphFunction::run(Stack& stack) {
   get_executor().run(stack);
 }
 
-void Function::run(Stack&& stack) {
+void GraphFunction::run(Stack&& stack) {
   run(stack);
 }
 
-IValue Function::operator()(
+IValue GraphFunction::operator()(
     std::vector<IValue> stack,
     const Kwargs& kwargs) {
   getSchema().checkAndNormalizeInputs(stack, kwargs);
@@ -44,7 +44,7 @@ IValue Function::operator()(
   return stack.front();
 }
 
-void Function::ensure_defined() {
+void GraphFunction::ensure_defined() {
   if (function_creator_) {
     auto creator = function_creator_;
     function_creator_ = placeholderCreator;
@@ -54,9 +54,9 @@ void Function::ensure_defined() {
   check_single_output();
 }
 
-const FunctionSchema& Function::getSchema() const {
+const c10::FunctionSchema& GraphFunction::getSchema() const {
   if (schema_ == nullptr) {
-    schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
+    schema_ = std::make_unique<c10::FunctionSchema>(defaultSchemaFor(*this));
   }
   return *schema_;
 }
