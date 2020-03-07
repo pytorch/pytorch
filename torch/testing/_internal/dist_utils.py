@@ -92,6 +92,10 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
     '''
     Loops until an RPC to the given rank fails. This is used to
     indicate that the node has failed in unit tests.
+    Args:
+    rank (int) - Rank of the node expected to fail
+    expected_error_regex (optional, str): Regex of exception message expected. Useful to ensure a specific failure 
+    occurs, not just any.
     '''
     while True:
         try:
@@ -104,6 +108,10 @@ def wait_until_node_failure(rank, expected_error_regex=".*"):
 # Shutdown sequence is not well defined, so we may see any of the following errors
 # When running tests that simulate errors via a shutdown on the remote end.
 def get_shutdown_error_regex(rpc_backend):
+    """
+    Return various error message we may see from RPC agents while running tests that check for failures. This function 
+    is used to match against possible errors to ensure failures were raised properly.
+    """
     if rpc_backend == "PROCESS_GROUP":
         error_regexes = ["Encountered exception in ProcessGroupAgent::enqueueSend"]
     else:

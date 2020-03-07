@@ -3,7 +3,7 @@ import threading
 import time
 import unittest
 from enum import Enum
-import datetime
+import torch
 from datetime import timedelta
 import torch.distributed as dist
 import torch.distributed.autograd as dist_autograd
