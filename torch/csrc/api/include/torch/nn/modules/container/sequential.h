@@ -243,6 +243,17 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     }
   }
 
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(AnyModule any_module) {
+    push_back(c10::to_string(modules_.size()), std::move(any_module));
+  }
+
+  void push_back(std::string name, AnyModule any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::move(name), modules_[index].ptr());
+  }
+
   /// Returns an iterator to the start of the `Sequential`.
   Iterator begin() {
     return modules_.begin();
@@ -339,17 +350,6 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     // Recursively calls this method, until the parameter pack only thas this
     // entry left. Then calls `push_back()` a final time (above).
     push_back(std::forward<Second>(second), std::forward<Rest>(rest)...);
-  }
-
-  /// Adds a type-erased `AnyModule` to the `Sequential`.
-  void push_back(AnyModule any_module) {
-    push_back(c10::to_string(modules_.size()), std::move(any_module));
-  }
-
-  void push_back(std::string name, AnyModule any_module) {
-    modules_.push_back(std::move(any_module));
-    const auto index = modules_.size() - 1;
-    register_module(std::move(name), modules_[index].ptr());
   }
 
   /// The base case, when the list of modules is empty.
