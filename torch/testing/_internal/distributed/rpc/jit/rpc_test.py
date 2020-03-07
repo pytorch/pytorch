@@ -564,63 +564,29 @@ class JitRpcTest(LocalRRefTest, JitRpcAsyncOpTest, RpcAgentTestFixture):
 
     @dist_init
     def test_torchscript_functions_not_supported(self):
-        dst_worker_name = "worker{}".format((self.rank + 1) % self.world_size)
+        dst_worker_name = worker_name((self.rank + 1) % self.world_size)
 
         # rpc_sync still accepts script class and run it in
         # the same code path as python call.
-<<<<<<< dest:   1586723a7ec3 - flato: [carbon] encrypt password in Unity in c...
         ret = rpc.rpc_sync(
             dst_worker_name, MyScriptClass, args=(self.rank,)
         )
-=======
-        # Currently neither rpc_sync or _rpc_sync_torchscript is allowed to
-        # accept script module and script module method.
-        n = self.rank + 1
-        dst_rank = n % self.world_size
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                worker_name(dst_rank), MyScriptClass, args=()
-            )
-        ret = rpc.rpc_sync(worker_name(dst_rank), MyScriptClass, args=())
->>>>>>> source: f69d834928a1 refactor - pritam: Add worker_name helper to dis...
 
         # rpc_sync does not accept script module and script module method.
         with self.assertRaisesRegex(
             RuntimeError, "ScriptModules cannot be deepcopied"
         ):
-<<<<<<< dest:   1586723a7ec3 - flato: [carbon] encrypt password in Unity in c...
             ret = rpc.rpc_sync(
                 dst_worker_name, MyScriptModule, args=(self.rank,)
-=======
-            ret = rpc._rpc_sync_torchscript(
-                worker_name(dst_rank), MyScriptModule, args=(self.rank,)
->>>>>>> source: f69d834928a1 refactor - pritam: Add worker_name helper to dis...
             )
 
-<<<<<<< dest:   1586723a7ec3 - flato: [carbon] encrypt password in Unity in c...
-=======
-        with self.assertRaisesRegex(
-            RuntimeError, "attempted to get undefined function"
-        ):
-            ret = rpc._rpc_sync_torchscript(
-                worker_name(dst_rank), MyScriptModule(self.rank).forward, args=()
-            )
->>>>>>> source: f69d834928a1 refactor - pritam: Add worker_name helper to dis...
         # Python 3.5 and Python 3.6 throw different error message, the only
         # common word can be greped is "pickle".
-<<<<<<< dest:   1586723a7ec3 - flato: [carbon] encrypt password in Unity in c...
         with self.assertRaisesRegex(
             TypeError, "pickle"
         ):
             ret = rpc.rpc_async(
                 dst_worker_name, MyScriptModule(self.rank).forward, args=()
-=======
-        with self.assertRaisesRegex(Exception, "pickle"):
-            ret = rpc.rpc_sync(
-                worker_name(dst_rank), MyScriptModule(self.rank).forward, args=()
->>>>>>> source: f69d834928a1 refactor - pritam: Add worker_name helper to dis...
             )
 
     @dist_init
