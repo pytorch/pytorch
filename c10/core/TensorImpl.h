@@ -1353,18 +1353,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_CHECK(
             dim() == 4,
             "required rank 4 tensor to use channels_last format");
-        set_sizes_and_strides(sizes(), get_channels_last_strides(sizes()));
+        set_sizes_and_strides(sizes(), get_channels_last_strides_2d(sizes()));
         break;
       }
       case MemoryFormat::ChannelsLast3d: {
         TORCH_CHECK(
             dim() == 5,
             "required rank 5 tensor to use channels_last_3d format");
-        TORCH_CHECK(false, "unsupported memory format ", memory_format);
-        //TODO Implement set_sizes_and_strides for channels last 3d
-        // Cleaning warning messages, no need to break as TORCH_CHECK(false)
-        // terminates flow.
-        // break;
+        set_sizes_and_strides(sizes(), get_channels_last_strides_3d(sizes()));
+        break;
       }
       case MemoryFormat::Preserve:
         TORCH_CHECK(false, "unsupported memory format ", memory_format);
@@ -1379,6 +1376,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_strides_like_channels_last() const {
     return is_channels_last_;
+  }
+
+  bool is_strides_like_channels_last_3d() const {
+    return is_channels_last_3d_;
   }
 
   bool is_non_overlapping_and_dense() const {
@@ -1461,9 +1462,13 @@ private:
    */
   bool compute_contiguous() const;
 
-  bool compute_channels_last_contiguous() const;
+  bool compute_channels_last_contiguous_2d() const;
 
-  bool compute_strides_like_channels_last() const;
+  bool compute_channels_last_contiguous_3d() const;
+
+  bool compute_strides_like_channels_last_2d() const;
+
+  bool compute_strides_like_channels_last_3d() const;
 
   bool compute_non_overlapping_and_dense() const;
 
@@ -1481,13 +1486,36 @@ protected:
    */
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
-    is_channels_last_contiguous_ = compute_channels_last_contiguous();
-    // is_channels_last_ is suggested memory_format.
-    // Being channels_last_contiguous doesn't necessarily mean the tensor is
-    // strided like channels_last: for strides on size-1 dimension could suggest
-    // desired memory_layout, but it doesn't affect memory storage
-    is_channels_last_ = compute_strides_like_channels_last();
-    is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+    // Note:
+    // Dim 0, 1, 2 will never be a channels last 2d/3d format
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this point)
+    // Dim 4+ is possibly be a channels last 3d format (Dim 5 only at this point)
+    switch (dim()) {
+      case 4:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = false;
+        is_channels_last_ = compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || compute_non_overlapping_and_dense();
+        break;
+      case 5:
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ && compute_channels_last_contiguous_3d();
+        is_channels_last_ = !is_channels_last_3d_contiguous_ && compute_strides_like_channels_last_2d();
+        is_channels_last_3d_ = !is_channels_last_ && compute_strides_like_channels_last_3d();
+        is_non_overlapping_and_dense_ = is_contiguous_ || is_channels_last_contiguous_ || is_channels_last_3d_contiguous_|| compute_non_overlapping_and_dense();
+        break;
+      default:
+        is_channels_last_contiguous_ = false;
+        is_channels_last_3d_contiguous_ = false;
+        // is_channels_last_ and is_channels_last_3d_ are suggested memory_format.
+        // Being channels_last_contiguous doesn't necessarily mean the tensor is
+        // strided like channels_last: for strides on channel dimension could suggest
+        // desired memory_layout, but it doesn't affect memory storage
+        is_channels_last_ = false;
+        is_channels_last_3d_ = false;
+        is_non_overlapping_and_dense_ = is_contiguous_ || compute_non_overlapping_and_dense();
+    }
   }
 
   /**
@@ -1598,8 +1626,8 @@ protected:
   // should pack this into a bitfield.
   bool is_contiguous_ = true;
 
-  // Tensor is stored in the channels last memory format, when dimensions
-  // order is NCHW and C-strides < W-strides < H-strides < N-strides
+  // Tensor is stored in the channels last 2d memory format, when dimensions
+  // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
   // (If size of any dimension is equal to 1, this dimension strides value
   // is not taken into account).
   bool is_channels_last_ = false;
@@ -1607,6 +1635,16 @@ protected:
   // Channels last contiguous tensor is channel last tensor which occupies
   // contiguous memory block.
   bool is_channels_last_contiguous_ = false;
+
+  // Tensor is stored in the channels last 3d memory format, when dimensions
+  // order is (N)CDHW and C-strides < W-strides < H-strides < D - strides (< N-strides)
+  // (If size of any dimension is equal to 1, this dimension strides value
+  // is not taken into account).
+  bool is_channels_last_3d_ = false;
+
+  // Channels last 3d contiguous tensor is channel last 3d tensor which occupies
+  // contiguous memory block.
+  bool is_channels_last_3d_contiguous_ = false;
 
   // Dense tensor is the tensor that store values in a contiguous block of memory.
   // Non-overlapping tensor is the tensor in which elements occupy individual
@@ -1696,7 +1734,7 @@ protected:
 //    miscellaneous bitfield
 //
 static_assert(sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-              sizeof(TensorImpl) == sizeof(int64_t) * 30,
+              sizeof(TensorImpl) == sizeof(int64_t) * 31,
               "You changed the size of TensorImpl on 64-bit arch."
               "See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10
