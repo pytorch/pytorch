@@ -30,7 +30,7 @@ void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
-  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides(t_sizes, t_strides));
+  set(datatype, t_sizes, t_strides, pad, is_channels_last_strides_2d(t_sizes, t_strides));
 }
 
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
