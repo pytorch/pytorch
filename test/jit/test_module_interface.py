@@ -4,7 +4,14 @@
 from typing import List
 import torch
 import torch.nn as nn
+import os
+import sys
 from torch.testing._internal.jit_utils import JitTestCase
+
+# Make the helper files in test/ importable
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+from torch.testing._internal.jit_utils import JitTestCase, execWrapper
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -446,3 +453,29 @@ class TestModuleInterface(JitTestCase):
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that uses interface attributes"):
             mf = torch._C._freeze_module(m._c)
+
+    def test_module_apis_interface(self):
+        @torch.jit.interface
+        class ModuleInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+
+        class TestModule(nn.Module):
+            proxy_mod : ModuleInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                return input * 2
+
+            @torch.jit.export
+            def method(self, input):
+                for module in self.modules():
+                    input = module(input)
+                return input
+
+        with self.assertRaisesRegex(Exception, "Could not compile"):
+            scripted_mod = torch.jit.script(TestModule())
