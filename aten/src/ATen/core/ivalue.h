@@ -701,8 +701,6 @@ struct TORCH_API StrongTypePtr {
 
 TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
 
-#ifndef C10_MOBILE
-
 template<typename T>
 c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
@@ -718,20 +716,6 @@ inline bool isCustomClassRegistered() {
   auto tmap = c10::getCustomClassTypeMap();
   return tmap.find(typeid(T).name()) != tmap.end();
 }
-
-#else  // C10_MOBILE
-
-template<typename T>
-c10::ClassTypePtr getCustomClassType() {
-  throw c10::Error("Custom class is not supported on mobile.", "");
-}
-
-template<typename T>
-inline bool isCustomClassRegistered() {
-  return false;
-}
-
-#endif  // C10_MOBILE
 
 TORCH_API std::unordered_map<std::string, std::function<PyObject*(void*)>>&
 getClassConverter();
