@@ -738,8 +738,12 @@ inline vector<float> OperatorBase::GetVectorFromIValueList<float>(
 template <>
 inline vector<string> OperatorBase::GetVectorFromIValueList<string>(
     const c10::IValue& value) const {
-  CAFFE_THROW("Cannot extract vector<string> from ivalue.");
+  auto vs = value.template to<c10::List<string>>();
   vector<string> out;
+  out.reserve(vs.size());
+  for (string v : vs) {
+    out.emplace_back(v);
+  }
   return out;
 }
 
