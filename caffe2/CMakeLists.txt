@@ -61,7 +61,7 @@ if (NOT MSVC)
   ENDIF()
   if (NOT (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
     set_source_files_properties(
-        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp) 
+        utils/threadpool/pthreadpool_new_if_impl.c PROPERTIES COMPILE_FLAGS -fno-openmp)
   endif()
 endif()
 
@@ -485,7 +485,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/mobile/type_parser.cpp
     )
 
-  if (NOT INTERN_DISABLE_MOBILE_INTERP AND BUILD_CAFFE2_MOBILE)
+  if (NOT INTERN_DISABLE_MOBILE_INTERP)
     set (MOBILE_SRCS
         ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
         ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
