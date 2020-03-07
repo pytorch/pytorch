@@ -363,16 +363,18 @@ void adaptive_max_pool3d_out_cuda_template(
     totalZ = sizeB * sizeD * osizeT;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
     "adaptive_max_pool3d_cuda",
     [&] {
-      scalar_t *input_data = input.data_ptr<scalar_t>();
-      scalar_t *output_data = output.data_ptr<scalar_t>();
-      int64_t *indices_data = indices.data_ptr<int64_t>();
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_cuda", [&] {
+        scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        int64_t *indices_data = indices.data_ptr<int64_t>();
 
-      adaptivemaxpool_loop(
-        input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
-        osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
+        adaptivemaxpool_loop(
+          input_data, output_data, indices_data, totalZ, isizeT, isizeH, isizeW,
+          osizeT, osizeH, osizeW, istrideD, istrideT, istrideH, istrideW);
+      });
     }
   );
 }
@@ -430,31 +432,35 @@ void adaptive_max_pool3d_backward_out_cuda_template(
   }
 
   if (atomic) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        atomicadaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+          atomicadaptivemaxgradinput_loop(
+            gradInput_data, gradOutput_data, indices_data,
+            totalZ,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+        });
       }
     );
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
       "adaptive_max_pool3d_backward_cuda",
       [&] {
-        scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
-        scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
-        int64_t *indices_data = indices.data_ptr<int64_t>();
+        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_max_pool3d_backward_cuda", [&] {
+          scalar_t *gradInput_data = gradInput.data_ptr<scalar_t>();
+          scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
+          int64_t *indices_data = indices.data_ptr<int64_t>();
 
-        adaptivemaxgradinput_loop(
-          gradInput_data, gradOutput_data, indices_data,
-          totalZ,
-          isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+          adaptivemaxgradinput_loop(
+            gradInput_data, gradOutput_data, indices_data,
+            totalZ,
+            isizeT, isizeH, isizeW, osizeT, osizeH, osizeW);
+        });
       }
     );
   }
