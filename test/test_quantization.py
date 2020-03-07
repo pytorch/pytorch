@@ -573,9 +573,12 @@ class PostTrainingDynamicQuantTest(QuantizationTestCase):
         checkQuantized(model)
 
     @unittest.skip("temporarily disable the test")
-    @given(qengine=st.sampled_from(("qnnpack", "fbgemm")))
+    @given(qengine=st.sampled_from(("fbgemm",)))
     def test_quantized_rnn(self, qengine):
         d_in, d_hid = 2, 2
+
+        # TODO: qlinear_prepack_fp16 currently doesn't support QNNPACK
+        # re-add "qnnpack" to the engine set when this is supported
 
         with override_quantized_engine(qengine):
             model = LSTMDynamicModel().eval()
