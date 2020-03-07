@@ -119,8 +119,7 @@ class TORCH_API Message final {
 // The exception string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API Message
-createExceptionResponse(const std::exception& e, int64_t id);
+TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 
 // Create a response Message of type Exception.
 // The passed in string representation will be used as the message's payload.

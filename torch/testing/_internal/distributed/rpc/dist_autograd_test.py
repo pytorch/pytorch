@@ -1418,7 +1418,6 @@ class DistAutogradTest(RpcAgentTestFixture):
                 # Wait for rank 2 to die.
                 shutdown_error_regex = get_shutdown_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
                 wait_until_node_failure(2, shutdown_error_regex)
-
                 # Shutdown sequence is not very well defined and as a result
                 # we might see any error given by get_shutdown_error_regex().
                 with self.assertRaisesRegex(RuntimeError, shutdown_error_regex):

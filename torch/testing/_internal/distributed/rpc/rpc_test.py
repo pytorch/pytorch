@@ -1469,6 +1469,7 @@ class RpcTest(RpcAgentTestFixture):
             world_size=self.world_size,
             rpc_backend_options=self.rpc_backend_options,
         )
+        rpc._set_rpc_timeout(timedelta(milliseconds=5000))
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
         initialize_pg(self.init_method, self.rank, self.world_size)

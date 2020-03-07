@@ -122,6 +122,8 @@ def get_shutdown_error_regex(rpc_backend):
             "worker.: Error in response from worker.: AsyncSocketException: recv() failed",
         ]
     error_regex = "".join(["({})|".format(error_str) for error_str in error_regexes])
+    # Strip out the last | or else it will match anything
+    error_regex = error_regex[:-1]
     return error_regex
 
 def wait_until_pending_users_flushed():
