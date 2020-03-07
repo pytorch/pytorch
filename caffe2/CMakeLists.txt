@@ -449,7 +449,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/frontend/schema_matching.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/script_type_parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/sugared_value.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/ir/class_type.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/parser.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/builtin_functions.cpp
     ${TORCH_SRC_DIR}/csrc/jit/frontend/canonicalize_modified_loop.cpp
@@ -469,7 +468,7 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/executor.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/codegen.cpp
     ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/fallback.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/function.cpp
+    ${TORCH_SRC_DIR}/csrc/jit/api/function_impl.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/vararg_functions.cpp
 
     ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/mem_arena.cpp

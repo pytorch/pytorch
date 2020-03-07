@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/method.h>
 
@@ -94,7 +95,7 @@ struct TORCH_API Object {
   }
 
   const std::vector<Method> get_methods() const {
-    return fmap(type()->methods(), [&](Function* func) {
+    return c10::fmap(type()->methods(), [&](Function* func) {
       return Method(_ivalue(), func);
     });
   }
