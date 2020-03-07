@@ -515,6 +515,12 @@ namespace {
               AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "adaptive_avg_pool2d_nhwc_cuda", [&] {
                 size_t shmem_size = (kernel_size_C * block_x * block_y * block_z) * sizeof(scalar_t);
                 AT_ASSERT(shmem_size <= sharedMemPerBlock);
+
+                printf("\n");
+                printf("%d %d %d\n", grid_x, grid_y, grid_z); 
+                printf("%d %d %d\n", block_x, block_y, block_z); 
+                printf("%d %d %d %zu\n", sizeC, kernel_stride_C, kernel_size_C, shmem_size); 
+
                 adaptive_average_pool_nhwc<int32_t><<<grid, block, shmem_size, at::cuda::getCurrentCUDAStream()>>> (
                   input_.data_ptr<scalar_t>(),
                   output.data_ptr<scalar_t>(),
