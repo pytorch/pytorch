@@ -10,27 +10,26 @@
 
 namespace torch { namespace autograd { namespace profiler {
 
+namespace {
+
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
 // constant initialization, so it is guaranteed to be initialized before
 // static initialization calls which may invoke registerCUDAMethods
 static CUDAStubs* cuda_stubs = default_stubs_addr;
 
-void registerCUDAMethods(CUDAStubs* stubs) {
-  cuda_stubs = stubs;
-}
-
 ProfilerState state = ProfilerState::Disabled;
-uint16_t next_thread_id = 0;
-// Protects access to next_thread_id and all_event_lists_map.
+// Protects access all_event_lists_map.
 std::mutex all_event_lists_map_mutex;
 std::unordered_map<uint16_t, std::shared_ptr<RangeEventList>>
     all_event_lists_map;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local uint16_t thread_id;
 
-uint16_t getThreadId() {
-  return thread_id;
+} // namespace
+
+void registerCUDAMethods(CUDAStubs* stubs) {
+  cuda_stubs = stubs;
 }
 
 ProfilerConfig::~ProfilerConfig() = default;
@@ -39,7 +38,7 @@ RangeEventList& getEventList() {
   if (!event_list) {
     std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
     event_list = std::make_shared<RangeEventList>();
-    thread_id = ++next_thread_id;
+    thread_id = RecordFunction::getCurrentThreadId();
     all_event_lists_map.emplace(thread_id, event_list);
   }
   return *event_list;
@@ -162,9 +161,10 @@ void enableProfiler(ProfilerConfig config) {
         }
       },
       [](const RecordFunction& fn) {
-        if (fn.getThreadId() != 0) {
-          // If we've overridden the thread_id on the RecordFunction, then find
-          //  the eventList that was created for the original thread_id. Then,
+        if (fn.getStartCallbacksThreadId() !=
+                RecordFunction::getCurrentThreadId()) {
+          // If we're not in a thread that ran start callbacks, then find
+          // the eventList that was created for the original thread_id. Then,
           // record the end event on this list so that the block is added to
           // the correct list, instead of to a new list. This should only run
           // when calling RecordFunction::end() in a different thread.
@@ -173,17 +173,17 @@ void enableProfiler(ProfilerConfig config) {
           } else {
             std::lock_guard<std::mutex> guard(all_event_lists_map_mutex);
             const auto& eventListIter =
-                all_event_lists_map.find(fn.getThreadId());
+                all_event_lists_map.find(fn.getStartCallbacksThreadId());
             TORCH_INTERNAL_ASSERT(
                 eventListIter != all_event_lists_map.end(),
                 "Did not find thread_id matching ",
-                fn.getThreadId());
+                fn.getStartCallbacksThreadId());
 
             auto& eventList = eventListIter->second;
             eventList->record(
                       EventKind::PopRange,
                       StringView(""),
-                      fn.getThreadId(),
+                      fn.getStartCallbacksThreadId(),
                       state == ProfilerState::CUDA);
           }
         } else {

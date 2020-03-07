@@ -7,7 +7,9 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/autograd/context/container.h>
+#endif
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -35,7 +37,9 @@
 namespace torch {
 namespace jit {
 
+#ifdef USE_DISTRIBUTED
 using torch::distributed::autograd::DistAutogradContainer;
+#endif
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -1134,11 +1138,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                     Stack stack)
                     : state_(std::move(state)), stack_(std::move(stack)) {}
                 void operator()() {
+                  int64_t dist_autograd_context_id = -1;
+                  #ifdef USE_DISTRIBUTED
+                  dist_autograd_context_id =
+                    DistAutogradContainer::currentContextId();
+                  #endif
                   at::launch(InterpreterContinuation(
                       state_,
                       std::move(stack_),
                       autograd::GradMode::is_enabled(),
-                      DistAutogradContainer::currentContextId()));
+                      dist_autograd_context_id));
                 }
 
                private:
@@ -1253,11 +1262,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Move inputs to a separate stack
             InterpreterState forked_interpreter(
                 frames.back().function->code_table_.at(inst.X));
+            int64_t dist_autograd_context_id = -1;
+            #ifdef USE_DISTRIBUTED
+            dist_autograd_context_id =
+              DistAutogradContainer::currentContextId();
+            #endif
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
                 autograd::GradMode::is_enabled(),
-                DistAutogradContainer::currentContextId());
+                dist_autograd_context_id);
             drop(stack, inst.N);
             push(stack, forked_interpreter.getFuture());
             at::launch(std::move(continuation));
@@ -1294,7 +1308,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       const Frame& frame = frames[i];
       std::string previous_fn_name = frame.function->function_name_;
       size_t pc = frame.pc;
-      // CALL nodes have already advanced the pc, so 
+      // CALL nodes have already advanced the pc, so
       // undo that to report the call node
       if (i + 1 < frames.size()) {
         --pc;
@@ -1429,7 +1443,9 @@ InterpreterState::InterpreterState(
     : pImpl(std::move(pImpl_)) {}
 
 void InterpreterContinuation::operator()() {
+  #ifdef USE_DISTRIBUTED
   DistAutogradContainer::setCurrentContextId(dist_autograd_context_id);
+  #endif
   autograd::AutoGradMode grad_mode(grad_mode_enabled);
   state.runAsync(stack);
 }
