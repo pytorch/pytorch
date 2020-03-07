@@ -109,7 +109,7 @@ class NotSupportedError(FrontendError):
 
 
 class UnsupportedNodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node):
+    def __init__(self, ctx, offending_node, reason=''):
         # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, ' '))
@@ -117,7 +117,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} aren't supported".format(feature_name)
+        msg = "{} {}aren't supported".format(feature_name, reason + ' ' if reason else '')
         super(UnsupportedNodeError, self).__init__(source_range, msg)
 
 
@@ -291,6 +291,8 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AnnAssign(ctx, stmt):
+        if stmt.value is None:
+            raise UnsupportedNodeError(ctx, stmt, reason='without assigned value')
         rhs = build_expr(ctx, stmt.value)
         lhs = build_expr(ctx, stmt.target)
         the_type = build_expr(ctx, stmt.annotation)
