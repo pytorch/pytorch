@@ -91,7 +91,6 @@ IValue readArchiveAndTensors(
       obj_loader ? std::move(*obj_loader) : nullptr,
       std::move(read_record),
       device);
-  unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }
 
@@ -159,6 +158,8 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       // type and may access the tags. Since setstate has a known input type, we
       // can correctly restore the tags now by apply the input type of set_state
       // to the state object being passed.
+      restoreAccurateTypeTags(
+          input, set_state->getSchema().arguments().at(1).type());
       (*set_state)({obj, input});
       setGraphExecutorOptimize(true);
       postSetStateValidate(obj);
