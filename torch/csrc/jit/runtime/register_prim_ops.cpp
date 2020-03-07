@@ -2381,10 +2381,6 @@ RegisterOperators reg2({
           listMulIntLeftInPlace<c_type::value_type>,                                \
           aliasAnalysisFromSchema())
 
-    CREATE_LIST_OPS("int", c10::List<int64_t>),
-    CREATE_LIST_OPS("float", c10::List<double>),
-    CREATE_LIST_OPS("bool", c10::List<bool>),
-    CREATE_LIST_OPS("Tensor", c10::List<at::Tensor>),
     CREATE_LIST_OPS("t", c10::List<IValue>),
 
     // `listContains<T>` is not implemented for non-primitive types
