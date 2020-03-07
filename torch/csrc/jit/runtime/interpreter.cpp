@@ -965,6 +965,32 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     }
   }
 
+  void runBuiltinFunction(Stack &stack, Function *fn, ActiveFrame *af) {
+    // BuiltinOpFunction directly invokes a void(Stack&) to implement
+    // custom C++ classes. Call run() here with the stack, and we will
+    // get the results from that C++ method back in the stack. Advance
+    // the PC by 1 without adding any new frame.
+    fn->run(stack);
+    ++af->pc;
+  }
+
+  void runGraphFunction(Stack &stack, Function *fn, ActiveFrame *af) {
+    const Code& code =
+        // consider passing
+        // `frames.back().function->remaining_bailout_depth_` into
+        // `get_executor().getPlanFor()` to propagate caller's depth
+        // restrictions onto children while this strategy has a
+        // potential to reduce the number of compilations for too
+        // dynamic callers we might miss opportunities where a caller is
+        // dynamic but a callee gets stable arguments
+        fn->get_executor()
+            .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
+            .code;
+    frames.back().pc = af->pc + 1;
+    enterFrame(code, stack.size() - code.num_inputs());
+    *af = ActiveFrame(frames.back());
+  }
+
   bool runImpl(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
@@ -1062,21 +1088,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
           } break;
           case CALL: {
-            const Code& code =
-                // consider passing
-                // `frames.back().function->remaining_bailout_depth_` into
-                // `get_executor().getPlanFor()` to propagate caller's depth
-                // restrictions onto children while this strategy has a
-                // potential to reduce the number of compilations for too
-                // dynamic callers we might miss opportunities where a caller is
-                // dynamic but a callee gets stable arguments
-                af.functions[inst.X]
-                    ->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code;
-            frames.back().pc = af.pc + 1;
-            enterFrame(code, stack.size() - code.num_inputs());
-            af = ActiveFrame(frames.back());
+            Function* fn = af.functions[inst.X];
+            if (!fn->isGraphFunction()) {
+              runBuiltinFunction(stack, fn, &af);
+            } else {
+              runGraphFunction(stack, fn, &af);
+            }
           } break;
           case INTERFACE_CALL: {
             // note the hash table lookup to find the function
@@ -1095,13 +1112,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                                 .toObject()
                                 ->type()
                                 ->getMethod(af.constants[inst.X].toStringRef());
-            const Code& code =
-                function->get_executor()
-                    .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code;
-            frames.back().pc = af.pc + 1;
-            enterFrame(code, stack.size() - inst.N);
-            af = ActiveFrame(frames.back());
+            if (!function->isGraphFunction()) {
+              runBuiltinFunction(stack, function, &af);
+            } else {
+              runGraphFunction(stack, function, &af);
+            }
           } break;
           case RET:
             if (frames.size() > 1) {

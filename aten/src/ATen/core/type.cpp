@@ -979,13 +979,11 @@ void ClassType::unsafeRemoveConstant(const std::string& name) {
 
 std::shared_ptr<CompilationUnit> ClassType::compilation_unit() {
   auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
   return cu;
 }
 
 std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   auto cu = compilation_unit_.lock();
-  TORCH_INTERNAL_ASSERT(cu);
   return cu;
 }
 

@@ -17,6 +17,10 @@ struct TORCH_API GraphFunction : public Function {
         graph_(std::move(graph)),
         function_creator_(std::move(function_creator)) {}
 
+  bool isGraphFunction() const override {
+    return true;
+  }
+
   void run(Stack& stack) override;
 
   void run(Stack&& stack) override;

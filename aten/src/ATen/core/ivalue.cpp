@@ -367,14 +367,10 @@ StrongTypePtr::StrongTypePtr(
   cu_ = std::move(cu);
   type_ = type;
   TORCH_INTERNAL_ASSERT(type_);
-  if (type_->cast<ClassType>()) {
-    TORCH_INTERNAL_ASSERT(
-        cu_, "class type's owning compilation unit is nullptr");
-  }
 }
 
-std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap() {
-    static std::unordered_map<std::string, c10::StrongTypePtr> tmap;
+std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap() {
+    static std::unordered_map<std::string, c10::ClassTypePtr> tmap;
     return tmap;
 }
 

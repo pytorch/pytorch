@@ -779,7 +779,7 @@ void initJitScriptBindings(PyObject* module) {
             py::object state;
             std::string qualname;
             std::tie(state, qualname) = state_tup;
-            auto class_type = classCU()->get_class(qualname);
+            auto class_type = getCustomClass(qualname);
             TORCH_CHECK(
                 class_type,
                 "Tried to deserialize class ",
@@ -789,7 +789,10 @@ void initJitScriptBindings(PyObject* module) {
                 "sure the appropriate code is linked.");
 
             auto self = script::Object(c10::ivalue::Object::create(
-                c10::StrongTypePtr(classCU(), class_type), 1));
+                c10::StrongTypePtr(
+                    std::shared_ptr<torch::jit::script::CompilationUnit>(),
+                    class_type),
+                1));
             if (auto setstate_method = self.find_method("__setstate__")) {
               auto setstate_schema = setstate_method->function().getSchema();
               TORCH_INTERNAL_ASSERT(

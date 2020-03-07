@@ -297,8 +297,8 @@ namespace detail {
   };
 
   template<class FuncType>
-  std::unique_ptr<FunctionSchema> inferFunctionSchema_() {
-    return std::make_unique<FunctionSchema>(inferFunctionSchema<FuncType>("", ""));
+  std::unique_ptr<FunctionSchema> inferFunctionSchemaFlattenedReturns_() {
+    return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<FuncType>("", ""));
   }
 
   template<class KernelFunctor>
@@ -306,7 +306,7 @@ namespace detail {
   public:
     using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
     std::unique_ptr<FunctionSchema> operator()() const {
-      return inferFunctionSchema_<func_type>();
+      return inferFunctionSchemaFlattenedReturns_<func_type>();
     }
   };
 }

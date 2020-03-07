@@ -366,7 +366,6 @@ if (NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_SRC_DIR}/csrc/jit/runtime/autodiff.cpp
     ${TORCH_SRC_DIR}/csrc/jit/ir/attributes.cpp
     ${TORCH_SRC_DIR}/csrc/jit/runtime/argument_spec.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/api/custom_class.cpp
     ${TORCH_SRC_DIR}/csrc/jit/passes/pass_manager.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/pickler.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/unpickler.cpp

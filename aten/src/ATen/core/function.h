@@ -25,6 +25,8 @@ TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph);
 // execution of the function. script::Method is a wrapper around a
 // underlying Function that also provides a `self` object.
 struct TORCH_API Function {
+  virtual bool isGraphFunction() const = 0;
+
   virtual void run(Stack& stack) = 0;
 
   virtual void run(Stack&& stack) = 0;

@@ -1147,6 +1147,7 @@ struct PythonPrintImpl {
   void printFunction(
       const Function& func,
       bool print_first_argument_type = true) {
+    TORCH_INTERNAL_ASSERT(func.isGraphFunction());
     const FunctionSchema& schema = func.getSchema();
     Graph& graph = *func.graph();
     used_names_.clear(); // each graph can reuse local names
@@ -1192,6 +1193,16 @@ struct PythonPrintImpl {
         enforce_importable_(enforce_importable) {}
 
   void printClass(const ClassTypePtr& classType) {
+    // If any of the methods are not Graph funtions, this indicates that
+    // this class is a custom-bound C++ class. Skip serialization
+    // of this class, we will depend on the ClassType being defined
+    // in the target process.
+    for (auto& method : classType->methods()) {
+      if (!method->isGraphFunction()) {
+        return;
+      }
+    }
+
     bool is_module = classType->is_module();
     body_ << "class " << classType->name()->name();
     if (is_module) {
