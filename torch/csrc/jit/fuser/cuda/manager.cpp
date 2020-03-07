@@ -68,10 +68,7 @@ public:
     CudaKernel& cuda_kernel_entry = kernel_cache_[kernel_id];
     std::cout << "executing cached kernel: " << kernel_id << std::endl;
 
-    for (auto& output : outputs) {
-      output.fill_(kernel_id+0.1234);
-    }
-
+    runKernel(cuda_kernel_entry, inputs, outputs);
   }
 
 protected:
