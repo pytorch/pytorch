@@ -1317,7 +1317,7 @@ struct getTypePtr_ final {
       throw c10::Error("Type could not be converted to any of the known types.", "");
     }
     auto res = getCustomClassType<T>();
-    return std::dynamic_pointer_cast<Type>(std::move(res.type_));
+    return std::dynamic_pointer_cast<Type>(std::move(res));
   }
 };
 
@@ -1434,6 +1434,12 @@ struct getTypePtr_<std::tuple<Contained...>> final {
       (getTypePtr_<Contained>::call())...
     };
     return TupleType::create(std::move(contained_types));
+  }
+};
+template <>
+struct getTypePtr_<void> final {
+  static TypePtr call() {
+    return NoneType::get();
   }
 };
 } // namespace detail
