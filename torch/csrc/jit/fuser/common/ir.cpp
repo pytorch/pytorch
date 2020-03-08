@@ -74,17 +74,14 @@ BinaryOp::BinaryOp(
 
 ForLoop::ForLoop(
     Int*        _index,
-    Int*        _start,
     IterDomain* _range,
     const std::vector<const Expr*> &_body)
     : Expr(ExprType::ForLoop),
       index_{_index},
-      start_{_start},
       range_{_range},
       body_{_body}
 {
   addInput(_index);
-  addInput(_start);
   addInput(_range);
   this->name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
