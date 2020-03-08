@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 import unittest
 
+from torch.testing._internal.common_utils import suppress_warnings
 
 @contextlib.contextmanager
 def num_profiled_runs(num_runs):
@@ -332,6 +333,7 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(a.numpy() + 2.0 * a.numpy(), x.numpy())
 
 
+    @suppress_warnings
     def test_constant(self):
         def constant(x):
             bbb = torch.tensor([1.0])
@@ -530,6 +532,7 @@ class TestTensorExprFuser(BaseTestClass):
             np.testing.assert_allclose(np.zeros(1024), x.cpu().numpy())
 
 
+    @suppress_warnings
     def test_min_max(self):
         def test(x, y):
             return torch.max(torch.min(x, y), torch.tensor([4.0]))
@@ -1076,7 +1079,6 @@ class TestTensorExprFuser(BaseTestClass):
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() == 1
 
 
-    @unittest.skip("fails on trunk")
     def test_unsqueeze(self):
         def easy(x, y):
             a = torch.unsqueeze(x, 0)
@@ -1168,7 +1170,6 @@ class TestTensorExprFuser(BaseTestClass):
             # np.testing.assert_allclose(res.cpu().numpy(), xn * yn * zn)
             # assert cuda.elapsed_value() == 1
 
-    @unittest.skip("guarding on static shapes is not working")
     def test_guard_fails(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1181,7 +1182,6 @@ class TestTensorExprFuser(BaseTestClass):
         r3 = test(*[torch.rand(4).cuda() for _ in range(3)])
         assert cuda.elapsed_value() == 2
         r4 = test(*[torch.rand(7).cuda() for _ in range(3)])
-        print(test.graph_for(*[torch.rand(7).cuda() for _ in range(3)]))
         assert cuda.elapsed_value() == 2
 
     def test_bitwise_ops(self):

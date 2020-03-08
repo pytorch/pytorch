@@ -348,7 +348,7 @@ void testLLVMVectorizerLoadStoreTest() {
   auto expr =
       For::make(i, 0, 4, Store::make(b, i, Load::make(a, i, mask), mask));
   auto vectorized = Vectorize(expr);
-  EXPECT_EQ(dynamic_cast<For*>(vectorized), nullptr);
+  EXPECT_TRUE(dynamic_cast<For*>(vectorized) == nullptr);
 
   LLVMCodeGen cg(vectorized, {a, b});
   std::vector<void*> args({a_buffer.data(), b_buffer.data()});

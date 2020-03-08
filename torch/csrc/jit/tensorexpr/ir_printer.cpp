@@ -264,7 +264,7 @@ void IRPrinter::visit(const For* v) {
   os() << std::endl;
   if (v->body()) {
     indent_++;
-    os() << *v->body() << std::endl;
+    os() << *v->body();
     indent_--;
   }
   emitIndent();
@@ -390,18 +390,6 @@ std::ostream& operator<<(std::ostream& stream, const Stmt& stmt) {
   } else {
     IRPrinter p(stream);
     p.print(stmt);
-  }
-  return stream;
-}
-
-std::ostream& operator<<(std::ostream& stream, Stmt* stmt) {
-  IRPrinter::PrinterStream* printer_stream =
-      dynamic_cast<IRPrinter::PrinterStream*>(&stream);
-  if (printer_stream != nullptr) {
-    stmt->accept(printer_stream->printer());
-  } else {
-    IRPrinter p(stream);
-    p.print(*stmt);
   }
   return stream;
 }

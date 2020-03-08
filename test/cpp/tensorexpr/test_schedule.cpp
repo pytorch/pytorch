@@ -47,7 +47,7 @@ void testExprLower01() {
   LoopNest l({tensor});
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 20);
   ASSERT_LT(oss.str().size(), 200);
 }
@@ -68,8 +68,8 @@ void testExprSimple02() {
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
   oss << *stmt;
-  //   ASSERT_GT(oss.str().size(), 200);
-  //   ASSERT_LT(oss.str().size(), 600);
+  ASSERT_GT(oss.str().size(), 200);
+  ASSERT_LT(oss.str().size(), 600);
 
   {
     // Compare to a reference loop structure structure.
@@ -135,7 +135,7 @@ void testExprSplitWithTailNone() {
 
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 200);
   ASSERT_LT(oss.str().size(), 600);
 
@@ -161,7 +161,7 @@ void testExprSplitWithTailNone() {
     // Stmt stmt = Block::make({stmt1, stmt2});
 
     std::ostringstream oss_ref;
-    oss_ref << stmt;
+    oss_ref << *stmt;
     oss_ref << "\n"; // TODO: fix printing instead of adding \n here
     ASSERT_EQ(oss.str(), oss_ref.str());
   }
@@ -292,7 +292,7 @@ void testScheduleFunctionCall01() {
   l.ApplyInlines();
   Stmt* stmt = l.root_stmt();
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   ASSERT_GT(oss.str().size(), 100);
 
   PaddedBuffer<float> a_v(M, N);
@@ -375,7 +375,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
   Stmt* stmt = l.root_stmt();
 
   std::ostringstream oss;
-  oss << stmt;
+  oss << *stmt;
   std::string str1 = remove_space(oss.str());
 
   {
@@ -432,7 +432,7 @@ void InlineFunc01Helper(const std::vector<std::string>& inline_order) {
     Stmt* stmt2 = l2.root_stmt();
 
     std::ostringstream oss2;
-    oss2 << stmt2;
+    oss2 << *stmt2;
     std::string str2 = remove_space(oss2.str());
 
     ASSERT_EQ(str1, str2);
