@@ -83,8 +83,8 @@ void CodeWrite::handle(const TensorView* const tv) {
     TransformReplay::fullReplay(consumer, tv_);
     tv2 = tv_;
   } else if (producer) {
-    throw std::runtime_error(
-        "Could not find consumer for producer in CodeWrite.");
+    TORCH_INTERNAL_ASSERT(false,
+        "Could not find consumer for this producer in CodeWrite.");
   }
   os << "TV" << tv->name();
 
@@ -236,6 +236,7 @@ void CodeWrite::closeFor() {
   os << "}" << std::endl;
 }
 
+//TODO: Should move stringify to type.cpp/h
 void CodeWrite::bind(IterDomain* id, Val* iterator) {
   switch (id->parallel_method()) {
     case (ParallelType::BIDz):
@@ -264,7 +265,7 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
       break;
     case (ParallelType::Vectorize):
     case (ParallelType::Unroll):
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Unroll and Vectorize are not yet implemented for code generation.");
     case (ParallelType::Serial):
       break;
@@ -422,12 +423,12 @@ void CodeWrite::header() {
             os << "int i";
             break;
           default:
-            throw std::runtime_error(
-                "Could not figure out data type for CodeWrite::header().");
+            TORCH_CHECK(false,
+                "CodeWrite::header() found an input to the fusion of unexpected val type.");
         }
       default:
-        throw std::runtime_error(
-            "Could not figure out value type for CodeWrite::header().");
+        TORCH_CHECK(false,
+            "CodeWrite::header() found an input to the fusion of unexpected data type.");
     }
 
     os << val->name();

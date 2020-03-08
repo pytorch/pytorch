@@ -9,18 +9,22 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+//Play split/merge/reorder operations backwards to compute indexing into original tensor.
 struct IndexCompute : public TransformIter {
  protected:
+  
   void replayBackward(Split* expr) override {
     int ax = expr->axis();
-    TORCH_CHECK(ax >= 0 && ax + 1 < indices.size());
+    TORCH_INTERNAL_ASSERT(ax >= 0 && ax + 1 < indices.size(),
+      "Hit an invalid Split transformation during IndexCompute, axis is not within bounds.");
     indices[ax] = static_cast<Int*>(mul(indices[ax], indices[ax + 1]));
     indices.erase(indices.begin() + ax + 1);
   }
 
   void replayBackward(Merge* expr) override {
     int ax = expr->axis();
-    TORCH_CHECK(ax >= 0 && ax < indices.size());
+    TORCH_INTERNAL_ASSERT(ax >= 0 && ax < indices.size(),
+      "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
     Int* O = expr->in()->axis(ax + 1)->size();
     Int* ind = indices[ax];
@@ -41,9 +45,11 @@ struct IndexCompute : public TransformIter {
     for (decltype(pos2axis.size()) i = 0; i < pos2axis.size(); i++) {
       int new_pos = i;
       int old_pos = pos2axis[i];
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           new_pos >= 0 && new_pos < indices.size() && old_pos >= 0 &&
-          old_pos < indices.size());
+          old_pos < indices.size(),
+          "Hit an invalid reorder transformation during IndexCompute,"
+          " at least one move position is not within bounds.");
       axis2pos[old_pos] = new_pos;
     }
     for (decltype(axis2pos.size()) i = 0; i < axis2pos.size(); i++) {
@@ -66,17 +72,30 @@ struct IndexCompute : public TransformIter {
     TensorDomain* td = tv->domain();
 
     bool exclude_reduction = td->size() > indices.size();
-    TORCH_CHECK(td->size() >= indices.size());
+    TORCH_CHECK(td->size() >= indices.size(),
+      "For IndexCompute the number of axis should match the number of dimensions"
+      " in the TensorView.");
 
-    // Add fake indices on reduction axes if they aren't there
-    // just for bookkeeping of split/merge/reorder.
+    // If we need to ignore the reduction dimensions because a tensor is
+    // being consumed, not produced, then insert dummy dimensions in the
+    // indices for bookkeeping while replaying split/merge/reorder operations. 
     if (exclude_reduction)
       for (decltype(td->size()) i{0}; i < td->size(); i++)
         if (td->axis(i)->isReduction())
           indices.insert(indices.begin() + i, new Int(-1));
+
+    // Run the split/merge/reorder operations backwards. This will
+    // Modify std::vector<Int*> indices so it can be used to index
+    // the root TensorDomain which should now match the physical axes.
     TensorDomain* root = TransformIter::runBackward(td, true);
-    TORCH_CHECK(root->size() == indices.size());
-    // Remove indices associated with reduction axes
+
+    TORCH_INTERNAL_ASSERT(root->size() == indices.size(),
+      "Error during IndexCompute. The number of indices generated"
+      " after running the transformations backwards should match" 
+      " the number of dimensions of the root TensorView.");
+
+    // Remove indices associated with reduction axes, we had them just for
+    // bookkeeping. 
     if (exclude_reduction) {
       for (int i = root->size() - 1; i >= 0; i--)
         if (root->axis(i)->isReduction())

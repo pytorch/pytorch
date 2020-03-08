@@ -33,7 +33,7 @@ Val::Val(ValType _vtype, DataType _dtype)
     this->name_ = fusion->registerVal(this);
     this->fusion_ = fusion;
   } else {
-    throw std::runtime_error("No fusion group found when creating a Val.");
+    TORCH_CHECK(false, "No active fusion group found when creating a Val.");
   }
 }
 
@@ -45,7 +45,7 @@ Expr* Val::getOrigin() {
 Expr::Expr(ExprType _type) : type_{_type} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
-    throw std::runtime_error("No fusion group found when creating an Expr.");
+    TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
   this->fusion_ = fusion;
 }
 

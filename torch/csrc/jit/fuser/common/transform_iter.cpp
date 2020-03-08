@@ -12,7 +12,8 @@ void TransformIter::replayBackward(Merge* expr) {}
 void TransformIter::replayBackward(Reorder* expr) {}
 
 void TransformIter::replayBackward(Expr* expr) {
-  TORCH_CHECK(expr->isExpr());
+  TORCH_INTERNAL_ASSERT(expr->isExpr(),
+  "Dispatch in transform iteration is expecting Exprs only.");
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
       replayBackward(static_cast<Split*>(expr));
@@ -24,7 +25,7 @@ void TransformIter::replayBackward(Expr* expr) {
       replayBackward(static_cast<Reorder*>(expr));
       break;
     default:
-      throw std::runtime_error("Could not detect expr type in replayBackward.");
+      TORCH_INTERNAL_ASSERT(false, "Could not detect expr type in replayBackward.");
   }
 }
 
@@ -44,7 +45,7 @@ TensorDomain* TransformIter::runBackward(
   // If I'm not back to the original td
   while (orig != nullptr) {
     if (visited_exprs.find(orig) != visited_exprs.end())
-      throw std::runtime_error(
+      TORCH_INTERNAL_ASSERT(false, 
           "TransformReplay::runBackward is not traversing a correct history.");
 
     visited_exprs.emplace(orig);
@@ -54,7 +55,7 @@ TensorDomain* TransformIter::runBackward(
     for (Val* inp : orig->inputs())
       if (inp->getValType() == ValType::TensorDomain) {
         if (previous_td != nullptr)
-          throw std::runtime_error(
+          TORCH_INTERNAL_ASSERT(false, 
               "TransformReplay::runBackward could not decifer transform history of a TensorDomain.");
 
         // Place transform op on top of stack.
@@ -91,7 +92,7 @@ TensorView* TransformIter::replay(Reorder* expr, TensorView* tv) {
 }
 
 TensorView* TransformIter::replay(Expr* expr, TensorView* tv) {
-  TORCH_CHECK(expr->isExpr());
+  TORCH_INTERNAL_ASSERT(expr->isExpr());
   switch (*(expr->getExprType())) {
     case (ExprType::Split):
       return replay(static_cast<Split*>(expr), tv);
@@ -100,7 +101,7 @@ TensorView* TransformIter::replay(Expr* expr, TensorView* tv) {
     case (ExprType::Reorder):
       return replay(static_cast<Reorder*>(expr), tv);
     default:
-      throw std::runtime_error("Could not detect expr type in replay.");
+      TORCH_INTERNAL_ASSERT(false, "Could not detect expr type in replay.");
   }
 }
 

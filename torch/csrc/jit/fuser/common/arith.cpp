@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/fuser/common/tensor.h>
 #include <torch/csrc/jit/fuser/common/type.h>
 
+#include <sstream>
+
 namespace torch{
 namespace jit{
 namespace fuser{
@@ -12,7 +14,8 @@ namespace fuser{
 TORCH_API Val* new_val_like(const Val* const val, DataType dtype){
   switch (val->getValType().value()) {
     case (ValType::Tensor):
-      throw std::runtime_error("Tensors cannot be intermediate values in this IR, must use TensorViews.");
+      TORCH_CHECK(false,
+        "Tensors cannot be intermediate values in this IR, must use TensorViews.");
     case(ValType::TensorView):
       return static_cast<const TensorView* const>(val)->newForOutput(dtype);
     case (ValType::Scalar):
@@ -27,7 +30,12 @@ TORCH_API Val* new_val_like(const Val* const val, DataType dtype){
     default:
       break;
   }
-  throw std::runtime_error("Cannot promote types."); //Todo print val and data types in the error
+  std::stringstream err_msg;
+  err_msg 
+  << "Could not generate a new value of type " 
+  << val->getValType().value() << " with data type " << val->getDataType().value()
+  << std::endl;
+  TORCH_CHECK(false, err_msg.str());
 }
 
 TORCH_API Val* new_val_like(const Val* const val){
@@ -35,6 +43,8 @@ TORCH_API Val* new_val_like(const Val* const val){
 }
 
 TORCH_API Val* promote_new(Val* v1, Val* v2) {
+  // Can't promote two types if they aren't both
+  // values with valid data types.
   TORCH_CHECK(v1->isVal() && v2->isVal());
   TORCH_CHECK(
       v1->getDataType() != DataType::Null &&
@@ -52,8 +62,8 @@ TORCH_API Val* promote_new(Val* v1, Val* v2) {
 TORCH_API Val* cast_op(DataType dtype, Val* v1){
   if( !is_cast_legal(v1->getDataType().value(), dtype) ) {
 	std::stringstream err;
-	err << "Illegal Cast of DataTypes From: " << v1->getDataType().value() << " To: " << dtype;
-    throw std::runtime_error(err.str());
+	err << "Illegal Cast value from  DataType: " << v1->getDataType().value() << " to DataType: " << dtype;
+    TORCH_CHECK(false, err.str());
   }
   Val* out = new_val_like(v1, dtype);
   Statement* expr = new UnaryOp(UnaryOpType::Cast, out, v1);

@@ -93,12 +93,13 @@ TensorView* split(TensorView* tv, int axis, int factor) {
   IterDomain* id = td->axis(axis);
 
   if (id->parallel_method() != ParallelType::Serial)
-    throw std::runtime_error(
-        "Splitting an axis of non-Serial iteration approach is not supported at this time. Parallelization strategy must be set after calling split.");
+    TORCH_CHECK(false,
+        "Splitting an axis of non-Serial iteration is not supported at this time."
+        " Parallelization strategy must be set after calling split.");
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
-      throw std::runtime_error("Cannot split axis within compute at range.");
+      TORCH_CHECK(false, "Cannot split axis within the compute at range.");
 
   std::vector<IterDomain*> new_domain;
 
@@ -140,7 +141,7 @@ TensorView* merge(TensorView* tv, int axis) {
 
   if (tv->getComputeAtView() != nullptr)
     if (axis < tv->getComputeAtAxis())
-      throw std::runtime_error("Cannot split axis within compute at range.");
+      TORCH_CHECK(false, "Cannot split axis within compute at range.");
 
   IterDomain* first = td->axis(axis);
   IterDomain* second = td->axis(axis + 1);
@@ -191,9 +192,7 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
     assert(old_pos >= 0 && old_pos < ndims && new_pos >= 0 && new_pos < ndims);
 
     if (pos2axis[new_pos] != -1)
-      throw std::runtime_error(
-          std::string("Fatal error: found overlapped positions in reorder. ") +
-          std::string(__FILE__) + " : " + std::to_string(__LINE__));
+      TORCH_CHECK(false, "Reorder found duplicate destination positions.");
 
     pos2axis[new_pos] = old_pos;
   }
@@ -202,9 +201,7 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   old_positions.erase(-1);
 
   if (old_positions.size() != axis2pos.size())
-    throw std::runtime_error(
-        std::string("Fatal error: found overlapped positions in reorder. ") +
-        std::string(__FILE__) + " : " + std::to_string(__LINE__));
+    TORCH_INTERNAL_ASSERT(false, "Reorder found duplicate destination positions.");
 
   std::set<int> all_positions;
   for (int i = 0; i < ndims; i++)
@@ -232,7 +229,7 @@ TensorView* reorder(TensorView* tv, std::unordered_map<int, int> axis2pos) {
   if (tv->getComputeAtView() != nullptr) {
     for (int i = 0; i < tv->getComputeAtAxis(); i++) {
       if (pos2axis[i] != i)
-        throw std::runtime_error(
+        TORCH_CHECK(false, 
             "Cannot reorder axis within compute at range.");
     }
   }
@@ -286,7 +283,8 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
     //Compute at is funny where size is the maximum acceptable value instead of size-1
     axis +=  consumer->domain()->size() + 1;
 
-  TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size() + 1);
+  TORCH_CHECK(axis >= 0 && axis < consumer->domain()->size() + 1,
+    "Compute at called on an axis outside valid range.");
 
   std::stack<Val*> dep_chain =
       DependencyCheck::getDependencyChain(this, consumer);
@@ -301,7 +299,8 @@ TensorView* TensorView::computeAt(TensorView* consumer, int axis) {
   while (!dep_chain.empty()) {
     Val* val = dep_chain.top();
     dep_chain.pop();
-    TORCH_CHECK(val->getValType() == ValType::TensorView);
+    TORCH_INTERNAL_ASSERT(val->getValType() == ValType::TensorView,
+    "When following the transform dependency chain, an invalid value was found.");
     TensorView* tv = static_cast<TensorView*>(val);
     if (tv->same_as(consumer))
       continue;

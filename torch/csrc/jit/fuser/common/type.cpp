@@ -91,37 +91,44 @@ static std::unordered_map<at::ScalarType, DataType> at_type_map {
 };
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
-  TORCH_CHECK(at_type_map.count(scalar_type) != 0);
+  TORCH_INTERNAL_ASSERT(at_type_map.count(scalar_type) != 0,
+  "No string found for scalar type.");
   return at_type_map[scalar_type];
 }
 
 std::ostream& operator<<(std::ostream& out, const ValType vtype) {
-  TORCH_CHECK(val_type_string_map.count(vtype) != 0);
+  TORCH_INTERNAL_ASSERT(val_type_string_map.count(vtype) != 0,
+  "No string found for val type.");
   return out << val_type_string_map[vtype];
 }
 
 std::ostream& operator<<(std::ostream& out, const DataType dtype) {
-  TORCH_CHECK(data_type_string_map.count(dtype) != 0);
+  TORCH_INTERNAL_ASSERT(data_type_string_map.count(dtype) != 0,
+  "No string found for data type.");
   return out << data_type_string_map[dtype];
 }
 
 std::ostream& operator<<(std::ostream& out, const ExprType etype) {
-  TORCH_CHECK(expr_type_string_map.count(etype) != 0);
+  TORCH_INTERNAL_ASSERT(expr_type_string_map.count(etype) != 0,
+  "No string found for expr type.");
   return out << expr_type_string_map[etype];
 }
 
 std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
-  TORCH_CHECK(unary_op_type_string_map.count(uotype) != 0);
+  TORCH_INTERNAL_ASSERT(unary_op_type_string_map.count(uotype) != 0,
+  "No string found for UnaryOp type.");
   return out << unary_op_type_string_map[uotype];
 }
 
 std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
-  TORCH_CHECK(binary_op_type_string_map.count(botype) != 0);
+  TORCH_INTERNAL_ASSERT(binary_op_type_string_map.count(botype) != 0,
+  "No string found for BinaryOp type.");
   return out << binary_op_type_string_map[botype];
 }
 
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
-  TORCH_CHECK(parallel_type_string_map.count(ptype) != 0);
+  TORCH_INTERNAL_ASSERT(parallel_type_string_map.count(ptype) != 0,
+  "No string found for parallel type.");
   return out << parallel_type_string_map[ptype];
 }
 
