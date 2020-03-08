@@ -1,11 +1,26 @@
-
 #include <ATen/native/ScatterGatherShapeChecks.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/Parallel.h>  
+#include <ATen/Parallel.h>
+#include <unordered_map>
+#include <map>
 
 namespace at { namespace native {
 
 namespace {
+
+#define DEFINE_REDUCE_FUNCTOR(FUNCTOR_NAME, OPERATOR) class FUNCTOR_NAME { \
+public:                                                             \
+ FUNCTOR_NAME() {};                                                 \
+ template <typename T>                                              \
+ void operator() (T* self_data, const T* src_data) {                \
+   *self_data OPERATOR *src_data;                                   \
+ };};                                                               \
+ FUNCTOR_NAME FUNCTOR_NAME##_func;
+
+DEFINE_REDUCE_FUNCTOR(ReduceSum, +=);
+DEFINE_REDUCE_FUNCTOR(ReduceSubtract, -=);
+DEFINE_REDUCE_FUNCTOR(ReduceMultiply, *=);
+DEFINE_REDUCE_FUNCTOR(ReduceDivide, /=);
 
 static inline int64_t ensure_nonempty_dim(int64_t dim) {
   return std::max<int64_t>(dim, 1);
@@ -307,7 +322,81 @@ void scatter_add_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, cons
     /*serial_exec=*/false);
 }
 
+template <typename func_t>
+void cpu_scatter_gather_reduce_kernel(
+  Tensor& self, int64_t dim,
+  const Tensor& index, const Tensor& src,
+  const std::string& method_name,
+  const func_t& f,
+  const std::string& reduce,
+  bool serial_exec = true
+) {
+  auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+  auto index_strides = ensure_nonempty_vec(index.strides().vec());
 
+  // `dim` is traversed in a kernel function `f`,
+  // that is why index.stride(dim) = 0 and index.size(dim) = 1.
+  // Also, index.size(dim) = 1 makes sure that TensorIterator.DimCounter
+  // has the following form : (i_1,..., i_{dim-1}, 0, i_{dim+1},...,i_n).
+  index_sizes[dim] = 1;
+  index_strides[dim] = 0;
+
+  // set self.shape = src.shape = index.shape,
+  // this defines the number of elements to iterate over,
+  // and set self.stride(dim) = src.stride(dim) = 0,
+  // because `dim` is traversed in a kernel function `f`.
+  auto self_restrided = restride_dim(self, dim, index_sizes);
+  auto index_restrided = index.as_strided(index_sizes, index_strides);
+  auto src_restrided = restride_dim(src, dim, index_sizes);
+
+  auto iter = TensorIterator();
+  iter.dont_compute_common_dtype();
+  iter.dont_resize_outputs();
+  iter.add_output(self_restrided);
+  iter.add_input(src_restrided, src.device(), src.scalar_type());
+  iter.add_input(index_restrided);
+  iter.build();
+
+  auto self_dim_stride = ensure_nonempty_stride(self, dim);
+  auto index_dim_stride = ensure_nonempty_stride(index, dim);
+  auto src_dim_stride = ensure_nonempty_stride(src, dim);
+
+  AT_DISPATCH_ALL_TYPES_AND2(
+    ScalarType::Bool, ScalarType::Half, iter.dtype(),
+    method_name, [&] {
+      using reduce_fn = std::function<void(scalar_t*, const scalar_t*)>;
+      std::map<const std::string, reduce_fn> reduce_funcs = {
+          {"sum", ReduceSum_func},
+          {"subtract", ReduceSubtract_func},
+          {"multiply", ReduceMultiply_func},
+          {"divide", ReduceDivide_func}                                   
+      };
+      auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+        auto* self_data_bytes = data[0];
+        const auto* index_data_bytes = data[2];
+        const auto* src_data_bytes = data[1];
+
+        for (int64_t i = 0; i < n; ++i) {
+          f(
+            (scalar_t*)self_data_bytes, self_dim_stride,
+            (int64_t*)index_data_bytes, index_dim_stride,
+            (scalar_t*)src_data_bytes, src_dim_stride,
+            reduce_funcs, reduce
+          );
+
+          self_data_bytes += strides[0];
+          index_data_bytes += strides[2];
+          src_data_bytes += strides[1];
+        }
+      };
+      if (serial_exec) {
+        iter.serial_for_each(loop, {0, iter.numel()});
+      } else {
+        iter.for_each(loop);
+      }
+    }
+  );
+}
 
 void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src,
                                std::string& reduce) {
@@ -322,40 +411,27 @@ void scatter_reduce_cpu_kernel(Tensor& self, int64_t dim, const Tensor& index, c
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
   std::string method_name = "scatter_" + reduce + "_";
 
-  cpu_scatter_gather_base_kernel(
+  cpu_scatter_gather_reduce_kernel(
     self, dim, index, src,
     method_name, [&] (
       auto* self_data, auto self_dim_stride,
       const auto* index_data, auto index_dim_stride,
-      const auto* src_data, auto src_dim_stride
-    ) {
-    std::map<
-    std::string,
-    std::function<void(const int64_t&, const int64_t&)> > reduce_func_map = {
-      {"add", [&](const int64_t& idx_dim, const int64_t& i) {
-                self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
-              }},
-      {"subtract", [&](const int64_t& idx_dim, const int64_t& i) {
-                     self_data[idx_dim * self_dim_stride] += src_data[i * src_dim_stride];
-                   }},
-      {"multiply", [&](const int64_t& idx_dim, const int64_t& i) {
-                     self_data[idx_dim * self_dim_stride] *= src_data[i * src_dim_stride];
-                   }},
-      {"divide", [&](const int64_t& idx_dim, const int64_t& i) {
-                   self_data[idx_dim * self_dim_stride] /= src_data[i * src_dim_stride];
-                 }}
-    };
-                   
+      const auto* src_data, auto src_dim_stride,
+      auto& reduce_funcs, const std::string& reduce
+    ) {                   
       for (int64_t i = 0; i < index_dim_size; ++i) {
         int64_t idx_dim = index_data[i * index_dim_stride];
         // we are not putting idx_dim in the error message because it disables
         // loop optimizations in clang-7
         TORCH_CHECK(idx_dim >= 0 && idx_dim < self_dim_size,
-                    "index ", index_data[i * index_dim_stride], " is out of bounds for dimension ", dim,
+                    "index ", index_data[i * index_dim_stride],
+                    " is out of bounds for dimension ", dim,
                     " with size ", self_dim_size);
-        reduce_func_map[reduce](idx_dim, i);
+        reduce_funcs[reduce](&self_data[idx_dim * self_dim_stride],
+                             &src_data[i * src_dim_stride]);
       }
     },
+    reduce,
     /*serial_exec=*/false);
 }
 

@@ -10814,7 +10814,7 @@ class TestTorchDeviceType(TestCase):
 
         for input, src, result, operation in test_data:
             input.scatter_(0, index, src, reduce=operation)
-            self.assertEqual(input, result)
+            self.assertEqual(input, result, operation)
 
     def test_scatter_reduce_scalar_tensor(self, device):
         pass
