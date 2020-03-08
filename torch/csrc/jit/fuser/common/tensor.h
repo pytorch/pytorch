@@ -134,6 +134,10 @@ struct TORCH_API IterDomain : public Val {
     return false;
   }
 
+  bool isThread(){
+    return ( isBlockDim() || isThreadDim() );
+  }
+
   void parallelize(ParallelType t){parallel_method_ = t;}
 
   ParallelType parallel_method() const noexcept {

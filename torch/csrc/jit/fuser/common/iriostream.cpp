@@ -183,7 +183,7 @@ void IRPrinter::handle(const IfThenElse* const ite) {
   if(ite->hasElse()) {
     os << "} else { \n";
     for(auto &expr : ite->else_body()) {
-      handle(expr);	
+      handle(expr);
     }
   }
   os<<"}\n";
