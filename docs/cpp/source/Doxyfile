@@ -56,9 +56,9 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/api/include \
                          ../../../torch/csrc/api/src \
                          ../../../torch/csrc/autograd/generated/variable_factories.h \
-                         ../../../torch/csrc/jit/custom_operator.h \
-                         ../../../torch/csrc/jit/import.h \
-                         ../../../torch/csrc/jit/script/module.h
+                         ../../../torch/csrc/jit/runtime/custom_operator.h \
+                         ../../../torch/csrc/jit/serialization/import.h \
+                         ../../../torch/csrc/jit/api/module.h
 # Don't include .cpp files!
 FILE_PATTERNS          = *.h
 # If you need this to be YES, exhale will probably break.

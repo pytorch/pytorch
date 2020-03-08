@@ -12,8 +12,22 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+constexpr auto kDefaultNumSendRecvThreads = 4;
+
 struct ProcessGroupRpcBackendOptions : public RpcBackendOptions {
-  ProcessGroupRpcBackendOptions() = default;
+  ProcessGroupRpcBackendOptions(
+      int num_send_recv_threads,
+      std::chrono::milliseconds rpc_timeout,
+      std::string init_method)
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numSendRecvThreads(num_send_recv_threads) {
+    TORCH_CHECK(
+        num_send_recv_threads > 0,
+        "Cannot create ProcessGroup RPC backend with ",
+        num_send_recv_threads,
+        " threads in the thread-pool.");
+  }
+
   int numSendRecvThreads;
 };
 

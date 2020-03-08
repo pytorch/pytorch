@@ -926,8 +926,8 @@ class TestClassType(JitTestCase):
 
             def forward(self, x):
                 # Make sure class constant is accessible in method
-                print(self.w)
-                return x
+                y = self.w
+                return x, y
 
         # Test serialization/deserialization of class constant
         for c in (2, 1.0, None, True, 'str', (2, 3), [5.9, 7.3]):

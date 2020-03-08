@@ -111,7 +111,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
             FailingOptimizer, [remote_param1, remote_param2]
         )
 
-        with dist_autograd.context():
+        with dist_autograd.context() as context_id:
             torch.manual_seed(0)
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
@@ -119,9 +119,9 @@ class DistOptimizerTest(RpcAgentTestFixture):
             output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1).sum()
 
-            dist_autograd.backward([loss])
+            dist_autograd.backward(context_id, [loss])
             with self.assertRaisesRegex(Exception, "Error running optimizer"):
-                dist_optim.step()
+                dist_optim.step(context_id)
 
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
@@ -179,7 +179,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
             optim.SGD, [remote_param1, remote_param2], lr=0.05
         )
 
-        with dist_autograd.context():
+        with dist_autograd.context() as context_id:
             torch.manual_seed(0)
             t1 = torch.rand((3, 3), requires_grad=True)
             t2 = torch.rand((3, 3), requires_grad=True)
@@ -187,8 +187,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
             output2 = rpc_async_method(MyModule.forward, remote_module2, output1.wait())
             loss = torch.add(output2.wait(), t1)
 
-            dist_autograd.backward([loss.sum()])
-            dist_optim.step()
+            dist_autograd.backward(context_id, [loss.sum()])
+            dist_optim.step(context_id)
 
             new_w1 = rpc_async_method(MyModule.get_w, remote_module1).wait()
             new_w2 = rpc_async_method(MyModule.get_w, remote_module2).wait()

@@ -388,7 +388,7 @@ class TestTypePromotion(TestCase):
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
-            actual = x < torch.tensor(0.5)
+            actual = x < torch.tensor(0.5, device=device)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
@@ -398,7 +398,7 @@ class TestTypePromotion(TestCase):
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 
-            actual = x < torch.tensor(0.5)
+            actual = x < torch.tensor(0.5, device=device)
             self.assertTrue(actual, expected)
             self.assertTrue(actual.dtype == torch.bool)
 

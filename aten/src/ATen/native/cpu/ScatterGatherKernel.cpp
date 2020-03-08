@@ -1,4 +1,5 @@
 #include <ATen/native/ScatterGatherShapeChecks.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Parallel.h>
 #include <unordered_map>
@@ -113,15 +114,6 @@ void scatter_shape_check(
       " apart from dimension ", dim
     );
   }
-}
-
-static Tensor restride_dim(
-  const Tensor& src, int64_t dim,
-  IntArrayRef replacement_shape
-) {
-  auto strides = ensure_nonempty_vec(src.strides().vec());
-  strides[dim] = 0;
-  return src.as_strided(replacement_shape, strides);
 }
 
 template <typename func_t>

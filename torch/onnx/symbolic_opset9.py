@@ -1749,15 +1749,27 @@ def _pad_packed_sequence(g, data, batch_sizes, batch_first, padding_value, total
     return data, lengths
 
 
-def randn(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "randn")
+def randn(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomNormalLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "randn")
     return g.op('RandomNormal', shape_i=shape)
 
 
-def rand(g, *shapes):
-    shapes_list = list(shapes)
-    shape = sym_help._get_const(shapes_list[0], "is", "rand")
+def rand(g, shapes, dtype, *options):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if dtype is None:
+        dtype = 6  # float
+    if sym_help._is_packed_list(shapes):
+        shape_const = g.op("ConstantOfShape", shapes,
+                           value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[6]))
+        return g.op('RandomUniformLike', shape_const, dtype_i=sym_help.scalar_type_to_onnx[dtype])
+    shape = sym_help._get_const(shapes, "is", "rand")
     return g.op('RandomUniform', shape_i=shape)
 
 
@@ -2182,7 +2194,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
         bias = g.op("Constant", value_t=bias_value)
 
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
-    axes = [i for i in range(1, len(input_sizes) - 1)]
+    axes = list(range(1, len(input_sizes) - 1))
     return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
 
 

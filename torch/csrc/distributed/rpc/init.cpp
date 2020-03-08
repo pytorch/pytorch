@@ -8,9 +8,10 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/types.h>
-#include <torch/csrc/jit/pybind_utils.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/types.h>
 
 #include <pybind11/chrono.h>
@@ -38,21 +39,25 @@ PyObject* rpc_init(PyObject* /* unused */) {
       shared_ptr_class_<RpcBackendOptions>(
           module,
           "RpcBackendOptions",
-          R"(A structure encapsulating the options passed into the RPC backend.
-            An instance of this class can be passed in to :meth:`~torch.distributed.rpc.init_rpc`
-            in order to initialize RPC with specific configurations, such as the
-             RPC timeout and init_method to be used. )")
+          R"(An abstract structure encapsulating the options passed into the RPC
+            backend. An instance of this class can be passed in to
+            :meth:`~torch.distributed.rpc.init_rpc` in order to initialize RPC
+            with specific configurations, such as the RPC timeout and
+            ``init_method`` to be used. )")
           .def_readwrite(
               "rpc_timeout",
               &RpcBackendOptions::rpcTimeout,
-              R"(A `datetime.timedelta` indicating the timeout to use for all RPCs.
-                If an RPC does not complete in this timeframe, it will complete
-                with an exception indicating that it has timed out.)")
+              R"(A ``datetime.timedelta`` indicating the timeout to use for all
+                RPCs. If an RPC does not complete in this timeframe, it will
+                complete with an exception indicating that it has timed out.)")
           .def_readwrite(
               "init_method",
               &RpcBackendOptions::initMethod,
               R"(URL specifying how to initialize the process group.
-                Default is env://)");
+                Default is ``env://``)");
+
+  module.attr("_DEFAULT_RPC_TIMEOUT") = py::cast(kDefaultRpcTimeout);
+  module.attr("_DEFAULT_INIT_METHOD") = py::cast(kDefaultInitMethod);
 
   auto workerInfo =
       shared_ptr_class_<WorkerInfo>(
@@ -144,7 +149,10 @@ PyObject* rpc_init(PyObject* /* unused */) {
               >>> # count is automatically updated.
               >>> rpc.rpc_sync("worker1", f, args(rref,))
           )")
-          .def(py::init<const py::object&>())
+          .def(
+              py::init<const py::object&, const py::object&>(),
+              py::arg("value"),
+              py::arg("type_hint") = py::none())
           .def(
               // not releasing GIL here to avoid context switch on getters
               "is_owner",
@@ -206,11 +214,54 @@ If the future completes with an error, an exception is thrown.
               )");
 
   shared_ptr_class_<ProcessGroupRpcBackendOptions>(
-      module, "ProcessGroupRpcBackendOptions", rpcBackendOptions)
-      .def(py::init<>())
+      module,
+      "ProcessGroupRpcBackendOptions",
+      rpcBackendOptions,
+      R"(
+          The backend options class for ``ProcessGroupAgent``, which is derived
+          from ``RpcBackendOptions``.
+
+          Arguments:
+              num_send_recv_threads (int, optional): The number of threads in
+                  the thread-pool used by ``ProcessGroupAgent`` (default: 4).
+              rpc_timeout (datetime.timedelta, optional): The timeout for RPC
+                  requests (default: ``timedelta(seconds=60)``).
+              init_method (str, optional): The URL to initialize
+                  ``ProcessGroupGloo`` (default: ``env://``).
+
+
+          Example::
+              >>> import datetime, os
+              >>> from torch.distributed import rpc
+              >>> os.environ['MASTER_ADDR'] = 'localhost'
+              >>> os.environ['MASTER_PORT'] = '29500'
+              >>>
+              >>> rpc.init_rpc(
+              >>>     "worker1",
+              >>>     rank=0,
+              >>>     world_size=2,
+              >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
+              >>>         num_send_recv_threads=16,
+              >>>         datetime.timedelta(seconds=20)
+              >>>     )
+              >>> )
+              >>>
+              >>> # omitting init_rpc invocation on worker2
+      )")
+      .def(
+          py::init<int, std::chrono::milliseconds, std::string>(),
+          py::arg("num_send_recv_threads") = kDefaultNumSendRecvThreads,
+          py::arg("rpc_timeout") = kDefaultRpcTimeout,
+          py::arg("init_method") = kDefaultInitMethod)
       .def_readwrite(
           "num_send_recv_threads",
-          &ProcessGroupRpcBackendOptions::numSendRecvThreads);
+          &ProcessGroupRpcBackendOptions::numSendRecvThreads,
+          R"(
+              The number of threads in the thread-pool used by ProcessGroupAgent.
+          )");
+
+  module.attr("_DEFAULT_NUM_SEND_RECV_THREADS") =
+      py::cast(kDefaultNumSendRecvThreads);
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(
@@ -259,8 +310,21 @@ If the future completes with an error, an exception is thrown.
       "_set_and_start_rpc_agent",
       [](const std::shared_ptr<RpcAgent>& rpcAgent) {
         RpcAgent::setCurrentRpcAgent(rpcAgent);
+        // Initializing typeResolver inside RpcAgent constructor will make
+        // RpcAgent have python dependency. To avoid RpcAgent to have python
+        // dependency, setTypeResolver() here.
+        std::shared_ptr<TypeResolver> typeResolver =
+            std::make_shared<TypeResolver>([&](const c10::QualifiedName& qn) {
+              auto typePtr = PythonRpcHandler::getInstance().parseTypeFromStr(
+                  qn.qualifiedName());
+              return c10::StrongTypePtr(
+                  PythonRpcHandler::getInstance().jitCompilationUnit(),
+                  std::move(typePtr));
+            });
+        rpcAgent->setTypeResolver(typeResolver);
         rpcAgent->start();
-      });
+      },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def("_reset_current_rpc_agent", []() {
     RpcAgent::setCurrentRpcAgent(nullptr);
@@ -289,8 +353,10 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(PyGILState_Check());
         return pyRpcBuiltin(dst, opName, rf, args, kwargs);
-      });
+      },
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_rpc_python_udf",
@@ -298,8 +364,10 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        DCHECK(!PyGILState_Check());
         return pyRpcPythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
+      py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -338,25 +406,34 @@ If the future completes with an error, an exception is thrown.
   module.def(
       "_invoke_rpc_torchscript",
       [](const std::string& dstWorkerName,
-         const std::string& qualifiedNameStr,
-         const py::args& args,
-         const py::kwargs& kwargs) {
+         const py::object& userCallable,
+         const py::tuple& argsTuple,
+         const py::dict& kwargsDict) {
+        DCHECK(PyGILState_Check());
         // No need to catch exception here, if function can not be found,
         // exception will be thrown in get_function() call; if args do not match
         // with function schema, exception will be thrown in
         // createStackForSchema() call.
+        auto qualifiedNameStr = c10::QualifiedName(
+            py::cast<std::string>(py::module::import("torch.jit")
+                                      .attr("_qualified_name")(userCallable)));
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
                                   ->get_function(qualifiedName)
                                   .getSchema();
-        auto stack = torch::jit::createStackForSchema(
-            functionSchema, args, kwargs, c10::nullopt);
-        auto fut =
+        Stack stack = torch::jit::createStackForSchema(
+            functionSchema,
+            argsTuple.cast<py::args>(),
+            kwargsDict.cast<py::kwargs>(),
+            c10::nullopt);
+        py::gil_scoped_release release;
+        DCHECK(!PyGILState_Check());
+        c10::intrusive_ptr<c10::ivalue::Future> fut =
             rpcTorchscript(dstWorkerName, qualifiedName, functionSchema, stack);
         return PythonFutureWrapper(fut);
       },
-      py::call_guard<py::gil_scoped_release>());
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_builtin",
@@ -365,8 +442,10 @@ If the future completes with an error, an exception is thrown.
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(PyGILState_Check());
         return pyRemoteBuiltin(dst, opName, rf, args, kwargs);
-      });
+      },
+      py::call_guard<py::gil_scoped_acquire>());
 
   module.def(
       "_invoke_remote_torchscript",
@@ -374,13 +453,20 @@ If the future completes with an error, an exception is thrown.
          const std::string& qualifiedNameStr,
          const py::args& args,
          const py::kwargs& kwargs) {
+        DCHECK(!PyGILState_Check());
         auto qualifiedName = c10::QualifiedName(qualifiedNameStr);
         auto functionSchema = PythonRpcHandler::getInstance()
                                   .jitCompilationUnit()
                                   ->get_function(qualifiedName)
                                   .getSchema();
-        auto stack = torch::jit::createStackForSchema(
-            functionSchema, args, kwargs, c10::nullopt);
+        Stack stack;
+        // Acquire GIL for py::args and py::kwargs processing.
+        {
+          pybind11::gil_scoped_acquire ag;
+          stack = torch::jit::createStackForSchema(
+              functionSchema, args, kwargs, c10::nullopt);
+        }
+        DCHECK(!PyGILState_Check());
         auto rrefPtr = remoteTorchscript(
             dstWorkerName, qualifiedName, functionSchema, stack);
         return PyRRef(rrefPtr);
@@ -393,8 +479,10 @@ If the future completes with an error, an exception is thrown.
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
          const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf) {
+        DCHECK(!PyGILState_Check());
         return pyRemotePythonUdf(dst, pickledPythonUDF, tensors, rf);
       },
+      py::call_guard<py::gil_scoped_release>(),
       py::arg("dst"),
       py::arg("pickledPythonUDF"),
       py::arg("tensors"),
@@ -407,7 +495,7 @@ If the future completes with an error, an exception is thrown.
           Retrieve the timeout for all RPCs that was set during RPC initialization.
 
           Returns:
-            `datetime.timedelta` instance indicating the RPC timeout.
+            ``datetime.timedelta`` instance indicating the RPC timeout.
       )");
 
   module.def(

@@ -25,6 +25,10 @@ struct ClassType;
 struct Type;
 class RRefInterface;
 using TypePtr = std::shared_ptr<Type>;
+
+struct ClassType;
+using ClassTypePtr = std::shared_ptr<ClassType>;
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -504,11 +508,44 @@ struct CAFFE2_API IValue final {
 
   /// @private [doxygen private]
   const void* internalToPointer() const {
-    TORCH_INTERNAL_ASSERT(isPtrType(), "Can only call internalToPointer() for pointer types");
+    TORCH_INTERNAL_ASSERT(
+        isPtrType(), "Can only call internalToPointer() for pointer types");
     return payload.as_intrusive_ptr;
   }
 
   TypePtr type() const;
+
+  size_t hash() const {
+    return payload.as_int;
+  }
+
+  // Detection Aliased tensors.
+  struct HashIValue {
+    size_t operator()(const IValue& val) const {
+      if (val.isTensor()) {
+        return 0;
+      }
+      return val.hash();
+    }
+  };
+
+  struct CompIValues {
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      if (lhs.isTensor() && rhs.isTensor()) {
+        return lhs.isAliasOf(rhs);
+      }
+      return lhs.hash() == rhs.hash();
+    }
+  };
+
+  using HashAliasedIValues = std::unordered_set<IValue, HashIValue, CompIValues>;
+
+  // Chechs if this and rhs has a subvalues in common.
+  // [t1,t2] and [t2, t3] returns true.
+  bool overlaps(const IValue& rhs) const;
+
+  // Inserts all subvalues of this in subValues.
+  void getSubValues(HashAliasedIValues& subValues) const;
 
  private:
   // NOTE: IValue tags are intentionally private. In the future we may encode
@@ -650,27 +687,24 @@ private:
   bool is_intrusive_ptr;
 };
 
-// An owning pointer to a Class. Just a pair of shared_ptrs to the class type
-// and its owning CU, so that the class type is guaranteed to stay alive as long
-// as we hold this object.
-struct StrongTypePtr {
+// An owning pointer to a type. When the type is class type, it requires a pair
+// of shared_ptrs to the class type and its owning CU, so that the class type is
+// guaranteed to stay alive as long as we hold this object.
+struct TORCH_API StrongTypePtr {
   StrongTypePtr(
       std::shared_ptr<torch::jit::script::CompilationUnit> cu,
-      std::shared_ptr<ClassType> type)
-      : cu_(std::move(cu)), type_(type) {
-    TORCH_INTERNAL_ASSERT(cu_);
-    TORCH_INTERNAL_ASSERT(type_);
-  }
+      std::shared_ptr<Type> type);
+
   std::shared_ptr<torch::jit::script::CompilationUnit> cu_;
-  std::shared_ptr<ClassType> type_;
+  std::shared_ptr<Type> type_;
 };
 
-TORCH_API std::unordered_map<std::string, c10::StrongTypePtr>& getCustomClassTypeMap();
+TORCH_API std::unordered_map<std::string, c10::ClassTypePtr>& getCustomClassTypeMap();
 
 #ifndef C10_MOBILE
 
 template<typename T>
-c10::StrongTypePtr getCustomClassType() {
+c10::ClassTypePtr getCustomClassType() {
   auto tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(typeid(T).name());
   if (res == tmap.end()) {
@@ -688,7 +722,7 @@ inline bool isCustomClassRegistered() {
 #else  // C10_MOBILE
 
 template<typename T>
-c10::StrongTypePtr getCustomClassType() {
+c10::ClassTypePtr getCustomClassType() {
   throw c10::Error("Custom class is not supported on mobile.", "");
 }
 
