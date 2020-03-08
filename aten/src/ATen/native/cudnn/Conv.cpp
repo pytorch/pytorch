@@ -116,7 +116,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 // This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution
 // gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
-constexpr size_t operator ""TiB(unsigned long long n) {
+constexpr size_t operator "" _TiB(unsigned long long n) {
   return size_t(n) * 1024 * 1024 * 1024 * 1024;
 }
 
@@ -305,7 +305,7 @@ struct Workspace {
     // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
-    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1TiB, "Not enough memory for workspace!");
+    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
     data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
   }
   Workspace(const Workspace&) = delete;
@@ -698,7 +698,7 @@ inline Tensor allocate_workspace(size_t size, const Tensor &other) {
   // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
   // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
   // we manually fail with OOM.
-  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1TiB, "Not enough memory for workspace!");
+  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
   return at::empty({static_cast<int64_t>(size)}, other.options().dtype(kByte));
 }
 
