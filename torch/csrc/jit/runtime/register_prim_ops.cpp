@@ -2300,6 +2300,8 @@ RegisterOperators reg2({
           listPop<value_type>,                                                \
           aliasAnalysisFromSchema())
 
+    CREATE_MUTABLE_LIST_OPS("Tensor", at::Tensor),
+
     Operator(
         "aten::remove(Tensor[](a!) self, Tensor el) -> ()",
         listRemove<at::Tensor>,
