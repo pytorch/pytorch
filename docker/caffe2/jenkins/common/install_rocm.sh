@@ -11,6 +11,8 @@ install_ubuntu() {
     apt-get install libc++1
     apt-get install libc++abi1
 
+    apt-get install -y --no-install-recommends libsndfile1
+
     DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
     # Add rocm repository
     wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
@@ -48,6 +50,7 @@ install_centos() {
   echo "gpgcheck=0" >> /etc/yum.repos.d/rocm.repo
 
   yum update -y
+  yum install -y libsndfile
 
   yum install -y \
                    rocm-dev \
