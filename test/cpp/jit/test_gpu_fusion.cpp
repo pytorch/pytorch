@@ -652,6 +652,11 @@ void testGPU_FusionParser() {
 
   FusionGuard fg(&fusion);
   TORCH_CHECK(fusion.exprs().size() == 2);
+
+  // TODO: this is what I expected codegen to handle;
+  //       so if we un-comment the following two lines, we should get some code;
+  //CodeWrite cw(std::cout);
+  //cw.traverse(&fusion);
 }
 
 void testGPU_FusionDependency() {
