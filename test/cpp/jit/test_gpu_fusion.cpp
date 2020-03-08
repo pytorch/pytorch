@@ -823,10 +823,10 @@ void testGPU_FusionCodeGen2() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
+  int nDims = 3;
   std::vector<IterDomain*> dom;
-  dom.push_back(new IterDomain(new Int()));
-  dom.push_back(new IterDomain(new Int()));
-  dom.push_back(new IterDomain(new Int()));
+  for(int i=0; i<nDims; i++)
+    dom.push_back(new IterDomain(new Int()));
 
   TensorView* tv0 = new TensorView(new TensorDomain(dom), DataType::Float);
   TensorView* tv1 = new TensorView(new TensorDomain(dom), DataType::Float);
@@ -896,7 +896,8 @@ void testGPU_FusionSimplePWise() {
   merge(tv3, 0);
   
   // Split by n_threads
-  split(tv3, 0, 128);
+  split(tv3, -1, 128*2);
+  split(tv3, -1, 128);
 
   //For all inputs, computeAt the output inline, temporaries should be squeezed between them
   tv0->computeAt(tv3, -1);
@@ -904,6 +905,7 @@ void testGPU_FusionSimplePWise() {
 
   //Parallelize TV3  
   tv3->domain()->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->domain()->axis(-2)->parallelize(ParallelType::TIDy);
   tv3->domain()->axis(-1)->parallelize(ParallelType::TIDx);
   
 
