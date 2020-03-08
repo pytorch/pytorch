@@ -409,7 +409,7 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
 #if CUDNN_VERSION < 7500
         bool skip = blacklist;
         skip &= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
-                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT)
+                  static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT);
         if (skip) {
           continue;
         }
