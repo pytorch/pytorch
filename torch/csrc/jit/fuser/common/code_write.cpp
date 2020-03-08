@@ -273,7 +273,7 @@ void CodeWrite::bind(IterDomain* id, Val* iterator) {
 }
 
 void CodeWrite::openFor(IterDomain* id) {
-  fors.push_back(new ForLoop(new Int(), new Int(0), id, {}));
+  fors.push_back(new ForLoop(new Int(), id, {}));
 
   if (id->parallel_method() != ParallelType::Serial) {
     bind(id, fors.back()->index());
@@ -285,7 +285,7 @@ void CodeWrite::openFor(IterDomain* id) {
 
   os << "for( size_t ";
   handle(fors.back()->index());
-  os << " = " << fors.back()->start() << "; ";
+  os << " = " << new Int(0) << "; ";
   handle(fors.back()->index());
   os << " < ";
   print_inline(id->size());

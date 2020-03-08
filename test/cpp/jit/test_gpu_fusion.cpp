@@ -935,7 +935,7 @@ void testGPU_FusionForLoop() {
   auto TV2 = new TensorView(T2);
   
   BinaryOp* op = new BinaryOp(BinaryOpType::Add, TV2, T0, T1);
-  ForLoop*  fl = new ForLoop(new Int(), new Int(0), ID0, {op});
+  ForLoop*  fl = new ForLoop(new Int(), ID0, {op});
 
   std::cout << fl;
 }

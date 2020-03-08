@@ -479,7 +479,6 @@ struct TORCH_API ForLoop : public Expr {
   ~ForLoop() = default;
   ForLoop(
     Int* _index
-  , Int* _start
   , IterDomain* _range
   , const std::vector<const Expr*> &_body);
 
@@ -490,11 +489,20 @@ struct TORCH_API ForLoop : public Expr {
   ForLoop& operator=(ForLoop&& other) = delete;
 
   Int*        index() const noexcept { return index_; }
-  Int*        start() const noexcept { return start_; }
   IterDomain* range() const noexcept { return range_; }
+
   const std::vector<const Expr*>& body() const noexcept { return body_; }
 
   void add_expr(const Expr* e) { body_.push_back(e); }
+
+  void remove_expr(const Expr* e) {
+    auto it = body_.begin();
+    for(; it != body_.end(); ++it)
+      if( *it == e)
+        break;
+    if( it != body_.end())
+      body_.erase(it);
+  }
 
   // TODO: This should probably be more sophisiticated. 
   bool same_as(const ForLoop* other) const {
@@ -504,7 +512,6 @@ struct TORCH_API ForLoop : public Expr {
 private:
   // TODO: Why is the pointer const and not what's in the object?
   Int* const index_;
-  Int* const start_;
   IterDomain* const range_;
   std::vector<const Expr*> body_;
 };
