@@ -17,7 +17,9 @@ struct IndexCompute : public TransformIter {
     int ax = expr->axis();
     TORCH_INTERNAL_ASSERT(ax >= 0 && ax + 1 < indices.size(),
       "Hit an invalid Split transformation during IndexCompute, axis is not within bounds.");
-    indices[ax] = static_cast<Int*>(mul(indices[ax], indices[ax + 1]));
+    indices[ax] = static_cast<Int*>(
+      add( mul(indices[ax], expr->factor()), indices[ax + 1])
+    );
     indices.erase(indices.begin() + ax + 1);
   }
 
@@ -26,10 +28,10 @@ struct IndexCompute : public TransformIter {
     TORCH_INTERNAL_ASSERT(ax >= 0 && ax < indices.size(),
       "Hit an invalid MERGE transformation during IndexCompute, axis is not within bounds.");
 
-    Int* O = expr->in()->axis(ax + 1)->size();
+    Int* I = expr->in()->axis(ax + 1)->size();
     Int* ind = indices[ax];
-    indices[ax] = static_cast<Int*>(div(ind, O));
-    indices.insert(indices.begin() + ax + 1, static_cast<Int*>(mod(ind, O)));
+    indices[ax] = static_cast<Int*>(div(ind, I));
+    indices.insert(indices.begin() + ax + 1, static_cast<Int*>(mod(ind, I)));
   }
 
   void replayBackward(Reorder* expr) override {

@@ -29,7 +29,7 @@ void CodeWrite::printIndexInto(
   if (inpOrOut) {
     for (decltype(indices.size()) i{0}; i < indices.size(); i++) {
       print_inline(indices[i]);
-      os << " * TV" << tv->name() << "->stride(" << i << ")";
+      os << " * T" << tv->name() << ".stride[" << i << "]";
       if (i != (indices.size() - 1))
         os << " + ";
     }
@@ -43,7 +43,7 @@ void CodeWrite::printIndexInto(
     bool first_ind_print = true;
 
     for (decltype(fors.size()) i{tv->getComputeAtAxis()}; i < fors.size(); i++) {
-      if (fors[i]->range()->isBlockDim() || fors[i]->range()->isThreadDim())
+      if (fors[i]->range()->isThread())
         continue;
 
       if (!first_ind_print && i != fors.size() - 1)
@@ -55,7 +55,7 @@ void CodeWrite::printIndexInto(
       print_inline(fors[i]->index());
 
       for (decltype(fors.size()) j{i + 1}; j < fors.size(); j++) {
-        if (fors[j]->range()->isBlockDim() || fors[j]->range()->isThreadDim())
+        if ( fors[j]->range()->isThread() )
           continue;
         os << " * ";
         //Strides
@@ -86,7 +86,7 @@ void CodeWrite::handle(const TensorView* const tv) {
     TORCH_INTERNAL_ASSERT(false,
         "Could not find consumer for this producer in CodeWrite.");
   }
-  os << "TV" << tv->name();
+  os << "T" << tv->name();
 
   std::vector<Int*> indices =
       IndexCompute::computeIndices(tv2, getLoopIndices());
@@ -297,7 +297,7 @@ void CodeWrite::printAlloc(TensorView* tv) {
     size = static_cast<Int*>(mul(size, tv->domain()->axis(i)->size()));
   }
   indent();
-  os << tv->getDataType().value() << " TV" << tv->name() << "[";
+  os << tv->getDataType().value() << " T" << tv->name() << "[";
   print_inline(size);
   os << "];" << std::endl;
 }
@@ -371,7 +371,7 @@ void CodeWrite::setupOverrides() {
       for (decltype(root->size()) i{0}; i < root->size(); i++) {
         if (overrides_find(root->axis(i)->size()) == overrides.end()) {
           std::stringstream ss;
-          ss << "TV" << tv->name() << "->size(" << i << ")";
+          ss << "TV" << tv->name() << ".size[" << i << "]";
           overrides_emplace(root->axis(i)->size(), ss.str());
         }
       }
@@ -392,7 +392,7 @@ void CodeWrite::header() {
   for (Val* val : vals) {
     switch (val->getValType().value()) {
       case (ValType::TensorView):
-        os << "TensorView* TV";
+        os << "Tensor T";
         break;
       case (ValType::Scalar):
         switch (val->getDataType().value()) {
