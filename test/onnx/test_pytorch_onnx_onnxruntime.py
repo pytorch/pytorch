@@ -1534,7 +1534,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
             def forward(self, input):
-                return input.expand(2, 3, 4)
+                return input.expand(2, 3, -1)
 
         input = torch.randn(2, 1, 4)
         self.run_test(ExpandModel(), input=(input))
@@ -1545,6 +1545,14 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.randn(3, 1)
         self.run_test(ExpandInferDimModel(), input=(input))
+
+        class ExpandTensorSizeModel(torch.nn.Module):
+            def forward(self, input, size):
+                return input.expand(size)
+
+        input = torch.randn(3,)
+        size = torch.tensor([-1])
+        self.run_test(ExpandTensorSizeModel(), input=(input, size))
 
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
