@@ -371,7 +371,7 @@ void CodeWrite::setupOverrides() {
       for (decltype(root->size()) i{0}; i < root->size(); i++) {
         if (overrides_find(root->axis(i)->size()) == overrides.end()) {
           std::stringstream ss;
-          ss << "TV" << tv->name() << ".size[" << i << "]";
+          ss << "T" << tv->name() << ".size[" << i << "]";
           overrides_emplace(root->axis(i)->size(), ss.str());
         }
       }
