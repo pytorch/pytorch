@@ -36,8 +36,13 @@ c10::optional<TensorContiguity> infer_contiguity_from_tensor_type(
 
 Tensor::Tensor(const std::shared_ptr<c10::TensorType>& tensor_type)
     : Val(ValType::Tensor, aten_opt_type_map(tensor_type->scalarType())),
-      contiguity_(infer_contiguity_from_tensor_type(tensor_type)),
-      domain_(nullptr) {}
+      contiguity_(infer_contiguity_from_tensor_type(tensor_type)) {
+  std::vector<IterDomain*> sizes;
+  for (int i = 0; i < contiguity_->rank(); i++) {
+    sizes.push_back(new IterDomain(new Int()));
+  }
+  domain_ = new TensorDomain(sizes);
+}
 
 Tensor::Tensor(const std::shared_ptr<Value>& jit_value)
     : Tensor(jit_value->type()->cast<c10::TensorType>()) {}

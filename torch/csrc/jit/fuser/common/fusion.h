@@ -236,6 +236,7 @@ struct TORCH_API Fusion : public IRInputOutput {
   }
 
   void print() {
+    FusionGuard fg(this);
     std::cout << "%kernel {\n";
     IRMathPrinter op_exprs(std::cout); 
     op_exprs.handle(this); 
