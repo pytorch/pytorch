@@ -68,7 +68,7 @@ void Val::dispatch(T handler, Val* val) {
     default:
       break;
   }
-  throw std::runtime_error("Unknown valtype in dispatch!");
+  TORCH_INTERNAL_ASSERT(false, "Unknown valtype in dispatch!");
 }
 
 template <typename T>
@@ -96,7 +96,7 @@ void Expr::dispatch(T handler, Expr* expr) {
       ptr(handler)->handle(static_cast<IfThenElse*>(expr));
       return;
     default:
-      throw std::runtime_error("Unknown exprtype in dispatch!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
 }
 
@@ -107,7 +107,7 @@ void Statement::dispatch(T handler, Statement* stmt) {
   } else if (stmt->isExpr()) {
     ptr(handler)->handle(static_cast<Expr*>(stmt));
   } else
-    throw std::runtime_error("Unknown stmttype in dispatch!");
+    TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
 
 template <typename T>
@@ -139,7 +139,7 @@ void Val::const_dispatch(T handler, const Val* const val) {
     default:
       break;
   }
-  throw std::runtime_error("Unknown valtype in dispatch!");
+  TORCH_INTERNAL_ASSERT(false, "Unknown valtype in dispatch!");
 }
 
 template <typename T>
@@ -167,7 +167,7 @@ void Expr::const_dispatch(T handler, const Expr* const expr) {
       ptr(handler)->handle(static_cast<const IfThenElse* const>(expr));
       return;
     default:
-      throw std::runtime_error("Unknown exprtype in dispatch!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
 }
 
@@ -178,7 +178,7 @@ void Statement::const_dispatch(T handler, const Statement* const stmt) {
   } else if (stmt->isExpr()) {
     ptr(handler)->handle(static_cast<const Expr* const>(stmt));
   } else
-    throw std::runtime_error("Unknown stmttype in dispatch!");
+    TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
 
 /*
@@ -215,7 +215,7 @@ Statement* Val::mutator_dispatch(T mutator, Val* val) {
     default:
       break;
   }
-  throw std::runtime_error("Unknown valtype in dispatch!");
+  TORCH_INTERNAL_ASSERT(false, "Unknown valtype in dispatch!");
 }
 
 template <typename T>
@@ -236,7 +236,7 @@ Statement* Expr::mutator_dispatch(T mutator, Expr* expr) {
     case ExprType::IfThenElse:
       return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
     default:
-      throw std::runtime_error("Unknown exprtype in dispatch!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
 }
 
@@ -248,7 +248,7 @@ Statement* Statement::mutator_dispatch(T mutator, Statement* stmt) {
   if (stmt->isExpr()) {
     return ptr(mutator)->mutate(static_cast<Expr*>(stmt));
   }
-  throw std::runtime_error("Unknown stmttype in dispatch!");
+  TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
 
 /*

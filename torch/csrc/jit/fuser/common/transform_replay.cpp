@@ -86,7 +86,8 @@ TensorView* TransformReplay::replay(Split* expr, TensorView* tv) {
   if (influence[axis]) {
     // Make sure split axis is real.
     int real_axis = axis_map[expr->axis()];
-    TORCH_CHECK(real_axis != -1);
+    TORCH_INTERNAL_ASSERT(real_axis != -1,
+    "During transformation replay attempted to split an imaginary axis.");
     // Replay split
     split(tv, real_axis, *(expr->factor()->value()));
     // Inserted a real axis, push everything in axis_map over to the right
@@ -113,7 +114,8 @@ TensorView* TransformReplay::replay(Merge* expr, TensorView* tv) {
 
   if (influence[axis] || influence[axis + 1]) {
     // Make sure both merge axes are real.
-    TORCH_CHECK(axis_map[axis] != -1 && axis_map[axis + 1] != -1);
+    TORCH_INTERNAL_ASSERT(axis_map[axis] != -1 && axis_map[axis + 1] != -1,
+    "During transformation replay attempted to merge an imaginary axis.");
     // Replay merge
     merge(tv, axis_map[axis]);
   } else {
@@ -245,7 +247,8 @@ TensorView* TransformReplay::runReplay(
   if (compute_at_axis < 0)
     compute_at_axis += replay_ref->domain()->size() + 1;
 
-  TORCH_CHECK(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1 );
+  TORCH_CHECK(compute_at_axis >= 0 && compute_at_axis < replay_ref->domain()->size() + 1,
+    "Transform replay cannot be performed as the compute_at_axis is not in the valid range.");
 
   this->compute_at_axis = compute_at_axis;
   
@@ -277,9 +280,11 @@ TensorView* TransformReplay::runReplay(
       axis_map.push_back(i);
 
   // Domain sizes must match at root for replay.
-  TORCH_CHECK(axis_map.size() == ref_root->size());
+  TORCH_CHECK(axis_map.size() == ref_root->size(),
+    "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
   for (decltype(axis_map.size()) i{0}; i < axis_map.size(); i++) {
-    TORCH_CHECK(ref_root->axis(i)->size()->same_as(target_root->axis(axis_map[i])->size()));
+    TORCH_CHECK(ref_root->axis(i)->size()->same_as(target_root->axis(axis_map[i])->size()),
+    "Transforms cannot be replayed as source and destinations do not have the same root sizes.");
   }
 
   /* STEP 3 */
@@ -295,7 +300,7 @@ TensorView* TransformReplay::runReplay(
 
   for (decltype(replayed->domain()->size()) i{0}; i < compute_at_axis; i++)
     if (replayed->domain()->axis(i)->isReduction())
-      throw std::runtime_error(
+      TORCH_CHECK(false,
           "Generated a compute_at dependency where a reduction would be used before computed.");
 
   return replayed;

@@ -1,10 +1,9 @@
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/fuser/common/ir.h>
 
+#include <torch/csrc/jit/fuser/common/ir.h>
 #include <torch/csrc/jit/fuser/common/type.h>
-#include <c10/util/Exception.h>
 
 /*
  * Creating an Expr node returns the node that was created. This is useful

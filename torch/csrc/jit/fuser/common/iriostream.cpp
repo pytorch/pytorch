@@ -116,9 +116,12 @@ void IRPrinter::handle(const Int* const i) {
 namespace{
 void check_inlineable(const IRInputOutput* const irio) {
   for (auto inp : irio->inputs())
-    TORCH_CHECK(inp->getValType().value() == ValType::Scalar);
-  TORCH_CHECK(irio->nOutputs() == 1)
-  TORCH_CHECK(irio->output(0)->getValType().value() == ValType::Scalar);
+    TORCH_CHECK(inp->getValType().value() == ValType::Scalar,
+    "Printing inline computations involving values other than scalars is not currently supported.");
+  TORCH_CHECK(irio->nOutputs() == 1,
+    "Cannot print inline computations if there's more than one output.");
+  TORCH_CHECK(irio->output(0)->getValType().value() == ValType::Scalar,
+    "Printing inline computations involving values other than scalars is not currently supported.");
 }
 }
 

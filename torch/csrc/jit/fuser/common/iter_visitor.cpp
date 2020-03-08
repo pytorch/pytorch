@@ -23,7 +23,7 @@ std::vector<Statement*> IterVisitor::next(
   else if (statement->isExpr())
     return next(static_cast<Expr*>(statement));
   else
-    throw std::runtime_error("Could not detect type in next_dispatch.");
+    TORCH_INTERNAL_ASSERT(false, "IterVisitor could not detect type in next_dispatch.");
 }
 
 std::vector<Statement*> IterVisitor::next(Val* v) {
@@ -92,7 +92,7 @@ void IterVisitor::traverse(
   FusionGuard fg(fusion);
 
   if (breadth_first)
-    throw std::runtime_error("Not implemented yet.");
+    TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
   std::set<Statement*> visited;
   std::deque<Statement*> to_visit;
 
@@ -139,7 +139,8 @@ void DependencyCheck::handle(Expr* expr){
   //that the top value on the chain is an output of this expr
   
   for(decltype(expr->nOutputs()) i = 0; i < expr->nOutputs(); i++){
-    TORCH_CHECK(expr->hasOutput(dep_chain.top()));
+    TORCH_INTERNAL_ASSERT(expr->hasOutput(dep_chain.top()),
+      "IterVisitor attempted to visit an expr, but this expr was visited in an incorrect order.");
     dep_chain.pop();
   }
 }

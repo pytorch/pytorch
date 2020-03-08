@@ -159,12 +159,12 @@ struct TORCH_API Fusion : public IRInputOutput {
 
     for(Val* inp : inputs())
       if(val->same_as(inp))
-        throw std::runtime_error(
+        TORCH_CHECK(false,
           "Cannot remove val as it is an input of the fusion.");
 
     for(Val* out : outputs())
       if(val->same_as(out))
-        throw std::runtime_error(
+        TORCH_CHECK(false,
           "Cannot remove val as it is an output of the fusion.");
 
     Expr* orig = origin(val);
@@ -210,8 +210,8 @@ struct TORCH_API Fusion : public IRInputOutput {
     if(inFusion(stmt))
       return;
     std::stringstream errmsg;
-    errmsg << stmt << msg << " was not found in the active fusion.";
-    throw std::runtime_error(errmsg.str());
+    errmsg << msg << " it was not found in the active fusion.";
+    TORCH_CHECK(false, errmsg.str());
   }
 
 
@@ -230,8 +230,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       bool breadth_first = false) {
     
     if (breadth_first)
-      throw std::runtime_error("Not implemented yet.");
-
+      TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
     return ExprSort::getExprs(this, from_outputs_only, breadth_first);
 
   }
@@ -252,7 +251,11 @@ struct TORCH_API Fusion : public IRInputOutput {
   
   StmtNameType registerVal(Val* val) {
     if (val->fusion()) {
-      TORCH_CHECK(val->fusion() == this);
+      if(val->fusion() != this){
+        std::stringstream ss;
+        ss << val << " was not found in the active fusion.";
+        TORCH_CHECK(false, ss.str());
+      }
       if (inFusion(val)) {
         return val->name();
       }
@@ -268,7 +271,11 @@ struct TORCH_API Fusion : public IRInputOutput {
    */
   StmtNameType registerExpr(Expr* expr) {
     if (expr->fusion()) {
-      TORCH_CHECK(expr->fusion() == this);
+      if(expr->fusion() != this){
+        std::stringstream ss;
+        ss << expr << " was not found in the active fusion.";
+        TORCH_CHECK(false, ss.str());
+      }
       if (inFusion(expr)) {
         return expr->name();
       }
@@ -307,7 +314,7 @@ struct TORCH_API Fusion : public IRInputOutput {
       return registerExpr(static_cast<Expr*>(stmt));
     }
 
-    throw std::runtime_error("Could not register statement.");
+    TORCH_INTERNAL_ASSERT(false, "Could not register statement as Fusion could not recognize its type.");
     return UNINITIALIZED_STMTNAMETYPE;
   }
 
