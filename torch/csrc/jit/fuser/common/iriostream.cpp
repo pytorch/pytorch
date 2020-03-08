@@ -85,7 +85,6 @@ void IRPrinter::handle(const TensorContiguity* const t) {
 }
 
 void IRPrinter::handle(const Float* const f) {
-  TORCH_CHECK(FusionGuard::getCurFusion() != nullptr);
   if (print_inline_ && FusionGuard::getCurFusion()->origin(f) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(f));
@@ -101,7 +100,6 @@ void IRPrinter::handle(const Float* const f) {
 }
 
 void IRPrinter::handle(const Int* const i) {
-  TORCH_CHECK(FusionGuard::getCurFusion() != nullptr);
   if (print_inline_ && FusionGuard::getCurFusion()->origin(i) != nullptr) {
     os << "( ";
     handle(FusionGuard::getCurFusion()->origin(i));
