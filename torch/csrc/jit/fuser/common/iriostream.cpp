@@ -174,18 +174,19 @@ void IRPrinter::handle(const ForLoop* const fl) {
   }
 }
 void IRPrinter::handle(const IfThenElse* const ite) {
-  os << "IfThenElse: if " << ite->cond() << " \n";
+  os << "if ( ";
+  print_inline(ite->cond());
+  os << " ) { \n";
   for(auto &expr : ite->if_body()) {
-    os << "\t";
-    handle(expr);	
+    handle(expr);
   }
   if(ite->hasElse()) {
-    os << "IfThenElse: else\n";
+    os << "} else { \n";
     for(auto &expr : ite->else_body()) {
-      os << "\t";
       handle(expr);	
     }
   }
+  os<<"}\n";
 }
 
 void IRPrinter::handle(const Split* const s) {
