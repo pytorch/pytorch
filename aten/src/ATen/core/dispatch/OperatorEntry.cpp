@@ -47,6 +47,18 @@ void OperatorEntry::prepareForDeregistration() {
   TORCH_INTERNAL_ASSERT(kernels_.size() == 0, "If the dispatch table is empty, then the invariant says there can't be any kernels but we still have kernels for dispatch keys ", listAllDispatchKeys(kernels_), ". The operator is ", toString(name_));
 }
 
+void OperatorEntry::registerSchema(FunctionSchema&& schema) {
+  TORCH_INTERNAL_ASSERT(!schema_.has_value());
+  schema_ = std::move(schema);
+  dispatchTable_.registerSchema(*schema_);
+}
+
+void OperatorEntry::deregisterSchema() {
+  TORCH_INTERNAL_ASSERT(schema_.has_value());
+  schema_ = c10::nullopt;
+  dispatchTable_.deregisterSchema();
+}
+
 std::list<KernelFunction>::iterator OperatorEntry::registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel) {
   std::unique_lock<std::mutex> lock(kernelsMutex_);
 

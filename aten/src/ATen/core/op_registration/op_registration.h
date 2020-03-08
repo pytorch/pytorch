@@ -731,9 +731,7 @@ class CAFFE2_API Module final {
   // namespaces; for now don't support
   const char* ns_;
 
-  // Internal implementation details; right now implement in terms of
-  // RegisterOperators
-  RegisterOperators register_;
+  std::vector<RegistrationHandleRAII> registrars_;
 
   Module(const char* ns);
 

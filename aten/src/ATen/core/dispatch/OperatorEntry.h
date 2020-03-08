@@ -29,6 +29,28 @@ public:
     return *schema_;
   }
 
+  // An OperatorEntry may be initialized with only an OperatorName.
+  // If this is the case, we may post facto register a schema to it.
+  //
+  // Some rules:
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(std::move(schema))
+  //    and
+  //      OperatorEntry op(schema.operator_name())
+  //      op.registerSchema(std::move(schema))
+  //  - The following programs are equivalent:
+  //      OperatorEntry op(schema.operator_name())
+  //    and
+  //      OperatorEntry op(std::move(schema))
+  //      op.deregisterSchema()
+  //
+  // NB: registerSchema/deregisterSchema are not idempotent; if you
+  // attempt to register a schema when one is already present or vice
+  // versa that is an error.  (Refcounting for the registrations is
+  // handled in the OperatorHandle in Dispatcher)
+  void registerSchema(FunctionSchema&&);
+  void deregisterSchema();
+
   const OperatorName& operator_name() const {
     return name_;
   }
@@ -42,11 +64,6 @@ public:
   // Postcondition: caller is responsible for disposing of the kernel
   std::list<KernelFunction>::iterator registerKernel(c10::optional<DispatchKey> dispatch_key, KernelFunction kernel);
   void deregisterKernel_(c10::optional<DispatchKey> dispatch_key, std::list<KernelFunction>::iterator kernel);
-
-  void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
-    TORCH_INTERNAL_ASSERT(schema_.has_value());
-    schema_->setAliasAnalysis(a);
-  }
 
 private:
 

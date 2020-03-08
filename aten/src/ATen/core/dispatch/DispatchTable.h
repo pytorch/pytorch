@@ -200,6 +200,14 @@ class DispatchTable final {
     return operatorName_;
   }
 
+  void registerSchema(const FunctionSchema& schema) {
+    dispatchKeyExtractor_.registerSchema(schema);
+  }
+
+  void deregisterSchema() {
+    dispatchKeyExtractor_.deregisterSchema();
+  }
+
 private:
 
   impl::KernelFunctionTable kernels_;

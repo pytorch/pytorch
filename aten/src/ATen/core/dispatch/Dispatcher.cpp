@@ -59,37 +59,6 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
 
 // Postcondition: caller is responsible for disposing of registration when they
 // are done
-OperatorHandle Dispatcher::findOrRegisterSchema_(FunctionSchema&& schema) {
-  const auto found = findSchema(schema.operator_name());
-  if (found != c10::nullopt) {
-    if (found->schema() != schema) {
-      TORCH_CHECK(false, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", found->schema());
-    }
-    if (schema.isDefaultAliasAnalysisKind()) {
-      // just do nothing and let it pass.
-    } else if (found->schema().isDefaultAliasAnalysisKind()) {
-      found->operatorIterator_->op.updateSchemaAliasAnalysis(schema.aliasAnalysis());
-    } else {
-      // TODO: This error message is crappy
-      TORCH_CHECK(
-        found->schema().aliasAnalysis() == schema.aliasAnalysis(),
-        "Tried to register multiple operators with the same schema but different alias analysis kind: ", toString(schema));
-    }
-    return *found;
-  }
-
-  OperatorName op_name = schema.operator_name();
-  operators_.emplace_back(std::move(schema));
-  OperatorHandle handle(--operators_.end());
-  operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
-    operatorLookupTable.emplace(op_name, handle);
-  });
-
-  return handle;
-}
-
-// Postcondition: caller is responsible for disposing of registration when they
-// are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findSchema(op_name);
   if (found != c10::nullopt) {
@@ -112,14 +81,34 @@ RegistrationHandleRAII Dispatcher::registerDef(FunctionSchema schema) {
 
   OperatorName op_name = schema.operator_name();
 
-  auto op = findOrRegisterSchema_(std::move(schema));
+  const auto found = findSchema(op_name);
+  OperatorHandle op = [&] {
+    if (found == c10::nullopt) {
+      // Initial def
+      operators_.emplace_back(std::move(schema));
+      OperatorHandle op(--operators_.end());
+      operatorLookupTable_.write([&] (ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) {
+        operatorLookupTable.emplace(op_name, op);
+      });
+      // Call the hook after the operator is setup!
+      listeners_->callOnOperatorRegistered(op);
+      return op;
+    } else {
+      // Re-registration for BC reasons, test for consistency
+      OperatorHandle op(*found);
+      TORCH_INTERNAL_ASSERT(op.operatorIterator_->def_and_impl_count >= 1);
+      // NB: the operator may have been impl'ed but not def'ed
+      if (op.operatorIterator_->def_count == 0) {
+        op.operatorIterator_->op.registerSchema(std::move(schema));
+      } else {
+        TORCH_CHECK(op.schema() == schema, "Tried to register multiple operators with the same name and the same overload name but different schemas: ", schema, " vs ", op.schema());
+      }
+      return op;
+    }
+  }();
 
   ++op.operatorIterator_->def_count;
   ++op.operatorIterator_->def_and_impl_count;
-  if (1 == op.operatorIterator_->def_count) {
-    // note: call listeners *after* operator is added, i.e. dispatcher is already valid for new op
-    listeners_->callOnOperatorRegistered(op);
-  }
 
   return RegistrationHandleRAII([this, op, op_name] {
     deregisterDef_(op, op_name);
@@ -142,6 +131,7 @@ void Dispatcher::deregisterDef_(const OperatorHandle& op, const OperatorName& op
     // TODO: check that listeners are not relying on prepareForDeregistration()
     // invariant
     listeners_->callOnOperatorDeregistered(op);
+    op.operatorIterator_->op.deregisterSchema();
   }
   if (0 == op.operatorIterator_->def_and_impl_count) {
     // TODO: rename this to "assert deregistration invariants"

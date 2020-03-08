@@ -153,27 +153,48 @@ namespace {
   }
 }
 
-Module&& Module::def(const char* schema) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, schema))
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA));
+// TODO: add overloads that take FunctionSchema directly
+Module&& Module::def(const char* schema_str) && {
+  auto schema = torch::jit::parseSchema(schema_str);
+  schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
+  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
   return std::move(*this);
 }
 
-Module&& Module::def(const char* name_or_schema, CppFunction&& f) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, name_or_schema))
-    .aliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA)
-    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+Module&& Module::def(const char* name_or_schema_str, CppFunction&& f) && {
+  auto name_or_schema = torch::jit::parseSchemaOrName(name_or_schema_str);
+  FunctionSchema schema = [&] {
+    // TODO: schema matching shouldn't happen here
+    if (name_or_schema.is_right()) {
+      // it's a schema
+      FunctionSchema schema = std::move(name_or_schema).right();
+      // check that the schemas match
+      auto diff = findSchemaDifferences(schema, *f.schema_);
+      TORCH_CHECK(!diff.has_value(),
+          "Module::def(): explicitly specified schema [", toString(schema),
+          "] doesn't match inferred schema [", toString(*f.schema_),
+          "]. ", *diff);
+      return schema;
+    } else {
+      // it's a name; use the inferred schema
+      TORCH_CHECK(f.schema_, "Module::def(): schema was not specified, and we "
+          "couldn't infer schema either.  Please explicitly provide schema.");
+      OperatorName name = std::move(name_or_schema).left();
+      return f.schema_->cloneWithName(std::move(name.name), std::move(name.overload_name));
+    }
+  }();
+  // Retain the OperatorName for Impl call
+  OperatorName name = schema.operator_name();
+  schema.setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA); // TODO: clean this up
+  registrars_.emplace_back(Dispatcher::singleton().registerDef(std::move(schema)));
+  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_)));
   return std::move(*this);
 }
 
-Module&& Module::impl(const char* name_or_schema, CppFunction&& f) && {
-  register_.op(c10::RegisterOperators::options()
-    .schema(addNamespace(ns_, name_or_schema))
-    // NB: Don't specify AliasAnalysis; the def() is expected to provide
-    // this
-    .kernel(f.dispatch_key_, std::move(f.func_), std::move(f.schema_)));
+Module&& Module::impl(const char* name_str, CppFunction&& f) && {
+  auto name = torch::jit::parseName(name_str);
+  // TODO: check that inferred schema matches real schema
+  registrars_.emplace_back(Dispatcher::singleton().registerImpl(name, f.dispatch_key_, std::move(f.func_)));
   return std::move(*this);
 }
 

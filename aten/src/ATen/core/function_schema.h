@@ -260,6 +260,16 @@ public:
     }
     return c10::nullopt;
   }
+  FunctionSchema cloneWithName(std::string name, std::string overload_name) const {
+    return FunctionSchema(
+      std::move(name),
+      std::move(overload_name),
+      arguments(),
+      returns(),
+      is_vararg(),
+      is_varret()
+      );
+  }
   FunctionSchema cloneWithArguments(std::vector<Argument> new_arguments) const {
     return FunctionSchema(
         name(),
