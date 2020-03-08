@@ -238,38 +238,18 @@ void CodeWrite::closeFor() {
 
 //TODO: Should move stringify to type.cpp/h
 void CodeWrite::bind(IterDomain* id, Val* iterator) {
-  switch (id->parallel_method()) {
-    case (ParallelType::BIDz):
-      overrides_emplace(iterator, "blockIdx.z");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::BIDy):
-      overrides_emplace(iterator, "blockIdx.y");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::BIDx):
-      overrides_emplace(iterator, "blockIdx.x");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::TIDz):
-      overrides_emplace(iterator, "threadIdx.z");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::TIDy):
-      overrides_emplace(iterator, "threadIdx.y");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::TIDx):
-      overrides_emplace(iterator, "threadIdx.x");
-      bound_iters.emplace(id);
-      break;
-    case (ParallelType::Vectorize):
-    case (ParallelType::Unroll):
+
+  if(id->isThread()){
+    std::stringstream ss;
+    ss << id->parallel_method();
+    overrides_emplace(iterator, ss.str());
+  }
+
+  if(id->parallel_method() == ParallelType::Vectorize
+  || id->parallel_method() == ParallelType::Unroll)
       TORCH_CHECK(false,
           "Unroll and Vectorize are not yet implemented for code generation.");
-    case (ParallelType::Serial):
-      break;
-  }
+
 }
 
 void CodeWrite::openFor(IterDomain* id) {

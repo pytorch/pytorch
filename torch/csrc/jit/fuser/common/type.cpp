@@ -75,12 +75,12 @@ static std::unordered_map<BinaryOpType, std::string> binary_op_type_inline_op_st
 };
 
 static std::unordered_map<ParallelType, std::string> parallel_type_string_map {
-    {ParallelType::BIDz,      "BIDz"},
-    {ParallelType::BIDy,      "BIDy"},
-    {ParallelType::BIDx,      "BIDx"},
-    {ParallelType::TIDz,      "TIDz"},
-    {ParallelType::TIDy,      "TIDy"},
-    {ParallelType::TIDx,      "TIDx"},
+    {ParallelType::BIDz,      "blockIdx.z"},
+    {ParallelType::BIDy,      "blockIdx.y"},
+    {ParallelType::BIDx,      "blockIdx.x"},
+    {ParallelType::TIDz,      "threadIdx.z"},
+    {ParallelType::TIDy,      "threadIdx.y"},
+    {ParallelType::TIDx,      "threadIdx.x"},
     {ParallelType::Vectorize, "Vectorize"},
     {ParallelType::Unroll,    "Unroll"},
     {ParallelType::Serial,    "Serial"}
