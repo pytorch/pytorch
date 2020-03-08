@@ -1383,8 +1383,10 @@ class TestNN(NNTestCase):
                 self.assertIs(modules[k], v)
             for k1, m2 in zip(modules, module_dict.values()):
                 self.assertIs(modules[k1], m2)
+                self.assertIs(modules.get(k1), m2)
             for k in modules.keys():
                 self.assertTrue(k in module_dict)
+            self.assertIs(modules.get('nosuchmodule'), None)
         check()
 
         modules['conv'] = nn.Conv2d(3, 4, 3)

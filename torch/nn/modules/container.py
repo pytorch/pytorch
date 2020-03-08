@@ -299,6 +299,11 @@ class ModuleDict(Module):
         del self[key]
         return v
 
+    def get(self, key, default=None):
+        r"""Return the value for `key` if it exists, else `default`.
+        """
+        return self._modules.get(key, default)
+
     @_copy_to_script_wrapper
     def keys(self):
         r"""Return an iterable of the ModuleDict keys.
