@@ -71,7 +71,7 @@ struct CAFFE2_API Slice final {
 CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 
 // `at::indexing::TensorIndex` is used for converting C++ tensor indices such as
-// `{None, "...", Ellipsis, 0, true, {1, None, 2}, torch::tensor({1, 2})}`
+// `{None, "...", Ellipsis, 0, true, Slice(1, None, 2), torch::tensor({1, 2})}`
 // into its equivalent `std::vector<TensorIndex>`, so that further tensor indexing
 // operations can be performed using the supplied indices.
 //
@@ -83,17 +83,17 @@ CAFFE2_API std::ostream& operator<<(std::ostream& stream, const Slice& slice);
 // `...`                   | `"..."`
 // `123`                   | `123`
 // `True` / `False`        | `true` / `false`
-// `:`                     | `{}` / `{None, None}`
-// `::`                    | `{}` / `{None, None, None}`
-// `1:`                    | `{1, None}`
-// `1::`                   | `{1, None, None}`
-// `:3`                    | `{None, 3}`
-// `:3:`                   | `{None, 3, None}`
-// `::2`                   | `{None, None, 2}`
-// `1:3`                   | `{1, 3}`
-// `1::2`                  | `{1, None, 2}`
-// `:3:2`                  | `{None, 3, 2}`
-// `1:3:2`                 | `{1, 3, 2}`
+// `:`                     | `Slice()` / `Slice(None, None)`
+// `::`                    | `Slice()` / `Slice(None, None, None)`
+// `1:`                    | `Slice(1, None)`
+// `1::`                   | `Slice(1, None, None)`
+// `:3`                    | `Slice(None, 3)`
+// `:3:`                   | `Slice(None, 3, None)`
+// `::2`                   | `Slice(None, None, 2)`
+// `1:3`                   | `Slice(1, 3)`
+// `1::2`                  | `Slice(1, None, 2)`
+// `:3:2`                  | `Slice(None, 3, 2)`
+// `1:3:2`                 | `Slice(1, 3, 2)`
 // `torch.tensor([1, 2])`) | `torch::tensor({1, 2})`
 struct CAFFE2_API TensorIndex final {
   // Case 1: `at::indexing::None`
@@ -116,28 +116,10 @@ struct CAFFE2_API TensorIndex final {
             class = typename std::enable_if<std::is_same<bool, T>::value>::type >
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
-  // Case 5: Slice represented in `{start, stop, step}` form,
-  // where `start` / `stop` / `step` can be integer or `at::indexing::None`
-  TensorIndex(std::initializer_list<c10::optional<int64_t>> slice) : type_(TensorIndexType::Slice) {
-    if (slice.size() == 0) {
-      slice_ = Slice(c10::nullopt, c10::nullopt, c10::nullopt);
-    } else if (slice.size() == 2) {
-      slice_ = Slice(*slice.begin(), *(slice.begin() + 1), c10::nullopt);
-    } else if (slice.size() == 3) {
-      slice_ = Slice(*slice.begin(), *(slice.begin() + 1), *(slice.begin() + 2));
-    } else {
-      TORCH_CHECK_VALUE(
-        false,
-        "Expected 0 / 2 / 3 elements in the braced-init-list to represent a slice index, but got ",
-        slice.size(),
-        " element(s)");
-    }
-  }
-
-  // Case 6: Slice represented in `at::indexing::Slice` form
+  // Case 5: Slice represented in `at::indexing::Slice` form
   TensorIndex(Slice slice) : slice_(std::move(slice)), type_(TensorIndexType::Slice) {}
 
-  // Case 7: Tensor value
+  // Case 6: Tensor value
   TensorIndex(Tensor tensor) : tensor_(std::move(tensor)), type_(TensorIndexType::Tensor) {}
 
   inline bool is_none() const {
