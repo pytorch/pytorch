@@ -384,6 +384,21 @@ void propagate_names_for_addmv(
 }
 
 void propagate_names_for_addmm(
+    Tensor& result,
+    const Tensor& m1,
+    const Tensor& m2,
+    const Tensor& bias) {
+  if (!m1.has_names() && !m2.has_names() &&
+      !bias.has_names() && !result.has_names()) {
+    return;
+  }
+
+  auto mm_outnames = compute_matmul_outnames(m1.names(), m2.names());
+  auto add_outnames = unify_from_right(mm_outnames, bias.names());
+  propagate_names(result, add_outnames);
+}
+
+void propagate_names_for_addmm_legacy(
     TensorImpl* result,
     TensorImpl* m1,
     TensorImpl* m2,
