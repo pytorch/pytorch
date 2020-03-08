@@ -70,7 +70,6 @@ TESTS = [
     'test_jit_disabled',
     'test_function_schema',
     'test_overrides',
-    'test_determination',
 ]
 
 # skip < 3.3 because mock is added in 3.3 and is used in rpc_spawn
@@ -80,7 +79,6 @@ if PY33:
         'distributed/rpc/test_rpc_spawn',
         'distributed/rpc/test_dist_autograd_spawn',
         'distributed/rpc/test_dist_optimizer_spawn',
-        'distributed/rpc/jit/test_rpc_spawn',
         'distributed/rpc/jit/test_dist_autograd_spawn',
     ])
 
@@ -88,6 +86,8 @@ if PY33:
 if PY36:
     TESTS.extend([
         'test_jit_py3',
+        'test_determination',
+        'distributed/rpc/jit/test_rpc_spawn',
     ])
 
 WINDOWS_BLACKLIST = [
@@ -108,6 +108,7 @@ ROCM_BLACKLIST = [
     'distributed/rpc/test_dist_optimizer_spawn',
     'distributed/rpc/jit/test_rpc_spawn',
     'distributed/rpc/jit/test_dist_autograd_spawn',
+    'test_determination',
 ]
 
 # These tests are slow enough that it's worth calculating whether the patch

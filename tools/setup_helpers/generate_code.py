@@ -26,7 +26,7 @@ def generate_code(ninja_global=None,
                   subset=None,
                   disable_autograd=False,
                   selected_op_list_path=None,
-                  disable_trace = False):
+                  disable_trace=False):
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.path.insert(0, root)
@@ -49,7 +49,7 @@ def generate_code(ninja_global=None,
             autograd_gen_dir,
             'tools/autograd',
             disable_autograd=disable_autograd,
-            disable_trace = disable_trace,
+            disable_trace=disable_trace,
         )
         gen_jit_dispatch(
             declarations_path or DECLARATIONS_PATH,
