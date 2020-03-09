@@ -264,6 +264,10 @@ class ProcessGroupAgent : public RpcAgent {
   std::mutex metricsMutex_;
   std::vector<std::unique_ptr<AverageMetricsTracker>> metrics_;
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  std::atomic<int32_t> clientActiveCalls_{0};
+  std::atomic<int32_t> serverActiveCalls_{0};
+  std::atomic<int32_t> serverActiveAsyncCalls_{0};
 };
 
 } // namespace rpc
