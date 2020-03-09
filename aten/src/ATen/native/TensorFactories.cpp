@@ -613,7 +613,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
 }
 
-Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
+Tensor randperm(int64_t n, GeneratorHolder generator, const TensorOptions& options) {
   auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
 }
@@ -622,7 +622,7 @@ Tensor& randperm_out(Tensor& result, int64_t n) {
   return at::randperm_out(result, n, nullptr);
 }
 
-Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
+Tensor& randperm_out_cpu(Tensor& result, int64_t n, GeneratorHolder generator) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   check_supported_max_int_with_precision(n, result);
   result.resize_({n});
@@ -987,7 +987,7 @@ Tensor randn(
 
 Tensor randn(
     IntArrayRef size,
-    Generator* generator,
+    GeneratorHolder generator,
     optional<DimnameList> names,
     const TensorOptions& options) {
   auto result = at::empty(size, names, options);
@@ -1003,7 +1003,7 @@ Tensor rand(
 
 Tensor rand(
     IntArrayRef size,
-    Generator* generator,
+    GeneratorHolder generator,
     optional<DimnameList> names,
     const TensorOptions& options) {
   auto result = at::empty(size, names, options);

@@ -346,7 +346,7 @@ sampleMultinomialOnce(int64_t* dest,
   }
 }
 
-void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, Generator* generator) {
+void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, GeneratorHolder generator) {
   auto gen = get_generator_or_default<CUDAGenerator>(generator, cuda::detail::getDefaultCUDAGenerator());
 
   int inputSize = self.dim();

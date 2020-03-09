@@ -29,7 +29,7 @@
 
 namespace at { namespace native {
 
-void exponential_kernel(TensorIterator& iter, double lambda_, Generator* gen_) {
+void exponential_kernel(TensorIterator& iter, double lambda_, GeneratorHolder gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   // Note that HIP doesn't support std::nextafter in device code.
   auto nextafter_1_0_float = std::nextafter(1.0f, 0.0f);

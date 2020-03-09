@@ -29,7 +29,7 @@
 
 namespace at { namespace native {
 
-void geometric_kernel_cuda(TensorIterator& iter, double p_, Generator* gen_) {
+void geometric_kernel_cuda(TensorIterator& iter, double p_, GeneratorHolder gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "geometric_cuda", [&] {
     if (std::is_same<scalar_t, double>::value) {

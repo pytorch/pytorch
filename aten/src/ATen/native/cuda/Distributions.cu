@@ -137,7 +137,7 @@ void dirichlet_scalar_cuda_kernel(
 
 namespace at { namespace native {
 
-Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
+Tensor _s_poisson_cuda(const Tensor& lambda, GeneratorHolder gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -152,7 +152,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen_) {
   return ret;
 }
 
-Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
+Tensor _s_gamma_cuda(const Tensor& alpha, GeneratorHolder gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
@@ -167,7 +167,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen_) {
   return ret;
 }
 
-Tensor _s_dirichlet_cuda(const Tensor& alpha, Generator* gen_) {
+Tensor _s_dirichlet_cuda(const Tensor& alpha, GeneratorHolder gen_) {
   auto gen = get_generator_or_default<CUDAGenerator>(gen_, cuda::detail::getDefaultCUDAGenerator());
   std::pair<uint64_t, uint64_t> rng_engine_inputs;
   {
