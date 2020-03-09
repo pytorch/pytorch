@@ -807,8 +807,7 @@ class TestCase(expecttest.TestCase):
         b_tol = self.get_default_tolerance(b)
         return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))
 
-    def assertEqual(self, x, y, **kwargs):
-        message = kwargs.get('message', '')
+    def assertEqual(self, x, y, message='', **kwargs):
         rtol = kwargs.get('rtol', None)
         atol = kwargs.get('atol', None)
         allow_inf = kwargs.get('allow_inf', False)
