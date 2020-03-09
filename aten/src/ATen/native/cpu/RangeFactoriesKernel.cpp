@@ -23,7 +23,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
     cpu_serial_kernel(
         iter,
         [start, step, &idx]() -> scalar_t {
-          return start + static_cast<scalar_t>(idx ++) * step;
+          return start + static_cast<scalar_t>((idx ++) * step);
         });
   });
 }
