@@ -209,7 +209,6 @@ void testLiteInterpreterWrongMethodName() {
   ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
 }
 
-
 void testLiteInterpreterParams() {
   script::Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -218,7 +217,6 @@ void testLiteInterpreterParams() {
       b = 1.0
       return self.foo * x + b
   )");
-
   double learning_rate = 0.1, momentum = 0.1;
   int n_epoc = 10;
   // init: y = x + 1;
@@ -226,7 +224,6 @@ void testLiteInterpreterParams() {
   std::vector<std::pair<Tensor, Tensor>> trainData{
       {1 * torch::ones({1}), 3 * torch::ones({1})},
   };
-
   // Reference: Full jit
   std::stringstream ms;
   m.save(ms);
@@ -250,7 +247,6 @@ void testLiteInterpreterParams() {
       optimizer.step();
     }
   }
-
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
@@ -271,5 +267,42 @@ void testLiteInterpreterParams() {
   }
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
 }
+
+void testLiteInterpreterSetState() {
+  script::Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def __getstate__(self):
+      return self.foo + self.foo
+    def __setstate__(self, a):
+      self.foo = a
+    def forward(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+
+  std::stringstream ms;
+  m.save(ms);
+  auto loaded_m = load(ms);
+  auto ref = loaded_m.run_method("forward", minput);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    res = bc.run_method("forward", bcinputs);
+  }
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
+}
+
 } // namespace jit
 } // namespace torch
